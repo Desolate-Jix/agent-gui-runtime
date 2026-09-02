@@ -194,6 +194,28 @@ def _unique_semantic_match(
     goal_label: str,
     name: str,
 ) -> Mapping[str, object] | None:
+    matches = _semantic_matches(
+        values,
+        role_field=role_field,
+        label_field=label_field,
+        goal_role=goal_role,
+        goal_label=goal_label,
+        name=name,
+    )
+    if len(matches) > 1:
+        raise ValueError(f"duplicate {name} target is ambiguous")
+    return matches[0] if matches else None
+
+
+def _semantic_matches(
+    values: object,
+    *,
+    role_field: str,
+    label_field: str,
+    goal_role: str,
+    goal_label: str,
+    name: str,
+) -> list[Mapping[str, object]]:
     if not isinstance(values, list):
         raise ValueError(f"{name} must be a list")
     matches = []
@@ -202,9 +224,7 @@ def _unique_semantic_match(
             raise ValueError(f"{name} item is invalid")
         if _matches_target(item, role_field=role_field, label_field=label_field, goal_role=goal_role, goal_label=goal_label):
             matches.append(item)
-    if len(matches) > 1:
-        raise ValueError(f"duplicate {name} target is ambiguous")
-    return matches[0] if matches else None
+    return matches
 
 
 def _source_parent(
@@ -475,16 +495,79 @@ def select_pre_vista_prediction_rows(
     declared_sets: set[tuple[str, ...]] = set()
     for raw_set in qwen_bindings["ambiguity_sets"]:
         ids = raw_set.get("candidate_ids") if isinstance(raw_set, Mapping) else None
-        if not isinstance(ids, list) or len(ids) < 2 or any(not isinstance(item, str) or not item for item in ids) or len(set(ids)) != len(ids):
+        if (
+            not isinstance(raw_set, Mapping)
+            or set(raw_set) != {"contract_version", "candidate_ids"}
+            or raw_set.get("contract_version") != "hybrid_semantic_ambiguity_set_v1"
+            or not isinstance(ids, list)
+            or len(ids) < 2
+            or any(not isinstance(item, str) or not item for item in ids)
+            or ids != sorted(ids)
+            or len(set(ids)) != len(ids)
+            or any(item not in binding_ids for item in ids)
+        ):
             raise ValueError("ambiguous Qwen set is non-unique")
         identity = tuple(ids)
         if identity in declared_sets or memberships.intersection(ids):
             raise ValueError("ambiguous Qwen set is duplicated")
         declared_sets.add(identity); memberships.update(ids)
-    qwen_binding = _unique_semantic_match(bindings, role_field="role", label_field="label", goal_role=goal_role, goal_label=goal_label, name="Qwen binding")
-    if qwen_binding is None:
+    qwen_matches = _semantic_matches(bindings, role_field="role", label_field="label", goal_role=goal_role, goal_label=goal_label, name="Qwen binding")
+    if len(qwen_matches) > 1:
+        match_ids = {str(item["candidate_id"]) for item in qwen_matches}
+        declared_match = any(set(identity) == match_ids for identity in declared_sets)
+        matching_fusion = [
+            item for item in fusion_candidates if item.get("candidate_id") in match_ids
+        ]
+        matching_omni = [
+            item for item in candidates if item.get("candidate_id") in match_ids
+        ]
+        matching_requests = [
+            item for item in submitted_vista_requests if item.get("candidate_id") in match_ids
+        ]
+        exact_geometry = len(matching_omni) == len(qwen_matches)
+        if exact_geometry:
+            fusion_by_id = {
+                str(item["candidate_id"]): item for item in matching_fusion
+            }
+            for candidate in matching_omni:
+                candidate_id = str(candidate["candidate_id"])
+                joined_items = [
+                    item
+                    for item in items
+                    if item.get("source_item_id") == candidate.get("source_item_id")
+                ]
+                fusion_candidate = fusion_by_id.get(candidate_id)
+                if (
+                    len(joined_items) != 1
+                    or fusion_candidate is None
+                    or candidate.get("coordinate_space") != "capture_pixel_xyxy"
+                    or _xyxy(candidate.get("bbox_original"), "Omni bbox")
+                    != _xyxy(joined_items[0].get("capture_bbox"), "Omni item bbox")
+                    or _xyxy(candidate.get("bbox_original"), "Omni bbox")
+                    != _xyxy(fusion_candidate.get("bbox_original"), "fusion bbox")
+                ):
+                    exact_geometry = False
+                    break
+        if (
+            not declared_match
+            or any(item.get("ambiguity") is not None for item in qwen_matches)
+            or len(matching_fusion) != len(qwen_matches)
+            or not exact_geometry
+            or any(
+                item.get("state") != "CONFLICT"
+                or item.get("reason") != "semantic_relation_not_unique"
+                or item.get("review_required") is not True
+                or item.get("vista_eligible") is not False
+                for item in matching_fusion
+            )
+            or matching_requests
+        ):
+            raise ValueError("duplicate Qwen binding target is ambiguous")
+        rows.extend([_missing_row(case_id, arm, "fusion_not_bound") for arm in ("omni_to_qwen", "omni_to_qwen_vista")])
+    elif not qwen_matches:
         rows.extend([_missing_row(case_id, arm, "target_not_present_pre_vista") for arm in ("omni_to_qwen", "omni_to_qwen_vista")])
     else:
+        qwen_binding = qwen_matches[0]
         hybrid_candidate_id = qwen_binding.get("candidate_id")
         if qwen_binding.get("ambiguity") is not None or hybrid_candidate_id in memberships:
             raise ValueError("matching Qwen binding is ambiguous")

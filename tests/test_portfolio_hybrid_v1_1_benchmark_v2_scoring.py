@@ -2238,6 +2238,186 @@ def test_s12_zero_matches_emit_missing_without_any_binding() -> None:
     assert all(row == {"case_id": "a" * 64, "arm_id": row["arm_id"], "selection_status": "missing", "eligibility": "INELIGIBLE", "failure_reason": "target_not_present_pre_vista"} for row in selected["rows"])
 
 
+def test_s12_declared_duplicate_qwen_semantics_count_as_fusion_missing() -> None:
+    inputs = _s12_inputs()
+    duplicate_id = "candidate/apply-now-duplicate"
+    duplicate_source_id = "omni-item/apply-now-duplicate"
+    inputs["omni_inventory"]["provider_result"]["items"].append(
+        {
+            "source_item_id": duplicate_source_id,
+            "safe_text": "Other action",
+            "safe_role": "button",
+            "capture_bbox": [62, 22, 102, 42],
+        }
+    )
+    inputs["omni_inventory"]["candidates"].append(
+        {
+            "candidate_id": duplicate_id,
+            "source_item_id": duplicate_source_id,
+            "bbox_original": [62, 22, 102, 42],
+            "coordinate_space": "capture_pixel_xyxy",
+        }
+    )
+    inputs["qwen_bindings"]["bindings"].append(
+        {
+            "candidate_id": duplicate_id,
+            "role": "button",
+            "label": "Apply now",
+            "ambiguity": None,
+        }
+    )
+    inputs["qwen_bindings"]["ambiguity_sets"] = [
+        {
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": ["candidate/apply-now", duplicate_id],
+        }
+    ]
+    inputs["fusion_result"]["candidates"][0].update(
+        {
+            "state": "CONFLICT",
+            "reason": "semantic_relation_not_unique",
+            "review_required": True,
+            "vista_eligible": False,
+        }
+    )
+    inputs["fusion_result"]["candidates"].append(
+        {
+            "candidate_id": duplicate_id,
+            "bbox_original": [62, 22, 102, 42],
+            "coordinate_space": "capture_pixel_xyxy",
+            "state": "CONFLICT",
+            "reason": "semantic_relation_not_unique",
+            "review_required": True,
+            "vista_eligible": False,
+        }
+    )
+    inputs["submitted_vista_requests"] = []
+
+    rows = {row["arm_id"]: row for row in _s12_select(inputs)["rows"]}
+
+    assert rows["qwen_only"]["selection_status"] == "selected"
+    assert rows["omni_only_discovery"]["selection_status"] == "selected"
+    for arm in ("omni_to_qwen", "omni_to_qwen_vista"):
+        assert rows[arm]["selection_status"] == "missing"
+        assert rows[arm]["failure_reason"] == "fusion_not_bound"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "malformed_set",
+        "partial_set",
+        "missing_omni_join",
+        "conflicting_bbox",
+        "mixed_state",
+        "review_flag",
+        "vista_request",
+    ],
+)
+def test_s12_declared_duplicate_qwen_semantics_require_exact_conflict_lineage(
+    mutation: str,
+) -> None:
+    inputs = _s12_inputs()
+    duplicate_id = "candidate/apply-now-duplicate"
+    duplicate_source_id = "omni-item/apply-now-duplicate"
+    inputs["omni_inventory"]["provider_result"]["items"].append(
+        {
+            "source_item_id": duplicate_source_id,
+            "safe_text": "Other action",
+            "safe_role": "button",
+            "capture_bbox": [62, 22, 102, 42],
+        }
+    )
+    inputs["omni_inventory"]["candidates"].append(
+        {
+            "candidate_id": duplicate_id,
+            "source_item_id": duplicate_source_id,
+            "bbox_original": [62, 22, 102, 42],
+            "coordinate_space": "capture_pixel_xyxy",
+        }
+    )
+    inputs["qwen_bindings"]["bindings"].append(
+        {
+            "candidate_id": duplicate_id,
+            "role": "button",
+            "label": "Apply now",
+            "ambiguity": None,
+        }
+    )
+    inputs["qwen_bindings"]["ambiguity_sets"] = [
+        {
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": ["candidate/apply-now", duplicate_id],
+        }
+    ]
+    inputs["fusion_result"]["candidates"] = [
+        {
+            "candidate_id": candidate_id,
+            "bbox_original": bbox,
+            "coordinate_space": "capture_pixel_xyxy",
+            "state": "CONFLICT",
+            "reason": "semantic_relation_not_unique",
+            "review_required": True,
+            "vista_eligible": False,
+        }
+        for candidate_id, bbox in (
+            ("candidate/apply-now", [12, 22, 52, 42]),
+            (duplicate_id, [62, 22, 102, 42]),
+        )
+    ]
+    inputs["submitted_vista_requests"] = []
+    if mutation == "malformed_set":
+        inputs["qwen_bindings"]["ambiguity_sets"][0].update(
+            {"contract_version": "wrong", "unexpected": True}
+        )
+    elif mutation == "partial_set":
+        inputs["qwen_bindings"]["ambiguity_sets"][0]["candidate_ids"] = [
+            "candidate/apply-now"
+        ]
+    elif mutation == "missing_omni_join":
+        inputs["omni_inventory"]["candidates"].pop()
+    elif mutation == "conflicting_bbox":
+        inputs["omni_inventory"]["candidates"][-1]["bbox_original"] = [
+            63,
+            22,
+            102,
+            42,
+        ]
+    elif mutation == "mixed_state":
+        inputs["fusion_result"]["candidates"][-1]["state"] = "BOUND"
+    elif mutation == "review_flag":
+        inputs["fusion_result"]["candidates"][-1]["review_required"] = False
+    else:
+        inputs["submitted_vista_requests"] = [
+            {
+                "contract_version": "hybrid_vista_refinement_request_v1",
+                "candidate_id": duplicate_id,
+                "submission_status": "SUBMITTED",
+                "candidate_bbox_ref": {"xyxy": [62, 22, 102, 42]},
+            }
+        ]
+
+    with pytest.raises(
+        ValueError, match="ambiguous Qwen set|duplicate Qwen binding target"
+    ):
+        _s12_select(inputs)
+
+
+def test_s12_undeclared_duplicate_qwen_semantics_remain_fatal() -> None:
+    inputs = _s12_inputs()
+    inputs["qwen_bindings"]["bindings"].append(
+        {
+            "candidate_id": "candidate/apply-now-duplicate",
+            "role": "button",
+            "label": "Apply now",
+            "ambiguity": None,
+        }
+    )
+
+    with pytest.raises(ValueError, match="duplicate Qwen binding target"):
+        _s12_select(inputs)
+
+
 @pytest.mark.parametrize("mutation", ["duplicate_qwen_action", "ambiguous_qwen_binding", "duplicate_request", "conflicting_fusion_bbox"])
 def test_s12_ambiguity_duplicate_and_conflicting_lineage_are_fatal(mutation: str) -> None:
     inputs = _s12_inputs()
