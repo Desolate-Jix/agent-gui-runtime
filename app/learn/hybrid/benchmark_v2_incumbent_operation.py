@@ -61,6 +61,9 @@ BENCHMARK_V2_ACTUAL_OPERATIONS_STABLE_ZERO_CONTRACT = (
 BENCHMARK_V2_INCUMBENT_PRE_RESERVATION_RECOVERY_CONTRACT = (
     "benchmark_v2_incumbent_pre_reservation_recovery_v1"
 )
+BENCHMARK_V2_HYBRID_PRE_RESERVATION_RECOVERY_CONTRACT = (
+    "benchmark_v2_hybrid_pre_reservation_recovery_v1"
+)
 BENCHMARK_V2_ACTUAL_COMPLETED_HYBRID_CLEANUP_CONTRACT = (
     "benchmark_v2_actual_completed_hybrid_cleanup_v1"
 )
@@ -2247,6 +2250,142 @@ def validate_benchmark_v2_incumbent_pre_reservation_recovery(
     return receipt
 
 
+def compose_benchmark_v2_hybrid_pre_reservation_recovery(
+    *,
+    run_id: str,
+    stage: str,
+    operation_id: str,
+    screen_group_ref: Mapping[str, object],
+    service_intent_ref: Mapping[str, object],
+    window_binding_ref: Mapping[str, object],
+    capture_ref: Mapping[str, object],
+    reservation_absence_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    return validate_benchmark_v2_hybrid_pre_reservation_recovery(
+        _seal(
+            {
+                "contract_version": (
+                    BENCHMARK_V2_HYBRID_PRE_RESERVATION_RECOVERY_CONTRACT
+                ),
+                "status": "safe_stopped",
+                "run_id": run_id,
+                "stage": stage,
+                "operation_id": operation_id,
+                "screen_group_ref": deepcopy(dict(screen_group_ref)),
+                "service_intent_ref": deepcopy(dict(service_intent_ref)),
+                "window_binding_ref": deepcopy(dict(window_binding_ref)),
+                "capture_ref": deepcopy(dict(capture_ref)),
+                "reservation_absence_ref": deepcopy(
+                    dict(reservation_absence_ref)
+                ),
+                "reason": "startup_failed_before_workflow_run",
+                **_NON_AUTHORIZING_SAFETY,
+            }
+        )
+    )
+
+
+def validate_benchmark_v2_hybrid_pre_reservation_recovery(
+    value: object,
+) -> dict[str, Any]:
+    receipt = _closed(
+        value,
+        {
+            "contract_version",
+            "status",
+            "run_id",
+            "stage",
+            "operation_id",
+            "screen_group_ref",
+            "service_intent_ref",
+            "window_binding_ref",
+            "capture_ref",
+            "reservation_absence_ref",
+            "reason",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark Hybrid pre-reservation recovery",
+    )
+    if (
+        receipt["contract_version"]
+        != BENCHMARK_V2_HYBRID_PRE_RESERVATION_RECOVERY_CONTRACT
+        or receipt["status"] != "safe_stopped"
+        or receipt["stage"] != "screen_understanding"
+        or receipt["reason"] != "startup_failed_before_workflow_run"
+        or receipt["artifact_is_authorization"] is not False
+        or receipt["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark Hybrid pre-reservation recovery is invalid")
+    for name in ("run_id", "operation_id"):
+        _text(receipt[name], f"benchmark Hybrid pre-reservation {name}")
+    receipt["screen_group_ref"] = _identity_ref(
+        receipt["screen_group_ref"],
+        "benchmark Hybrid pre-reservation screen group ref",
+    )
+    for name in ("window_binding_ref", "capture_ref"):
+        receipt[name] = _identity_ref(
+            receipt[name], f"benchmark Hybrid pre-reservation {name}"
+        )
+    receipt["service_intent_ref"] = _content_ref(
+        receipt["service_intent_ref"],
+        "benchmark Hybrid pre-reservation service_intent_ref",
+    )
+    absence = _closed(
+        receipt["reservation_absence_ref"],
+        {
+            "contract_version",
+            "authority_kind",
+            "supervision_inputs_ref",
+            "run_id",
+            "stage",
+            "operation_id",
+            "reservation_present",
+            "provider_journal_present",
+            "provider_cleanup_journal_present",
+            "worker_ids",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        },
+        "benchmark Hybrid pre-reservation absence evidence",
+    )
+    if (
+        absence["contract_version"]
+        != "benchmark_worker_pre_reservation_absence_v1"
+        or absence["run_id"] != receipt["run_id"]
+        or absence["stage"] != receipt["stage"]
+        or absence["operation_id"] != receipt["operation_id"]
+        or absence["reservation_present"] is not False
+        or absence["provider_journal_present"] is not False
+        or absence["provider_cleanup_journal_present"] is not False
+        or absence["worker_ids"] != []
+        or absence["artifact_is_authorization"] is not False
+        or absence["execute_binding_enabled"] is not False
+    ):
+        raise ValueError("benchmark Hybrid pre-reservation absence evidence is invalid")
+    _text(
+        absence["authority_kind"],
+        "benchmark Hybrid pre-reservation absence authority kind",
+    )
+    absence["supervision_inputs_ref"] = _runtime_sealed_parent(
+        absence["supervision_inputs_ref"],
+        "benchmark Hybrid pre-reservation supervision inputs ref",
+    )
+    _sha(
+        absence["content_sha256"],
+        "benchmark Hybrid pre-reservation absence evidence SHA",
+    )
+    if absence["content_sha256"] != runtime_content_sha256(absence):
+        raise ValueError("benchmark Hybrid pre-reservation absence evidence SHA differs")
+    receipt["reservation_absence_ref"] = absence
+    _sha(receipt["content_sha256"], "benchmark Hybrid pre-reservation content SHA")
+    if receipt["content_sha256"] != content_sha256(receipt):
+        raise ValueError("benchmark Hybrid pre-reservation recovery SHA differs")
+    return receipt
+
+
 def compose_benchmark_v2_actual_completed_hybrid_cleanup(
     *,
     operation_ref: Mapping[str, object],
@@ -3111,6 +3250,30 @@ class BenchmarkV2IncumbentWorkflowService:
             composition=self._composition,
             provider_case_ref=provider_case_ref,
             window_binding=window_binding,
+        )
+
+    def recover_hybrid_pre_reservation(
+        self,
+        *,
+        screen_group: Mapping[str, object],
+        window_binding: Mapping[str, object],
+        service_intent_ref: Mapping[str, object],
+    ) -> dict[str, Any] | None:
+        group = validate_benchmark_v2_hybrid_screen_group_start(screen_group)
+        binding = validate_benchmark_v2_workflow_window_binding(window_binding)
+        intent_ref = _content_ref(
+            service_intent_ref,
+            "benchmark Hybrid pre-reservation service intent ref",
+        )
+        from app.learn.workflow_service import (
+            _recover_benchmark_v2_hybrid_pre_reservation_workflow_service,
+        )
+
+        return _recover_benchmark_v2_hybrid_pre_reservation_workflow_service(
+            composition=self._composition,
+            screen_group=group,
+            window_binding=binding,
+            service_intent_ref=intent_ref,
         )
 
     def lookup_incumbent_observe(

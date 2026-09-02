@@ -32,6 +32,7 @@ from app.learn.hybrid.benchmark_v2_incumbent_operation import (
     validate_benchmark_v2_actual_fusion_safe_stop_cleanup,
     validate_benchmark_v2_actual_operations_stable_zero,
     validate_benchmark_v2_hybrid_screen_group_start,
+    validate_benchmark_v2_hybrid_pre_reservation_recovery,
     validate_benchmark_v2_incumbent_pre_reservation_recovery,
     validate_benchmark_v2_provider_dispatch_context_projection,
     validate_benchmark_v2_workflow_window_binding,
@@ -220,6 +221,8 @@ class BenchmarkV2ScreenGroupIterator(Iterator[Mapping[str, object]], Protocol):
 
 class BenchmarkV2ProductionRuntimePort(Protocol):
     def load_provider_manifest(self, *, path: Path) -> Mapping[str, object]: ...
+
+    def workflow_store_capacity(self) -> Mapping[str, object]: ...
 
     def prepare_screen_groups(
         self,
@@ -1052,6 +1055,11 @@ class _BenchmarkV2ProductionRuntime:
             case_refs=case_refs,
             corpus_file_ref=corpus_file_ref,
         )
+
+    def workflow_store_capacity(self) -> Mapping[str, object]:
+        from app.learn.workflow_store import learning_workflow_run_store
+
+        return learning_workflow_run_store.capacity_snapshot()
 
     def prepare_screen_groups(
         self,
@@ -3269,6 +3277,11 @@ def _reconcile_actual_operations(
         )
         targets.setdefault(parent_sha, {})[key] = intent
     lookup_hybrid = getattr(service, "lookup_hybrid_operation", None)
+    recover_hybrid_pre_reservation = getattr(
+        service,
+        "recover_hybrid_pre_reservation",
+        None,
+    )
     lookup = getattr(service, "lookup_incumbent_observe", None)
     recover_pre_reservation = getattr(
         service,
@@ -3330,7 +3343,40 @@ def _reconcile_actual_operations(
                 raise ValueError("benchmark actual Hybrid cleanup lookup differs")
             group_terminals.append(terminal)
         else:
-            unresolved_operations += 1
+            recovery_value = (
+                recover_hybrid_pre_reservation(
+                    screen_group=deepcopy(intent["provider_group"]),
+                    window_binding=deepcopy(intent["window_binding"]),
+                    service_intent_ref={
+                        "content_sha256": str(intent["content_sha256"])
+                    },
+                )
+                if callable(recover_hybrid_pre_reservation)
+                else None
+            )
+            if recovery_value is None:
+                unresolved_operations += 1
+            else:
+                recovery = validate_benchmark_v2_hybrid_pre_reservation_recovery(
+                    recovery_value
+                )
+                binding = intent["window_binding"]
+                if (
+                    recovery["screen_group_ref"]
+                    != _actual_group_ref(intent["provider_group"])
+                    or recovery["service_intent_ref"]
+                    != {"content_sha256": str(intent["content_sha256"])}
+                    or recovery["run_id"] != binding["run_id"]
+                    or recovery["stage"] != binding["stage"]
+                    or recovery["operation_id"] != binding["operation_id"]
+                    or recovery["window_binding_ref"]
+                    != binding["window_binding_ref"]
+                    or recovery["capture_ref"] != binding["capture_ref"]
+                ):
+                    raise ValueError(
+                        "benchmark actual Hybrid pre-reservation recovery lineage differs"
+                    )
+                pre_reservation_recoveries.append(recovery)
         parent_sha = str(intent["content_sha256"])
         for key in sorted(targets.get(parent_sha, {})):
             call_intent = targets[parent_sha][key]
@@ -4339,28 +4385,41 @@ def _validate_actual_operations_cleanup_aggregate(
         or not isinstance(partial_values, list)
     ):
         raise ValueError("actual operations cleanup aggregate refs are invalid")
-    if (
-        not (partial_values or completed_values)
-        or len(full_values)
-        + len(recovery_values)
-        + len(completed_values)
-        + len(partial_values)
-        < 2
-    ):
-        raise ValueError("actual operations cleanup aggregate is incomplete")
-
     attestations = [
         validate_benchmark_v2_actual_operations_stable_zero(item)
         for item in full_values
     ]
-    recoveries = [
-        validate_benchmark_v2_incumbent_pre_reservation_recovery(item)
-        for item in recovery_values
-    ]
+    recoveries = []
+    for item in recovery_values:
+        contract = item.get("contract_version") if isinstance(item, Mapping) else None
+        if contract == "benchmark_v2_hybrid_pre_reservation_recovery_v1":
+            recoveries.append(
+                validate_benchmark_v2_hybrid_pre_reservation_recovery(item)
+            )
+        else:
+            recoveries.append(
+                validate_benchmark_v2_incumbent_pre_reservation_recovery(item)
+            )
     completed_cleanups = [_validate_actual_hybrid_cleanup(item) for item in completed_values]
     partial_terminals = [
         _validate_partial_actual_terminal_cleanup(item) for item in partial_values
     ]
+    hybrid_recoveries = [
+        item
+        for item in recoveries
+        if item.get("contract_version")
+        == "benchmark_v2_hybrid_pre_reservation_recovery_v1"
+    ]
+    if (
+        not (partial_terminals or completed_cleanups or hybrid_recoveries)
+        or not (
+            attestations
+            or recoveries
+            or completed_cleanups
+            or partial_terminals
+        )
+    ):
+        raise ValueError("actual operations cleanup aggregate is incomplete")
     producer_shas = [
         str(item["content_sha256"])
         for item in [
@@ -4425,13 +4484,19 @@ def _validate_actual_operations_cleanup_aggregate(
         )
         for cleanup in completed_cleanups
     }
+    incumbent_recoveries = [
+        recovery
+        for recovery in recoveries
+        if recovery.get("contract_version")
+        == "benchmark_v2_incumbent_pre_reservation_recovery_v1"
+    ]
     if completed_cleanups and any(
         (
             recovery["window_binding_ref"]["content_sha256"],
             recovery["capture_ref"]["content_sha256"],
         )
         not in completed_bindings
-        for recovery in recoveries
+        for recovery in incumbent_recoveries
     ):
         raise ValueError(
             "actual operations cleanup recovery parent binding is stale"

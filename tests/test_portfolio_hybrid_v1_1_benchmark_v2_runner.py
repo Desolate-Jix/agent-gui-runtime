@@ -238,6 +238,17 @@ class _DeterministicRuntime:
             },
         }
 
+    def workflow_store_capacity(self) -> Mapping[str, object]:
+        self.calls.append(("workflow_store_capacity", None))
+        return {
+            "contract_version": "learning_workflow_store_capacity_v1",
+            "max_runs": 128,
+            "run_count": 56,
+            "active_runs": 56,
+            "terminal_evictable_runs": 0,
+            "available_slots": 72,
+        }
+
     def prepare_screen_groups(
         self,
         *,
@@ -588,7 +599,78 @@ def test_dry_run_loads_the_public_facade_and_never_prepares_or_dispatches(
     }
     assert result["artifact_is_authorization"] is False
     assert result["execute_binding_enabled"] is False
-    assert [name for name, _ in runtime.calls] == ["load_provider_manifest"]
+    assert [name for name, _ in runtime.calls] == [
+        "load_provider_manifest",
+        "workflow_store_capacity",
+    ]
+
+
+def test_dry_run_rejects_insufficient_workflow_capacity_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _DeterministicRuntime()
+    runtime.workflow_store_capacity = lambda: {
+        "contract_version": "learning_workflow_store_capacity_v1",
+        "max_runs": 128,
+        "run_count": 128,
+        "active_runs": 57,
+        "terminal_evictable_runs": 71,
+        "available_slots": 71,
+    }
+    _install_runtime(monkeypatch, runtime)
+    output = tmp_path / "dry-run.json"
+
+    with pytest.raises(ValueError, match="requires 72 workflow slots"):
+        runner.run_cli(
+            [
+                "--provider-manifest",
+                str(_manifest(tmp_path)),
+                "--partition",
+                "regression",
+                "--dry-run",
+                "--output",
+                str(output),
+            ]
+        )
+
+    assert not output.exists()
+    assert not runtime.owned_groups
+
+
+def test_actual_rejects_insufficient_workflow_capacity_before_attempt_reservation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = _DeterministicRuntime()
+    runtime.workflow_store_capacity = lambda: {
+        "contract_version": "learning_workflow_store_capacity_v1",
+        "max_runs": 128,
+        "run_count": 57,
+        "active_runs": 57,
+        "terminal_evictable_runs": 0,
+        "available_slots": 71,
+    }
+    _install_runtime(monkeypatch, runtime)
+    ledger = tmp_path / "ledger" / "regression" / "events.jsonl"
+    output_root = tmp_path / "attempts"
+
+    with pytest.raises(ValueError, match="requires 72 workflow slots"):
+        runner.run_cli(
+            [
+                "--provider-manifest",
+                str(_manifest(tmp_path)),
+                "--partition",
+                "regression",
+                "--actual-models",
+                "--attempt-ledger",
+                str(ledger),
+                "--output-root",
+                str(output_root),
+            ]
+        )
+
+    assert not ledger.exists()
+    assert not output_root.exists()
+    assert not runtime.owned_groups
 
 
 def test_actual_reserves_unique_attempts_before_dispatch_and_preserves_both_chains(

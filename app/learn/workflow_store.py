@@ -71,6 +71,24 @@ class LearningWorkflowRunStore:
                 raise LearningWorkflowTransitionError("workflow run not found")
             return deepcopy(state)
 
+    def capacity_snapshot(self) -> dict[str, Any]:
+        """只读投影当前容量；终态槽可在下一次新建 run 时回收。"""
+
+        with self._lock:
+            run_count = len(self._states)
+            terminal_evictable = sum(
+                state.get("terminal") is True for state in self._states.values()
+            )
+            active = run_count - terminal_evictable
+            return {
+                "contract_version": "learning_workflow_store_capacity_v1",
+                "max_runs": self._max_runs,
+                "run_count": run_count,
+                "active_runs": active,
+                "terminal_evictable_runs": terminal_evictable,
+                "available_slots": self._max_runs - active,
+            }
+
     def transition(
         self,
         *,

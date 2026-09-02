@@ -193,6 +193,53 @@ def test_workflow_store_persists_terminal_run_eviction(tmp_path) -> None:
     restarted_store.close()
 
 
+def test_workflow_store_capacity_snapshot_is_read_only_and_counts_reclaimable_slots(
+    tmp_path,
+) -> None:
+    state_path = tmp_path / "learning-workflow-runs.json"
+    store = LearningWorkflowRunStore(max_runs=3, state_path=state_path)
+    active = store.transition(
+        run_id="active-one",
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+    )
+    assert active["terminal"] is False
+    store.transition(
+        run_id="active-two",
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+    )
+    terminal = store.transition(
+        run_id="terminal-one",
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+    )
+    store.transition(
+        run_id="terminal-one",
+        expected_revision=int(terminal["revision"]),
+        stage="bind_capture",
+        outcome="safe_stopped",
+        reason="capacity snapshot terminal fixture",
+    )
+    before = state_path.read_bytes()
+
+    snapshot = store.capacity_snapshot()
+
+    assert snapshot == {
+        "contract_version": "learning_workflow_store_capacity_v1",
+        "max_runs": 3,
+        "run_count": 3,
+        "active_runs": 2,
+        "terminal_evictable_runs": 1,
+        "available_slots": 1,
+    }
+    assert state_path.read_bytes() == before
+    store.close()
+
+
 def test_restarted_running_operation_is_projected_as_detached(tmp_path) -> None:
     store = LearningWorkflowRunStore()
     state = store.transition(

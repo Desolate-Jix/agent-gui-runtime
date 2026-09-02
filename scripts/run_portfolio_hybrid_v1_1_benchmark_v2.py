@@ -79,6 +79,7 @@ _HOLDOUT_NORMAL_CLEANUP_REASON = "benchmark_v2_holdout_actual_runner_finished"
 _HOLDOUT_RECOVERY_CLEANUP_REASON = "cleanup_only_after_interrupted_holdout_attempt"
 _ZERO_SHA256 = "0" * 64
 _PROVIDERS = ("omni", "qwen", "vista")
+_ACTUAL_REQUIRED_WORKFLOW_SLOTS = 72
 _ZERO_COUNTS = {
     "service_operations": 0,
     "windows": 0,
@@ -1609,6 +1610,49 @@ def _require_zero_counts(runtime: object) -> dict[str, int]:
     return deepcopy(_ZERO_COUNTS)
 
 
+def _require_workflow_store_capacity(runtime: object) -> dict[str, object]:
+    capacity_reader = getattr(runtime, "workflow_store_capacity", None)
+    if not callable(capacity_reader):
+        raise RuntimeError("benchmark workflow store capacity preflight is unavailable")
+    raw = capacity_reader()
+    fields = {
+        "contract_version",
+        "max_runs",
+        "run_count",
+        "active_runs",
+        "terminal_evictable_runs",
+        "available_slots",
+    }
+    if not isinstance(raw, Mapping) or set(raw) != fields:
+        raise ValueError("benchmark workflow store capacity snapshot is not closed")
+    snapshot = deepcopy(dict(raw))
+    counts = [
+        snapshot[name]
+        for name in (
+            "max_runs",
+            "run_count",
+            "active_runs",
+            "terminal_evictable_runs",
+            "available_slots",
+        )
+    ]
+    if (
+        snapshot["contract_version"] != "learning_workflow_store_capacity_v1"
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in counts)
+        or any(value < 0 for value in counts)
+        or snapshot["run_count"]
+        != snapshot["active_runs"] + snapshot["terminal_evictable_runs"]
+        or snapshot["available_slots"]
+        != snapshot["max_runs"] - snapshot["active_runs"]
+    ):
+        raise ValueError("benchmark workflow store capacity snapshot is invalid")
+    if snapshot["available_slots"] < _ACTUAL_REQUIRED_WORKFLOW_SLOTS:
+        raise ValueError(
+            "actual regression requires 72 workflow slots before dispatch"
+        )
+    return snapshot
+
+
 def _validate_cleanup_receipt(
     value: object,
     *,
@@ -2307,6 +2351,7 @@ def _run_actual(args: argparse.Namespace, runtime: object) -> dict[str, object]:
     if args.partition != "regression":
         raise ValueError("Task 9 actual execution is regression-only; holdout is not authorized")
     manifest = runtime.load_provider_manifest(path=Path(args.provider_manifest))
+    _require_workflow_store_capacity(runtime)
     attempt, attempt_dir = _reserve_attempt(
         ledger_path=Path(args.attempt_ledger),
         output_root=Path(args.output_root),
@@ -2771,6 +2816,7 @@ def _dry_run(args: argparse.Namespace, runtime: object) -> dict[str, object]:
     loaded = runtime.load_provider_manifest(path=Path(args.provider_manifest))
     if not isinstance(loaded, Mapping):
         raise ValueError("provider manifest must be an object")
+    capacity = _require_workflow_store_capacity(runtime)
     manifest_ref = {
         "content_sha256": hashlib.sha256(_canonical_bytes(dict(loaded))).hexdigest()
     }
@@ -2779,6 +2825,8 @@ def _dry_run(args: argparse.Namespace, runtime: object) -> dict[str, object]:
             "contract_version": "benchmark_v2_runner_dry_run_v1",
             "partition": args.partition,
             "provider_manifest_ref": manifest_ref,
+            "workflow_store_capacity": capacity,
+            "required_workflow_slots": _ACTUAL_REQUIRED_WORKFLOW_SLOTS,
             "provider_dispatch_count": 0,
             "dry_run": True,
             **_SAFETY,

@@ -4572,6 +4572,229 @@ def test_actual_cleanup_consumes_pre_reservation_recovery_without_fake_operation
     iterator.close()
 
 
+def test_actual_cleanup_consumes_exact_hybrid_pre_reservation_absence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_hybrid_pre_reservation_recovery,
+    )
+
+    binding = incumbent.compose_benchmark_v2_workflow_window_binding(
+        run_id="hybrid-pre-start-run",
+        operation_id="hybrid-pre-start-operation",
+        window_binding_ref={"id": "hybrid-pre-window", "content_sha256": "a" * 64},
+        capture_ref={"id": "hybrid-pre-capture", "content_sha256": "b" * 64},
+        owner_journal_ref={"content_sha256": "c" * 64},
+        expected_uia_root_ref={"content_sha256": "d" * 64},
+    )
+    group = {
+        "screen_group": "hybrid-pre-screen",
+        "content_sha256": "e" * 64,
+    }
+    intent_sha = "f" * 64
+
+    class RecoveringHybridService:
+        def __init__(self, *, mutation: str | None = None) -> None:
+            self.mutation = mutation
+            self.recovery_calls = 0
+
+        def lookup_hybrid_operation(self, **_kwargs):
+            return None
+
+        def cancel_operation(self, **_kwargs):
+            raise AssertionError("Hybrid pre-reservation recovery must not cancel")
+
+        def recover_hybrid_pre_reservation(
+            self, *, screen_group, window_binding, service_intent_ref
+        ):
+            self.recovery_calls += 1
+            absence = runtime_seal_immutable(
+                {
+                    "contract_version": (
+                        "benchmark_worker_pre_reservation_absence_v1"
+                    ),
+                    "authority_kind": "test_benchmark_worker_supervision",
+                    "supervision_inputs_ref": runtime_seal_immutable(
+                        {"kind": "test-supervision-inputs"}
+                    ),
+                    "run_id": str(window_binding["run_id"]),
+                    "stage": str(window_binding["stage"]),
+                    "operation_id": str(window_binding["operation_id"]),
+                    "reservation_present": False,
+                    "provider_journal_present": False,
+                    "provider_cleanup_journal_present": False,
+                    "worker_ids": [],
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                }
+            )
+            recovery = compose_benchmark_v2_hybrid_pre_reservation_recovery(
+                run_id=(
+                    "wrong-run"
+                    if self.mutation == "run_id"
+                    else str(window_binding["run_id"])
+                ),
+                stage=str(window_binding["stage"]),
+                operation_id=(
+                    "wrong-operation"
+                    if self.mutation == "operation_id"
+                    else str(window_binding["operation_id"])
+                ),
+                screen_group_ref={
+                    "id": (
+                        "wrong-screen-group"
+                        if self.mutation == "screen_group_id"
+                        else str(screen_group["screen_group"])
+                    ),
+                    "content_sha256": (
+                        "2" * 64
+                        if self.mutation == "screen_group_sha"
+                        else str(screen_group["content_sha256"])
+                    ),
+                },
+                service_intent_ref={
+                    "content_sha256": (
+                        "0" * 64
+                        if self.mutation == "service_intent"
+                        else str(service_intent_ref["content_sha256"])
+                    )
+                },
+                window_binding_ref=(
+                    {"id": "wrong-window", "content_sha256": "3" * 64}
+                    if self.mutation == "window_binding_ref"
+                    else window_binding["window_binding_ref"]
+                ),
+                capture_ref=(
+                    {"id": "wrong-capture", "content_sha256": "4" * 64}
+                    if self.mutation == "capture_ref"
+                    else window_binding["capture_ref"]
+                ),
+                reservation_absence_ref=absence,
+            )
+            if self.mutation == "content_sha256":
+                recovery["content_sha256"] = "5" * 64
+            return recovery
+
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_screen_group_service_intents",
+        lambda **_kwargs: [
+            {
+                "provider_group": deepcopy(group),
+                "window_binding": deepcopy(binding),
+                "content_sha256": intent_sha,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_read_actual_incumbent_call_intents",
+        lambda **_kwargs: [],
+    )
+
+    for mutation in (
+        "service_intent",
+        "screen_group_id",
+        "screen_group_sha",
+        "run_id",
+        "operation_id",
+        "window_binding_ref",
+        "capture_ref",
+        "content_sha256",
+    ):
+        wrong = RecoveringHybridService(mutation=mutation)
+        with pytest.raises(ValueError):
+            runtime_module._reconcile_actual_operations(
+                attempt_dir=tmp_path,
+                service=wrong,
+            )
+
+    service = RecoveringHybridService()
+    reconciled = runtime_module._reconcile_actual_operations(
+        attempt_dir=tmp_path,
+        service=service,
+    )
+
+    assert service.recovery_calls == 1
+    assert reconciled[0] == []
+    assert reconciled[1] == []
+    assert len(reconciled[2]) == 1
+    assert reconciled[3] == []
+    assert reconciled[4] == []
+    assert reconciled[5] == 0
+    runtime_module._validate_actual_operations_cleanup_aggregate(
+        {
+            "full_group_attestation_refs": [],
+            "pre_reservation_recovery_refs": [reconciled[2][0]],
+            "completed_hybrid_cleanup_refs": [],
+            "partial_workflow_terminal_refs": [],
+        }
+    )
+
+
+def test_cleanup_aggregate_allows_distinct_hybrid_pre_reservation_recovery(
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_hybrid_pre_reservation_recovery,
+    )
+
+    completed_binding = incumbent.compose_benchmark_v2_workflow_window_binding(
+        run_id="completed-run",
+        operation_id="completed-operation",
+        window_binding_ref={"id": "completed-window", "content_sha256": "1" * 64},
+        capture_ref={"id": "completed-capture", "content_sha256": "2" * 64},
+        owner_journal_ref={"content_sha256": "3" * 64},
+        expected_uia_root_ref={"content_sha256": "4" * 64},
+    )
+    completed_step = _actual_completed_review_step(
+        {"request_ref": {"id": "completed-request", "content_sha256": "5" * 64}},
+        completed_binding,
+    )
+    completed_cleanup = _actual_completed_review_cleanup(
+        completed_step["operation_ref"]
+    )
+    absence = runtime_seal_immutable(
+        {
+            "contract_version": "benchmark_worker_pre_reservation_absence_v1",
+            "authority_kind": "test_benchmark_worker_supervision",
+            "supervision_inputs_ref": runtime_seal_immutable(
+                {"kind": "test-supervision-inputs"}
+            ),
+            "run_id": "absent-run",
+            "stage": "screen_understanding",
+            "operation_id": "absent-operation",
+            "reservation_present": False,
+            "provider_journal_present": False,
+            "provider_cleanup_journal_present": False,
+            "worker_ids": [],
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    recovery = compose_benchmark_v2_hybrid_pre_reservation_recovery(
+        run_id="absent-run",
+        stage="screen_understanding",
+        operation_id="absent-operation",
+        screen_group_ref={"id": "absent-group", "content_sha256": "6" * 64},
+        service_intent_ref={"content_sha256": "7" * 64},
+        window_binding_ref={"id": "absent-window", "content_sha256": "8" * 64},
+        capture_ref={"id": "absent-capture", "content_sha256": "9" * 64},
+        reservation_absence_ref=absence,
+    )
+
+    runtime_module._validate_actual_operations_cleanup_aggregate(
+        {
+            "full_group_attestation_refs": [],
+            "pre_reservation_recovery_refs": [recovery],
+            "completed_hybrid_cleanup_refs": [completed_cleanup],
+            "partial_workflow_terminal_refs": [],
+        }
+    )
+
+
 def test_actual_cleanup_fails_closed_when_durable_hybrid_intent_is_not_terminal(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

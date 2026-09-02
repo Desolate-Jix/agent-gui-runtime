@@ -3865,6 +3865,120 @@ def _recover_benchmark_v2_incumbent_pre_reservation_workflow_service(
         )
 
 
+def _recover_benchmark_v2_hybrid_pre_reservation_workflow_service(
+    *,
+    composition: LearningWorkflowServiceComposition,
+    screen_group: Mapping[str, object],
+    window_binding: Mapping[str, object],
+    service_intent_ref: Mapping[str, object],
+) -> dict[str, Any] | None:
+    """仅在 Hybrid run 从未创建且 exact worker lineage 为空时投影安全停止。"""
+
+    from app.learn.hybrid.benchmark_v2_contracts import (
+        content_sha256 as benchmark_content_sha256,
+    )
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        compose_benchmark_v2_hybrid_pre_reservation_recovery,
+        validate_benchmark_v2_hybrid_screen_group_start,
+        validate_benchmark_v2_workflow_window_binding,
+    )
+    from app.learn.workflow_worker import _benchmark_supervision_inputs_ref
+
+    _require_minted_learning_workflow_service_composition(composition)
+    group = validate_benchmark_v2_hybrid_screen_group_start(screen_group)
+    binding = validate_benchmark_v2_workflow_window_binding(window_binding)
+    if (
+        not isinstance(service_intent_ref, Mapping)
+        or set(service_intent_ref) != {"content_sha256"}
+        or not isinstance(service_intent_ref.get("content_sha256"), str)
+        or len(str(service_intent_ref["content_sha256"])) != 64
+    ):
+        raise LearningWorkflowStageOperationError(
+            "benchmark_v2 Hybrid pre-reservation service intent ref is invalid"
+        )
+    run_id = str(binding["run_id"])
+    stage = str(binding["stage"])
+    operation_id = str(binding["operation_id"])
+    with get_learning_workflow_operation_lock(
+        store=composition.store,
+        run_id=run_id,
+        operation_id=operation_id,
+    ):
+        try:
+            composition.store.get(run_id)
+        except LearningWorkflowTransitionError as error:
+            if str(error) != "workflow run not found":
+                raise
+        else:
+            return None
+        root = composition.benchmark_supervision_root
+        if root is None:
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Hybrid pre-reservation supervision root is unavailable"
+            )
+        absence = _LearningWorkflowRegistryOwner(
+            composition.worker_registry
+        ).attest_benchmark_pre_reservation_absence(
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            supervision_root=root,
+        )
+        expected_supervision_inputs_ref = _benchmark_supervision_inputs_ref(root)
+        expected_absence_fields = {
+            "contract_version",
+            "authority_kind",
+            "supervision_inputs_ref",
+            "run_id",
+            "stage",
+            "operation_id",
+            "reservation_present",
+            "provider_journal_present",
+            "provider_cleanup_journal_present",
+            "worker_ids",
+            "artifact_is_authorization",
+            "execute_binding_enabled",
+            "content_sha256",
+        }
+        if (
+            not isinstance(absence, Mapping)
+            or set(absence) != expected_absence_fields
+            or absence.get("contract_version")
+            != "benchmark_worker_pre_reservation_absence_v1"
+            or absence.get("authority_kind") != root.authority_kind
+            or absence.get("supervision_inputs_ref")
+            != expected_supervision_inputs_ref
+            or absence.get("run_id") != run_id
+            or absence.get("stage") != stage
+            or absence.get("operation_id") != operation_id
+            or absence.get("reservation_present") is not False
+            or absence.get("provider_journal_present") is not False
+            or absence.get("provider_cleanup_journal_present") is not False
+            or absence.get("worker_ids") != []
+            or absence.get("artifact_is_authorization") is not False
+            or absence.get("execute_binding_enabled") is not False
+            or absence.get("content_sha256")
+            != benchmark_content_sha256(dict(absence))
+            or not isinstance(absence.get("supervision_inputs_ref"), Mapping)
+        ):
+            raise LearningWorkflowStageOperationError(
+                "benchmark_v2 Hybrid pre-reservation absence attestation is invalid"
+            )
+        return compose_benchmark_v2_hybrid_pre_reservation_recovery(
+            run_id=run_id,
+            stage=stage,
+            operation_id=operation_id,
+            screen_group_ref={
+                "id": str(group["screen_group"]),
+                "content_sha256": str(group["content_sha256"]),
+            },
+            service_intent_ref=service_intent_ref,
+            window_binding_ref=binding["window_binding_ref"],
+            capture_ref=binding["capture_ref"],
+            reservation_absence_ref=absence,
+        )
+
+
 def _lookup_benchmark_v2_incumbent_workflow_service(
     *,
     composition: LearningWorkflowServiceComposition,

@@ -20,6 +20,7 @@ from app.learn.workflow_service import (
 )
 from app.learn.workflow_store import LearningWorkflowRunStore
 from app.learn.workflow_worker import (
+    LearningStageWorkerError,
     LearningStageWorkerRegistry,
     compose_test_benchmark_worker_supervision_root,
 )
@@ -46,6 +47,23 @@ def _binding(
         capture_ref={"id": "capture-1", "content_sha256": capture_digest},
         owner_journal_ref={"content_sha256": SHA_A},
         expected_uia_root_ref={"content_sha256": SHA_B},
+    )
+
+
+def _hybrid_group() -> dict[str, object]:
+    return incumbent.compose_benchmark_v2_hybrid_screen_group_start(
+        attempt_ref=seal_immutable({"attempt_id": "attempt-hybrid-pre-start"}),
+        partition="regression",
+        screen_group="screen-group-hybrid-pre-start",
+        provider_corpus_ref=seal_immutable({"kind": "provider-corpus"}),
+        case_refs=[_case(f"case-{index}") for index in range(5)],
+        hybrid_capture_bundle_ref={"id": "bundle", "content_sha256": SHA_A},
+        request_ref={"id": "request", "content_sha256": SHA_B},
+        registration_ref={"id": "registration", "content_sha256": SHA_A},
+        manifest_ref={"id": "manifest", "content_sha256": SHA_B},
+        capture_image_path="screenshots/regression/hybrid-pre-start.png",
+        hybrid_config={},
+        capture_bundle={},
     )
 
 
@@ -329,6 +347,122 @@ def test_recover_incumbent_pre_reservation_ignores_regular_terminal(
         provider_case_ref=provider_case_ref,
         window_binding=binding,
     ) is None
+
+
+def test_recover_hybrid_pre_reservation_requires_exact_store_and_worker_absence(
+    tmp_path: Path,
+) -> None:
+    from app.learn.workflow_worker import _benchmark_operation_artifact_path
+
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path / "worker-journals",
+        test_capability=object(),
+        workflow_store=store,
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=root.journal_root,
+        benchmark_supervision_root=root,
+    )
+    composition = compose_test_learning_workflow_service_unit(
+        store=store,
+        worker_registry=registry,
+        project_root=tmp_path,
+        benchmark_supervision_root=root,
+        provider_case_resolver=object(),
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+    service = incumbent.BenchmarkV2IncumbentWorkflowService(composition)
+    group = _hybrid_group()
+    binding = _binding()
+    intent_ref = {"content_sha256": "c" * 64}
+
+    recovered = service.recover_hybrid_pre_reservation(
+        screen_group=group,
+        window_binding=binding,
+        service_intent_ref=intent_ref,
+    )
+    replay = service.recover_hybrid_pre_reservation(
+        screen_group=group,
+        window_binding=binding,
+        service_intent_ref=intent_ref,
+    )
+
+    assert recovered == replay
+    assert recovered["contract_version"] == (
+        "benchmark_v2_hybrid_pre_reservation_recovery_v1"
+    )
+    assert recovered["status"] == "safe_stopped"
+    assert recovered["service_intent_ref"] == intent_ref
+    assert recovered["run_id"] == binding["run_id"]
+    assert recovered["window_binding_ref"] == binding["window_binding_ref"]
+    assert recovered["capture_ref"] == binding["capture_ref"]
+    assert recovered["reservation_absence_ref"]["contract_version"] == (
+        "benchmark_worker_pre_reservation_absence_v1"
+    )
+    assert recovered["reservation_absence_ref"]["run_id"] == binding["run_id"]
+    assert recovered["reservation_absence_ref"]["stage"] == binding["stage"]
+    assert recovered["reservation_absence_ref"]["operation_id"] == (
+        binding["operation_id"]
+    )
+    assert recovered["artifact_is_authorization"] is False
+    assert recovered["execute_binding_enabled"] is False
+
+    durable = _benchmark_operation_artifact_path(
+        root.journal_root,
+        str(binding["operation_id"]),
+        ".benchmark-reservation.json",
+    )
+    durable.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(LearningStageWorkerError, match="durable worker state"):
+        service.recover_hybrid_pre_reservation(
+            screen_group=group,
+            window_binding=binding,
+            service_intent_ref=intent_ref,
+        )
+
+
+def test_recover_hybrid_pre_reservation_rejects_any_existing_workflow_state(
+    tmp_path: Path,
+) -> None:
+    store = LearningWorkflowRunStore()
+    root = compose_test_benchmark_worker_supervision_root(
+        journal_root=tmp_path / "worker-journals",
+        test_capability=object(),
+        workflow_store=store,
+        test_store_capability=object(),
+    )
+    registry = LearningStageWorkerRegistry(
+        result_root=root.journal_root,
+        benchmark_supervision_root=root,
+    )
+    composition = compose_test_learning_workflow_service_unit(
+        store=store,
+        worker_registry=registry,
+        project_root=tmp_path,
+        benchmark_supervision_root=root,
+        provider_case_resolver=object(),
+        benchmark_v2_worker_binding_resolver=object(),
+    )
+    service = incumbent.BenchmarkV2IncumbentWorkflowService(composition)
+    group = _hybrid_group()
+    binding = _binding()
+    store.transition(
+        run_id=str(binding["run_id"]),
+        expected_revision=0,
+        stage="bind_capture",
+        outcome="running",
+    )
+
+    assert (
+        service.recover_hybrid_pre_reservation(
+            screen_group=group,
+            window_binding=binding,
+            service_intent_ref={"content_sha256": "c" * 64},
+        )
+        is None
+    )
 
 
 def test_start_uses_five_unique_child_slots_and_replays_same_case(
