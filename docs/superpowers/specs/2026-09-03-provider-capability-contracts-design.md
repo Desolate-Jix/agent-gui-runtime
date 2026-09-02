@@ -271,7 +271,9 @@ The first implementation must not alter model behavior or persisted artifact byt
 
 - Add Qwen2.5-VL-7B as a separate Semantic Binding Provider Bundle.
 - Run protocol smoke on the three previously failing complex screens.
-- Only if smoke passes, create a new sealed regression candidate and run the existing 12-screen/60-target regression.
+- If smoke passes, stop and report the exact bundle, protocol, quality, latency, and cleanup evidence.
+- Do not reuse or modify the frozen Benchmark v2 runner for the new bundle. The current runner is pinned to the old release identity and Qwen revision.
+- A 12-screen/60-target candidate regression requires a separately designed and approved bundle-neutral runner that produces explicitly non-Benchmark-v2 candidate evidence. It is not part of this implementation plan.
 - Do not modify the Qwen3 baseline or run unique holdout.
 
 The remaining Discovery and Grounding challengers are separate future slices. Their interfaces are established now; their models are not integrated in the first replacement proof.
