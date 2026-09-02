@@ -141,6 +141,10 @@ def _light_envelope(value:object,*,name:str)->tuple[dict[str,object],dict[str,ob
     except (ValueError,UnicodeDecodeError,base64.binascii.Error) as error: raise ValueError(f"{name} encoding invalid") from error
     if raw!=canonical_bytes(item) or not isinstance(item,Mapping): raise ValueError(f"{name} bytes invalid")
     artifact=dict(item); version=artifact.get("contract_version")
+    if version=="benchmark_v2_qwen_quality_safe_stop_omission_v1":
+        expected_refs=[{"id":f"{prefix}/{hashlib.sha256(domain+raw).hexdigest()}","content_sha256":hashlib.sha256(raw).hexdigest()} for prefix,domain in (("qwen-bindings",b"benchmark-v2-qwen-bindings\0"),("fusion-result",b"benchmark-v2-fusion-result\0"))]
+        if env["ref"] not in expected_refs: raise ValueError(f"{name} ref invalid")
+        return artifact,dict(env["ref"])
     if version in _RAW_DOMAINS:
         prefix,domain=_RAW_DOMAINS[str(version)]; expected_ref={"id":f"{prefix}/{hashlib.sha256(domain+raw).hexdigest()}","content_sha256":hashlib.sha256(raw).hexdigest()}
     else:
@@ -161,6 +165,19 @@ def _light_closure_index(outer:Mapping[str,object],*,name:str)->tuple[dict[bytes
         if key in found: raise ValueError(f"{name} closure duplicate")
         found[key]=(item,dict(envelope)); items.append(item)
     return found,items
+
+def _closure_contract_counts(index:Mapping[bytes,tuple[dict[str,object],dict[str,object]]])->dict[str,int]:
+    counts:dict[str,int]={}
+    omission_roles={"qwen-bindings":"hybrid_qwen_bindings_v1","fusion-result":"hybrid_fusion_result_v1"}
+    for item,envelope in index.values():
+        version=str(item["contract_version"])
+        if version=="benchmark_v2_qwen_quality_safe_stop_omission_v1":
+            reference=envelope.get("ref")
+            if not isinstance(reference,Mapping) or not isinstance(reference.get("id"),str): raise ValueError("accepted Qwen omission role invalid")
+            version=omission_roles.get(str(reference["id"]).split("/",1)[0],"")
+            if not version: raise ValueError("accepted Qwen omission role invalid")
+        counts[version]=counts.get(version,0)+1
+    return counts
 
 def _enable_dependency_light_pathless_validation()->None:
     try:
@@ -330,8 +347,7 @@ def _validate_accepted_regression_score_input(value:object,*,raw:bytes,release:M
             request=_resolve_pathless(prediction_by_ref,row["vista_request_ref"],"sealed_vista_request_v4")
             if request.get("target_binding_ref")!=row.get("target_binding_ref") or request.get("bbox_ref")!=row.get("bbox_ref"): raise ValueError("accepted prediction request lineage differs")
     q_count=sum(row.get("selection_status")=="selected" and row.get("arm_id")=="qwen_only" for row in rows); o_count=sum(row.get("selection_status")=="selected" and row.get("arm_id")=="omni_only_discovery" for row in rows); h_count=sum(row.get("selection_status")=="selected" and row.get("arm_id")=="omni_to_qwen" for row in rows); request_count=sum(len(group["submitted_vista_request_refs"]) for group in groups.values())
-    counts:dict[str,int]={}
-    for item in prediction_children: counts[str(item["contract_version"])]=counts.get(str(item["contract_version"]),0)+1
+    counts=_closure_contract_counts(prediction_by_ref)
     event_count=counts.get("benchmark_v2_runner_event_verified_projection_v1",0); expected_counts={"hybrid_omni_inventory_v1":12,"hybrid_qwen_bindings_v1":12,"hybrid_fusion_result_v1":12,"hybrid_vista_refinement_request_v1":request_count,"benchmark_v2_nested_provider_evidence_ref_v1":2*q_count+o_count+h_count,"sealed_prediction_source_parent_v1":q_count+o_count+h_count,"sealed_prediction_bbox_v1":q_count+o_count+h_count,"sealed_target_binding_v4":q_count+o_count+h_count,"sealed_vista_request_v4":h_count,"automatic_prediction_v3":1,"benchmark_v2_runner_event_verified_projection_v1":event_count,"benchmark_v2_projected_attempt_ledger_v1":1}; expected_counts={key:count for key,count in expected_counts.items() if count}
     lifecycle_counts:dict[str,int]={}
     for item,_ in lifecycle_by_ref.values(): lifecycle_counts[str(item["contract_version"])]=lifecycle_counts.get(str(item["contract_version"]),0)+1

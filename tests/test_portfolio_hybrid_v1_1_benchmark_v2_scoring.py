@@ -2229,6 +2229,72 @@ def test_s12_accepted_envelope_routes_qwen_omission_by_ref_class(
     assert reference == envelope["ref"]
 
 
+@pytest.mark.parametrize(
+    ("prefix", "domain"),
+    [
+        ("qwen-bindings", b"benchmark-v2-qwen-bindings\0"),
+        ("fusion-result", b"benchmark-v2-fusion-result\0"),
+    ],
+)
+def test_s3_private_scorer_accepts_qwen_quality_safe_stop_omission_envelope(
+    prefix: str,
+    domain: bytes,
+) -> None:
+    marker = {
+        "contract_version": "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+    }
+    raw = canonical_bytes(marker)
+    reference = {
+        "id": prefix + "/" + hashlib.sha256(domain + raw).hexdigest(),
+        "content_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    envelope = {
+        "ref": reference,
+        "canonical_bytes_b64": base64.b64encode(raw).decode("ascii"),
+    }
+
+    decoded, observed_ref = scorer_v2._light_envelope(
+        envelope,
+        name="Qwen quality omission",
+    )
+
+    assert decoded == marker
+    assert observed_ref == reference
+
+    forged = deepcopy(envelope)
+    forged["ref"]["id"] = "omni-inventory/" + hashlib.sha256(
+        b"benchmark-v2-omni-inventory\0" + raw
+    ).hexdigest()
+    with pytest.raises(ValueError, match="Qwen quality omission ref invalid"):
+        scorer_v2._light_envelope(forged, name="Qwen quality omission")
+
+
+def test_s3_closure_counts_qwen_quality_omissions_by_evidence_role() -> None:
+    marker = {
+        "contract_version": "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+    }
+    raw = canonical_bytes(marker)
+    closure: dict[bytes, tuple[dict[str, object], dict[str, object]]] = {}
+    for prefix, domain in (
+        ("qwen-bindings", b"benchmark-v2-qwen-bindings\0"),
+        ("fusion-result", b"benchmark-v2-fusion-result\0"),
+    ):
+        reference = {
+            "id": prefix + "/" + hashlib.sha256(domain + raw).hexdigest(),
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+        envelope = {
+            "ref": reference,
+            "canonical_bytes_b64": base64.b64encode(raw).decode("ascii"),
+        }
+        closure[canonical_bytes(reference)] = (deepcopy(marker), envelope)
+
+    assert scorer_v2._closure_contract_counts(closure) == {
+        "hybrid_qwen_bindings_v1": 1,
+        "hybrid_fusion_result_v1": 1,
+    }
+
+
 def test_s12_qwen_quality_safe_stop_keeps_real_arms_and_marks_hybrid_missing() -> None:
     from app.learn.hybrid.benchmark_v2_contracts import (
         content_sha256,
