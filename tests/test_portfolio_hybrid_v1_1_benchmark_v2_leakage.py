@@ -484,6 +484,110 @@ def test_self_hashed_synthetic_accepted_root_is_rejected() -> None:
         review._validate_accepted_run(synthetic, raw)
 
 
+def test_leakage_review_accepts_authoritative_pretty_regression_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    review = _load_script("review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py")
+    provider, corpus, _ = _refs()
+    accepted: dict[str, object] = {
+        "contract_version": "benchmark_v2_accepted_regression_score_input_v2",
+        "benchmark_release_id": BENCHMARK_RELEASE_ID,
+        "partition": "regression",
+        "corpus_parent_ref": corpus["source_parent_ref"],
+        "provider_manifest_ref": provider,
+        "provider_corpus_ref": corpus,
+        "selection_policy": "first_complete_lifecycle_verified_attempt",
+        "attempt_ref": {"id": "attempt/synthetic", "content_sha256": "1" * 64},
+        "attempt_ledger_ref": {"id": "ledger/synthetic", "content_sha256": "2" * 64},
+        "automatic_prediction_ref": {
+            "id": "automatic/synthetic",
+            "content_sha256": "3" * 64,
+        },
+        "selected_lifecycle_ref": {
+            "id": "lifecycle/synthetic",
+            "content_sha256": "4" * 64,
+        },
+        "verified_parent_projections": {},
+        "prediction_run_envelope": {},
+        "lifecycle_bundle_envelope": {},
+        "safety": review.SAFETY,
+    }
+    accepted["content_sha256"] = hashlib.sha256(
+        canonical_bytes(accepted)
+    ).hexdigest()
+    raw = json.dumps(
+        accepted,
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+        allow_nan=False,
+    ).encode("utf-8") + b"\n"
+    monkeypatch.setattr(review, "_validate_public_envelopes", lambda _value: None)
+    monkeypatch.setattr(
+        review,
+        "_validate_accepted_public_lineage",
+        lambda _value, *, validated_provider_corpus: None,
+    )
+
+    assert review._validate_accepted_run(accepted, raw) == accepted
+
+
+@pytest.mark.parametrize("raw_variant", ["compact", "crlf", "trailing"])
+def test_leakage_review_rejects_non_authoritative_regression_bytes(
+    raw_variant: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    review = _load_script("review_portfolio_hybrid_v1_1_benchmark_v2_leakage.py")
+    provider, corpus, _ = _refs()
+    accepted: dict[str, object] = {
+        "contract_version": "benchmark_v2_accepted_regression_score_input_v2",
+        "benchmark_release_id": BENCHMARK_RELEASE_ID,
+        "partition": "regression",
+        "corpus_parent_ref": corpus["source_parent_ref"],
+        "provider_manifest_ref": provider,
+        "provider_corpus_ref": corpus,
+        "selection_policy": "first_complete_lifecycle_verified_attempt",
+        "attempt_ref": {"id": "attempt/synthetic", "content_sha256": "1" * 64},
+        "attempt_ledger_ref": {"id": "ledger/synthetic", "content_sha256": "2" * 64},
+        "automatic_prediction_ref": {
+            "id": "automatic/synthetic",
+            "content_sha256": "3" * 64,
+        },
+        "selected_lifecycle_ref": {
+            "id": "lifecycle/synthetic",
+            "content_sha256": "4" * 64,
+        },
+        "verified_parent_projections": {},
+        "prediction_run_envelope": {},
+        "lifecycle_bundle_envelope": {},
+        "safety": review.SAFETY,
+    }
+    accepted["content_sha256"] = hashlib.sha256(
+        canonical_bytes(accepted)
+    ).hexdigest()
+    pretty = json.dumps(
+        accepted,
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+        allow_nan=False,
+    ).encode("utf-8") + b"\n"
+    raw = {
+        "compact": canonical_bytes(accepted) + b"\n",
+        "crlf": pretty.replace(b"\n", b"\r\n"),
+        "trailing": pretty + b" ",
+    }[raw_variant]
+    monkeypatch.setattr(review, "_validate_public_envelopes", lambda _value: None)
+    monkeypatch.setattr(
+        review,
+        "_validate_accepted_public_lineage",
+        lambda _value, *, validated_provider_corpus: None,
+    )
+
+    with pytest.raises(ValueError, match="accepted regression input bytes are not canonical"):
+        review._validate_accepted_run(accepted, raw)
+
+
 @pytest.mark.parametrize(
     "field",
     [

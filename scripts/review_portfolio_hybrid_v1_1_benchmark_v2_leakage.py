@@ -153,7 +153,7 @@ def _validate_accepted_run(
     if not isinstance(value, Mapping) or set(value) != fields:
         raise ValueError("accepted regression input is not closed")
     accepted = deepcopy(dict(value))
-    if raw != _canonical_bytes(accepted) + b"\n":
+    if raw != _pretty_bytes(accepted):
         raise ValueError("accepted regression input bytes are not canonical")
     if (
         accepted["contract_version"]

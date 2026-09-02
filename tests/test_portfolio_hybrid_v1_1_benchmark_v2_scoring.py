@@ -16,6 +16,7 @@ PRIVATE_LABEL_MARKERS=tuple(f"private-label-{index:03d}" for index in range(1,6)
 PRIVATE_SCREEN_GROUP_MARKER="private-screen-group-marker/never-public"
 def ref(name:str)->dict[str,str]: return {"id":name,"content_sha256":hashlib.sha256(name.encode()).hexdigest()}
 def write(path:Path,value:object)->None: path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(canonical_bytes(value)+b"\n")
+def write_pretty(path:Path,value:object)->None: path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(json.dumps(value,ensure_ascii=False,sort_keys=True,indent=2,allow_nan=False).encode("utf-8")+b"\n")
 def artifact(contract:str,aid:str,**fields:object)->dict[str,object]: return {"contract_version":contract,"artifact_id":aid,**fields,"safety":deepcopy(SAFETY)}
 
 def evidence(*,missing_qwen:bool=False,all_missing_qwen:bool=False,later_holdout:bool=False,pair_mode:str="valid")->tuple[dict[str,object],dict[str,object],dict[str,object]]:
@@ -122,7 +123,7 @@ def _selected_accepted_input(path:Path,provider_cases:list[dict[str,object]],pri
     children=order_pathless_envelopes(registry_name="prediction_run_v3",envelopes=children,context={})
     semantic={key:deepcopy(value) for key,value in run.items() if key not in {"contract_version","artifact_id","content_sha256"}}; semantic["corpus_parent_ref"]=deepcopy(release["corpus_parent_ref"]); semantic["provider_manifest_ref"]=deepcopy(release["provider_manifest_ref"]); semantic["provider_corpus_ref"]=deepcopy(release["provider_corpus_ref"]); semantic["automatic_prediction_ref"]=pathless_artifact_ref(changed); semantic["sealed_artifact_envelopes"]=children
     changed_run=seal_pathless_projection(contract_version="benchmark_v2_prediction_run_v3",semantic_payload=semantic)
-    accepted["corpus_parent_ref"]=deepcopy(release["corpus_parent_ref"]); accepted["provider_manifest_ref"]=deepcopy(release["provider_manifest_ref"]); accepted["provider_corpus_ref"]=deepcopy(release["provider_corpus_ref"]); accepted["automatic_prediction_ref"]=pathless_artifact_ref(changed); accepted["prediction_run_envelope"]=seal_pathless_envelope(changed_run); accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); write(path,accepted)
+    accepted["corpus_parent_ref"]=deepcopy(release["corpus_parent_ref"]); accepted["provider_manifest_ref"]=deepcopy(release["provider_manifest_ref"]); accepted["provider_corpus_ref"]=deepcopy(release["provider_corpus_ref"]); accepted["automatic_prediction_ref"]=pathless_artifact_ref(changed); accepted["prediction_run_envelope"]=seal_pathless_envelope(changed_run); accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); (write_pretty if partition=="regression" else write)(path,accepted)
 
 
 def _remint_pathless_unchecked(value:dict[str,object])->dict[str,object]:
@@ -140,7 +141,7 @@ def _rewrite_accepted_outer(accepted:dict[str,object],field:str,outer:dict[str,o
 
 
 def _finish_accepted_mutation(path:Path,accepted:dict[str,object])->None:
-    accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); write(path,accepted)
+    accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); write_pretty(path,accepted)
 
 
 @pytest.fixture(scope="module")
@@ -385,7 +386,7 @@ def test_s3_production_child_rejects_old_or_substituted_accepted_authority(mutat
         lifecycle=json.loads(base64.b64decode(accepted["lifecycle_bundle_envelope"]["canonical_bytes_b64"],validate=True))
         alternate=next(envelope["ref"] for envelope in lifecycle["sealed_artifact_envelopes"] if envelope["ref"]!=accepted["selected_lifecycle_ref"] and envelope["ref"]["id"].startswith("verified-lifecycle/"))
         accepted["selected_lifecycle_ref"]=alternate
-    accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); accepted_path=tmp_path/"accepted-mutated.json"; write(accepted_path,accepted)
+    accepted["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in accepted.items() if key!="content_sha256"})).hexdigest(); accepted_path=tmp_path/"accepted-mutated.json"; write_pretty(accepted_path,accepted)
     private_output=tmp_path/"private.json"; public_output=tmp_path/"public.json"
     with pytest.raises(ValueError,match="failed closed"):
         run_private_scorer(private_manifest_path=task10_release_inputs["private"],prediction_run_ref_path=accepted_path,private_output_path=private_output,public_ref_path=public_output)
@@ -1952,6 +1953,78 @@ def test_s3_private_score_v3_rejects_reminted_status_and_recursive_leakage(tmp_p
         changed["content_sha256"]=hashlib.sha256(canonical_bytes({key:value for key,value in changed.items() if key!="content_sha256"})).hexdigest()
         with pytest.raises(ValueError,match="scorer"):
             scorer._validate_private_score_artifact(changed)
+
+
+def test_s3_private_scorer_accepts_authoritative_pretty_regression_input(
+    task10_release_inputs: dict[str, Path],
+) -> None:
+    from app.learn.hybrid.benchmark_v2_private_release import (
+        validate_task10_private_release_bundle,
+    )
+
+    accepted = json.loads(
+        task10_release_inputs["accepted"].read_text(encoding="utf-8")
+    )
+    raw = (
+        json.dumps(
+            accepted,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    release = validate_task10_private_release_bundle(
+        private_manifest_path=task10_release_inputs["private"]
+    )
+
+    validated, _, _ = scorer_v2._validate_accepted_regression_score_input(
+        accepted,
+        raw=raw,
+        release=release,
+    )
+
+    assert validated["content_sha256"] == accepted["content_sha256"]
+
+
+@pytest.mark.parametrize("raw_variant", ["compact", "crlf", "trailing"])
+def test_s3_private_scorer_rejects_non_authoritative_regression_bytes(
+    raw_variant: str,
+    task10_release_inputs: dict[str, Path],
+) -> None:
+    from app.learn.hybrid.benchmark_v2_private_release import (
+        validate_task10_private_release_bundle,
+    )
+
+    accepted = json.loads(
+        task10_release_inputs["accepted"].read_text(encoding="utf-8")
+    )
+    pretty = (
+        json.dumps(
+            accepted,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+    raw = {
+        "compact": canonical_bytes(accepted) + b"\n",
+        "crlf": pretty.replace(b"\n", b"\r\n"),
+        "trailing": pretty + b" ",
+    }[raw_variant]
+    release = validate_task10_private_release_bundle(
+        private_manifest_path=task10_release_inputs["private"]
+    )
+
+    with pytest.raises(ValueError, match="accepted regression score input contract invalid"):
+        scorer_v2._validate_accepted_regression_score_input(
+            accepted,
+            raw=raw,
+            release=release,
+        )
 
 
 def _s12_inputs(*, goal: str = "Select the button labeled 'Apply now'") -> dict[str, object]:
