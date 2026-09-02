@@ -19,7 +19,7 @@ def write(path:Path,value:object)->None: path.parent.mkdir(parents=True,exist_ok
 def write_pretty(path:Path,value:object)->None: path.parent.mkdir(parents=True,exist_ok=True); path.write_bytes(json.dumps(value,ensure_ascii=False,sort_keys=True,indent=2,allow_nan=False).encode("utf-8")+b"\n")
 def artifact(contract:str,aid:str,**fields:object)->dict[str,object]: return {"contract_version":contract,"artifact_id":aid,**fields,"safety":deepcopy(SAFETY)}
 
-def evidence(*,missing_qwen:bool=False,all_missing_qwen:bool=False,later_holdout:bool=False,pair_mode:str="valid")->tuple[dict[str,object],dict[str,object],dict[str,object]]:
+def evidence(*,missing_qwen:bool=False,all_missing_arms:frozenset[str]=frozenset(),later_holdout:bool=False,pair_mode:str="valid")->tuple[dict[str,object],dict[str,object],dict[str,object]]:
     parent=ref("parent/seal"); cases=[{"case_id":f"opaque/{index}","screen_group":PRIVATE_SCREEN_GROUP_MARKER,"important_target":True,"acceptable_regions":[[10+(index-1)*20,10,14+(index-1)*20,14]]} for index in range(1,6)]
     envelopes=[]; rows=[]
     automatic_ref_placeholder=ref("automatic/pending")
@@ -34,7 +34,7 @@ def evidence(*,missing_qwen:bool=False,all_missing_qwen:bool=False,later_holdout
         request=seal_vista_request(artifact_id=f"request/{cid}",case_id=cid,target_binding_ref=artifact_ref(right),candidate_id=right["candidate_id"],fusion_ref=right["fusion_ref"],capture_ref=right["capture_ref"],bbox_ref=right["bbox_ref"],source_parent_ref=parent)
         envelopes.append(sealed_artifact_envelope(request))
         for arm in ("qwen_only","omni_only_discovery","omni_to_qwen","omni_to_qwen_vista"):
-            if arm=="qwen_only" and (all_missing_qwen or (missing_qwen and cid=="opaque/1")):
+            if arm in all_missing_arms or (arm=="qwen_only" and missing_qwen and cid=="opaque/1"):
                 rows.append({"case_id":cid,"arm_id":arm,"selection_status":"missing","eligibility":"INELIGIBLE","failure_reason":"no_selection"}); continue
             binding=wrong if arm=="qwen_only" and cid=="opaque/1" else right
             row={"case_id":cid,"arm_id":arm,"selection_status":"selected","eligibility":"ELIGIBLE","target_binding_ref":artifact_ref(binding)}
@@ -539,11 +539,25 @@ def test_sealed_lineage_mutations_fail(tmp_path:Path,mutation:str)->None:
     with pytest.raises(ValueError,match="failed closed|invalid|mismatch|differs|missing|wrong|cherry|lineage|artifact|closed"):
         execute(tmp_path,private,run,bundle)
 
-def test_selection_status_estimands_and_zero_selected_fail(tmp_path:Path)->None:
+@pytest.mark.parametrize("zero_arms",[
+    frozenset({"qwen_only"}),
+    frozenset({"omni_only_discovery"}),
+    frozenset({"omni_to_qwen","omni_to_qwen_vista"}),
+])
+def test_selection_status_estimands_and_zero_selected_is_formal_model_quality_fail(tmp_path:Path,zero_arms:frozenset[str])->None:
     private,run,bundle=evidence(missing_qwen=True); _,score,_=execute(tmp_path,private,run,bundle)
     qwen=score["automatic"]["arm_metrics"]["qwen_only"]; assert qwen["coverage"]=="4/5"; assert qwen["semantic_precision"]=="1/1"
-    private,run,bundle=evidence(all_missing_qwen=True)
-    with pytest.raises(ValueError): execute(tmp_path/"all",private,run,bundle)
+    private,run,bundle=evidence(all_missing_arms=zero_arms)
+    _,score,_=execute(tmp_path/"all",private,run,bundle)
+    for arm in zero_arms:
+        metric=score["automatic"]["arm_metrics"][arm]
+        assert metric["coverage"]=="0/1"
+        assert metric["important_correct_coverage"]=="0/1"
+        assert metric["semantic_precision"]=="0/1"
+        assert metric["wrong"]==0
+    assert score["gate"]["status"]=="FAIL"
+    if "omni_to_qwen_vista" in zero_arms:
+        assert score["point_metric"]=={"gain_numerator":0,"submitted_count":0,"gain":"0/1"}
 
 def test_first_verified_regression_and_automatic_human_boundary(tmp_path:Path)->None:
     private,run,bundle=evidence(); auto=next(x for x in run["sealed_artifacts"] if x["ref"]==run["automatic_prediction_ref"]); value=decode(auto); row=next(r for r in value["rows"] if r["case_id"]=="opaque/1" and r["arm_id"]=="omni_to_qwen_vista"); wrong=next(x for x in run["sealed_artifacts"] if x["ref"]["id"]=="binding-wrong/opaque/1"); row["target_binding_ref"]=wrong["ref"]; row["vista_result"]["target_binding_ref"]=wrong["ref"]; reseal(auto,value); run["automatic_prediction_ref"]=auto["ref"]

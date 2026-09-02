@@ -572,14 +572,16 @@ def _validate(private:object,run:object,lifecycle_bundle:object,*,_task10_releas
     return list(by.values()),cases,gate
 
 def _score(rows:list[dict[str,Any]],cases:dict[str,dict[str,Any]],gate:Mapping[str,Any])->dict[str,object]:
-    metrics={}
+    # 零选择属于模型质量失败：保留全量case分母，并让正式Gate失败。
+    metrics={}; all_arms_have_selected_predictions=True
     # 公开 binding 只携带不透明 case 身份；正确性由私有几何判定。
     for arm in ARMS:
         armrows=[r for r in rows if r["arm_id"]==arm]; selected=[r for r in armrows if r["selection_status"]=="selected"]
-        if not selected: raise ValueError("semantic precision selected denominator is zero")
+        if not selected: all_arms_have_selected_predictions=False
         correct=sum(_private_unique_target_center_containment(case_id=r["case_id"],bbox=r["_bbox"],cases=cases) for r in selected)
         important_total=sum(bool(c["important_target"]) for c in cases.values()); important_correct=sum(_private_unique_target_center_containment(case_id=r["case_id"],bbox=r["_bbox"],cases=cases) and cases[r["case_id"]]["important_target"] for r in selected)
-        metrics[arm]={"coverage":Fraction(len(selected),len(cases)),"important_correct_coverage":Fraction(important_correct,important_total),"semantic_precision":Fraction(correct,len(selected)),"wrong":len(selected)-correct}
+        semantic_precision=Fraction(correct,len(selected)) if selected else Fraction(0,1)
+        metrics[arm]={"coverage":Fraction(len(selected),len(cases)),"important_correct_coverage":Fraction(important_correct,important_total),"semantic_precision":semantic_precision,"wrong":len(selected)-correct}
     numerator=submitted=0
     baselines={r["case_id"]:r for r in rows if r["arm_id"]=="omni_to_qwen"}
     for r in rows:
@@ -588,11 +590,11 @@ def _score(rows:list[dict[str,Any]],cases:dict[str,dict[str,Any]],gate:Mapping[s
         if baseline_row["selection_status"]!="selected": raise ValueError("VISTA selection has no exact baseline")
         submitted+=1; a,b,c,d=baseline_row["_bbox"]; baseline=_hit((Fraction(a+c,2),Fraction(b+d,2)),cases[r["case_id"]]["acceptable_regions"]); result=r["vista_result"]
         refined=0 if result["status"] in FAILURES else _hit(tuple(Fraction(v) for v in result["canonical_capture_pixel_point"]),cases[r["case_id"]]["acceptable_regions"]); numerator+=refined-baseline
-    if not submitted: raise ValueError("zero submitted denominator")
+    gain=Fraction(numerator,submitted) if submitted else Fraction(0,1)
     t=gate["thresholds"]; release,base=metrics["omni_to_qwen_vista"],metrics["qwen_only"]
-    passed=release["wrong"]==t["wrong_target_count"] and release["coverage"]>=Fraction(t["min_coverage"]) and release["important_correct_coverage"]-base["important_correct_coverage"]>=Fraction(t["min_important_target_correct_coverage_delta"]) and release["semantic_precision"]-base["semantic_precision"]>=Fraction(t["min_semantic_precision_delta"]) and submitted>=t["min_vista_submitted_count"] and numerator>0
+    passed=all_arms_have_selected_predictions and release["wrong"]==t["wrong_target_count"] and release["coverage"]>=Fraction(t["min_coverage"]) and release["important_correct_coverage"]-base["important_correct_coverage"]>=Fraction(t["min_important_target_correct_coverage_delta"]) and release["semantic_precision"]-base["semantic_precision"]>=Fraction(t["min_semantic_precision_delta"]) and submitted>=t["min_vista_submitted_count"] and numerator>0
     serial={a:{k:(f"{v.numerator}/{v.denominator}" if isinstance(v,Fraction) else v) for k,v in m.items()} for a,m in metrics.items()}
-    return {"automatic":{"wrong_target_count":release["wrong"],"arm_metrics":serial},"point_metric":{"gain_numerator":numerator,"submitted_count":submitted,"gain":f"{Fraction(numerator,submitted).numerator}/{Fraction(numerator,submitted).denominator}"},"gate":{"status":"PASS" if passed else "FAIL","automatic_split":"pre_review","regression_role":"precondition_only"}}
+    return {"automatic":{"wrong_target_count":release["wrong"],"arm_metrics":serial},"point_metric":{"gain_numerator":numerator,"submitted_count":submitted,"gain":f"{gain.numerator}/{gain.denominator}"},"gate":{"status":"PASS" if passed else "FAIL","automatic_split":"pre_review","regression_role":"precondition_only"}}
 
 def _score_private_child(**_:object)->dict[str,object]:
     raise PermissionError("private scorer direct path is child-only")
