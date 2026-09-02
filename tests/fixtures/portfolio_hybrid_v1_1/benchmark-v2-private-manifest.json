@@ -52,14 +52,14 @@
       "tests/fixtures/portfolio_hybrid_v1_1/benchmark-v2-manifest.template.json": "66c64ab33594276ec148c04afaf8a27787cbcbdabdfa26f0a0105a0f480a7838"
     },
     "test_sha256_by_path": {
-      "tests/test_learn_hybrid_contracts.py": "ee89ba74ffe4ab042aebe1647a1379c3625ab0aa30cc0c494fea075ff8aada9e",
+      "tests/test_learn_hybrid_contracts.py": "978c4ea8c612ddde5cb9aa610b052b76fb79d233fc7f6cecccf1304b2db2c187",
       "tests/test_learn_hybrid_qwen_binding.py": "9e916c8a5063671c11b0bb5c524d1138c61cce8bab5eafc603f491f847504aae",
       "tests/test_learn_hybrid_windows_process_scope.py": "6af6c5971e9861ca4e0d34a95521e7798f50a2542621a3659a335f28a58702e9",
-      "tests/test_learning_workflow_stage_execution.py": "41bba1810f1c1c4cb604943e2e8c48636c64a228b34a3a8cf98132ddb871f8f4",
+      "tests/test_learning_workflow_stage_execution.py": "9420742d4bd659fc89458b22fcd95433b43868a8e6172c99fa435902c1c59d36",
       "tests/test_learning_workflow_stage_worker.py": "46c5e92e00e075656126081af7fe6e473800497d2a445220657abff3c83bc031",
       "tests/test_model_request_cancellation.py": "d60d727fd260c4272d038649421186e059745368381df1d2175a3adc4e8bfa2c",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py": "8e28d897b14b332189d05c68b0c861885f5d983edbe1f55651c22d72df34e3ff",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "8b5f555eea96eef957806bd41c642179a1da3350181d4031d9f4fa02aece3190",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_actual.py": "e74b9135200dd7f0c8df92857f472146a15841fe165b53983c84e68d918b4212",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_dispatch_attestation.py": "f710a4b4a3504182318b27c7166f161fe09dfe8d0218b3d23ed7a14439478e82",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_estimand.py": "33e6462b86c481836e360e9192cda707dac20db89ba1d976fdbd42346fbe2a1a",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_holdout.py": "6ad6b5c55c549ad63fd245e78814a5fe0bed29bf7c1b9a900473662f4f6a34fd",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_incumbent.py": "11d40f64f7e974f2323e98c706035288dce53fdc86202b19fe4ecce3ed56c3ce",
@@ -74,14 +74,14 @@
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py": "dab5353481ea679159dce2618f008e32c2f8efc10e57f9555e8f9bc3380a6e81",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py": "21eb7e54c9fab35ab4c13dd34ceaf779d6d04048fcaed839310f0eaf9b38e32b",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py": "ff14c43431b80e5c01425b04595cf274ac7b639b36e86fb19624ee60e3aae67d",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py": "c057040b08b55c61b9744494824daa2922ba1ee11389991d3ef61fc4ca2388d2",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py": "97ce322c393f91eca59f6223d5b57141e3ef34407df4c5abb6bdda24c7d5cc51",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py": "2a3f25f310dba2d70c7a3ffc9024ddcaa436c62df03be8bbaba88a87402d44a0",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_workflow_service_port.py": "4df303bb5663c23508b22b1c08dbe1bc0e6774cf726f7b6b006fbce6902cde98",
       "tests/test_portfolio_hybrid_v1_1_release_gate_v2.py": "f8cee28ff6981629f52cc71ee5f6a66b3fe33c7619cc8e040b7ab81ab7c0165b",
       "tests/test_uei_v1_projections.py": "0eb30a772d8dba22786450cfc60cd35ff33e5424f8c30069e460a2ab188a09f4"
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "1a01137be5a0d0c8fe76ae5abc68f80e81cd4ba7f78ccb242f4d2866faaa9045",
+  "content_sha256": "297e6560640bcc862519ce4cdb4e93a48854b14f43a74a9ca649f1416d90cb40",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
