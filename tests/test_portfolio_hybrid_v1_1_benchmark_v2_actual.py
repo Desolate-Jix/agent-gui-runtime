@@ -548,6 +548,34 @@ def test_prediction_run_v3_materializer_succeeds_deterministically_offline(monke
     }
 
 
+def test_regression_actual_body_uses_runtime_hash_dialect() -> None:
+    body = {
+        "contract_version": "benchmark_v2_runner_actual_body_v1",
+        "attempt_ref": {"content_sha256": SHA_A},
+        "partition": "regression",
+        "screen_group_results": [
+            {
+                "screen_group": f"screen-{index:02d}",
+                "coordinate": 415.0,
+                "create_time_ns": 1_788_314_842_712_270_848,
+            }
+            for index in range(12)
+        ],
+        "body_status": "complete",
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    body["content_sha256"] = content_sha256(body)
+    encoded = (
+        json.dumps(
+            body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        + b"\n"
+    )
+
+    assert benchmark_predictions._parse_actual_body_bytes(encoded) == body
+
+
 def test_prediction_run_v3_rejects_resealed_body_not_bound_to_lifecycle(monkeypatch) -> None:
     kwargs, body, _ = _offline_c3_inputs(monkeypatch)
     changed = deepcopy(body)

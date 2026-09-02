@@ -452,6 +452,225 @@ def test_opaque_raw_ref_requires_matching_validated_canonical_bytes(monkeypatch)
         )
 
 
+def test_opaque_raw_ref_accepts_frozen_benchmark_numeric_canonicalization(
+    monkeypatch,
+) -> None:
+    raw = seal_immutable(
+        {
+            "contract_version": "hybrid_vista_refinement_request_v1",
+            "candidate_id": "candidate/one",
+            "submission_status": "SUBMITTED",
+            "candidate_bbox_ref": {"xyxy": [1.0, 2.0, 3.0, 4.0]},
+        }
+    )
+    monkeypatch.setattr(
+        "app.learn.hybrid.vista_refinement._validated_request",
+        lambda value: value,
+    )
+    raw_bytes = _canonical(raw)
+    expected = {
+        "id": "submitted-vista-request/"
+        + hashlib.sha256(
+            b"benchmark-v2-submitted-vista-request\0" + raw_bytes
+        ).hexdigest(),
+        "content_sha256": hashlib.sha256(raw_bytes).hexdigest(),
+    }
+
+    assert (
+        validate_pathless_ref(
+            role="submitted_request_ref",
+            value=expected,
+            context={
+                "contract_version": "sealed_vista_request_v4",
+                "opaque_raw_canonical_bytes": {
+                    "submitted_request_ref": raw_bytes,
+                },
+            },
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("prefix", "domain"),
+    [
+        ("qwen-bindings", b"benchmark-v2-qwen-bindings\0"),
+        ("fusion-result", b"benchmark-v2-fusion-result\0"),
+    ],
+)
+def test_prediction_registry_accepts_qwen_quality_safe_stop_omission(
+    prefix: str,
+    domain: bytes,
+) -> None:
+    from app.learn.hybrid.benchmark_v2_contracts import content_sha256
+
+    marker = {
+        "contract_version": "benchmark_v2_qwen_quality_safe_stop_omission_v1",
+        "provider_group_ref": {"id": "group/one", "content_sha256": "1" * 64},
+        "omni_inventory_ref": {"id": "omni/one", "content_sha256": "2" * 64},
+        "failure_result_ref": {"content_sha256": "3" * 64},
+        "failure_response_sha256": "4" * 64,
+        "diagnostics_ref": {"content_sha256": "5" * 64},
+        "model_request_ref": {"id": "request/one", "content_sha256": "6" * 64},
+        "capture_lineage_ref": {"id": "capture/one", "content_sha256": "7" * 64},
+        "screenshot_sha256": "8" * 64,
+        "provider_dispatch_receipt_refs": [
+            {"provider": "omni", "content_sha256": "9" * 64},
+            {"provider": "qwen", "content_sha256": "a" * 64},
+        ],
+        "cleanup_refs": {
+            "worker_cleanup_ref": {"content_sha256": "b" * 64},
+            "provider_cleanup_ref": {"content_sha256": "c" * 64},
+        },
+        "failure_reason": "Qwen binding response is not a closed JSON object",
+        "omitted_artifacts": [
+            "hybrid_qwen_bindings_v1",
+            "hybrid_fusion_result_v1",
+        ],
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+    marker["content_sha256"] = content_sha256(marker)
+    envelope = _raw_envelope(
+        marker,
+        prefix=prefix,
+        domain=domain,
+    )
+
+    assert order_pathless_envelopes(
+        registry_name="prediction_run_v3",
+        envelopes=[envelope],
+        context={},
+    ) == [envelope]
+
+
+@pytest.mark.parametrize(
+    ("identifier", "expected"),
+    [
+        ("qwen-bindings/one", "hybrid_qwen_bindings_v1"),
+        ("fusion-result/one", "hybrid_fusion_result_v1"),
+    ],
+)
+def test_prediction_graph_counts_qwen_omission_by_envelope_role(
+    identifier: str,
+    expected: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_pathless as pathless
+
+    assert pathless._prediction_raw_contract_version(
+        {
+            "contract_version": (
+                "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+            )
+        },
+        {"ref": {"id": identifier, "content_sha256": "a" * 64}},
+    ) == expected
+
+
+def _qwen_omission_lineage_inputs() -> tuple[
+    dict[str, dict[str, object]],
+    dict[str, dict[str, str]],
+    list[dict[str, str]],
+    dict[bytes, tuple[dict[str, object], dict[str, object]]],
+]:
+    from app.learn.hybrid import benchmark_v2_pathless as pathless
+
+    provider_ref = _ref("group/one")
+    omni_ref = _ref("omni-inventory/one")
+    omni_value = {
+        "contract_version": "hybrid_omni_inventory_v1",
+        "content_sha256": "e" * 64,
+    }
+    omni_semantic_ref = {
+        "id": "omni_inventory",
+        "content_sha256": omni_value["content_sha256"],
+    }
+    qwen_ref = _ref("qwen/one")
+    fusion_ref = _ref("fusion/one")
+    group = {
+        "provider_group_ref": provider_ref,
+        "omni_inventory_ref": omni_ref,
+        "qwen_bindings_ref": qwen_ref,
+        "fusion_result_ref": fusion_ref,
+    }
+    marker = {
+        "contract_version": "benchmark_v2_qwen_quality_safe_stop_omission_v1",
+        "provider_group_ref": provider_ref,
+        "omni_inventory_ref": omni_semantic_ref,
+    }
+    rows = [
+        {
+            "case_id": "case/one",
+            "arm_id": arm,
+            "selection_status": "missing",
+            "failure_reason": "qwen_quality_safe_stop",
+        }
+        for arm in ("omni_to_qwen", "omni_to_qwen_vista")
+    ]
+    by_ref = {
+        pathless._canonical_bytes(omni_ref): (deepcopy(omni_value), {}),
+        pathless._canonical_bytes(qwen_ref): (deepcopy(marker), {}),
+        pathless._canonical_bytes(fusion_ref): (deepcopy(marker), {}),
+    }
+    return (
+        {"group/one": group},
+        {
+            "case/one": {
+                "provider_group_id": "group/one",
+                "case_content_sha256": "a" * 64,
+            }
+        },
+        rows,
+        by_ref,
+    )
+
+
+def test_prediction_graph_binds_qwen_omission_rows_to_exact_group_marker() -> None:
+    from app.learn.hybrid import benchmark_v2_pathless as pathless
+
+    groups, cases, rows, by_ref = _qwen_omission_lineage_inputs()
+
+    pathless._validate_qwen_omission_row_lineage(
+        groups=groups,
+        cases=cases,
+        rows=rows,
+        by_ref=by_ref,
+    )
+
+
+@pytest.mark.parametrize("mutation", ["healthy_raw", "wrong_group", "wrong_omni"])
+def test_prediction_graph_rejects_forged_qwen_omission_row_lineage(
+    mutation: str,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_pathless as pathless
+
+    groups, cases, rows, by_ref = _qwen_omission_lineage_inputs()
+    if mutation == "healthy_raw":
+        for item, _ in by_ref.values():
+            item["contract_version"] = "hybrid_qwen_bindings_v1"
+    elif mutation == "wrong_group":
+        for item, _ in by_ref.values():
+            if "provider_group_ref" in item:
+                item["provider_group_ref"] = _ref("group/other")
+    else:
+        for item, _ in by_ref.values():
+            if item.get("contract_version") == (
+                "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+            ):
+                item["omni_inventory_ref"] = {
+                    "id": "omni_inventory",
+                    "content_sha256": "f" * 64,
+                }
+
+    with pytest.raises(ValueError, match="Qwen quality safe-stop row lineage"):
+        pathless._validate_qwen_omission_row_lineage(
+            groups=groups,
+            cases=cases,
+            rows=rows,
+            by_ref=by_ref,
+        )
+
+
 def test_source_parent_semantic_discriminator_is_closed() -> None:
     nested = _seal_nested()
     nested_ref = pathless_artifact_ref(nested)
@@ -1178,7 +1397,12 @@ def test_automatic_prediction_v3_requires_frozen_identity_and_row_order() -> Non
             "arm_id": arm,
             "selection_status": "missing",
             "eligibility": "INELIGIBLE",
-            "failure_reason": "target_not_present_pre_vista",
+                "failure_reason": (
+                    "qwen_quality_safe_stop"
+                    if case_index == 0
+                    and arm in {"omni_to_qwen", "omni_to_qwen_vista"}
+                    else "target_not_present_pre_vista"
+                ),
         }
         for case_index in range(60)
         for arm in ("qwen_only", "omni_only_discovery", "omni_to_qwen", "omni_to_qwen_vista")

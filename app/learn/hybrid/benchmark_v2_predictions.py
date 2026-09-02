@@ -379,11 +379,41 @@ def select_pre_vista_prediction_rows(
 
     if not isinstance(incumbent_response, Mapping):
         raise ValueError("incumbent response is missing")
-    screen = incumbent_response.get("screen_reading")
-    inventory_view = screen.get("screen_inventory") if isinstance(screen, Mapping) else None
+    wrapper_fields = {
+        "success",
+        "message",
+        "data",
+        "error",
+        "_benchmark_v2_window_binding_evidence",
+    }
+    if set(incumbent_response) != wrapper_fields:
+        raise ValueError("incumbent API response is not closed")
+    data = incumbent_response.get("data")
+    binding_evidence = incumbent_response.get(
+        "_benchmark_v2_window_binding_evidence"
+    )
+    if (
+        incumbent_response.get("success") is not True
+        or incumbent_response.get("error") is not None
+        or not isinstance(incumbent_response.get("message"), str)
+        or not incumbent_response["message"]
+        or not isinstance(data, Mapping)
+        or set(data) != {"result"}
+        or not isinstance(binding_evidence, Mapping)
+        or not binding_evidence
+    ):
+        raise ValueError("incumbent API response envelope is invalid")
+    incumbent_result = data.get("result")
+    if (
+        not isinstance(incumbent_result, Mapping)
+        or incumbent_result.get("contract_version") != "screen_observation_v1"
+        or not isinstance(incumbent_result.get("screen_inventory"), Mapping)
+    ):
+        raise ValueError("incumbent API response result is invalid")
+    inventory_view = incumbent_result["screen_inventory"]
     actions = inventory_view.get("available_actions") if isinstance(inventory_view, Mapping) else None
     if not isinstance(actions, list):
-        raise ValueError("incumbent available actions are missing")
+        raise ValueError("incumbent API response screen inventory is invalid")
     action_ids = [_public_identifier(item.get("id"), "incumbent action") for item in actions if isinstance(item, Mapping)]
     if len(action_ids) != len(actions) or len(set(action_ids)) != len(action_ids):
         raise ValueError("duplicate incumbent action identity")
@@ -648,7 +678,7 @@ def _seal_automatic_prediction_v3(
 
 
 def _parse_actual_body_bytes(actual_body_bytes: bytes) -> dict[str, object]:
-    from app.learn.recognition.uei.canonical import content_sha256
+    from app.learn.hybrid.benchmark_v2_contracts import content_sha256
 
     if not isinstance(actual_body_bytes, bytes):
         raise ValueError("actual body bytes are required")
@@ -1609,7 +1639,17 @@ def _accepted_envelope(value: object, *, name: str) -> tuple[dict[str, object], 
             b"benchmark-v2-submitted-vista-request\0",
         ),
     }
-    raw_spec = raw_classes.get(str(decoded.get("contract_version")))
+    contract_version = str(decoded.get("contract_version"))
+    raw_spec = raw_classes.get(contract_version)
+    if contract_version == "benchmark_v2_qwen_quality_safe_stop_omission_v1":
+        reference = value.get("ref") if isinstance(value, Mapping) else None
+        identifier = reference.get("id") if isinstance(reference, Mapping) else None
+        if isinstance(identifier, str) and identifier.startswith("qwen-bindings/"):
+            raw_spec = ("qwen-bindings", b"benchmark-v2-qwen-bindings\0")
+        elif isinstance(identifier, str) and identifier.startswith("fusion-result/"):
+            raw_spec = ("fusion-result", b"benchmark-v2-fusion-result\0")
+        else:
+            raise ValueError(f"{name} Qwen omission envelope class is invalid")
     if raw_spec is None:
         ref = pathless_artifact_ref(decoded)
     else:

@@ -12,10 +12,12 @@ import struct
 import pytest
 
 from app.learn.hybrid import benchmark_v2_lifecycle as lifecycle
+from app.learn.hybrid import benchmark_v2_incumbent_operation as incumbent
 from app.learn.hybrid import benchmark_v2_window_owner as window_owner
 from app.learn.hybrid import benchmark_v2_worker_binding as worker_binding
 from app.learn.hybrid.benchmark_v2_contracts import (
     canonical_json_bytes as benchmark_canonical_json_bytes,
+    content_sha256 as benchmark_content_sha256,
 )
 from app.learn.hybrid.vista_refinement import build_vista_requests
 from app.learn import workflow_worker
@@ -2922,34 +2924,72 @@ def _s13_screen_projection(
     )
     if len(case_refs) != 5:
         raise ValueError("screen projection helper requires five case refs")
-    operations = [
-        seal_immutable(
-            {
-                "mode": "hybrid_v1_1",
-                "operation_id": f"{screen_group}-hybrid",
-                "status": "complete",
-                "request_ref": request_ref,
-                "window_binding_ref": window_binding_ref,
-                "capture_ref": capture_ref,
-            }
-        ),
+    operation_specs = [
+        ("hybrid_v1_1", 0, request_ref),
         *[
-            seal_immutable(
+            (
+                "incumbent_qwen_only",
+                index + 1,
                 {
-                    "mode": "incumbent_qwen_only",
-                    "operation_id": f"{screen_group}-incumbent-{index}",
-                    "status": "complete",
-                    "request_ref": {
-                        "id": case["case_id"],
-                        "content_sha256": case["case_content_sha256"],
-                    },
-                    "window_binding_ref": window_binding_ref,
-                    "capture_ref": capture_ref,
-                }
+                    "id": case["case_id"],
+                    "content_sha256": case["case_content_sha256"],
+                },
             )
             for index, case in enumerate(case_refs)
         ],
     ]
+    operations = []
+    for mode, index, operation_request_ref in operation_specs:
+        run_id = (
+            f"run/{screen_group}/hybrid"
+            if mode == "hybrid_v1_1"
+            else f"run/{screen_group}/incumbent/{index}"
+        )
+        operation_id = (
+            f"{screen_group}-hybrid"
+            if mode == "hybrid_v1_1"
+            else f"{screen_group}-incumbent-{index - 1}"
+        )
+        operations.append(
+            incumbent.compose_benchmark_v2_workflow_service_operation_ref(
+                mode=mode,
+                run_id=run_id,
+                stage="screen_understanding",
+                operation_id=operation_id,
+                workflow_state_ref={
+                    "run_id": run_id,
+                    "revision": index + 1,
+                    "content_sha256": hashlib.sha256(
+                        f"workflow:{run_id}:{index + 1}".encode()
+                    ).hexdigest(),
+                },
+                stage_execution_ref={
+                    "run_id": run_id,
+                    "stage": "screen_understanding",
+                    "operation_id": operation_id,
+                    "revision": index + 1,
+                    "content_sha256": hashlib.sha256(
+                        f"stage:{run_id}:{operation_id}:{index + 1}".encode()
+                    ).hexdigest(),
+                },
+                request_ref=operation_request_ref,
+                window_binding_ref=window_binding_ref,
+                capture_ref=capture_ref,
+                worker_ref=seal_immutable(
+                    {
+                        "worker_id": f"worker/{screen_group}/{index}",
+                        "model_request_id": f"model-request/{screen_group}/{index}",
+                        "payload_sha256": hashlib.sha256(
+                            f"payload:{screen_group}:{index}".encode()
+                        ).hexdigest(),
+                    }
+                ),
+                status="complete",
+                predecessor_content_sha256=hashlib.sha256(
+                    f"predecessor:{screen_group}:{index}".encode()
+                ).hexdigest(),
+            )
+        )
     executions = [
         {
             "id": f"{operation['mode']}/{operation['operation_id']}",
@@ -2988,25 +3028,112 @@ def _s13_screen_projection(
             "execute_binding_enabled": False,
         }
     )
+    cleanup_entries = []
+    for index, operation in enumerate(operations):
+        worker = operation["worker_ref"]
+        if operation["mode"] == "hybrid_v1_1":
+            worker_cleanup = seal_immutable(
+                {
+                    "contract_version": (
+                        "benchmark_v2_hybrid_completed_worker_cleanup_ref_v1"
+                    ),
+                    "run_id": operation["run_id"],
+                    "stage": operation["stage"],
+                    "operation_id": operation["operation_id"],
+                    "worker_id": worker["worker_id"],
+                    "model_request_id": worker["model_request_id"],
+                    "payload_sha256": worker["payload_sha256"],
+                    "worker_status": "completed",
+                    "runtime_attached": False,
+                    "result_available": True,
+                }
+            )
+        else:
+            worker_cleanup = seal_immutable(
+                {
+                    "contract_version": "benchmark_worker_cleanup_receipt_v1",
+                    "outcome": "verified_exact_worker_exited",
+                    "run_id": operation["run_id"],
+                    "stage": operation["stage"],
+                    "operation_id": operation["operation_id"],
+                    "worker_id": worker["worker_id"],
+                    "reservation_ref": {
+                        "content_sha256": hashlib.sha256(
+                            f"reservation:{screen_group}:{index}".encode()
+                        ).hexdigest()
+                    },
+                }
+            )
+        provider_cleanup = seal_immutable(
+            {
+                "contract_version": "benchmark_provider_cleanup_ref_v1",
+                "status": "cleanup_verified",
+                "outcome": "verified_exact_process_exited",
+                "run_id": operation["run_id"],
+                "stage": operation["stage"],
+                "operation_id": operation["operation_id"],
+                "worker_id": worker["worker_id"],
+                "model_request_id": worker["model_request_id"],
+                "payload_sha256": worker["payload_sha256"],
+            }
+        )
+        if operation["mode"] == "incumbent_qwen_only":
+            terminal_receipt = seal_immutable(
+                {
+                    "contract_version": "benchmark_v2_incumbent_terminal_receipt_v1",
+                    "outcome": "benchmark_v2_incumbent_observe_complete",
+                    "run_id": operation["run_id"],
+                    "stage": operation["stage"],
+                    "operation_id": operation["operation_id"],
+                    "worker_id": worker["worker_id"],
+                    "model_request_id": worker["model_request_id"],
+                    "payload_sha256": worker["payload_sha256"],
+                    "result_sha256": hashlib.sha256(
+                        f"result:{screen_group}:{index}".encode()
+                    ).hexdigest(),
+                    "terminal_intent_ref": seal_immutable(
+                        {"kind": "terminal-intent", "index": index}
+                    ),
+                    "cancel_intent_ref": None,
+                    "generic_adoption_ref": seal_immutable(
+                        {"kind": "generic-adoption", "index": index}
+                    ),
+                    "window_adoption_ref": seal_immutable(
+                        {"kind": "window-adoption", "index": index}
+                    ),
+                    "worker_cleanup_ref": worker_cleanup,
+                    "provider_cleanup_ref": provider_cleanup,
+                    "provider_cleanup_outcome": provider_cleanup["outcome"],
+                    "terminal_at": "2026-09-02T00:00:00+00:00",
+                    "artifact_is_authorization": False,
+                    "execute_binding_enabled": False,
+                    "predecessor_content_sha256": operation[
+                        "predecessor_content_sha256"
+                    ],
+                }
+            )
+        else:
+            terminal_receipt = seal_immutable(
+                {
+                    "run_id": operation["run_id"],
+                    "stage": operation["stage"],
+                    "operation_id": operation["operation_id"],
+                    "worker_id": worker["worker_id"],
+                }
+            )
+        cleanup_entries.append(
+            {
+                "operation_ref_sha256": operation["content_sha256"],
+                "terminal_receipt_ref": terminal_receipt,
+                "worker_cleanup_ref": worker_cleanup,
+                "provider_cleanup_ref": provider_cleanup,
+            }
+        )
     service_stable = seal_immutable(
         {
             "contract_version": "benchmark_v2_actual_operations_stable_zero_v1",
             "operation_refs": operations,
-            "cleanup_entries": [
-                {
-                    "operation_ref_sha256": operation["content_sha256"],
-                    "terminal_receipt_ref": seal_immutable(
-                        {"kind": "terminal", "index": index}
-                    ),
-                    "worker_cleanup_ref": seal_immutable(
-                        {"kind": "worker-cleanup", "index": index}
-                    ),
-                    "provider_cleanup_ref": seal_immutable(
-                        {"kind": "provider-cleanup", "index": index}
-                    ),
-                }
-                for index, operation in enumerate(operations)
-            ],
+            "cleanup_entries": cleanup_entries,
             "window_binding_ref": window_binding_ref,
             "capture_ref": capture_ref,
             "cleanup_status": "stable_zero",
@@ -3099,7 +3226,11 @@ def _s13_screen_projection(
                             {
                                 "provider": provider,
                                 "content_sha256": hashlib.sha256(
-                                    f"{screen_group}:{case_index}:{arm_id}:{provider}".encode()
+                                    (
+                                        f"{screen_group}:{case_index}:{arm_id}:{provider}"
+                                        if arm_id == "qwen_only"
+                                        else f"{screen_group}:{arm_id}:{provider}"
+                                    ).encode()
                                 ).hexdigest(),
                             }
                             for provider in provider_sets[arm_id]
@@ -3212,6 +3343,215 @@ def test_s13_screen_group_lifecycle_projection_uses_unique_unicode_order() -> No
             projection["parent_refs"]["actual_screen_group_ref"]["content_sha256"]
             != projection["parent_refs"]["provider_group_ref"]["content_sha256"]
         )
+
+
+def test_s13_accepts_actual_runtime_hash_dialect_and_owner_journal_ref() -> None:
+    attempt = _s13_attempt()
+    raw = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    for projection in raw:
+        owner_journal_ref = {"content_sha256": hashlib.sha256(
+            str(projection["screen_group"]).encode("utf-8")
+        ).hexdigest()}
+        projection["shared_parent_refs"]["owner_journal_ref"] = owner_journal_ref
+        for row in projection["rows"]:
+            row["shared_parent_refs"] = deepcopy(projection["shared_parent_refs"])
+
+        window_close = deepcopy(projection["window_close_ref"])
+        window_close.pop("content_sha256")
+        window_close["process_identity"]["create_time_ns"] = 1_788_314_842_712_270_848
+        window_close["content_sha256"] = benchmark_content_sha256(window_close)
+        projection["window_close_ref"] = window_close
+
+        stable = deepcopy(projection["lifecycle_ref"])
+        stable.pop("content_sha256")
+        stable["window_close_ref"] = deepcopy(window_close)
+        stable["content_sha256"] = benchmark_content_sha256(stable)
+        projection["lifecycle_ref"] = stable
+        projection["content_sha256"] = benchmark_content_sha256(projection)
+
+    assert all(
+        projection["content_sha256"]
+        != lifecycle.content_sha256(projection)
+        for projection in raw
+    )
+    result = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=raw,
+    )
+
+    assert len(result) == 12
+
+
+def test_s13_accepts_actual_vista_capture_bundle_parent_lineage() -> None:
+    attempt = _s13_attempt()
+    raw = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    for projection in raw:
+        bundle_ref = deepcopy(
+            projection["shared_parent_refs"]["hybrid_capture_bundle_ref"]
+        )
+        assert bundle_ref["id"].rsplit("/", 1)[-1] == bundle_ref["content_sha256"]
+        bundle_ref["content_sha256"] = hashlib.sha256(
+            f"stored:{projection['screen_group']}".encode("utf-8")
+        ).hexdigest()
+        projection["shared_parent_refs"]["hybrid_capture_bundle_ref"] = bundle_ref
+        for row in projection["rows"]:
+            row["shared_parent_refs"] = deepcopy(projection["shared_parent_refs"])
+        projection["content_sha256"] = benchmark_content_sha256(projection)
+
+    result = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=raw,
+    )
+
+    assert len(result) == 12
+
+
+def test_s13_rejects_vista_capture_bundle_with_wrong_id_class() -> None:
+    digest = "a" * 64
+
+    with pytest.raises(
+        ValueError,
+        match="benchmark v2 hybrid capture bundle id is invalid",
+    ):
+        lifecycle._s13_vista_capture_bundle_ref(
+            {
+                "id": f"unrelated-parent/{digest}",
+                "content_sha256": "b" * 64,
+            }
+        )
+
+
+def test_s13_rejects_hollow_incumbent_terminal_receipt() -> None:
+    attempt = _s13_attempt()
+    raw = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    for projection in raw:
+        stable = deepcopy(projection["lifecycle_ref"])
+        service = deepcopy(stable["service_stable_zero_attestation"])
+        terminal = {
+            "contract_version": "benchmark_v2_incumbent_terminal_receipt_v1",
+            "operation_id": f"incumbent:{projection['screen_group']}",
+            "create_time_ns": 1_788_314_842_712_270_848,
+        }
+        terminal["content_sha256"] = benchmark_content_sha256(terminal)
+        service["cleanup_entries"][1]["terminal_receipt_ref"] = terminal
+        service["content_sha256"] = lifecycle.content_sha256(service)
+        stable["service_stable_zero_attestation"] = service
+        stable["content_sha256"] = benchmark_content_sha256(stable)
+        projection["lifecycle_ref"] = stable
+        projection["content_sha256"] = benchmark_content_sha256(projection)
+
+    with pytest.raises(ValueError, match="benchmark terminal receipt"):
+        lifecycle.project_benchmark_v2_screen_group_lifecycles(
+            attempt_ref=attempt,
+            screen_group_projections=raw,
+        )
+
+
+def test_s13_rejects_incumbent_terminal_cleanup_lineage_drift() -> None:
+    attempt = _s13_attempt()
+    raw = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    for projection in raw:
+        stable = deepcopy(projection["lifecycle_ref"])
+        service = deepcopy(stable["service_stable_zero_attestation"])
+        entry = service["cleanup_entries"][1]
+        terminal = deepcopy(entry["terminal_receipt_ref"])
+        terminal["worker_cleanup_ref"] = seal_immutable(
+            {"kind": "foreign-worker-cleanup"}
+        )
+        terminal.pop("content_sha256")
+        terminal["content_sha256"] = benchmark_content_sha256(terminal)
+        entry["terminal_receipt_ref"] = terminal
+        service.pop("content_sha256")
+        service["content_sha256"] = lifecycle.content_sha256(service)
+        stable["service_stable_zero_attestation"] = service
+        stable.pop("content_sha256")
+        stable["content_sha256"] = benchmark_content_sha256(stable)
+        projection["lifecycle_ref"] = stable
+        projection["content_sha256"] = benchmark_content_sha256(projection)
+
+    with pytest.raises(ValueError, match="terminal cleanup lineage is stale"):
+        lifecycle.project_benchmark_v2_screen_group_lifecycles(
+            attempt_ref=attempt,
+            screen_group_projections=raw,
+        )
+
+
+def test_s13_accepts_multiple_unique_vista_dispatch_receipts() -> None:
+    attempt = _s13_attempt()
+    raw = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    for projection in raw:
+        extra_vista_receipt = {
+            "provider": "vista",
+            "content_sha256": hashlib.sha256(
+                f"extra-vista:{projection['screen_group']}".encode("utf-8")
+            ).hexdigest(),
+        }
+        for row in projection["rows"]:
+            if row["arm_id"] == "omni_to_qwen_vista":
+                row["observation"]["provider_dispatch_receipt_refs"].append(
+                    deepcopy(extra_vista_receipt)
+                )
+        projection["content_sha256"] = benchmark_content_sha256(projection)
+
+    result = lifecycle.project_benchmark_v2_screen_group_lifecycles(
+        attempt_ref=attempt,
+        screen_group_projections=raw,
+    )
+
+    assert len(result) == 12
+
+
+def test_s13_rejects_cross_case_hybrid_dispatch_receipt_drift() -> None:
+    attempt = _s13_attempt()
+    raw = [
+        _s13_screen_projection(attempt=attempt, screen_group=f"screen-{index:02d}")
+        for index in range(12)
+    ]
+    for projection in raw:
+        vista_rows = [
+            row
+            for row in projection["rows"]
+            if row["arm_id"] == "omni_to_qwen_vista"
+        ]
+        vista_rows[0]["observation"]["provider_dispatch_receipt_refs"].append(
+            {
+                "provider": "vista",
+                "content_sha256": hashlib.sha256(
+                    f"drift:{projection['screen_group']}".encode("utf-8")
+                ).hexdigest(),
+            }
+        )
+        projection["content_sha256"] = benchmark_content_sha256(projection)
+
+    with pytest.raises(ValueError, match="dispatch evidence drifts across cases"):
+        lifecycle.project_benchmark_v2_screen_group_lifecycles(
+            attempt_ref=attempt,
+            screen_group_projections=raw,
+        )
+
+
+def test_s13_qwen_quality_omission_does_not_require_zero_vista_review() -> None:
+    assert lifecycle._s13_expected_dispatch_providers(
+        arm_id="omni_to_qwen_vista",
+        observation={"qwen_quality_safe_stop_omission": {}},
+        zero_vista_requests=True,
+        qwen_quality_safe_stop=True,
+    ) == {"omni", "qwen"}
 
 
 def test_s13_screen_group_lifecycle_rejects_duplicate_and_cross_group_lineage() -> None:
@@ -3360,7 +3700,7 @@ def test_s13_screen_group_lifecycle_rejects_reminted_raw_parent_tamper(
         )
     target["content_sha256"] = lifecycle.content_sha256(target)
 
-    with pytest.raises(ValueError, match="benchmark v2"):
+    with pytest.raises(ValueError, match=r"benchmark (?:v2|actual)"):
         lifecycle.project_benchmark_v2_screen_group_lifecycles(
             attempt_ref=attempt,
             screen_group_projections=raw,
@@ -4764,7 +5104,18 @@ def _h5_holdout_lifecycle_graph(
             for row in screen["rows"]:
                 if row["arm_id"] == "qwen_only":
                     row["observation"]["response"] = {
-                        "screen_reading": {"screen_inventory": {"available_actions": []}}
+                        "success": True,
+                        "message": "ok",
+                        "data": {
+                            "result": {
+                                "contract_version": "screen_observation_v1",
+                                "screen_inventory": {"available_actions": []},
+                            }
+                        },
+                        "error": None,
+                        "_benchmark_v2_window_binding_evidence": {
+                            "content_sha256": "f" * 64
+                        },
                     }
                 elif row["arm_id"] == "omni_to_qwen_vista":
                     row["observation"]["review_projection"] = {"proposals": []}

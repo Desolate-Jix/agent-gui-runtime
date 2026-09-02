@@ -21,6 +21,7 @@ from typing import Any, Mapping, Sequence
 import psutil
 
 from app.learn.hybrid.benchmark_v2_contracts import (
+    content_sha256 as benchmark_content_sha256,
     validate_qwen_quality_safe_stop_omission,
     validate_qwen_quality_safe_stop_runtime_lineage,
 )
@@ -4146,6 +4147,18 @@ def _attempt_sealed_parent(value: object, name: str) -> dict[str, Any]:
     return parent
 
 
+def _benchmark_sealed_parent(value: object, name: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        raise ValueError(f"{name} must be a sealed object")
+    parent = deepcopy(dict(value))
+    digest = parent.get("content_sha256")
+    if not isinstance(digest, str) or _SHA_RE.fullmatch(digest) is None:
+        raise ValueError(f"{name} content SHA is invalid")
+    if benchmark_content_sha256(parent) != digest:
+        raise ValueError(f"{name} content SHA differs")
+    return parent
+
+
 def _validate_benchmark_v2_attempt_event(value: object) -> dict[str, Any]:
     event = _closed(value, _ATTEMPT_EVENT_FIELDS, "benchmark attempt event")
     if (
@@ -5321,6 +5334,24 @@ def _s13_exact_ref(value: object, name: str) -> dict[str, str]:
     return {"id": str(value["id"]), "content_sha256": str(value["content_sha256"])}
 
 
+def _s13_owner_journal_ref(value: object, name: str) -> dict[str, Any]:
+    if isinstance(value, Mapping) and set(value) == {"content_sha256"}:
+        digest = value.get("content_sha256")
+        if not isinstance(digest, str) or _SHA_RE.fullmatch(digest) is None:
+            raise ValueError(f"{name} is invalid")
+        return {"content_sha256": digest}
+    return _attempt_sealed_parent(value, name)
+
+
+def _s13_vista_capture_bundle_ref(value: Mapping[str, object]) -> dict[str, str]:
+    reference = _s13_exact_ref(value, "benchmark v2 hybrid capture bundle ref")
+    match = re.fullmatch(r"hybrid-capture/([0-9a-f]{64})", reference["id"])
+    if match is None:
+        raise ValueError("benchmark v2 hybrid capture bundle id is invalid")
+    digest = match.group(1)
+    return {"id": reference["id"], "content_sha256": digest}
+
+
 _S13_RELEASE_ID = "portfolio_hybrid_v1_1_benchmark_v2_release_1"
 _S13_ARMS = (
     "qwen_only",
@@ -5335,6 +5366,7 @@ def _s13_expected_dispatch_providers(
     arm_id: str,
     observation: Mapping[str, object],
     zero_vista_requests: bool,
+    qwen_quality_safe_stop: bool = False,
 ) -> set[str]:
     expected = {
         "qwen_only": {"qwen"},
@@ -5347,6 +5379,8 @@ def _s13_expected_dispatch_providers(
         raise ValueError("benchmark v2 row arm is invalid")
     if arm_id != "omni_to_qwen_vista" or not zero_vista_requests:
         return providers
+    if qwen_quality_safe_stop:
+        return {"omni", "qwen"}
     review = observation.get("review_projection")
     expected_review = {
         "contract_version": "benchmark_v2_quality_safe_stop_review_projection_v1",
@@ -5530,7 +5564,7 @@ def _s13_pre_vista_parent(
             "id": "fusion_result",
             "content_sha256": str(raw_fusion["content_sha256"]),
         },
-        "capture_bundle": dict(hybrid_capture_bundle_ref),
+        "capture_bundle": _s13_vista_capture_bundle_ref(hybrid_capture_bundle_ref),
         "omni_inventory": {
             "id": "omni_inventory",
             "content_sha256": str(raw_omni["content_sha256"]),
@@ -5601,7 +5635,9 @@ def _pre_vista_envelope_contract(value: object) -> str:
 
 
 def _s13_window_close_parent(value: object) -> dict[str, Any]:
-    receipt = _attempt_sealed_parent(value, "benchmark v2 screen group window close ref")
+    receipt = _benchmark_sealed_parent(
+        value, "benchmark v2 screen group window close ref"
+    )
     if (
         set(receipt) != _TASK4_CLEANUP_FIELDS
         or receipt.get("contract_version")
@@ -5638,9 +5674,11 @@ def _s13_service_stable_zero_parent(
     capture_ref: Mapping[str, object],
     execution_refs: Sequence[Mapping[str, object]],
 ) -> dict[str, Any]:
-    receipt = _attempt_sealed_parent(
-        value, "benchmark v2 service stable-zero attestation"
+    from app.learn.hybrid.benchmark_v2_incumbent_operation import (
+        validate_benchmark_v2_actual_operations_stable_zero,
     )
+
+    receipt = validate_benchmark_v2_actual_operations_stable_zero(value)
     if (
         set(receipt)
         != {
@@ -5672,10 +5710,7 @@ def _s13_service_stable_zero_parent(
         or len(raw_entries) != 6
     ):
         raise ValueError("benchmark v2 service stable-zero operation set differs")
-    operations = [
-        _attempt_sealed_parent(item, "benchmark v2 service operation ref")
-        for item in raw_operations
-    ]
+    operations = [deepcopy(dict(item)) for item in raw_operations]
     derived_execution_refs: list[dict[str, str]] = []
     hybrid_count = 0
     incumbent_requests: list[dict[str, str]] = []
@@ -5750,9 +5785,16 @@ def _s13_service_stable_zero_parent(
             "worker_cleanup_ref",
             "provider_cleanup_ref",
         ):
-            _attempt_sealed_parent(
-                raw_entry.get(field), f"benchmark v2 service cleanup {field}"
+            child = raw_entry.get(field)
+            validator = (
+                _benchmark_sealed_parent
+                if field == "terminal_receipt_ref"
+                and isinstance(child, Mapping)
+                and child.get("contract_version")
+                == "benchmark_v2_incumbent_terminal_receipt_v1"
+                else _attempt_sealed_parent
             )
+            validator(child, f"benchmark v2 service cleanup {field}")
     if len(set(cleanup_hashes)) != 6:
         raise ValueError("benchmark v2 service cleanup entries are duplicated")
     return receipt
@@ -5761,7 +5803,9 @@ def _s13_service_stable_zero_parent(
 def _s13_screen_group_parent(
     value: object, *, attempt_ref: Mapping[str, object]
 ) -> tuple[str, dict[str, Any], dict[str, str], dict[str, str]]:
-    projection = _attempt_sealed_parent(value, "benchmark v2 actual screen group projection")
+    projection = _benchmark_sealed_parent(
+        value, "benchmark v2 actual screen group projection"
+    )
     expected = {
         "contract_version",
         "benchmark_release_id",
@@ -5839,7 +5883,7 @@ def _s13_screen_group_parent(
         "capture_ref": _s13_exact_ref(
             shared.get("capture_ref"), "benchmark v2 shared capture ref"
         ),
-        "owner_journal_ref": _attempt_sealed_parent(
+        "owner_journal_ref": _s13_owner_journal_ref(
             shared.get("owner_journal_ref"), "benchmark v2 shared owner journal ref"
         ),
         "expected_uia_root_ref": _attempt_sealed_parent(
@@ -5881,6 +5925,7 @@ def _s13_screen_group_parent(
     case_order: list[dict[str, str]] = []
     row_pairs: list[tuple[str, str]] = []
     incumbent_execution_by_case: dict[str, dict[str, str]] = {}
+    shared_dispatch_by_arm: dict[str, list[dict[str, object]]] = {}
     zero_vista_requests = evidence.get("submitted_vista_request_envelopes") == []
     for row in rows:
         if (
@@ -5941,6 +5986,7 @@ def _s13_screen_group_parent(
         for receipt in receipts:
             if (
                 not isinstance(receipt, Mapping)
+                or set(receipt) != {"provider", "content_sha256"}
                 or not isinstance(receipt.get("provider"), str)
                 or _SHA_RE.fullmatch(
                     str(receipt.get("content_sha256") or "")
@@ -5953,17 +5999,30 @@ def _s13_screen_group_parent(
             arm_id=arm_id,
             observation=observation,
             zero_vista_requests=zero_vista_requests,
+            qwen_quality_safe_stop=qwen_omission is not None,
         )
         if (
             providers != expected_dispatch_providers
-            or len(receipts) != len(providers)
+            or len({str(item["content_sha256"]) for item in receipts})
+            != len(receipts)
         ):
             raise ValueError("benchmark v2 row provider dispatch coverage differs")
+        if arm_id != "qwen_only":
+            normalized_receipts = [deepcopy(dict(item)) for item in receipts]
+            prior_receipts = shared_dispatch_by_arm.setdefault(
+                arm_id,
+                normalized_receipts,
+            )
+            if prior_receipts != normalized_receipts:
+                raise ValueError(
+                    "benchmark v2 row dispatch evidence drifts across cases"
+                )
         if qwen_omission is not None and arm_id in {
             "omni_to_qwen",
             "omni_to_qwen_vista",
         } and (
             observation.get("qwen_quality_safe_stop_omission") != qwen_omission
+            or "review_projection" in observation
             or receipts != qwen_omission["provider_dispatch_receipt_refs"]
         ):
             raise ValueError("benchmark v2 Qwen omission row lineage differs")
@@ -5979,7 +6038,7 @@ def _s13_screen_group_parent(
         raise ValueError("benchmark v2 screen group case-arm multiset differs")
 
     close_ref = _s13_window_close_parent(projection.get("window_close_ref"))
-    stable = _attempt_sealed_parent(
+    stable = _benchmark_sealed_parent(
         projection.get("lifecycle_ref"), "benchmark v2 raw screen group lifecycle"
     )
     stable_expected = {
@@ -6368,12 +6427,16 @@ def _s13_runner_event_inputs(
     bodies = _s13_index_raw_attempt_evidence(
         actual_body,
         name="actual body",
-        validator=lambda item: _attempt_sealed_parent(item, "benchmark v2 actual body"),
+        validator=lambda item: _benchmark_sealed_parent(
+            item, "benchmark v2 actual body"
+        ),
     )
     results = _s13_index_raw_attempt_evidence(
         actual_result,
         name="actual result",
-        validator=lambda item: _attempt_sealed_parent(item, "benchmark v2 actual result"),
+        validator=lambda item: _benchmark_sealed_parent(
+            item, "benchmark v2 actual result"
+        ),
     )
     cleanups = _s13_index_raw_attempt_evidence(
         cleanup_receipt,

@@ -713,8 +713,12 @@ def test_public_score_boundary_owns_full_v3_validation_and_scorer_alias(tmp_path
     assert validated==public and summary=={key:public[key] for key in ("status","score_ref","content_sha256")}
     assert scorer_v2.validate_private_scorer_public_ref is public_score.validate_private_scorer_public_ref_v3
     assert public_score.validate_private_scorer_input_binding_v1(public["score_input_binding"])==public["score_input_binding"]
-    noncanonical=deepcopy(public); encoded=noncanonical["launch_receipt"]["canonical_bytes_b64"]; alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"; position=-3 if encoded.endswith("==") else -2
-    changed=encoded[:position]+alphabet[alphabet.index(encoded[position])+1]+encoded[position+1:]
+    noncanonical=deepcopy(public); encoded=noncanonical["launch_receipt"]["canonical_bytes_b64"]; alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    if not encoded.endswith("="):
+        changed=encoded+"=="
+    else:
+        position=-3 if encoded.endswith("==") else -2
+        changed=encoded[:position]+alphabet[alphabet.index(encoded[position])+1]+encoded[position+1:]
     assert base64.b64decode(changed,validate=True)==base64.b64decode(encoded,validate=True) and changed!=encoded
     noncanonical["launch_receipt"]["canonical_bytes_b64"]=changed; noncanonical["content_sha256"]=public_score.content_sha256({key:value for key,value in noncanonical.items() if key!="content_sha256"})
     monkeypatch.setattr(public_score,"scan_benchmark_v2_public_value",lambda value:None)
@@ -1960,7 +1964,18 @@ def _s12_inputs(*, goal: str = "Select the button labeled 'Apply now'") -> dict[
         "layout": {"layout_id": "layout-a", "title": "A", "surface": "web", "density": "normal", "precision_case": False, "source_kind": "synthetic"},
     }
     action = {"contract_version": "available_action_v1", "id": "incumbent-action/apply-now", "label": "Apply now", "role": "button", "bbox": {"x": 10, "y": 20, "w": 40, "h": 20}}
-    incumbent = {"screen_reading": {"screen_inventory": {"available_actions": [action]}}}
+    incumbent = {
+        "success": True,
+        "message": "ok",
+        "data": {
+            "result": {
+                "contract_version": "screen_observation_v1",
+                "screen_inventory": {"available_actions": [action]},
+            }
+        },
+        "error": None,
+        "_benchmark_v2_window_binding_evidence": {"content_sha256": "f" * 64},
+    }
     item = {"source_item_id": "omni-item/apply-now", "safe_text": "Apply now", "safe_role": "button", "capture_bbox": [12, 22, 52, 42]}
     inventory = {
         "contract_version": "hybrid_omni_inventory_v1",
@@ -1993,18 +2008,66 @@ def _s12_select(inputs: dict[str, object]) -> dict[str, object]:
     return select_pre_vista_prediction_rows(**inputs)
 
 
+def _s12_incumbent_actions(inputs: dict[str, object]) -> list[dict[str, object]]:
+    return inputs["incumbent_response"]["data"]["result"]["screen_inventory"][
+        "available_actions"
+    ]
+
+
+def test_s12_rejects_legacy_incumbent_response_without_api_wrapper() -> None:
+    inputs = _s12_inputs()
+    inputs["incumbent_response"] = {
+        "screen_reading": {
+            "screen_inventory": {
+                "available_actions": deepcopy(_s12_incumbent_actions(inputs))
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="incumbent API response"):
+        _s12_select(inputs)
+
+
 @pytest.mark.parametrize(
     ("goal_role", "provider_role"),
     [("button", "button"), ("checkbox", "checkbox"), ("combobox", "select"), ("combobox", "dropdown"), ("link", "hyperlink"), ("menuitem", "menu_item"), ("tab", "tab_item"), ("textbox", "search_input"), ("textbox", "edit")],
 )
 def test_s12_strict_goal_grammar_and_exact_role_aliases(goal_role: str, provider_role: str) -> None:
     inputs = _s12_inputs(goal=f"Select the {goal_role} labeled 'Apply   now'")
-    inputs["incumbent_response"]["screen_reading"]["screen_inventory"]["available_actions"][0]["role"] = provider_role
-    inputs["incumbent_response"]["screen_reading"]["screen_inventory"]["available_actions"][0]["label"] = " Apply now "
+    _s12_incumbent_actions(inputs)[0]["role"] = provider_role
+    _s12_incumbent_actions(inputs)[0]["label"] = " Apply now "
     inputs["omni_inventory"]["provider_result"]["items"][0]["safe_role"] = provider_role
     inputs["qwen_bindings"]["bindings"][0]["role"] = provider_role
     assert parse_benchmark_v2_goal(inputs["provider_case"]["goal"]) == (goal_role, "Apply now")
     assert all(row["selection_status"] == "selected" for row in _s12_select(inputs)["rows"])
+
+
+def test_s12_accepts_actual_incumbent_api_response_wrapper() -> None:
+    inputs = _s12_inputs()
+
+    rows = {row["arm_id"]: row for row in _s12_select(inputs)["rows"]}
+
+    assert rows["qwen_only"]["selection_status"] == "selected"
+    assert rows["qwen_only"]["candidate_id"] == "incumbent-action/apply-now"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda response: response["data"].clear(),
+        lambda response: response.update({"success": False}),
+        lambda response: response.update({"unexpected": True}),
+        lambda response: response["data"]["result"].pop("screen_inventory"),
+    ],
+)
+def test_s12_rejects_malformed_incumbent_api_response_wrapper(mutation) -> None:
+    inputs = _s12_inputs()
+    response = deepcopy(inputs["incumbent_response"])
+    mutation(response)
+    inputs["incumbent_response"] = response
+
+    with pytest.raises(ValueError, match="incumbent API response"):
+        _s12_select(inputs)
 
 
 @pytest.mark.parametrize("goal", ["select the button labeled 'Apply now'", " Select the button labeled 'Apply now'", "Select the Button labeled 'Apply now'", "Select the button labelled 'Apply now'", "Select the button labeled \"Apply now\"", "Select the button labeled ''", "Select the unknown labeled 'Apply now'"])
@@ -2057,6 +2120,40 @@ def test_s12_arm_aware_artifacts_are_closed_and_do_not_fabricate_fusion() -> Non
         semantic = {key: value for key, value in item.items() if key not in {"artifact_id", "content_sha256"}}
         semantic_sha = hashlib.sha256(item["contract_version"].encode() + b"\0" + canonical_bytes(semantic)).hexdigest()
         assert item["artifact_id"].endswith(semantic_sha)
+
+
+@pytest.mark.parametrize(
+    ("prefix", "domain"),
+    [
+        ("qwen-bindings", b"benchmark-v2-qwen-bindings\0"),
+        ("fusion-result", b"benchmark-v2-fusion-result\0"),
+    ],
+)
+def test_s12_accepted_envelope_routes_qwen_omission_by_ref_class(
+    prefix: str,
+    domain: bytes,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_predictions as predictions
+
+    marker = {
+        "contract_version": "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+    }
+    raw = canonical_bytes(marker)
+    envelope = {
+        "ref": {
+            "id": f"{prefix}/" + hashlib.sha256(domain + raw).hexdigest(),
+            "content_sha256": hashlib.sha256(raw).hexdigest(),
+        },
+        "canonical_bytes_b64": base64.b64encode(raw).decode("ascii"),
+    }
+
+    decoded, reference = predictions._accepted_envelope(
+        envelope,
+        name="Qwen omission",
+    )
+
+    assert decoded == marker
+    assert reference == envelope["ref"]
 
 
 def test_s12_qwen_quality_safe_stop_keeps_real_arms_and_marks_hybrid_missing() -> None:
@@ -2145,7 +2242,7 @@ def test_s12_zero_matches_emit_missing_without_any_binding() -> None:
 def test_s12_ambiguity_duplicate_and_conflicting_lineage_are_fatal(mutation: str) -> None:
     inputs = _s12_inputs()
     if mutation == "duplicate_qwen_action":
-        actions = inputs["incumbent_response"]["screen_reading"]["screen_inventory"]["available_actions"]
+        actions = _s12_incumbent_actions(inputs)
         actions.append(deepcopy(actions[0])); actions[-1]["id"] = "incumbent-action/duplicate"
     elif mutation == "ambiguous_qwen_binding": inputs["qwen_bindings"]["bindings"][0]["ambiguity"] = "duplicate semantic target"
     elif mutation == "duplicate_request": inputs["submitted_vista_requests"].append(deepcopy(inputs["submitted_vista_requests"][0]))
@@ -2249,7 +2346,7 @@ def test_s12_public_identifiers_reject_filesystem_and_alias_escape(unsafe_id: st
     if boundary in {"actual_screen_group_ref", "capture_ref"}:
         inputs[boundary]["id"] = unsafe_id
     elif boundary == "action_id":
-        inputs["incumbent_response"]["screen_reading"]["screen_inventory"]["available_actions"][0]["id"] = unsafe_id
+        _s12_incumbent_actions(inputs)[0]["id"] = unsafe_id
     else:
         inputs["omni_inventory"]["candidates"][0]["candidate_id"] = unsafe_id
         inputs["qwen_bindings"]["bindings"][0]["candidate_id"] = unsafe_id

@@ -1022,11 +1022,16 @@ def _validate_automatic_prediction_v3(payload: Mapping[str, object]) -> None:
         if status == "missing":
             _closed(row, base | {"failure_reason"}, name=f"row[{index}]")
             reason = row.get("failure_reason")
-            allowed_reasons = (
-                {"target_not_present_pre_vista"}
-                if arm_id in {"qwen_only", "omni_only_discovery"}
-                else {"target_not_present_pre_vista", "fusion_not_bound"}
-            )
+            if arm_id == "qwen_only":
+                allowed_reasons = {"target_not_present_pre_vista"}
+            elif arm_id == "omni_only_discovery":
+                allowed_reasons = {"target_not_present_pre_vista"}
+            else:
+                allowed_reasons = {
+                    "target_not_present_pre_vista",
+                    "fusion_not_bound",
+                    "qwen_quality_safe_stop",
+                }
             if reason not in allowed_reasons:
                 raise ValueError("automatic prediction missing reason is invalid")
         else:
@@ -1939,7 +1944,10 @@ _RAW_CLASSES: Mapping[str, _RawClass] = MappingProxyType(
     }
 )
 _RAW_CONTRACTS: Mapping[str, str] = MappingProxyType(
-    {spec.contract_version: name for name, spec in _RAW_CLASSES.items()}
+    {
+        **{spec.contract_version: name for name, spec in _RAW_CLASSES.items()},
+        "benchmark_v2_qwen_quality_safe_stop_omission_v1": "qwen_bindings",
+    }
 )
 
 
@@ -2057,10 +2065,16 @@ def _decode_raw_bytes(raw_class: str, raw: bytes) -> dict[str, object]:
         decoded = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("opaque raw canonical bytes are invalid") from exc
-    if not isinstance(decoded, Mapping) or decoded.get("contract_version") != spec.contract_version:
+    allowed_contracts = {spec.contract_version}
+    if raw_class in {"qwen_bindings", "fusion_result"}:
+        allowed_contracts.add("benchmark_v2_qwen_quality_safe_stop_omission_v1")
+    if (
+        not isinstance(decoded, Mapping)
+        or decoded.get("contract_version") not in allowed_contracts
+    ):
         raise ValueError("opaque raw contract is invalid")
     _validate_raw_public_json(decoded, name=f"{raw_class} raw evidence")
-    from app.learn.recognition.uei.canonical import canonical_json_bytes
+    from app.learn.hybrid.benchmark_v2_contracts import canonical_json_bytes
 
     if canonical_json_bytes(decoded) != raw:
         raise ValueError("opaque raw bytes are not canonical")
@@ -2100,6 +2114,16 @@ def _validate_raw_class_value(
     *,
     validated_by_class: Mapping[str, Sequence[Mapping[str, object]]],
 ) -> dict[str, object]:
+    if (
+        raw_class in {"qwen_bindings", "fusion_result"}
+        and value.get("contract_version")
+        == "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+    ):
+        from app.learn.hybrid.benchmark_v2_contracts import (
+            validate_qwen_quality_safe_stop_omission,
+        )
+
+        return validate_qwen_quality_safe_stop_omission(value)
     if raw_class == "omni_inventory":
         from app.learn.hybrid.contracts import validate_omni_inventory
 
@@ -2485,6 +2509,88 @@ def _validate_projected_ledger_graph(
         raise ValueError("projected ledger selected refs are not earliest eligible")
 
 
+def _prediction_raw_contract_version(
+    item: Mapping[str, object],
+    envelope: Mapping[str, object],
+) -> str:
+    version = str(item.get("contract_version") or "")
+    if version != "benchmark_v2_qwen_quality_safe_stop_omission_v1":
+        return version
+    reference = _ref(
+        envelope.get("ref"),
+        name="Qwen quality safe-stop envelope ref",
+    )
+    identifier = reference["id"]
+    if identifier.startswith("qwen-bindings/"):
+        return "hybrid_qwen_bindings_v1"
+    if identifier.startswith("fusion-result/"):
+        return "hybrid_fusion_result_v1"
+    raise ValueError("Qwen quality safe-stop envelope class is invalid")
+
+
+def _validate_qwen_omission_row_lineage(
+    *,
+    groups: Mapping[str, Mapping[str, object]],
+    cases: Mapping[str, Mapping[str, str]],
+    rows: Sequence[Mapping[str, object]],
+    by_ref: Mapping[
+        bytes,
+        tuple[dict[str, object], dict[str, object]],
+    ],
+) -> None:
+    omission_contract = "benchmark_v2_qwen_quality_safe_stop_omission_v1"
+    rows_by_key = {
+        (str(row.get("case_id") or ""), str(row.get("arm_id") or "")): row
+        for row in rows
+    }
+    for group_id, group in groups.items():
+        qwen = by_ref.get(
+            _canonical_bytes(_ref(group["qwen_bindings_ref"], name="qwen_bindings_ref"))
+        )
+        fusion = by_ref.get(
+            _canonical_bytes(_ref(group["fusion_result_ref"], name="fusion_result_ref"))
+        )
+        omni = by_ref.get(
+            _canonical_bytes(_ref(group["omni_inventory_ref"], name="omni_inventory_ref"))
+        )
+        if qwen is None or fusion is None or omni is None:
+            raise ValueError("Qwen quality safe-stop row lineage is unresolved")
+        qwen_value = qwen[0]
+        fusion_value = fusion[0]
+        omni_value = omni[0]
+        expected_omni_ref = {
+            "id": "omni_inventory",
+            "content_sha256": omni_value.get("content_sha256"),
+        }
+        qwen_omitted = qwen_value.get("contract_version") == omission_contract
+        fusion_omitted = fusion_value.get("contract_version") == omission_contract
+        if qwen_omitted != fusion_omitted or (
+            qwen_omitted and qwen_value != fusion_value
+        ):
+            raise ValueError("Qwen quality safe-stop row lineage differs")
+        if qwen_omitted and (
+            qwen_value.get("provider_group_ref") != group["provider_group_ref"]
+            or qwen_value.get("omni_inventory_ref") != expected_omni_ref
+        ):
+            raise ValueError("Qwen quality safe-stop row lineage differs")
+        group_case_ids = [
+            case_id
+            for case_id, case in cases.items()
+            if case.get("provider_group_id") == group_id
+        ]
+        for case_id in group_case_ids:
+            for arm_id in ("omni_to_qwen", "omni_to_qwen_vista"):
+                row = rows_by_key.get((case_id, arm_id))
+                if row is None:
+                    raise ValueError("Qwen quality safe-stop row lineage is incomplete")
+                marked = (
+                    row.get("selection_status") == "missing"
+                    and row.get("failure_reason") == "qwen_quality_safe_stop"
+                )
+                if marked != qwen_omitted:
+                    raise ValueError("Qwen quality safe-stop row lineage differs")
+
+
 def _validate_prediction_graph(
     run: Mapping[str, object],
     by_ref: Mapping[bytes, tuple[dict[str, object], dict[str, object]]],
@@ -2654,6 +2760,12 @@ def _validate_prediction_graph(
         or set(actual_row_keys) != expected_row_keys
     ):
         raise ValueError("prediction row authoritative 60x4 key set differs")
+    _validate_qwen_omission_row_lineage(
+        groups=groups,
+        cases=cases,
+        rows=rows,
+        by_ref=by_ref,
+    )
     for row in rows:
         assert isinstance(row, Mapping)
         case_id = str(row["case_id"])
@@ -2780,8 +2892,8 @@ def _validate_prediction_graph(
         raise ValueError("prediction submitted request count is below selected hybrid count")
     class_counts: dict[str, int] = {}
     class_ref_keys: dict[str, set[bytes]] = {}
-    for ref_key, (item, _) in by_ref.items():
-        version = str(item.get("contract_version") or "")
+    for ref_key, (item, envelope) in by_ref.items():
+        version = _prediction_raw_contract_version(item, envelope)
         class_counts[version] = class_counts.get(version, 0) + 1
         class_ref_keys.setdefault(version, set()).add(ref_key)
     holdout = run.get("partition") == "holdout"
@@ -2924,6 +3036,15 @@ def _decode_envelope(
         )
         return raw, validated, None, spec
     raw_class = _RAW_CONTRACTS.get(str(contract_version))
+    if contract_version == "benchmark_v2_qwen_quality_safe_stop_omission_v1":
+        ref = envelope.get("ref")
+        identifier = ref.get("id") if isinstance(ref, Mapping) else None
+        if isinstance(identifier, str) and identifier.startswith("qwen-bindings/"):
+            raw_class = "qwen_bindings"
+        elif isinstance(identifier, str) and identifier.startswith("fusion-result/"):
+            raw_class = "fusion_result"
+        else:
+            raise ValueError("Qwen quality safe-stop envelope class is invalid")
     if raw_class is None:
         raise ValueError("unknown pathless contract")
     decoded = _decode_raw_bytes(raw_class, raw)

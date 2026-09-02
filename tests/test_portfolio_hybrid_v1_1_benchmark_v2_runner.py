@@ -939,9 +939,18 @@ def test_materialize_score_input_true_offline_producer_is_deterministic(
         for row in screen["rows"]:
             if row["arm_id"] == "qwen_only":
                 row["observation"]["response"] = {
-                    "screen_reading": {
-                        "screen_inventory": {"available_actions": []}
-                    }
+                    "success": True,
+                    "message": "ok",
+                    "data": {
+                        "result": {
+                            "contract_version": "screen_observation_v1",
+                            "screen_inventory": {"available_actions": []},
+                        }
+                    },
+                    "error": None,
+                    "_benchmark_v2_window_binding_evidence": {
+                        "content_sha256": "f" * 64
+                    },
                 }
             elif row["arm_id"] == "omni_to_qwen_vista":
                 row["observation"]["review_projection"] = {"proposals": []}
