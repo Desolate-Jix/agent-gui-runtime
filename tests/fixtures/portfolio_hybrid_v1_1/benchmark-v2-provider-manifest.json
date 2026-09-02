@@ -172,7 +172,7 @@
         "role": "holdout_ledger"
       },
       {
-        "file_sha256": "119580ee77b1c65ca52f11e7a3cbba692582401380d27dacfb2b98bcd01d29e3",
+        "file_sha256": "6659a2fc6019ff1a36c0e974b68716b8c6a888584bc7298b564ee9ea93ac06de",
         "relative_path": "app/learn/hybrid/benchmark_v2_incumbent_operation.py",
         "role": "incumbent_operation"
       },
@@ -192,7 +192,7 @@
         "role": "qwen_binding"
       },
       {
-        "file_sha256": "deb306dce330ea2a696d0a683040d2864801acb480172838a449f1a0f52b544d",
+        "file_sha256": "177160c234812f51a83b1c7b087f5975c47a7c69a539b0b032caf6f2c4c06c80",
         "relative_path": "app/learn/hybrid/benchmark_v2_runtime.py",
         "role": "benchmark_runtime"
       },
@@ -237,7 +237,7 @@
         "role": "uei_projections"
       },
       {
-        "file_sha256": "11ae13e9c9a42eec19eddb674db61bb666e28e202e70aea650f25bb1f8cb2688",
+        "file_sha256": "143819c7eb4362b22880fa45cc5be80627673a7b1ab554267b6260b2fba6124b",
         "relative_path": "app/learn/workflow_service.py",
         "role": "workflow_service"
       },
@@ -262,7 +262,7 @@
         "role": "omniparser_learn_smoke"
       },
       {
-        "file_sha256": "b04223faac3a85032843f8dbc7c73c9c4ce5655169d29a6a782e803a74957cc8",
+        "file_sha256": "bf4f043b320b5aa7bc03a70eec263de99c70a0a5a487f806f25df60ac73170ec",
         "relative_path": "scripts/run_portfolio_hybrid_v1_1_benchmark_v2.py",
         "role": "benchmark_runner"
       },
