@@ -4,7 +4,7 @@
       "app/api/panel.py": "5eadccc1ff615d1d1ddb70d121da3a8d877d45201be00943f7677a895b681af3",
       "app/core/model_server.py": "9cea85d2cb5514ffd525cfa4bfaf81da979705f3856eabedea0b1544c5d60a03",
       "app/learn/calibration_sequence.py": "da160b06cf639a83d161e970482f980b9f60a1562ecd104122f36a99ec446258",
-      "app/learn/hybrid/benchmark_scorer_v2.py": "088f909b252f6dbac919c656d9ad990b11b861c38fc653894b1d905cd6ff8a0a",
+      "app/learn/hybrid/benchmark_scorer_v2.py": "8ad4e4f0c58b3acaa92f9e6f4c5bf360223937025f0e652de592b1ce3c821b01",
       "app/learn/hybrid/benchmark_v2_actual.py": "f63d66b2f6340c96d35fbdefd798a94cc574dbcf666dc9c17116f6113a2ce936",
       "app/learn/hybrid/benchmark_v2_contracts.py": "db6b3114453ece1470aef4960e44f00de9f1101d3f7a25d1c7748374fbc22feb",
       "app/learn/hybrid/benchmark_v2_dispatch_attestation.py": "8e0e7226b382b11369437c1dc82044b42215e26fed23a388a5fdbaf37d615e23",
@@ -71,7 +71,7 @@
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runner.py": "1fceb4808738132e7e1e1c7fcbedb2492eddc076acd1b35270125ea513bc1d61",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime.py": "506021610545fe2ce9b44dcc56400f3215cb880b2e66e0dfc8d3b44629eb64c8",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_runtime_recovery.py": "6b932be881507380d7981f0f766a6e8415c66902747320c76477f0cdaa462b19",
-      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py": "72dc043628795a583a957f3e2bc9a84808930003be308869d2eb59c52270d4e6",
+      "tests/test_portfolio_hybrid_v1_1_benchmark_v2_scoring.py": "7a2eb2d74ebbd4b888175d6eb3d241d24fda2446866797fe1fd16ad4ba757ca1",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_seal.py": "21eb7e54c9fab35ab4c13dd34ceaf779d6d04048fcaed839310f0eaf9b38e32b",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_window.py": "ff14c43431b80e5c01425b04595cf274ac7b639b36e86fb19624ee60e3aae67d",
       "tests/test_portfolio_hybrid_v1_1_benchmark_v2_worker_binding.py": "2a3f25f310dba2d70c7a3ffc9024ddcaa436c62df03be8bbaba88a87402d44a0",
@@ -81,7 +81,7 @@
     }
   },
   "benchmark_release_id": "portfolio_hybrid_v1_1_benchmark_v2_release_1",
-  "content_sha256": "065df5fdb1198ca59d9aeee2ecc2ef1bb96cdf7b99efbdf224af841c400ebdb6",
+  "content_sha256": "0d85886022e408560a33038e66e840e9466412a4363b516681c1c84d8dbc2d1c",
   "contract_version": "portfolio_hybrid_v1_1_benchmark_v2_private_manifest_v1",
   "corpus_parent": {
     "content_sha256": "bc06e007b4518bb716fdaff81ae7dd147227d09a10044d90a6b4577088ecba93",
@@ -92,7 +92,7 @@
   "holdout_partition": "holdout",
   "private_scorer_refs": [
     {
-      "file_sha256": "088f909b252f6dbac919c656d9ad990b11b861c38fc653894b1d905cd6ff8a0a",
+      "file_sha256": "8ad4e4f0c58b3acaa92f9e6f4c5bf360223937025f0e652de592b1ce3c821b01",
       "relative_path": "app/learn/hybrid/benchmark_scorer_v2.py",
       "role": "private_scorer_module"
     },
