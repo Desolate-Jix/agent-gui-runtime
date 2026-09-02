@@ -499,6 +499,18 @@ class OmniParserShadowAdapter:
         ).strip()
         process_identity = observation.get("process_identity")
         descendant_identities = observation.get("descendant_identities")
+        scope_cleanup = None
+        scope_acquisition = observation.get("process_scope_acquisition")
+        if process_scope_name:
+            from app.learn.hybrid.windows_process_scope import (
+                observe_process_scope_cleanup,
+            )
+
+            scope_cleanup = observe_process_scope_cleanup(
+                process_scope_name,
+                terminate=True,
+                stable_zero_observations=3,
+            )
         provider_after, descendants_after = [], []
         observable = observation.get("inventory_observable") is True
         for identity, target in (
@@ -523,18 +535,6 @@ class OmniParserShadowAdapter:
         )
         observable = observable and listeners_observable
         lease_files = [str(lease_path)] if lease_path is not None and lease_path.exists() else []
-        scope_cleanup = None
-        scope_acquisition = observation.get("process_scope_acquisition")
-        if process_scope_name:
-            from app.learn.hybrid.windows_process_scope import (
-                observe_process_scope_cleanup,
-            )
-
-            scope_cleanup = observe_process_scope_cleanup(
-                process_scope_name,
-                terminate=True,
-                stable_zero_observations=3,
-            )
         verified = (
             cleanup_status == "verified"
             and isinstance(process_identity, dict)

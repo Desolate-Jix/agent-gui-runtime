@@ -377,6 +377,85 @@ def test_adapter_persists_exact_invocation_cleanup_observation(
     ] or observation["process_scope_cleanup"]["observed_member_pids_before"] == []
 
 
+def test_cleanup_observation_reprobes_processes_after_scope_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid import windows_process_scope
+    from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+
+    lineage = {
+        "run_id": "run-omni-cleanup-order",
+        "workflow_revision": 7,
+        "operation_id": "operation-omni-cleanup-order",
+        "stage": "screen_understanding",
+        "stage_execution_id": "execution-omni-cleanup-order",
+    }
+    scope_name = windows_process_scope.process_scope_name(lineage, "omni")
+    process_identity = {"pid": 4202, "create_time_ns": 100_000_000_002}
+    cleanup_finished = False
+    events: list[str] = []
+
+    def _scope_cleanup(*args, **kwargs):
+        nonlocal cleanup_finished
+        events.append("scope_cleanup")
+        cleanup_finished = True
+        return {
+            "scope_name": scope_name,
+            "cleanup_status": "verified",
+        }
+
+    def _probe(identity):
+        assert identity == process_identity
+        events.append("process_probe")
+        return "proven_absent" if cleanup_finished else "exact_live"
+
+    monkeypatch.setattr(
+        adapter_module,
+        "OMNI_CLEANUP_OBSERVATION_ROOT",
+        tmp_path / "cleanup",
+    )
+    monkeypatch.setattr(
+        windows_process_scope,
+        "observe_process_scope_cleanup",
+        _scope_cleanup,
+    )
+    monkeypatch.setattr(adapter_module, "_probe_process_identity", _probe)
+    monkeypatch.setattr(
+        adapter_module,
+        "_active_listener_endpoints",
+        lambda identities: ([], True),
+    )
+    monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", scope_name)
+    monkeypatch.setenv("AGENT_GUI_HYBRID_LINEAGE_JSON", json.dumps(lineage))
+    adapter = adapter_module.OmniParserShadowAdapter(configuration=_config(tmp_path))
+    adapter._cleanup_observation = {
+        "process_identity": process_identity,
+        "descendant_identities": [],
+        "inventory_observable": True,
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": scope_name,
+            "member_pids": [process_identity["pid"]],
+            "provider_pid": process_identity["pid"],
+        },
+    }
+
+    adapter._persist_cleanup_observation(
+        "invocation/cleanup-order",
+        lease_path=tmp_path / "leases" / "gpu_vision.lock",
+        lease_token="a" * 32,
+        cleanup_status="verified",
+    )
+    observation = adapter_module.load_omniparser_invocation_cleanup_observation(
+        "invocation/cleanup-order"
+    )
+
+    assert events[0] == "scope_cleanup"
+    assert observation["cleanup_status"] == "verified"
+    assert observation["provider_processes_after"] == []
+
+
 @pytest.mark.parametrize("owner_scope_closed", [False, True])
 def test_abnormal_reconciliation_removes_exact_resource_lease_and_seals_observation(
     tmp_path: Path,
