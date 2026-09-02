@@ -179,6 +179,13 @@ def _closure_contract_counts(index:Mapping[bytes,tuple[dict[str,object],dict[str
         counts[version]=counts.get(version,0)+1
     return counts
 
+def _expected_regression_lifecycle_counts(index:Mapping[bytes,tuple[dict[str,object],dict[str,object]]],*,screen_group_count:int,expected_runner_event_count:int)->dict[str,int]:
+    runner_events=[item for item,_ in index.values() if item.get("contract_version")=="benchmark_v2_runner_event_verified_projection_v1"]
+    if len(runner_events)!=expected_runner_event_count: raise ValueError("accepted lifecycle runner event coverage differs")
+    cleanup_count=sum(item.get("event_kind")=="cleanup" for item in runner_events)
+    if cleanup_count<1: raise ValueError("accepted lifecycle cleanup coverage differs")
+    return {"benchmark_v2_lifecycle_verified_projection_v1":screen_group_count+cleanup_count+1,"benchmark_v2_attempt_journal_terminal_event_verified_projection_v1":1,"benchmark_v2_runner_event_verified_projection_v1":expected_runner_event_count,"benchmark_v2_projected_attempt_ledger_v1":1}
+
 def _enable_dependency_light_pathless_validation()->None:
     try:
         __import__("PIL")
@@ -351,7 +358,10 @@ def _validate_accepted_regression_score_input(value:object,*,raw:bytes,release:M
     event_count=counts.get("benchmark_v2_runner_event_verified_projection_v1",0); expected_counts={"hybrid_omni_inventory_v1":12,"hybrid_qwen_bindings_v1":12,"hybrid_fusion_result_v1":12,"hybrid_vista_refinement_request_v1":request_count,"benchmark_v2_nested_provider_evidence_ref_v1":2*q_count+o_count+h_count,"sealed_prediction_source_parent_v1":q_count+o_count+h_count,"sealed_prediction_bbox_v1":q_count+o_count+h_count,"sealed_target_binding_v4":q_count+o_count+h_count,"sealed_vista_request_v4":h_count,"automatic_prediction_v3":1,"benchmark_v2_runner_event_verified_projection_v1":event_count,"benchmark_v2_projected_attempt_ledger_v1":1}; expected_counts={key:count for key,count in expected_counts.items() if count}
     lifecycle_counts:dict[str,int]={}
     for item,_ in lifecycle_by_ref.values(): lifecycle_counts[str(item["contract_version"])]=lifecycle_counts.get(str(item["contract_version"]),0)+1
-    if request_count<h_count or counts!=expected_counts or lifecycle_counts!={"benchmark_v2_lifecycle_verified_projection_v1":14,"benchmark_v2_attempt_journal_terminal_event_verified_projection_v1":1,"benchmark_v2_runner_event_verified_projection_v1":event_count,"benchmark_v2_projected_attempt_ledger_v1":1} or not isinstance(lifecycle.get("screen_group_lifecycle_projection_refs"),list) or len(lifecycle["screen_group_lifecycle_projection_refs"])!=12: raise ValueError("accepted regression closure coverage differs")
+    screen_refs=lifecycle.get("screen_group_lifecycle_projection_refs")
+    if not isinstance(screen_refs,list) or len(screen_refs)!=12: raise ValueError("accepted regression closure coverage differs")
+    expected_lifecycle_counts=_expected_regression_lifecycle_counts(lifecycle_by_ref,screen_group_count=len(screen_refs),expected_runner_event_count=event_count)
+    if request_count<h_count or counts!=expected_counts or lifecycle_counts!=expected_lifecycle_counts: raise ValueError("accepted regression closure coverage differs")
     entries=ledger.get("entries")
     if not isinstance(entries,list): raise ValueError("accepted projected ledger entries invalid")
     eligible=[entry for entry in entries if isinstance(entry,Mapping) and entry.get("selection_eligible") is True]

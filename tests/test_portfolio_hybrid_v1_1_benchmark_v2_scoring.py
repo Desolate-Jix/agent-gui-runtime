@@ -2295,6 +2295,27 @@ def test_s3_closure_counts_qwen_quality_omissions_by_evidence_role() -> None:
     }
 
 
+def test_s3_lifecycle_counts_include_each_terminalized_attempt_cleanup() -> None:
+    closure: dict[bytes, tuple[dict[str, object], dict[str, object]]] = {}
+    for index, kind in enumerate(("opened", "cleanup", "opened", "body_complete", "cleanup", "result")):
+        item = {
+            "contract_version": "benchmark_v2_runner_event_verified_projection_v1",
+            "event_kind": kind,
+        }
+        closure[str(index).encode("ascii")] = (item, {})
+
+    assert scorer_v2._expected_regression_lifecycle_counts(
+        closure,
+        screen_group_count=12,
+        expected_runner_event_count=6,
+    ) == {
+        "benchmark_v2_lifecycle_verified_projection_v1": 15,
+        "benchmark_v2_attempt_journal_terminal_event_verified_projection_v1": 1,
+        "benchmark_v2_runner_event_verified_projection_v1": 6,
+        "benchmark_v2_projected_attempt_ledger_v1": 1,
+    }
+
+
 def test_s12_qwen_quality_safe_stop_keeps_real_arms_and_marks_hybrid_missing() -> None:
     from app.learn.hybrid.benchmark_v2_contracts import (
         content_sha256,
