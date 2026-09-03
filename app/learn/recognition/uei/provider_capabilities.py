@@ -8,9 +8,10 @@ from hashlib import sha256
 import math
 import re
 from threading import Event
+from types import MappingProxyType
 from typing import Protocol
 
-from app.learn.hybrid.contracts import validate_capture_identity
+from app.learn.hybrid.contracts import validate_capture_identity, validate_omni_inventory
 from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256
 from app.learn.recognition.uei.contracts import UEIValidationError
 from app.learn.recognition.uei.provider_adapters import (
@@ -47,16 +48,24 @@ def _sha256_string(value: object, *, name: str) -> str:
 
 
 def _ref(value: object, *, name: str) -> dict[str, str]:
-    if not isinstance(value, dict) or set(value) != {"id", "content_sha256"}:
+    if not isinstance(value, Mapping) or set(value) != {"id", "content_sha256"}:
         raise UEIValidationError(f"provider_capability_invalid_{name}_ref")
-    _non_empty_string(value["id"], name=f"{name}_id")
-    _sha256_string(value["content_sha256"], name=f"{name}_content_sha256")
-    return value
+    identifier = _non_empty_string(value["id"], name=f"{name}_id")
+    digest = _sha256_string(value["content_sha256"], name=f"{name}_content_sha256")
+    return {"id": identifier, "content_sha256": digest}
 
 
 def _same_ref(left: dict[str, str], right: dict[str, str], *, name: str) -> None:
     if left != right:
         raise UEIValidationError(f"provider_capability_{name}_mismatch")
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(child) for key, child in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(child) for child in value)
+    return value
 
 
 def _finite_confidence(value: object, *, name: str, optional: bool = False) -> float | int | None:
@@ -125,36 +134,20 @@ def _sealed_context_ref(value: object) -> dict[str, str]:
 
 def _candidate_ids_from_inventory(
     value: object, *, capture_identity: tuple[dict[str, str], str, dict[str, int]]
-) -> tuple[str, ...]:
-    if not isinstance(value, dict) or not isinstance(value.get("candidates"), list):
+) -> tuple[tuple[str, ...], dict[str, object]]:
+    if not isinstance(value, dict):
         raise UEIValidationError("provider_capability_invalid_omni_inventory")
+    try:
+        inventory = validate_omni_inventory(value)
+    except (TypeError, ValueError) as error:
+        raise UEIValidationError("provider_capability_invalid_omni_inventory") from error
     inventory_identity = _semantic_capture_identity(
-        value.get("capture_identity"), name="omni_inventory"
+        inventory.get("capture_identity"), name="omni_inventory"
     )
     for actual, expected in zip(inventory_identity, capture_identity):
         if actual != expected:
             raise UEIValidationError("provider_capability_lineage_mismatch")
-    width, height = capture_identity[2]["width"], capture_identity[2]["height"]
-    ids: list[str] = []
-    for candidate in value["candidates"]:
-        if not isinstance(candidate, dict):
-            raise UEIValidationError("provider_capability_invalid_omni_inventory")
-        ids.append(_non_empty_string(candidate.get("candidate_id"), name="candidate_id"))
-        bbox = candidate.get("bbox_original")
-        if (
-            not isinstance(bbox, (list, tuple))
-            or len(bbox) != 4
-            or any(isinstance(edge, bool) or not isinstance(edge, int) for edge in bbox)
-        ):
-            raise UEIValidationError("provider_capability_invalid_candidate_geometry")
-        x1, y1, x2, y2 = bbox
-        if not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
-            raise UEIValidationError("provider_capability_invalid_candidate_geometry")
-        if candidate.get("coordinate_space") != _CAPTURE_COORDINATE_SPACE:
-            raise UEIValidationError("provider_capability_invalid_candidate_geometry")
-    if len(set(ids)) != len(ids):
-        raise UEIValidationError("provider_capability_candidate_duplicate")
-    return tuple(ids)
+    return tuple(candidate["candidate_id"] for candidate in inventory["candidates"]), inventory
 
 
 def reject_authority_shaped_payload(value: object) -> None:
@@ -227,6 +220,10 @@ class ProviderInvocationEnvelopeV1:
             raise UEIValidationError("provider_capability_invalid_resource_lease")
         if self.cancellation_event is not None and not isinstance(self.cancellation_event, Event):
             raise UEIValidationError("provider_capability_invalid_cancellation_event")
+        object.__setattr__(self, "bundle_ref", _freeze(self.bundle_ref))
+        object.__setattr__(self, "capture_lineage_ref", _freeze(self.capture_lineage_ref))
+        if self.resource_lease is not None:
+            object.__setattr__(self, "resource_lease", _freeze(self.resource_lease))
 
 
 @dataclass(frozen=True)
@@ -252,6 +249,19 @@ class CandidateDiscoveryRequestV1:
             or any(isinstance(edge, bool) or not isinstance(edge, int) or edge <= 0 for edge in self.capture.image_size.values())
         ):
             raise UEIValidationError("provider_capability_invalid_capture")
+        object.__setattr__(
+            self,
+            "capture",
+            RestrictedCaptureLease(
+                request_ref=_freeze(self.capture.request_ref),
+                capture_lineage_ref=_freeze(self.capture.capture_lineage_ref),
+                artifact_ref=_freeze(self.capture.artifact_ref),
+                capture_id=self.capture.capture_id,
+                artifact_sha256=self.capture.artifact_sha256,
+                image_size=_freeze(self.capture.image_size),
+                local_path=self.capture.local_path,
+            ),
+        )
 
     def validate_result(self, result: CandidateDiscoveryResultV1) -> CandidateDiscoveryResultV1:
         """Bind discovery evidence to this exact invocation and immutable capture."""
@@ -316,6 +326,8 @@ class CandidateDiscoveryResultV1:
             raise UEIValidationError("provider_capability_candidate_duplicate")
         _non_negative_int(self.duration_ms, name="duration_ms")
         _non_negative_int(self.resource_units, name="resource_units")
+        object.__setattr__(self, "bundle_ref", _freeze(self.bundle_ref))
+        object.__setattr__(self, "capture_lineage_ref", _freeze(self.capture_lineage_ref))
 
 
 @dataclass(frozen=True)
@@ -360,7 +372,7 @@ class SemanticBindingRequestV1:
             _ref(context.get("capture_lineage_ref"), name="capture_lineage"),
             name="lineage",
         )
-        expected_ids = _candidate_ids_from_inventory(
+        expected_ids, validated_inventory = _candidate_ids_from_inventory(
             self.omni_inventory, capture_identity=capture_identity
         )
         if supplied_ids != expected_ids:
@@ -373,6 +385,9 @@ class SemanticBindingRequestV1:
             raise UEIValidationError("provider_capability_screenshot_sha256_mismatch")
         if declared_sha256 != capture_identity[1]:
             raise UEIValidationError("provider_capability_screenshot_sha256_mismatch")
+        object.__setattr__(self, "capture_bundle", _freeze(self.capture_bundle))
+        object.__setattr__(self, "omni_inventory", _freeze(validated_inventory))
+        object.__setattr__(self, "context_ref", _freeze(self.context_ref))
 
     def validate_result(self, result: SemanticBindingResultV1) -> SemanticBindingResultV1:
         """Bind semantic output to the request's immutable closed candidate order."""
@@ -425,6 +440,8 @@ class SemanticBindingResultV1:
             raise UEIValidationError("provider_capability_candidate_duplicate")
         _non_negative_int(self.duration_ms, name="duration_ms")
         _non_negative_int(self.resource_units, name="resource_units")
+        object.__setattr__(self, "bundle_ref", _freeze(self.bundle_ref))
+        object.__setattr__(self, "capture_lineage_ref", _freeze(self.capture_lineage_ref))
 
 
 @dataclass(frozen=True)
@@ -446,6 +463,7 @@ class GroundingRefinementRequestV1:
         if not isinstance(self.provider_request, dict) or self.provider_request.get("state") != "BOUND":
             raise UEIValidationError("provider_capability_grounding_requires_bound")
         reject_authority_shaped_payload(self.provider_request)
+        object.__setattr__(self, "provider_request", _freeze(self.provider_request))
 
     def validate_result(self, result: GroundingRefinementResultV1) -> GroundingRefinementResultV1:
         """Bind a grounding result to this exact request and strict interior geometry."""
@@ -498,6 +516,9 @@ class GroundingRefinementResultV1:
             _ref(evidence_ref, name="evidence")
         _non_negative_int(self.duration_ms, name="duration_ms")
         _non_negative_int(self.resource_units, name="resource_units")
+        object.__setattr__(self, "bundle_ref", _freeze(self.bundle_ref))
+        object.__setattr__(self, "capture_lineage_ref", _freeze(self.capture_lineage_ref))
+        object.__setattr__(self, "evidence_refs", _freeze(self.evidence_refs))
 
 
 class CandidateDiscoveryProvider(Protocol):
