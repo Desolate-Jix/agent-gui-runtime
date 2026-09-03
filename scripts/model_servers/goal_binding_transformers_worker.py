@@ -162,7 +162,7 @@ def _verify_code_identity(value: object) -> dict[str, str]:
     return observed
 
 
-def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | None = None, dispatcher: Callable[..., object] | None = None) -> dict[str, object]:
+def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | None = None, dispatcher: Callable[..., object] | None = None, session_root: Path | None = None) -> dict[str, object]:
     allowed = {
         "image_path", "goal", "profile", "screenshot", "parent_identity_path",
         "incumbent_projection", "incumbent_request", "artifact_root", "listener_port",
@@ -189,8 +189,9 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
     if not isinstance(artifact_root_value, str):
         raise ValueError("worker artifact root is invalid")
     artifact_root = Path(artifact_root_value).resolve()
-    if not path.resolve().is_relative_to(artifact_root) or not Path(identity_path).resolve().is_relative_to(artifact_root):
-        raise ValueError("worker request artifacts escape the supplied artifact root")
+    request_root = session_root.resolve() if session_root is not None else artifact_root
+    if not path.resolve().is_relative_to(request_root) or not Path(identity_path).resolve().is_relative_to(request_root):
+        raise ValueError("worker request artifacts escape the verified request root")
     provider_id = profile.get("provider_id")
     has_incumbent = payload.get("incumbent_projection") is not None or payload.get("incumbent_request") is not None
     if provider_id == "qwen3_vl_8b_q4_k_m":
@@ -407,7 +408,7 @@ def serve_session(config_path: Path) -> None:
                         raise
                     failure = provider_failure(exc, attempted=True)
                     return ""
-            envelope = _run_provider_once(payload, request_bytes=path.stat().st_size, dispatcher=invoke)
+            envelope = _run_provider_once(payload, request_bytes=path.stat().st_size, dispatcher=invoke, session_root=root)
             if failure:
                 envelope = failure_envelope(payload, failure, identity=identity, request_bytes=path.stat().st_size)
             envelope["request_lineage"].update(session_id=config["session_id"], sequence=sequence, session_sha256=digest, request_sha256=request_sha256)

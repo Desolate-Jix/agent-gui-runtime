@@ -672,10 +672,16 @@ def run_goal_binding_arm(
         metric = metrics[name]
         assert isinstance(metric, dict)
         metrics[name] = _finish(metric)
+    cleanup_path = artifact_dir / "cleanup.json"
+    cleanup_bytes = (json.dumps(cleanup_receipt, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    cleanup_path.write_bytes(cleanup_bytes)
+    cleanup_evidence_ref = {"path": str(cleanup_path.resolve()), "sha256": sha256(cleanup_bytes).hexdigest()}
+    cleanup_receipt = {field: cleanup_receipt[field] for field in _CLEANUP_FIELDS}
     payload = seal_immutable({
         "contract_version": "simple_native_provider_diagnostic_v2", "regression_diagnostic_only": True,
         "promotion_eligible": False, "screen_count": 5, "target_count": 25, "metrics": metrics,
         "cases": states, "provider_phase_cleanup": [cleanup_receipt], "cleanup_receipt": cleanup_receipt,
+        "cleanup_evidence_ref": cleanup_evidence_ref,
         "action_candidates": [], "artifact_is_authorization": False, "execute_binding": False,
         "arm_id": arm.arm_id, "provider_id": arm.provider_id, "omni_snapshot_ref": snapshot_ref,
     })

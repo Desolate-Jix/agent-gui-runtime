@@ -51,6 +51,40 @@ def test_gui_telemetry_raw_is_separate_from_full_ordered_topk(monkeypatch, tmp_p
     assert result["parsed_native"] == {"topk_points": prediction["topk_points"]}
 
 
+def test_official_gui_no_pointer_preserves_raw_and_same_runtime_continues(monkeypatch, tmp_path):
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    request = payload(tmp_path, "gui_actor_3b_bf16")
+    predictions = [
+        {"topk_points": None, "generated_text": "\u65e0\u5b9a\u4f4d", "attention": [0.1, 0.2]},
+        {"topk_points": [[0.2, 0.3], [0.9, 0.1]], "attention": [1, 2]},
+    ]
+    loads, calls = [], []
+    model = object()
+    def infer(conversation, selected_model, tokenizer, processor, **kwargs):
+        calls.append(selected_model)
+        return predictions[len(calls) - 1]
+    def load(*args):
+        loads.append(1)
+        return {"model": model, "processor": object(), "tokenizer": object(),
+                "inference": infer, "grounding_system_message": "grounding"}
+    monkeypatch.setattr(runtimes, "_load_dependencies", load)
+    runtime = runtimes.open_session(profile=request["profile"], artifact_root=tmp_path,
+                                    session_root=tmp_path, scope_name="unused", listener_port=None)
+    try:
+        first = worker._run_provider_once(request, dispatcher=runtime)
+        second = worker._run_provider_once(request, dispatcher=runtime)
+    finally:
+        runtime.close()
+    assert json.loads(first["raw_native_output"]) == predictions[0]
+    assert first["raw_native_output_sha256"] == hashlib.sha256(first["raw_native_output"].encode("utf-8")).hexdigest()
+    assert first["failure"]["kind"] == "malformed_native_output"
+    assert first["failure"]["terminal"] is False
+    assert first["failure"]["attempted"] is True
+    assert second["outcome"] == "native_output"
+    assert second["parsed_native"] == {"topk_points": predictions[1]["topk_points"]}
+    assert loads == [1] and calls == [model, model]
+
+
 @pytest.mark.parametrize("raw,ok", [(' [ ] \n', True), ('{"x":1}', False), ('[{"x":1,"x":2}]', False), ('[NaN]', False)])
 def test_incumbent_decodes_strict_bare_json_list(monkeypatch, tmp_path, raw, ok):
     request = payload(tmp_path, "qwen3_vl_8b_q4_k_m")
@@ -107,8 +141,9 @@ def offline_arm(monkeypatch, tmp_path):
     monkeypatch.setenv("PYTHONPATH", str(tmp_path))
     arms = []
     def make(**changes):
+        run_root = changes.pop("run_root", None)
         selected = dict(profile, **changes)
-        arm = callers.make_goal_binding_arm(profile=selected, artifact_dir=tmp_path)
+        arm = callers.make_goal_binding_arm(profile=selected, artifact_dir=tmp_path, run_root=run_root)
         arms.append(arm)
         return arm
     yield make, Path(request["image_path"]), tmp_path
@@ -130,6 +165,100 @@ def test_persistent_arm_real_mailbox_one_load_two_calls_one_cleanup(offline_arm)
     assert receipt["verified"] is True
     assert arm.cleanup() == receipt
     assert (root / "events.txt").read_text().splitlines() == ["load", "call", "call", "close"]
+
+
+def test_real_mailbox_separates_model_and_run_roots(offline_arm):
+    make, image, root = offline_arm
+    run_root = root.parent / (root.name + "-run")
+    arm = make(run_root=run_root)
+    first = arm.call(image, {"goal": "valid"})
+    second = arm.call(image, {"goal": "valid"})
+    assert first["outcome"] == second["outcome"] == "native_output"
+    assert first["worker_process_identity"] == second["worker_process_identity"]
+    assert first["request_lineage"]["screenshot_sha256"] == hashlib.sha256(image.read_bytes()).hexdigest()
+    receipt = arm.cleanup()
+    assert receipt["verified"] is True
+    cleanup_path = Path(receipt["cleanup_observations"][0]["cleanup_path"])
+    assert cleanup_path.is_relative_to(run_root) and not cleanup_path.is_relative_to(root)
+    config = json.loads(cleanup_path.with_name("session.json").read_text(encoding="utf-8"))
+    assert Path(config["artifact_root"]) == root
+    assert (root / "events.txt").read_text().splitlines() == ["load", "call", "call", "close"]
+
+
+@pytest.mark.parametrize("field", ["image_path", "parent_identity_path"])
+def test_real_mailbox_rejects_paths_outside_verified_session(offline_arm, monkeypatch, field):
+    make, image, root = offline_arm
+    original = worker.atomic_write
+    def tamper(path, body):
+        if path.parent.name == "requests" and path.suffix == ".json":
+            request = json.loads(body)
+            request["payload"][field] = str(image if field == "image_path" else root / "identity.json")
+            body = json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        original(path, body)
+    monkeypatch.setattr(worker, "atomic_write", tamper)
+    arm = make(run_root=root.parent / (root.name + "-run"))
+    with pytest.raises(RuntimeError, match="mailbox payload identity mismatch"):
+        arm.call(image, {"goal": "valid"})
+    assert arm.cleanup()["verified"] is False
+    assert (root / "events.txt").read_text().splitlines() == ["load", "close"]
+
+
+def test_real_session_runner_cleanup_is_accepted_by_frozen_scorer(offline_arm):
+    from test_goal_binding_ab import _run
+    from app.learn.hybrid.goal_binding_ab_score import _verified_cleanup_receipt
+    make, _, root = offline_arm
+    arm = make(coordinate_space="normalized_0_1000")
+    artifact = _run(root / "diagnostic", arm=arm)
+    document = json.loads(artifact.path.read_text(encoding="utf-8"))
+    receipt = document["cleanup_receipt"]
+    assert _verified_cleanup_receipt(receipt, provider_id=arm.provider_id) == receipt
+    assert document["provider_phase_cleanup"] == [receipt]
+    reference = document["cleanup_evidence_ref"]
+    raw = Path(reference["path"]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == reference["sha256"]
+    full = json.loads(raw)
+    observation = full["cleanup_observations"][0]
+    assert observation["contract_version"] == "goal_binding_provider_call_cleanup_v1"
+    assert observation["request_count"] == 25
+    assert json.loads(Path(observation["cleanup_path"]).read_text(encoding="utf-8")) == full
+    assert (root / "events.txt").read_text().splitlines() == ["load"] + ["call"] * 25 + ["close"]
+
+
+@pytest.mark.parametrize("delay,budget,verified", [(2.3, 10, True), (5, 0.1, False)])
+def test_managed_close_has_independent_bounded_budget(offline_arm, monkeypatch, delay, budget, verified):
+    from app.core import model_server
+    from app.learn.hybrid import goal_binding_model_callers as callers
+    make, image, root = offline_arm
+    fake = root / "fake_provider.py"
+    source = fake.read_text(encoding="utf-8")
+    source = source.replace("return {'status':'released'}", "return managed_close()")
+    source += (
+        "\ndef managed_close():\n"
+        "    from app.core import model_server\n"
+        "    from scripts.model_servers import goal_binding_provider_runtimes as runtimes\n"
+        "    obj = object.__new__(runtimes._ManagedIncumbentSession)\n"
+        "    obj.closed=False; obj.lease={}; obj.profile={}; obj.selected={}\n"
+        "    obj.hashes={}; obj.identity=None; obj.port=None\n"
+        f"    def release(*args): time.sleep({delay}); return {{'lease':{{}}}}\n"
+        "    model_server.release_scoped_qwen_model_lease=release\n"
+        "    model_server._validate_exact_qwen_cleanup_evidence=lambda *args: None\n"
+        "    runtimes._managed_artifact_identity=lambda *args: {}\n"
+        "    return obj.close()\n"
+    )
+    fake.write_text(source, encoding="utf-8")
+    monkeypatch.setattr(callers, "_CLEANUP_TIMEOUT_SECONDS", budget, raising=False)
+    monkeypatch.setattr(model_server, "_validate_exact_qwen_cleanup_evidence", lambda *args: None)
+    arm = make(provider_id="qwen3_vl_8b_q4_k_m", native_output={"kind": "qwen_goal_binding_array_v1"})
+    arm.call(image, {"goal": "valid", "incumbent_runtime_request": {}, "incumbent_projection": {}})
+    receipt = arm.cleanup()
+    assert receipt["verified"] is verified
+    evidence = receipt["cleanup_observations"][0]
+    if verified:
+        assert evidence["runtime_cleanup"]["managed_release"] == {"lease": {}}
+        assert evidence["exit_code"] == 0
+    else:
+        assert "provider cleanup deadline exceeded" in evidence["errors"]
+        assert "managed incumbent release evidence is unavailable" in evidence["errors"]
 
 
 def test_identical_request_across_arms_and_runs_never_overwrites(offline_arm):

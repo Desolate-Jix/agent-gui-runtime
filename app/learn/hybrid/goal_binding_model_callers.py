@@ -28,6 +28,7 @@ _MODEL_TEST_ROOT = MODEL_TEST_ROOT
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_SCREENSHOT_BYTES = 32 * 1024 * 1024
 _MAX_SCREENSHOT_PIXELS = 32 * 1024 * 1024
+_CLEANUP_TIMEOUT_SECONDS = 120.0
 
 
 def _closed_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -566,12 +567,13 @@ class GoalBindingProviderSession:
         observation = {"cleanup_status": "not_started"}
         cleanup_errors = []
         if self.process is not None:
+            cleanup_deadline = time.monotonic() + _CLEANUP_TIMEOUT_SECONDS
             if not (self.root / "stop.json").exists():
                 write_json(self.root / "stop.json", {"session_sha256": self.config_sha})
             try:
-                self.process.wait(timeout=2)
+                self.process.wait(timeout=max(0.0, cleanup_deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
-                pass
+                cleanup_errors.append("provider cleanup deadline exceeded")
         if self.scope is not None:
             self.scope.close()
             observation = observe_process_scope_cleanup(self.config["scope_name"], terminate=True, listener_ports=[self.port] if self.port else [], stable_zero_observations=3)
@@ -615,6 +617,7 @@ class GoalBindingProviderSession:
         verified = self.identity is not None and not self.blocked and observation.get("cleanup_status") == "verified" and all(sample.get("status") == "verified" for sample in samples) and not gpu_owners and not leases and not cleanup_errors and exit_code is not None
         evidence = {"verified": verified, "scope": observation, "baseline": self.baseline, "gpu_samples": samples, "worker_process_identity": self.identity, "exit_code": exit_code, "request_count": self.sequence, "errors": cleanup_errors, "session_id": self.session_id, "logs": {name: {"sha256": _sha256_file(self.root / name), "bytes": (self.root / name).stat().st_size} for name in ("worker.stdout.bin", "worker.stderr.bin") if (self.root / name).exists()}}
         evidence.update(launcher_process_identity=self.launcher_identity, runtime_state=self.runtime_state, runtime_cleanup=runtime_cleanup, started_ns=self.started_ns, stopped_ns=time.time_ns(), profile=self.profile, code_identity=self.config.get("code_identity") if self.config else None)
+        evidence.update(contract_version="goal_binding_provider_call_cleanup_v1", cleanup_path=str(self.root / "cleanup.json"))
         self.receipt = {"contract_version": "simple_native_provider_cleanup_v1", "provider": self.profile["provider_id"], "verified": verified, "cleanup_status": "verified" if verified else "failed", "owned_processes": gpu_owners, "provider_processes_after": observation.get("member_identities_after", []), "helper_processes_after": [], "orphan_descendant_pids": observation.get("member_pids_after", []), "active_listeners_after": observation.get("active_listeners_after", []), "lease_files_after": leases, "cleanup_observations": [evidence]}
         if self.root.exists():
             write_json(self.root / "cleanup.json", self.receipt)

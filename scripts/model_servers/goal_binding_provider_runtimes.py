@@ -311,12 +311,10 @@ def run_gui_actor(
         topk=3,
     )
     safe_prediction = _json_safe(prediction)
-    if not isinstance(safe_prediction, dict) or not isinstance(safe_prediction.get("topk_points"), list):
-        raise ValueError("official GUI-Actor inference did not return topk_points")
     raw = json.dumps(safe_prediction, ensure_ascii=False, separators=(",", ":"))
     return _result(
         raw,
-        parsed_native={"topk_points": safe_prediction["topk_points"]},
+        parsed_native={"topk_points": safe_prediction["topk_points"]} if isinstance(safe_prediction, dict) and isinstance(safe_prediction.get("topk_points"), list) else None,
         telemetry=_metrics(
             generation_tokens=None,
             peak_vram_bytes=_cuda_peak(torch_module) if torch_module is not None else None,
