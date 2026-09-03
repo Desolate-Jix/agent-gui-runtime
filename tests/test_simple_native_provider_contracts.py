@@ -55,7 +55,6 @@ def test_qwen_expansion_restores_stable_ids_and_existing_contract() -> None:
 
     request = _runtime_request(); projection = build_qwen_model_projection(request)
     result = expand_qwen_model_response({"bindings": [{"i": 0, "role": "button", "label": "新建", "status": "BOUND", "confidence": .9}, {"i": 1, "role": "button", "label": "取消", "status": "UNBOUND", "confidence": .1}]}, projection=projection, runtime_request=request)
-    assert result["contract_version"] == "hybrid_qwen_bindings_v1"
     assert [item["candidate_id"] for item in result["bindings"]] == ["candidate/one", "candidate/two"]
 
 

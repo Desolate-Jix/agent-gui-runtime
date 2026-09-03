@@ -57,6 +57,8 @@ def parse_omni_native_output(raw: object) -> tuple[OmniNativeItem, ...]:
 def _runtime_candidates(runtime_request: Mapping[str, object]) -> tuple[list[Mapping[str, object]], tuple[int, int]]:
     if not isinstance(runtime_request, Mapping):
         raise ValueError("Qwen runtime request must be an object")
+    if runtime_request.get("contract_version") != "hybrid_qwen_binding_request_v1":
+        raise ValueError("Qwen runtime request must be built by the full binding contract")
     screenshot = runtime_request.get("screenshot")
     candidates = runtime_request.get("candidates")
     if not isinstance(screenshot, Mapping) or not isinstance(screenshot.get("image_size"), Mapping) or not isinstance(candidates, list):
@@ -118,7 +120,7 @@ def expand_qwen_model_response(raw: object, *, projection: Mapping[str, object],
         expanded.append({"candidate_id": candidates[index]["candidate_id"], "role": role, "label": label, "binding_status": status, "confidence": confidence})
     # This is deliberately the existing wire shape; the runner supplies its sealed inventory to
     # parse_qwen_candidate_bindings before consumers see the result.
-    return {"contract_version": "hybrid_qwen_bindings_v1", "bindings": expanded}
+    return {"bindings": expanded}
 
 
 def parse_vista_normalized_point(raw_text: str) -> tuple[float, float]:

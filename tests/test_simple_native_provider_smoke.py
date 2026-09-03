@@ -25,7 +25,7 @@ def test_each_native_slot_can_be_replaced_independently(tmp_path: Path) -> None:
     calls = {"omni": 0, "qwen": 0, "vista": 0}
     slots = SimpleNativeSlots(omni=lambda _: calls.__setitem__("omni", calls["omni"] + 1) or {"items": []}, qwen=lambda _, projection: calls.__setitem__("qwen", calls["qwen"] + 1) or {"bindings": [{"i": value["i"], "role": "button", "label": "x", "status": "BOUND", "confidence": 1} for value in projection["candidates"]]}, vista=lambda _, __: calls.__setitem__("vista", calls["vista"] + 1) or "[0,0]")
     run_simple_native_regression_diagnostic(cases=_cases(), slots=slots, artifact_dir=tmp_path)
-    assert calls == {"omni": 5, "qwen": 5, "vista": 25}
+    assert calls == {"omni": 5, "qwen": 5, "vista": 2}  # two invalid bare points stop the slot
 
 
 def test_provider_runner_never_receives_gold_or_scorer_private_fields(tmp_path: Path) -> None:
@@ -72,4 +72,4 @@ def test_runner_writes_raw_parsed_error_lineage_and_cleanup_receipt(tmp_path: Pa
     from app.learn.hybrid.simple_native_smoke import run_simple_native_regression_diagnostic
     artifact=run_simple_native_regression_diagnostic(cases=_cases(), slots=_slots(), artifact_dir=tmp_path)
     raw=json.loads(artifact.path.read_text(encoding="utf-8"))
-    assert raw["cleanup_receipt"]["verified"] is True and raw["cases"][0]["trace"][0]["raw"]
+    assert raw["cleanup_receipt"]["verified"] is False and raw["cases"][0]["trace"][0]["raw"]

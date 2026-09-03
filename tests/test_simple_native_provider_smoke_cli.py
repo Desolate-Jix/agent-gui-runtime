@@ -44,3 +44,11 @@ def test_cli_rejects_changed_screenshot_and_prompt_hashes(tmp_path: Path) -> Non
     path=tmp_path / "bad.json"; path.write_text(json.dumps(config),encoding="utf-8")
     result=_run("--config", str(path))
     assert result.returncode != 0 and "sha256" in result.stderr
+
+
+def test_cli_replay_rejects_malformed_jsonl(tmp_path: Path) -> None:
+    replay=tmp_path / "replay"; replay.mkdir()
+    for name in ("omni.jsonl", "qwen.jsonl", "vista.jsonl"):
+        (replay / name).write_text("THIS IS INVALID\n", encoding="utf-8")
+    result=_run("--mode", "replay", "--replay-dir", str(replay), "--artifact-dir", str(tmp_path / "out"))
+    assert result.returncode != 0 and "replay fixture invalid" in result.stderr

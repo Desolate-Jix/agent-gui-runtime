@@ -50,6 +50,14 @@ def _hub_cache_path(profile: dict[str, object]) -> Path:
     return Path(str(expected_paths["huggingface_cache_path"])).expanduser()
 
 
+
+def project_omni_official_items(items: list[dict[str, object]]) -> dict[str, object]:
+    """在 runtime adapter 附加字段前，保留官方 Omni 的四个 native 字段。"""
+    return {"items": [
+        {"bbox": item.get("bbox"), "type": item.get("type"), "content": item.get("content"), "interactivity": item.get("interactivity")}
+        for item in items
+    ]}
+
 def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = False) -> dict[str, object]:
     from app.learn.recognition.omniparser_quality import filter_omniparser_candidates
     from scripts import run_omniparser_learn_smoke as runner
@@ -141,11 +149,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-def project_omni_official_items(items: list[dict[str, object]]) -> dict[str, object]:
-    """在 runtime adapter 附加字段前，保留官方 Omni 的四个 native 字段。"""
-    return {"items": [
-        {"bbox": item.get("bbox"), "type": item.get("type"), "content": item.get("content"), "interactivity": item.get("interactivity")}
-        for item in items
-    ]}
