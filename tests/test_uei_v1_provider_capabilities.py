@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
+from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.recognition.uei.contracts import UEIValidationError
 from app.learn.recognition.uei.provider_adapters import (
     ProviderRunBudget,
@@ -152,46 +154,21 @@ def test_semantic_request_rejects_non_closed_candidate_coverage_or_order(
     ordered_candidate_ids: tuple[str, ...],
 ):
     with pytest.raises(UEIValidationError, match="candidate"):
-        SemanticBindingRequestV1(
-            envelope=envelope("semantic_binding"),
-            ordered_candidate_ids=ordered_candidate_ids,
-            capture_bundle={"capture_lineage_ref": dict(LINEAGE_REF)},
-            omni_inventory={
-                "candidates": [
-                    {"candidate_id": "candidate/one"},
-                    {"candidate_id": "candidate/two"},
-                ]
-            },
-            context_ref={"id": "context/test", "content_sha256": "5" * 64},
-            screenshot_bytes=b"screenshot",
-            screenshot_media_type="image/png",
-            screenshot_sha256=sha256(b"screenshot").hexdigest(),
-        )
+        _bound_semantic_request(ordered_candidate_ids=ordered_candidate_ids)
+
 
 
 def _semantic_request() -> SemanticBindingRequestV1:
-    return SemanticBindingRequestV1(
-        envelope=envelope("semantic_binding"),
-        ordered_candidate_ids=("candidate/one", "candidate/two"),
-        capture_bundle={"capture_lineage_ref": dict(LINEAGE_REF)},
-        omni_inventory={
-            "candidates": [
-                {"candidate_id": "candidate/one"},
-                {"candidate_id": "candidate/two"},
-            ]
-        },
-        context_ref={"id": "context/test", "content_sha256": "5" * 64},
-        screenshot_bytes=b"screenshot",
-        screenshot_media_type="image/png",
-        screenshot_sha256=sha256(b"screenshot").hexdigest(),
-    )
+    return _bound_semantic_request()
 
 
-def _semantic_result(candidate_ids: tuple[str, ...]) -> SemanticBindingResultV1:
+def _semantic_result(
+    candidate_ids: tuple[str, ...], *, capture_lineage_ref: dict[str, str]
+) -> SemanticBindingResultV1:
     return SemanticBindingResultV1(
         bundle_ref=dict(BUNDLE_REF),
         invocation_id="invocation/test",
-        capture_lineage_ref=dict(LINEAGE_REF),
+        capture_lineage_ref=deepcopy(capture_lineage_ref),
         bindings=tuple(
             SemanticBindingItemV1(
                 candidate_id=candidate_id,
@@ -216,8 +193,14 @@ def _semantic_result(candidate_ids: tuple[str, ...]) -> SemanticBindingResultV1:
 def test_semantic_result_rejects_missing_duplicate_unknown_or_reordered_candidate_ids(
     candidate_ids: tuple[str, ...],
 ):
+    request = _semantic_request()
     with pytest.raises(UEIValidationError, match="candidate"):
-        _semantic_request().validate_result(_semantic_result(candidate_ids))
+        request.validate_result(
+            _semantic_result(
+                candidate_ids,
+                capture_lineage_ref=request.envelope.capture_lineage_ref,
+            )
+        )
 
 
 def test_semantic_item_keeps_open_non_empty_role_strings():
@@ -297,4 +280,169 @@ def test_requests_and_results_bind_exact_capability_refs_and_lineage():
             items=(),
             duration_ms=1,
             resource_units=1,
+        )
+
+
+def _discovery_request() -> CandidateDiscoveryRequestV1:
+    return CandidateDiscoveryRequestV1(
+        envelope=envelope("candidate_discovery"),
+        capture=capture(),
+    )
+
+
+def _discovery_result(**overrides: object) -> CandidateDiscoveryResultV1:
+    values: dict[str, object] = {
+        "bundle_ref": dict(BUNDLE_REF),
+        "invocation_id": "invocation/test",
+        "capture_lineage_ref": dict(LINEAGE_REF),
+        "items": (),
+        "duration_ms": 1,
+        "resource_units": 1,
+    }
+    values.update(overrides)
+    return CandidateDiscoveryResultV1(**values)
+
+
+@pytest.mark.parametrize("overrides", [
+    {"bundle_ref": {"id": "bundle/other", "content_sha256": "1" * 64}},
+    {"invocation_id": "invocation/other"},
+    {"capture_lineage_ref": {"id": "capture/other", "content_sha256": "2" * 64}},
+])
+def test_discovery_result_requires_exact_request_bundle_invocation_and_lineage(overrides):
+    with pytest.raises(UEIValidationError, match="mismatch"):
+        _discovery_request().validate_result(_discovery_result(**overrides))
+
+
+def _semantic_capture_identity(screenshot_bytes: bytes) -> dict[str, object]:
+    screenshot_sha256 = sha256(screenshot_bytes).hexdigest()
+    artifact = seal_immutable({
+        "contract_version": "artifact_ref_v1",
+        "artifact_id": "artifact/semantic-screenshot",
+        "artifact_sha256": screenshot_sha256,
+        "media_type": "image/png",
+        "byte_length": len(screenshot_bytes),
+        "restricted": True,
+    })
+    artifact_ref = {"id": artifact["artifact_id"], "content_sha256": artifact["content_sha256"]}
+    lineage = seal_immutable({
+        "contract_version": "capture_lineage_v1",
+        "capture_id": "capture/semantic-test",
+        "artifact_ref": artifact_ref,
+        "artifact_sha256": screenshot_sha256,
+        "image_size": {"width": 100, "height": 100},
+        "capture_coordinate_space": "capture_pixel_xyxy",
+        "captured_at": "2026-09-03T00:00:00Z",
+    })
+    return {
+        "contract_version": "hybrid_capture_identity_v1",
+        "capture_id": "capture/semantic-test",
+        "capture_lineage_ref": {"id": lineage["capture_id"], "content_sha256": lineage["content_sha256"]},
+        "capture_lineage": lineage,
+        "artifact_ref": artifact_ref,
+        "artifact": artifact,
+        "artifact_sha256": screenshot_sha256,
+        "screenshot_sha256": screenshot_sha256,
+        "image_size": {"width": 100, "height": 100},
+        "capture_coordinate_space": "capture_pixel_xyxy",
+        "captured_at": "2026-09-03T00:00:00Z",
+        "workflow_revision": "1",
+    }
+
+
+def _semantic_bound_inputs(*, screenshot_bytes: bytes = b"bound-screenshot") -> dict[str, object]:
+    capture_identity = _semantic_capture_identity(screenshot_bytes)
+    capture_lineage_ref = deepcopy(capture_identity["capture_lineage_ref"])
+    context = seal_immutable({
+        "context_id": "context/test",
+        "capture_lineage_ref": deepcopy(capture_lineage_ref),
+    })
+    context_ref = {"id": context["context_id"], "content_sha256": context["content_sha256"]}
+    return {
+        "capture_bundle": {
+            "capture_lineage_ref": capture_lineage_ref,
+            "context_ref": context_ref,
+            "capture_identity": deepcopy(capture_identity),
+            "context": context,
+        },
+        "omni_inventory": {
+            "capture_identity": deepcopy(capture_identity),
+            "candidates": [
+                {
+                    "candidate_id": "candidate/one",
+                    "bbox_original": [10, 10, 20, 20],
+                    "coordinate_space": "capture_pixel_xyxy",
+                },
+                {
+                    "candidate_id": "candidate/two",
+                    "bbox_original": [30, 30, 40, 40],
+                    "coordinate_space": "capture_pixel_xyxy",
+                },
+            ],
+        },
+        "context_ref": context_ref,
+        "screenshot_bytes": screenshot_bytes,
+        "screenshot_media_type": "image/png",
+        "screenshot_sha256": capture_identity["screenshot_sha256"],
+    }
+
+
+def _bound_semantic_request(**overrides: object) -> SemanticBindingRequestV1:
+    values: dict[str, object] = {
+        "ordered_candidate_ids": ("candidate/one", "candidate/two"),
+        **_semantic_bound_inputs(),
+    }
+    capture_lineage_ref = values["capture_bundle"]["capture_lineage_ref"]
+    values["envelope"] = ProviderInvocationEnvelopeV1(
+        bundle_ref=dict(BUNDLE_REF),
+        capability="semantic_binding",
+        invocation_id="invocation/test",
+        capture_lineage_ref=deepcopy(capture_lineage_ref),
+        budget=budget(),
+    )
+    values.update(overrides)
+    return SemanticBindingRequestV1(**values)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda values: values["capture_bundle"].pop("capture_lineage_ref"),
+    lambda values: values["omni_inventory"]["capture_identity"].update({"screenshot_sha256": "f" * 64}),
+    lambda values: values["omni_inventory"]["candidates"][0].update({"bbox_original": [10, 10, 10, 20]}),
+    lambda values: values["omni_inventory"]["candidates"][0].update({"coordinate_space": "image_normalized_xyxy"}),
+])
+def test_semantic_request_requires_same_capture_and_immutable_candidate_geometry(mutate):
+    values = _semantic_bound_inputs()
+    mutate(values)
+    with pytest.raises(UEIValidationError):
+        _bound_semantic_request(**values)
+
+
+def test_semantic_screenshot_input_is_not_limited_by_output_budget():
+    screenshot_bytes = b"input-bytes-not-output"
+    values = _semantic_bound_inputs(screenshot_bytes=screenshot_bytes)
+    request = _bound_semantic_request(
+        envelope=ProviderInvocationEnvelopeV1(
+            bundle_ref=dict(BUNDLE_REF),
+            capability="semantic_binding",
+            invocation_id="invocation/input-budget",
+            capture_lineage_ref=deepcopy(values["capture_bundle"]["capture_lineage_ref"]),
+            budget=ProviderRunBudget(30_000, 1, 256, 4_096, "gpu_vision"),
+        ),
+        **values,
+    )
+    assert request.screenshot_bytes == screenshot_bytes
+
+
+@pytest.mark.parametrize("provider_request", [
+    {"state": "UNBOUND"},
+    {},
+    {"state": "BOUND", "nested": {"execute": True}},
+])
+def test_grounding_request_requires_bound_non_authorizing_input(provider_request):
+    with pytest.raises(UEIValidationError):
+        GroundingRefinementRequestV1(
+            envelope=envelope("grounding_refinement"),
+            candidate_id="candidate/one",
+            candidate_bbox=(10, 10, 20, 20),
+            permitted_roi=(10, 10, 20, 20),
+            provider_request=provider_request,
         )
