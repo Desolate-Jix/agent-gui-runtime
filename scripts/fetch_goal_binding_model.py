@@ -43,8 +43,25 @@ def _profile(path: Path) -> dict[str, object]:
     return value
 
 
+def _same_production_root(root: Path) -> bool:
+    """Compare lexical absolute paths without creating or resolving the target."""
+    return os.path.normcase(os.path.normpath(os.path.abspath(str(root)))) == os.path.normcase(os.path.normpath(os.path.abspath(str(MODEL_TEST_ROOT))))
+
+
+def _reject_reparse_root(root: Path) -> None:
+    """Do not create a quota lock through a pre-existing reparse point."""
+    candidate = Path(root).absolute()
+    for parent in (candidate, *candidate.parents):
+        if not parent.exists():
+            continue
+        info = parent.lstat()
+        if parent.is_symlink() or bool(getattr(info, "st_file_attributes", 0) & 0x400):
+            raise ValueError("model-test root contains a reparse point")
+
+
 @contextmanager
 def _quota_reservation(root: Path):
+    _reject_reparse_root(root)
     root.mkdir(parents=True, exist_ok=True)
     lock = root / ".goal-binding-quota.lock"
     try:
@@ -64,7 +81,7 @@ def _quota_reservation(root: Path):
 
 def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
     """Resolve and download only explicitly declared files; imported lazily on request."""
-    if Path(root).absolute() != MODEL_TEST_ROOT.absolute():
+    if not _same_production_root(Path(root)):
         raise ValueError("production acquisition is pinned to E:\\模型测试; injected roots are test-only library primitives")
     provider_id, repo_id, requested = profile.get("provider_id"), profile.get("repo_id"), profile.get("artifact_files")
     if not isinstance(provider_id, str) or not isinstance(repo_id, str) or not isinstance(requested, list) or not requested or any(not isinstance(name, str) or not name or Path(name).is_absolute() or ".." in Path(name).parts for name in requested):
@@ -97,8 +114,9 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
             raise ValueError(f"Hugging Face size is unavailable for {name}")
         expected[name] = size
         oid = (lfs.get("sha256") or lfs.get("oid")) if isinstance(lfs, dict) else (getattr(lfs, "sha256", None) or getattr(lfs, "oid", None))
-        if isinstance(oid, str) and len(oid) == 64:
-            expected_hashes[name] = oid
+        if not isinstance(oid, str) or len(oid) != 64 or any(char not in "0123456789abcdef" for char in oid):
+            raise ValueError(f"Hugging Face SHA-256 is unavailable for {name}")
+        expected_hashes[name] = oid
     root = Path(root)
     with _quota_reservation(root):
         assert_download_fits(root=root, remote_bytes=sum(expected.values()))
@@ -115,7 +133,7 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
                 if target.stat().st_size != expected[name] or (name in expected_hashes and _digest(target) != expected_hashes[name]):
                     raise ValueError(f"download verification failed for {name}")
             remove_huggingface_local_metadata(root=root, staging_path=staging)
-            return materialize_downloaded_artifact(root=root, provider_id=provider_id, repo_id=repo_id, revision=revision, staging_path=staging, expected_files=expected)
+            return materialize_downloaded_artifact(root=root, provider_id=provider_id, repo_id=repo_id, revision=revision, staging_path=staging, expected_files=expected, expected_sha256=expected_hashes)
         except BaseException:
             if staging.exists():
                 cleanup_failed_staging(root=root, staging_path=staging)
@@ -137,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.profile is None:
         parser.error("--profile is required unless --inventory-only is used")
-    if args.root != MODEL_TEST_ROOT:
+    if not _same_production_root(args.root):
         parser.error("production acquisition is pinned to E:\\模型测试; --root is inventory-only")
     manifest = fetch_profile(profile=_profile(args.profile), root=args.root)
     print(json.dumps({"manifest_path": str(manifest), "artifact_is_authorization": False}, ensure_ascii=False, sort_keys=True))

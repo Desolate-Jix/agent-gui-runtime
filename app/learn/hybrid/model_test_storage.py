@@ -97,6 +97,39 @@ def _guarded_directory(root: Path, *parts: str) -> Path:
     return current
 
 
+def _remove_if_own_manifest(path: Path, *, provider_id: str, revision: str) -> None:
+    """Remove a transaction's manifest only when its identity is still ours."""
+    if not path.exists() or _is_reparse(path):
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if isinstance(payload, Mapping) and payload.get("contract_version") == _MANIFEST_VERSION and payload.get("provider_id") == provider_id and payload.get("revision") == revision:
+        path.unlink()
+
+
+def _restore_registry(path: Path, previous: bytes | None) -> None:
+    """Best-effort rollback for a registry replacement owned by this transaction."""
+    if previous is None:
+        if path.exists() and not _is_reparse(path):
+            path.unlink()
+        return
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.rollback.", suffix=".tmp", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(previous)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if _is_reparse(temporary) or _is_reparse(path.parent):
+            raise ValueError("storage rollback destination is a reparse point")
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
     parent = path.parent
     if _is_reparse(parent):
@@ -188,6 +221,9 @@ def register_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, 
         if not isinstance(file, Path):
             raise ValueError("registered file path is invalid")
         resolved, relative = _validate_registered_file(root, file)
+        namespace = Path("artifacts") / provider_id / revision
+        if not Path(relative).is_relative_to(namespace):
+            raise ValueError("registered file is outside its exact artifact namespace")
         if relative in seen:
             raise ValueError("registered file is duplicated")
         seen.add(relative)
@@ -197,11 +233,14 @@ def register_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, 
     if manifest.exists():
         raise ValueError("artifact manifest already exists")
     payload = {"contract_version": _MANIFEST_VERSION, "provider_id": provider_id, "repo_id": repo_id, "revision": revision, "files": entries, "artifact_is_authorization": False}
-    _atomic_json(manifest, payload)
     registry_path = _guarded_directory(root, "reports") / _REGISTRY_NAME
+    previous_registry = registry_path.read_bytes() if registry_path.exists() else None
     registry: dict[str, object] = {"contract_version": "model_test_artifact_registry_v1", "manifests": {}}
-    if registry_path.exists():
-        loaded = json.loads(registry_path.read_text(encoding="utf-8"))
+    if previous_registry is not None:
+        try:
+            loaded = json.loads(previous_registry.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("artifact registry is invalid") from exc
         if not isinstance(loaded, dict) or loaded.get("contract_version") != registry["contract_version"] or not isinstance(loaded.get("manifests"), dict):
             raise ValueError("artifact registry is invalid")
         registry = loaded
@@ -210,8 +249,17 @@ def register_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, 
     key = manifest.relative_to(Path(root).resolve()).as_posix()
     if key in records:
         raise ValueError("artifact registry already contains manifest")
-    records[key] = sha256(manifest.read_bytes()).hexdigest()
-    _atomic_json(registry_path, registry)
+    try:
+        _atomic_json(manifest, payload)
+        records[key] = sha256(manifest.read_bytes()).hexdigest()
+        _atomic_json(registry_path, registry)
+    except BaseException:
+        # A failed registry publication must never make a movable artifact look registered.
+        try:
+            _restore_registry(registry_path, previous_registry)
+        finally:
+            _remove_if_own_manifest(manifest, provider_id=provider_id, revision=revision)
+        raise
     return manifest
 
 
@@ -247,6 +295,16 @@ def _load_manifest(root: Path, manifest_path: Path) -> tuple[dict[str, object], 
 
 def delete_registered_artifact(*, root: Path, manifest_path: Path) -> dict[str, object]:
     payload, root_resolved, resolved_manifest = _load_manifest(Path(root), Path(manifest_path))
+    reports = _guarded_directory(root_resolved, "reports")
+    journal = reports / f"{payload['provider_id']}-{payload['revision']}-deletion-pending.json"
+    if journal.exists():
+        try:
+            existing = json.loads(journal.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("deletion journal is unreadable") from exc
+        if isinstance(existing, Mapping) and existing.get("status") == "pending":
+            raise RuntimeError("registered artifact has a pending deletion journal")
+        raise ValueError("deletion journal already exists")
     registered: list[Path] = []
     seen: set[str] = set()
     for entry in payload["files"]:
@@ -268,15 +326,30 @@ def delete_registered_artifact(*, root: Path, manifest_path: Path) -> dict[str, 
         if resolved.stat().st_size != expected_bytes or _sha256(resolved) != expected_sha:
             raise ValueError("registered file was modified")
         registered.append(resolved)
-    reports = _guarded_directory(root_resolved, "reports")
-    journal = reports / f"{payload['provider_id']}-{payload['revision']}-deletion-pending.json"
-    _atomic_json(journal, {"contract_version": "model_test_artifact_deletion_journal_v1", "manifest_path": str(resolved_manifest), "files": sorted(seen), "status": "pending"})
+    all_files = sorted(seen)
+    deleted: list[str] = []
+    remaining = list(all_files)
+    journal_payload: dict[str, object] = {
+        "contract_version": "model_test_artifact_deletion_journal_v1",
+        "manifest_path": str(resolved_manifest),
+        "files": all_files,
+        "deleted_files": deleted,
+        "remaining_files": remaining,
+        "status": "pending",
+    }
+    _atomic_json(journal, journal_payload)
     for file in registered:
         file.unlink()
+        relative = file.relative_to(root_resolved).as_posix()
+        deleted.append(relative)
+        remaining.remove(relative)
+        journal_payload["deleted_files"] = list(deleted)
+        journal_payload["remaining_files"] = list(remaining)
+        _atomic_json(journal, journal_payload)
     receipt = {"contract_version": "model_test_artifact_deletion_receipt_v1", "provider_id": payload["provider_id"], "revision": payload["revision"], "deleted_count": len(registered), "deleted_files": sorted(seen), "manifest_path": str(resolved_manifest), "verified": True}
     receipt_path = reports / f"{payload['provider_id']}-{payload['revision']}-deletion.json"
     _atomic_json(receipt_path, receipt)
-    _atomic_json(journal, {"contract_version": "model_test_artifact_deletion_journal_v1", "manifest_path": str(resolved_manifest), "files": sorted(seen), "status": "complete", "receipt_path": str(receipt_path)})
+    _atomic_json(journal, {**journal_payload, "status": "complete", "receipt_path": str(receipt_path)})
     receipt["receipt_path"] = str(receipt_path)
     return receipt
 
@@ -316,18 +389,23 @@ def remove_huggingface_local_metadata(*, root: Path, staging_path: Path) -> None
         cache.rmdir()
 
 
-def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, revision: str, staging_path: Path, expected_files: Mapping[str, int]) -> Path:
+def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, revision: str, staging_path: Path, expected_files: Mapping[str, int], expected_sha256: Mapping[str, str]) -> Path:
     _safe_component(provider_id, name="provider_id")
     _immutable_revision(revision)
     root = Path(root)
     root_resolved, staging = _guard(root, Path(staging_path))
     if staging.relative_to(root_resolved).parts[:2] != ("staging", provider_id):
         raise ValueError("staging target is outside provider-specific staging")
-    if not isinstance(expected_files, Mapping) or not expected_files:
+    if not isinstance(expected_files, Mapping) or not expected_files or not isinstance(expected_sha256, Mapping):
         raise ValueError("expected files are invalid")
     actual = {path.relative_to(staging).as_posix(): path for path in _logical_files(staging) if path.is_file()}
-    if set(actual) != set(expected_files) or any(not isinstance(size, int) or size < 0 or actual[name].stat().st_size != size for name, size in expected_files.items()):
+    if set(actual) != set(expected_files) or set(expected_sha256) != set(expected_files) or any(not isinstance(name, str) or not isinstance(size, int) or size < 0 or actual[name].stat().st_size != size for name, size in expected_files.items()):
         raise ValueError("downloaded files do not match expected bytes")
+    if any(not isinstance(expected_sha256[name], str) or len(expected_sha256[name]) != 64 or any(char not in "0123456789abcdef" for char in expected_sha256[name]) for name in expected_files):
+        raise ValueError("downloaded files do not have closed SHA-256 expectations")
+    # Rehash at the commit boundary, not only after the remote client returns.
+    if any(_sha256(actual[name]) != expected_sha256[name] for name in expected_files):
+        raise ValueError("downloaded files changed after verification")
     destination_parent = _guarded_directory(root_resolved, "artifacts", provider_id)
     destination = destination_parent / revision
     if destination.exists():
