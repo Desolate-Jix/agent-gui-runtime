@@ -527,3 +527,6 @@ safety flags
 Omni native output 仅有 normalized bbox、type、content、interactivity，adapter 再补 runtime 字段。Qwen 完整 runtime request 继续是 capture/freshness/provenance 的真源；模型面对短 ordinal projection，adapter 恢复 stable candidate ID 后进入既有 parser。VISTA 只传 ROI 与短 target prompt，实际 caller 不使用 generic system/json_object；bare `[x,y]` 必须经 ROI、candidate、capture strict bounds 验证，不能 clipping、nearest-point 或 bbox fallback。
 
 报告必须保留 raw UTF-8、parsed/error、hash、parent lineage、slot latency/bytes、分子/分母和 cleanup receipt。任一坐标、lineage、Gold isolation、schema 连续失败、GPU ownership 或 zero-action 不变量失败即停止。Phase B 只有在批准 actual trace、安全证据、无 holdout 和足以证明抽象必要性的第二实现/重复 seam 存在时才可另行设计；本阶段不改 Learning 或 Benchmark v2 schema。
+
+
+> 实现状态：当前 worktree 中已验证的 CLI 仅为 replay/preflight；actual 模型启动保持 guard，且不属于本次离线验证证据。

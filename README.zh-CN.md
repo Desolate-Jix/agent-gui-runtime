@@ -275,3 +275,6 @@ Automatic provider selection、remote execution、raw-coordinate Agent authority
 `python scripts/run_simple_native_provider_smoke.py` 默认进入离线 `preflight`：只校验 `case-001` 至 `case-005`，绝不启动模型，也不执行任何动作。`replay` 使用可注入的原生形状 fixture，写入仅回归诊断、不可 promotion 的 25-target 报告。
 
 三个协议保持独立：Omni 只输出 `{bbox,type,content,interactivity}`；Qwen 在本地保留完整 runtime request，模型只看 ordinal `{i,box,active}` candidates；VISTA 接收已验证 ROI，且只返回 bare normalized `[x,y]`。runtime ID、capture lineage、坐标变换、metrics 和 review-only 字段均由 adapter 持有。actual mode 除 operator flag 外还需要当前任务的明确批准；lineage、bounds、schema、cleanup 或 action path 失败均必须停止。Phase B 需要已批准且冻结的 actual run、稳定 native trace、安全/cleanup evidence、零 holdout 使用，以及任何后续抽象的事实依据。Learning 与 Benchmark v2 schema 均未改变。
+
+
+> 实现状态：当前 worktree 中已验证的 CLI 仅为 replay/preflight；actual 模型启动保持 guard，且不属于本次离线验证证据。
