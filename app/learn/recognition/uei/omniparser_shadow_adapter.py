@@ -278,52 +278,92 @@ class OmniParserShadowAdapter:
             "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
         ).strip()
         runtime_path = Path(runtime_path_text) if runtime_path_text else None
-        if process_scope_name or runtime_path is not None or lineage_text:
-            try:
-                lineage = json.loads(lineage_text)
-            except (TypeError, json.JSONDecodeError) as error:
-                raise OmniParserShadowAdapterError("runtime_configuration_unavailable") from error
-            if runtime_path is None or not process_scope_name or not isinstance(lineage, dict):
-                raise OmniParserShadowAdapterError("runtime_configuration_unavailable")
-            persist_omniparser_invocation_owner(
-                runtime_path,
-                invocation_id=invocation_id,
-                resource_group=budget.resource_group,
-                resource_lease=resource_lease,
-                lineage=lineage,
-                process_scope_name=process_scope_name,
-            )
+        owner_persisted = False
+        primary_error: BaseException | None = None
+        primary_traceback = None
         try:
+            if process_scope_name or runtime_path is not None or lineage_text:
+                try:
+                    lineage = json.loads(lineage_text)
+                except (TypeError, json.JSONDecodeError) as error:
+                    raise OmniParserShadowAdapterError(
+                        "runtime_configuration_unavailable"
+                    ) from error
+                if runtime_path is None or not process_scope_name or not isinstance(lineage, dict):
+                    raise OmniParserShadowAdapterError("runtime_configuration_unavailable")
+                persist_omniparser_invocation_owner(
+                    runtime_path,
+                    invocation_id=invocation_id,
+                    resource_group=budget.resource_group,
+                    resource_lease=resource_lease,
+                    lineage=lineage,
+                    process_scope_name=process_scope_name,
+                )
+                owner_persisted = True
             if cancellation_event is not None and cancellation_event.is_set():
                 raise OmniParserShadowAdapterError("runtime_cancelled")
-            return self._invoke_worker(
+            output = self._invoke_worker(
                 capture=capture,
                 budget=budget,
                 cancellation_event=cancellation_event,
                 native_output=native_output,
             )
-        finally:
-            cleanup_status = "verified"
-            if runtime_path is not None:
-                _begin_omniparser_finalization(runtime_path, "completed")
+        except BaseException as error:
+            primary_error = error
+            primary_traceback = error.__traceback__
+
+        cleanup_errors: list[BaseException] = []
+        finalization_started = False
+        if owner_persisted and runtime_path is not None:
             try:
-                resource_lease.release()
-                if runtime_path is not None:
-                    _advance_omniparser_finalization(
-                        runtime_path, "lease_removed"
-                    )
-            except BaseException:
-                cleanup_status = "failed"
-                raise
-            finally:
-                self._persist_cleanup_observation(
-                    invocation_id,
-                    lease_path=lease_path if isinstance(lease_path, Path) else None,
-                    lease_token=lease_token if isinstance(lease_token, str) else None,
-                    cleanup_status=cleanup_status,
+                _begin_omniparser_finalization(runtime_path, "completed")
+                finalization_started = True
+            except BaseException as error:
+                cleanup_errors.append(error)
+        lease_released = False
+        try:
+            resource_lease.release()
+            lease_released = True
+        except BaseException as error:
+            cleanup_errors.append(error)
+        if finalization_started and lease_released and runtime_path is not None:
+            try:
+                _advance_omniparser_finalization(
+                    runtime_path, "lease_removed"
                 )
-                if runtime_path is not None:
-                    _mark_omniparser_runtime_released(runtime_path, invocation_id)
+            except BaseException as error:
+                cleanup_errors.append(error)
+        try:
+            self._persist_cleanup_observation(
+                invocation_id,
+                lease_path=lease_path if isinstance(lease_path, Path) else None,
+                lease_token=lease_token if isinstance(lease_token, str) else None,
+                cleanup_status=(
+                    "verified" if lease_released and not cleanup_errors else "failed"
+                ),
+            )
+        except BaseException as error:
+            cleanup_errors.append(error)
+        if owner_persisted and runtime_path is not None and not cleanup_errors:
+            try:
+                _mark_omniparser_runtime_released(runtime_path, invocation_id)
+            except BaseException as error:
+                cleanup_errors.append(error)
+
+        cleanup_error: BaseException | None = None
+        if len(cleanup_errors) == 1:
+            cleanup_error = cleanup_errors[0]
+        elif cleanup_errors:
+            cleanup_error = BaseExceptionGroup(
+                "omniparser cleanup failed", cleanup_errors
+            )
+        if primary_error is not None:
+            if cleanup_error is not None:
+                raise primary_error.with_traceback(primary_traceback) from cleanup_error
+            raise primary_error.with_traceback(primary_traceback)
+        if cleanup_error is not None:
+            raise cleanup_error
+        return output
 
     def _validate_preflight(
         self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget, invocation_id: str,

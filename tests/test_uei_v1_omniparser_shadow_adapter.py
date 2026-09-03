@@ -167,6 +167,63 @@ def test_managed_native_invoke_uses_same_worker_lifecycle_without_normalizing_bo
     assert not calls[0]["output_path"].exists()
 
 
+@pytest.mark.parametrize("failure", ["lineage_json", "owner_persistence"])
+def test_pre_dispatch_owner_failure_releases_exact_resource_lease_once(
+    tmp_path: Path,
+    monkeypatch,
+    failure: str,
+) -> None:
+    from app.learn.recognition.uei import omniparser_shadow_adapter as adapter_module
+
+    releases: list[str] = []
+
+    class Lease:
+        def release(self) -> None:
+            releases.append("released")
+
+    monkeypatch.setattr(
+        adapter_module.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("worker dispatch reached")
+        ),
+    )
+    if failure == "lineage_json":
+        monkeypatch.setenv("AGENT_GUI_HYBRID_LINEAGE_JSON", "{")
+        expected_error = adapter_module.OmniParserShadowAdapterError
+        expected_message = None
+    else:
+        monkeypatch.setenv("AGENT_GUI_HYBRID_LINEAGE_JSON", "{}")
+        monkeypatch.setenv("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", "scope-omni")
+        monkeypatch.setenv(
+            "AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", str(tmp_path / "owner.json")
+        )
+        monkeypatch.setattr(
+            adapter_module,
+            "persist_omniparser_invocation_owner",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("owner persistence failed")
+            ),
+        )
+        expected_error = RuntimeError
+        expected_message = "owner persistence failed"
+
+    with pytest.raises(expected_error, match=expected_message) as captured:
+        adapter_module.OmniParserShadowAdapter(
+            configuration=_config(tmp_path),
+            resource_lease_manager=lambda _group: Lease(),
+            gpu_free_gib=lambda: 99,
+        ).invoke(
+            capture=_capture(tmp_path),
+            budget=_budget(),
+            invocation_id=f"invocation/pre-dispatch-{failure}",
+        )
+
+    if failure == "lineage_json":
+        assert captured.value.code == "runtime_configuration_unavailable"
+    assert releases == ["released"]
+
+
 def test_offline_environment_preserves_only_windows_program_roots(tmp_path: Path, monkeypatch) -> None:
     from app.learn.recognition.uei.omniparser_shadow_adapter import _offline_environment
 
