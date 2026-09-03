@@ -12,13 +12,14 @@ import sys
 from typing import Any
 
 from app.learn.hybrid.goal_binding_ab import GoalBindingArm, adapt_incumbent_candidate_index, make_native_point_adapter
+from app.learn.hybrid.model_test_storage import MODEL_TEST_ROOT
 
 _PROFILE_VERSION = "goal_binding_model_profile_v1"
 _NOT_ACQUIRED = "not_acquired"
 _HEX = frozenset("0123456789abcdef")
 _FIELDS = frozenset({"contract_version", "profile_id", "arm_id", "provider_id", "model_id", "repository_id", "upstream_revision", "artifacts", "artifact_manifest", "runtime", "dtype_or_quantization", "native_output", "coordinate_space", "preprocessing", "max_output_bytes", "timeout_seconds", "license", "artifact_is_authorization", "execute_binding_enabled", "final_submit_forbidden"})
 _CLEANUP_FIELDS = frozenset({"contract_version", "provider", "verified", "cleanup_status", "owned_processes", "provider_processes_after", "helper_processes_after", "orphan_descendant_pids", "active_listeners_after", "lease_files_after"})
-_MODEL_TEST_ROOT = Path(r"E:\模型测试")
+_MODEL_TEST_ROOT = MODEL_TEST_ROOT
 _MAX_REQUEST_BYTES = 1024 * 1024
 
 
