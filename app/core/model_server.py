@@ -704,7 +704,7 @@ def run_qwen_projection_model(
         "max_tokens": 1536,
         "response_format": {
             "type": "json_schema",
-            "schema": _qwen_model_projection_response_schema(compact),
+            "json_schema": {"schema": _qwen_model_projection_response_schema(compact)},
         },
         "messages": [
             {"role": "system", "content": "Return one compact closed JSON array only."},

@@ -109,7 +109,11 @@ def test_qwen_projection_wire_is_compact_bounded_and_marks_each_serial_body_comp
         wire = json.dumps(body, sort_keys=True)
         assert set(body) == {"model", "temperature", "max_tokens", "response_format", "messages"}
         assert body["temperature"] == 0.0 and body["max_tokens"] == 1536
-        assert body["response_format"]["schema"] == model_server._qwen_model_projection_response_schema(_qwen_projection())
+        assert body["response_format"] == {
+            "type": "json_schema",
+            "json_schema": {"schema": model_server._qwen_model_projection_response_schema(_qwen_projection())},
+        }
+        assert "schema" not in body["response_format"]
         assert "candidate/" not in wire and "context_ref" not in wire and "capture_id" not in wire
         assert body["messages"][1]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
     assert [event[0] for event in events].count("attest") == 5
