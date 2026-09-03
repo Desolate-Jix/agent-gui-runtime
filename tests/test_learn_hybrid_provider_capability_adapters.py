@@ -594,6 +594,17 @@ def test_qwen_cleanup_requires_terminal_receipt_and_inactive_exact_lease(
     assert adapter.validate_cleanup(
         receipt=owned, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
     ).status == "clean"
+    retry_owned = {
+        key: value for key, value in owned.items()
+        if key not in {
+            "hybrid_process_scope_name", "hybrid_process_scope_acquisition",
+            "hybrid_process_scope_cleanup",
+        }
+    }
+    retry_owned["server_termination"] = "verified_exact_process_proven_absent_on_retry"
+    assert adapter.validate_cleanup(
+        receipt=retry_owned, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
+    ).status == "clean"
     for invalid in (
         {**shared, "status": "pending"},
         {**shared, "shared_server_retained": False},

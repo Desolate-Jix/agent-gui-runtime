@@ -328,13 +328,22 @@ def _validate_qwen_release_terminal_receipt(
         "hybrid_process_scope_name", "hybrid_process_scope_acquisition",
         "hybrid_process_scope_cleanup",
     }
-    if set(receipt) != owned_fields:
+    retry_owned_fields = {
+        "status", "lease", "shared_server_retained", "server_termination", "release",
+        "after", "process_identity", "hybrid_descendant_cleanup",
+    }
+    terminal = receipt.get("server_termination")
+    if terminal == "verified_exact_process_exited":
+        expected_fields = owned_fields
+    elif terminal == "verified_exact_process_proven_absent_on_retry":
+        expected_fields = retry_owned_fields
+    else:
         raise ValueError("Qwen release receipt shape is invalid")
     release = receipt.get("release")
     if (
-        receipt.get("status") != "released"
+        set(receipt) != expected_fields
+        or receipt.get("status") != "released"
         or receipt.get("shared_server_retained") is not False
-        or receipt.get("server_termination") != "verified_exact_process_exited"
         or receipt.get("process_identity") != lease.get("server_process_identity")
         or not isinstance(release, dict)
         or set(release) != {"status", "identity", "reason"}
@@ -344,7 +353,10 @@ def _validate_qwen_release_terminal_receipt(
         or not isinstance(receipt.get("after"), dict)
         or not isinstance(receipt.get("hybrid_descendant_cleanup"), dict)
         or receipt["hybrid_descendant_cleanup"].get("status") != "verified"
-        or not isinstance(receipt.get("hybrid_process_scope_name"), str)
+    ):
+        raise ValueError("Qwen owned release receipt is not terminal")
+    if terminal == "verified_exact_process_exited" and (
+        not isinstance(receipt.get("hybrid_process_scope_name"), str)
         or not receipt["hybrid_process_scope_name"]
         or not isinstance(receipt.get("hybrid_process_scope_acquisition"), dict)
         or not isinstance(receipt.get("hybrid_process_scope_cleanup"), dict)

@@ -975,6 +975,19 @@ def test_legacy_qwen_projection_preserves_frozen_precompact_artifact_bytes() -> 
     assert canonical_json_bytes(actual) == canonical_json_bytes(expected)
 
 
+def test_qwen_rejects_excessive_nested_json_string_without_recursion_error() -> None:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture())
+    raw = "{" * 1_500 + "0" + "}" * 1_500
+    with pytest.raises(ValueError, match="invalid JSON"):
+        parse_qwen_candidate_bindings(
+            raw, inventory,
+            context_ref={"id": "hybrid-context/test", "content_sha256": "5" * 64},
+        )
+
+
 def test_qwen_rejects_excessive_nested_authority_without_recursion_error() -> None:
     from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
     from tests.test_learn_hybrid_contracts import inventory_fixture

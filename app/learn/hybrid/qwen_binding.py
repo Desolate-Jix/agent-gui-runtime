@@ -289,7 +289,7 @@ def _parse_qwen_wire_bindings(
             raise ValueError("Qwen model JSON exceeds byte limit")
         try:
             raw = json.loads(raw)
-        except json.JSONDecodeError as error:
+        except (json.JSONDecodeError, RecursionError) as error:
             raise ValueError("unbound Qwen prose or invalid JSON") from error
     if not isinstance(raw, Mapping):
         raise ValueError("unbound Qwen prose or non-closed output")
@@ -605,7 +605,7 @@ def run_qwen_candidate_binding(
             raise ValueError("Qwen model JSON exceeds byte limit")
         try:
             raw = json.loads(raw)
-        except json.JSONDecodeError as error:
+        except (json.JSONDecodeError, RecursionError) as error:
             raise ValueError("unbound Qwen prose or invalid JSON") from error
     parsed = parse_qwen_candidate_bindings(
         raw,
