@@ -11,6 +11,7 @@ _CONTRACT_VERSION = "goal_binding_provider_result_v1"
 _COORDINATE_SPACES = frozenset({"normalized_0_1", "normalized_0_1000", "capture_pixels"})
 _INCUMBENT_CONTROL_PROVIDER_IDS = frozenset({"qwen3_vl_8b_q4_k_m"})
 _UNBOUND_REASONS = frozenset({"no_active_candidate_hit", "ambiguous_active_candidate_hit"})
+_INCUMBENT_UNBOUND_REASON = "provider_abstained"
 _PROVIDER_FAILURE_REASONS = frozenset(
     {
         "provider_call_failed",
@@ -399,10 +400,30 @@ def validate_goal_binding_provider_result(value: object) -> dict[str, object]:
                 raise ValueError("direct_candidate_index must not invent a canonical point")
             canonical_point = None
     else:
-        if binding_basis != "native_point":
-            raise ValueError("only bound results may use direct_candidate_index")
         if candidate_index is not None or candidate_id is not None:
             raise ValueError("unbound or provider failure result carries a candidate")
+        if binding_basis == "direct_candidate_index":
+            if status != "UNBOUND" or provider_id not in _INCUMBENT_CONTROL_PROVIDER_IDS:
+                raise ValueError("direct_candidate_index is reserved for the incumbent control")
+            if reason != _INCUMBENT_UNBOUND_REASON or point is not None:
+                raise ValueError("direct_candidate_index unbound reason or point is invalid")
+            canonical_point = None
+            return {
+                "contract_version": _CONTRACT_VERSION,
+                "goal_index": goal_index,
+                "candidate_index": None,
+                "candidate_id": None,
+                "status": "UNBOUND",
+                "reason": _INCUMBENT_UNBOUND_REASON,
+                "binding_basis": "direct_candidate_index",
+                "confidence": confidence,
+                "canonical_capture_pixel_point": None,
+                "provider_id": provider_id,
+                "native_output_ref": lineage["native_output_ref"],
+                "omni_snapshot_ref": lineage["omni_snapshot_ref"],
+                "capture_ref": lineage["capture_ref"],
+                "artifact_is_authorization": False,
+            }
         if status == "PROVIDER_FAILURE":
             if not isinstance(reason, str) or reason not in _PROVIDER_FAILURE_REASONS:
                 raise ValueError("provider failure result reason is invalid")

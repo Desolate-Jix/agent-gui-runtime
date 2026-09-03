@@ -239,14 +239,23 @@ def adapt_incumbent_candidate_index(
         raise ValueError("incumbent candidate-index response is incomplete")
     binding = bindings[0]
     if binding.get("status") != "BOUND":
-        # The closed canonical contract forbids direct-index UNBOUND results and
-        # forbids inventing a point.  Preserve safety by recording a failure.
-        return _provider_failure(
-            goal_index=goal_index,
-            provider_id=str(context["provider_id"]),
-            context=context,
-            reason="malformed_native_output",
-        )
+        result = {
+            "contract_version": "goal_binding_provider_result_v1",
+            "goal_index": goal_index,
+            "candidate_index": None,
+            "candidate_id": None,
+            "status": "UNBOUND",
+            "reason": "provider_abstained",
+            "binding_basis": "direct_candidate_index",
+            "confidence": binding.get("confidence"),
+            "canonical_capture_pixel_point": None,
+            "provider_id": context["provider_id"],
+            "native_output_ref": context["native_output_ref"],
+            "omni_snapshot_ref": context["omni_snapshot_ref"],
+            "capture_ref": context["capture_ref"],
+            "artifact_is_authorization": False,
+        }
+        return validate_goal_binding_provider_result(result)
     candidate_id = binding.get("candidate_id")
     candidate_index = next(
         (index for index, candidate in enumerate(candidates) if isinstance(candidate, Mapping) and candidate.get("candidate_id") == candidate_id),

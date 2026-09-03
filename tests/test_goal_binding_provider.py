@@ -199,3 +199,27 @@ def test_incumbent_direct_index_basis_is_closed_and_has_no_invented_point() -> N
         validate_goal_binding_provider_result(
             dict(control, provider_id="ui_venus_1_5_2b_f16")
         )
+
+
+def test_incumbent_direct_index_can_preserve_safe_unbound_abstention() -> None:
+    from app.learn.hybrid.goal_binding_provider import validate_goal_binding_provider_result
+
+    bound = _map(_proposal())
+    abstained = dict(
+        bound,
+        candidate_index=None,
+        candidate_id=None,
+        status="UNBOUND",
+        reason="provider_abstained",
+        binding_basis="direct_candidate_index",
+        canonical_capture_pixel_point=None,
+        provider_id="qwen3_vl_8b_q4_k_m",
+    )
+    assert validate_goal_binding_provider_result(abstained) == abstained
+
+    with pytest.raises(ValueError, match="direct_candidate_index"):
+        validate_goal_binding_provider_result(dict(abstained, provider_id="ui_venus_1_5_2b_f16"))
+    with pytest.raises(ValueError, match="reason"):
+        validate_goal_binding_provider_result(dict(abstained, reason="malformed_native_output"))
+    with pytest.raises(ValueError, match="candidate"):
+        validate_goal_binding_provider_result(dict(abstained, candidate_index=0, candidate_id="candidate/apply"))

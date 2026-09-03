@@ -322,3 +322,31 @@ def test_incumbent_bound_record_keeps_frozen_scoring_geometry_when_vista_fails(t
     binder = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "binder")
     assert binder["selected_candidate"]["bbox_original"] == [10, 20, 30, 40]
     assert binder["selected_candidate"]["center_capture_pixel"] == [20.0, 30.0]
+
+
+def test_incumbent_legal_unbound_is_schema_valid_safe_abstention(tmp_path: Path) -> None:
+    from app.learn.hybrid.goal_binding_ab import adapt_incumbent_candidate_index
+
+    arm = _arm(
+        call=lambda _image, _request: [{"goal_index": 0, "candidate_index": None, "status": "UNBOUND", "confidence": 0.4}],
+        adapt=adapt_incumbent_candidate_index,
+    )
+    arm = type(arm)("incumbent", "qwen3_vl_8b_q4_k_m", arm.call, arm.adapt, lambda: _clean("qwen3_vl_8b_q4_k_m"))
+    artifact = _run(tmp_path, arm=arm)
+    binder = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "binder")
+    assert binder["canonical_binding"]["status"] == "UNBOUND"
+    assert binder["canonical_binding"]["binding_basis"] == "direct_candidate_index"
+    assert artifact.metrics["binder"]["schema_valid"] == 25
+    assert artifact.metrics["binder"]["schema_invalid"] == 0
+
+
+def test_malformed_incumbent_unbound_is_schema_invalid(tmp_path: Path) -> None:
+    from app.learn.hybrid.goal_binding_ab import adapt_incumbent_candidate_index
+
+    arm = _arm(
+        call=lambda _image, _request: [{"goal_index": 0, "candidate_index": 0, "status": "UNBOUND", "confidence": 0.4}],
+        adapt=adapt_incumbent_candidate_index,
+    )
+    arm = type(arm)("incumbent", "qwen3_vl_8b_q4_k_m", arm.call, arm.adapt, lambda: _clean("qwen3_vl_8b_q4_k_m"))
+    artifact = _run(tmp_path, arm=arm)
+    assert artifact.metrics["binder"]["schema_invalid"] == 25
