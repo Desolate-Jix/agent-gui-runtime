@@ -739,6 +739,71 @@ def run_qwen_projection_model(
     return parsed
 
 
+def run_hybrid_vista_bare_point(
+    *,
+    roi_bytes: bytes,
+    roi_media_type: str,
+    roi_sha256: str,
+    target_text: str,
+    model_lease: dict[str, Any],
+    timeout_seconds: float = 120.0,
+) -> str:
+    """使用精确 VISTA 租约发送单条 ROI 点定位请求。"""
+    if not isinstance(roi_bytes, bytes) or not roi_bytes:
+        raise ValueError("verified VISTA ROI bytes are required")
+    if roi_media_type not in {"image/png", "image/jpeg"}:
+        raise ValueError("verified VISTA ROI media type is invalid")
+    if sha256(roi_bytes).hexdigest() != roi_sha256:
+        raise ValueError("verified VISTA ROI hash mismatch")
+    prompt = str(target_text or "").strip()
+    if not prompt or len(prompt) > 512:
+        raise ValueError("VISTA target text is invalid")
+    profile = _profile_for_hybrid_vista_model_lease(model_lease)
+    endpoint = str(profile.get("endpoint") or "").strip() or model_base_url(profile) + "/chat/completions"
+    image_url = "data:" + roi_media_type + ";base64," + base64.b64encode(roi_bytes).decode("ascii")
+    try:
+        max_tokens = int(profile.get("max_new_tokens") or 32)
+    except (TypeError, ValueError) as error:
+        raise ValueError("VISTA max token limit is invalid") from error
+    body_payload = {
+        "model": str(profile.get("model_name") or profile.get("model_id") or "vista"),
+        "temperature": 0.0,
+        "max_tokens": min(32, max(1, max_tokens)),
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ],
+    }
+    body = json.dumps(body_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(body) > _SIMPLE_NATIVE_HTTP_REQUEST_MAX_BYTES:
+        raise ValueError("VISTA HTTP request byte limit exceeded")
+    request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=float(timeout_seconds)) as response:
+            response_bytes = response.read(_QWEN_HTTP_RESPONSE_MAX_BYTES + 1)
+            if len(response_bytes) > _QWEN_HTTP_RESPONSE_MAX_BYTES:
+                raise ValueError("VISTA HTTP response byte limit exceeded")
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"VISTA point request failed: {error}") from error
+    response_payload = json.loads(response_bytes.decode("utf-8"))
+    choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
+    message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        raise ValueError("VISTA point response has no message content")
+    return content
+
+
 def prepare_qwen_model_request_acquisition_owner(
     request_id: str, *, runtime_owner_ref: Mapping[str, object]
 ) -> dict[str, Any]:
@@ -4912,6 +4977,65 @@ def build_hybrid_vista_model_lease(
             "process_identities": deepcopy(process_identities),
         },
     }
+
+
+def _profile_for_hybrid_vista_model_lease(model_lease: object) -> dict[str, Any]:
+    if not isinstance(model_lease, dict):
+        raise ValueError("exact Hybrid VISTA model lease is required")
+    fields = {
+        "contract_version",
+        "provider",
+        "incarnation_id",
+        "profile",
+        "process_identities",
+        "process_scope_name",
+        "process_scope_acquisition",
+    }
+    profile = model_lease.get("profile")
+    identities = model_lease.get("process_identities")
+    scope_name = model_lease.get("process_scope_name")
+    acquisition = model_lease.get("process_scope_acquisition")
+    if (
+        set(model_lease) != fields
+        or model_lease.get("contract_version") != "hybrid_vista_model_lease_v2"
+        or model_lease.get("provider") != "vista"
+        or not isinstance(profile, dict)
+        or not str(profile.get("profile_id") or "").strip()
+        or not isinstance(identities, list)
+        or not identities
+        or any(not _valid_process_identity(identity) for identity in identities)
+        or not isinstance(scope_name, str)
+        or not scope_name
+        or not isinstance(acquisition, dict)
+        or acquisition.get("contract_version") != "hybrid_process_scope_acquisition_v1"
+        or acquisition.get("scope_name") != scope_name
+        or acquisition.get("process_identities") != identities
+        or not isinstance(acquisition.get("member_pids"), list)
+        or any(identity["pid"] not in acquisition["member_pids"] for identity in identities)
+        or model_lease.get("incarnation_id")
+        != content_sha256({"profile_id": profile["profile_id"], "process_identities": identities})
+    ):
+        raise ValueError("exact Hybrid VISTA model lease is invalid")
+    if any(_current_process_identity(identity["pid"]) != identity for identity in identities):
+        raise RuntimeError("VISTA provider process ownership changed before request")
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    scope = WindowsProcessScope(scope_name, create=False)
+    try:
+        member_pids = scope.pids()
+    finally:
+        scope.close()
+    expected_pids = {identity["pid"] for identity in identities}
+    if not expected_pids.issubset(set(member_pids)):
+        raise RuntimeError("VISTA provider process left its exact scope before request")
+    try:
+        port = int(profile.get("port") or 0)
+    except (TypeError, ValueError) as error:
+        raise ValueError("VISTA provider port is invalid") from error
+    listening_pids = set(_listening_pids_for_port(port))
+    if port <= 0 or not listening_pids or not listening_pids.issubset(expected_pids):
+        raise RuntimeError("VISTA endpoint socket ownership changed before request")
+    return deepcopy(profile)
 
 
 def release_hybrid_vista_model_lease(

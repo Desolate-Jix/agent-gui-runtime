@@ -130,3 +130,68 @@ def test_scoped_qwen_release_uses_exact_release_without_benchmark_artifacts(monk
 
     assert model_server.release_scoped_qwen_model_lease(lease, "completed") == {"status": "released"}
     assert calls == [{"lease": lease, "reason": "completed", "persist_benchmark_artifacts": False}]
+
+
+def test_vista_bare_point_wire_uses_one_user_message_and_reuses_exact_lease(monkeypatch) -> None:
+    from app.core import model_server
+
+    events: list[object] = []
+    requests: list[dict[str, object]] = []
+    lease = {"contract_version": "hybrid_vista_model_lease_v2", "provider": "vista"}
+    response_payload = {"choices": [{"message": {"content": "[500,500]"}}]}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def read(self, limit: int) -> bytes:
+            events.append(("read", limit))
+            return json.dumps(response_payload).encode("utf-8")
+
+    def urlopen(request, *, timeout: float):
+        events.append(("open", timeout))
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return Response()
+
+    profile = {
+        "profile_id": "vista-test",
+        "model_name": "vista",
+        "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+        "max_new_tokens": 32,
+    }
+    monkeypatch.setattr(
+        model_server,
+        "_profile_for_hybrid_vista_model_lease",
+        lambda selected: events.append(("attest", selected)) or profile,
+    )
+    monkeypatch.setattr(model_server.urllib.request, "urlopen", urlopen)
+    roi = b"verified-roi"
+
+    for _ in range(3):
+        assert model_server.run_hybrid_vista_bare_point(
+            roi_bytes=roi,
+            roi_media_type="image/png",
+            roi_sha256=sha256(roi).hexdigest(),
+            target_text="button labeled 'Open'",
+            model_lease=lease,
+            timeout_seconds=2,
+        ) == "[500,500]"
+
+    assert len(requests) == 3
+    for body in requests:
+        assert set(body) == {"model", "temperature", "max_tokens", "messages"}
+        assert body["temperature"] == 0.0 and body["max_tokens"] == 32
+        assert len(body["messages"]) == 1 and body["messages"][0]["role"] == "user"
+        content = body["messages"][0]["content"]
+        assert content[0] == {"type": "text", "text": "button labeled 'Open'"}
+        assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+        assert "response_format" not in body
+    for index in range(3):
+        assert [event[0] for event in events[index * 3:(index + 1) * 3]] == [
+            "attest",
+            "open",
+            "read",
+        ]
