@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from hashlib import sha256
 import math
 import re
@@ -480,7 +480,10 @@ def invoke_with_capability_envelope(
                 if failure is None:
                     started = monotonic_ns()
                     try:
-                        raw_result = invoke(request)
+                        dispatch_request = _request_with_effective_budget(
+                            request=request, envelope=envelope, budget=effective_budget,
+                        )
+                        raw_result = invoke(dispatch_request)
                     except AdapterFailure as error:
                         failure = CapabilityInvocationFailure(
                             "invocation", error.reason_class, error.retryable, "not_required",
@@ -530,6 +533,26 @@ def invoke_with_capability_envelope(
             failure.duration_ms, failure.resource_units, failure.output_item_count,
         )
     return CapabilityInvocationOutcome(result=result, failure=failure, cleanup=terminal_cleanup, promoted=promoted)
+
+
+def _request_with_effective_budget(
+    *, request: TRequest, envelope: ProviderInvocationEnvelopeV1, budget: ProviderRunBudget,
+) -> TRequest:
+    try:
+        dispatch_envelope = replace(envelope, budget=budget)
+        for field in (
+            "bundle_ref", "invocation_id", "capture_lineage_ref", "resource_lease",
+            "cancellation_event",
+        ):
+            object.__setattr__(dispatch_envelope, field, getattr(envelope, field))
+        dispatch_request = replace(request, envelope=dispatch_envelope)
+        if hasattr(request, "capture"):
+            object.__setattr__(dispatch_request, "capture", getattr(request, "capture"))
+    except TypeError as error:
+        raise UEIValidationError("provider_capability_invalid_envelope") from error
+    return dispatch_request
+
+
 
 
 @dataclass(frozen=True)
@@ -590,9 +613,22 @@ class CandidateDiscoveryItemV1:
     safe_role: str | None = None
     safe_states: tuple[str, ...] = ()
     confidence: float | None = None
+    provider_source_item_id: str | None = None
+    source_id_origin: str = "provider"
 
     def __post_init__(self) -> None:
         _non_empty_string(self.source_item_id, name="source_item_id")
+        if self.source_id_origin not in {"provider", "synthesized"}:
+            raise UEIValidationError("provider_capability_invalid_source_id_origin")
+        provider_source_item_id = self.provider_source_item_id
+        if self.source_id_origin == "provider":
+            if provider_source_item_id is None:
+                provider_source_item_id = self.source_item_id
+            elif _non_empty_string(provider_source_item_id, name="provider_source_item_id") != self.source_item_id:
+                raise UEIValidationError("provider_capability_source_item_id_mismatch")
+        elif provider_source_item_id is not None:
+            raise UEIValidationError("provider_capability_source_item_id_mismatch")
+        object.__setattr__(self, "provider_source_item_id", provider_source_item_id)
         _non_empty_string(self.kind, name="kind")
         if self.source_bbox is not None:
             _xyxy(self.source_bbox, name="source_bbox")
@@ -620,6 +656,7 @@ class CandidateDiscoveryResultV1:
     items: tuple[CandidateDiscoveryItemV1, ...]
     duration_ms: int
     resource_units: int
+    source_item_order: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _ref(self.bundle_ref, name="bundle")
@@ -630,6 +667,15 @@ class CandidateDiscoveryResultV1:
         ids = [item.source_item_id for item in self.items]
         if len(set(ids)) != len(ids):
             raise UEIValidationError("provider_capability_candidate_duplicate")
+        expected_order = tuple(ids)
+        if not self.source_item_order:
+            object.__setattr__(self, "source_item_order", expected_order)
+        elif (
+            not isinstance(self.source_item_order, tuple)
+            or self.source_item_order != expected_order
+            or any(not isinstance(item_id, str) or not item_id for item_id in self.source_item_order)
+        ):
+            raise UEIValidationError("provider_capability_candidate_order_mismatch")
         _non_negative_int(self.duration_ms, name="duration_ms")
         _non_negative_int(self.resource_units, name="resource_units")
         object.__setattr__(self, "bundle_ref", _freeze(self.bundle_ref))

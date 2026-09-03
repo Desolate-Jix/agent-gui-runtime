@@ -20,9 +20,6 @@ from app.learn.recognition.uei.provider_capabilities import (
 )
 
 
-_LEGACY_PROJECTION_ATTRIBUTE = "_provider_capability_legacy_projection_v1"
-
-
 class OmniDiscoveryCompatibilityAdapter:
     capability = "candidate_discovery"
 
@@ -57,7 +54,7 @@ def normalize_current_screen_parse_output(
     """将现有 screen-parse 输出转换为瞬态、非授权的 discovery 结果。"""
     if not isinstance(request, CandidateDiscoveryRequestV1):
         raise UEIValidationError("provider_capability_invalid_discovery_request")
-    _validate_screen_parse_output(output)
+    _validate_screen_parse_output(request=request, output=output)
     items = tuple(
         _neutral_item(
             item=item,
@@ -75,7 +72,6 @@ def normalize_current_screen_parse_output(
         resource_units=output.resource_units,
     )
     request.validate_result(result)
-    object.__setattr__(result, _LEGACY_PROJECTION_ATTRIBUTE, _copy_screen_parse_output(output))
     return result
 
 
@@ -86,22 +82,10 @@ def project_discovery_to_screen_parse_v1(
     if not isinstance(result, CandidateDiscoveryResultV1):
         raise UEIValidationError("provider_capability_invalid_discovery_result")
     reject_authority_shaped_payload(vars(result))
+    if result.source_item_order != tuple(item.source_item_id for item in result.items):
+        raise UEIValidationError("provider_capability_discovery_projection_order_mismatch")
     for item in result.items:
         reject_authority_shaped_payload(vars(item))
-    legacy_output = getattr(result, _LEGACY_PROJECTION_ATTRIBUTE, None)
-    if legacy_output is not None:
-        _validate_screen_parse_output(legacy_output)
-        expected_items = tuple(
-            _neutral_item(
-                item=item,
-                bundle_ref=dict(result.bundle_ref),
-                source_index=index,
-            )
-            for index, item in enumerate(legacy_output.items)
-        )
-        if result.items != expected_items:
-            raise UEIValidationError("provider_capability_discovery_projection_order_mismatch")
-        return _copy_screen_parse_output(legacy_output)
     return NormalizedScreenParseOutput(
         items=tuple(_screen_parse_item(item) for item in result.items),
         duration_ms=result.duration_ms,
@@ -109,16 +93,31 @@ def project_discovery_to_screen_parse_v1(
     )
 
 
-def _validate_screen_parse_output(output: object) -> None:
+def _validate_screen_parse_output(
+    *, request: CandidateDiscoveryRequestV1, output: object,
+) -> None:
     if not isinstance(output, NormalizedScreenParseOutput):
         raise UEIValidationError("provider_capability_invalid_screen_parse_output")
     reject_authority_shaped_payload(vars(output))
     if not isinstance(output.items, tuple):
         raise UEIValidationError("provider_capability_invalid_screen_parse_items")
+    width = request.capture.image_size["width"]
+    height = request.capture.image_size["height"]
     for item in output.items:
         if not isinstance(item, NormalizedProviderItem):
             raise UEIValidationError("provider_capability_invalid_screen_parse_item")
         reject_authority_shaped_payload(vars(item))
+        if item.kind not in {"element", "text", "role", "state", "icon", "structure"}:
+            raise UEIValidationError("provider_capability_invalid_omni_kind")
+        if item.source_coordinate_space != "capture_pixel_xyxy":
+            raise UEIValidationError("provider_capability_invalid_omni_coordinate_space")
+        bbox = item.source_bbox
+        if (
+            not isinstance(bbox, tuple) or len(bbox) != 4
+            or any(isinstance(edge, bool) or not isinstance(edge, int) for edge in bbox)
+            or not (0 <= bbox[0] < bbox[2] <= width and 0 <= bbox[1] < bbox[3] <= height)
+        ):
+            raise UEIValidationError("provider_capability_invalid_omni_bbox")
 
 
 def _neutral_item(
@@ -127,13 +126,16 @@ def _neutral_item(
     bundle_ref: dict[str, str],
     source_index: int,
 ) -> CandidateDiscoveryItemV1:
-    source_item_id = item.source_item_id
+    provider_source_item_id = item.source_item_id
+    source_item_id = provider_source_item_id
+    source_id_origin = "provider"
     if source_item_id is None:
         source_item_id = deterministic_neutral_source_item_id(
             bundle_ref=bundle_ref,
             source_index=source_index,
             native_fingerprint=_native_item_fingerprint(item),
         )
+        source_id_origin = "synthesized"
     return CandidateDiscoveryItemV1(
         source_item_id=source_item_id,
         kind=item.kind,
@@ -143,6 +145,8 @@ def _neutral_item(
         safe_role=item.safe_role,
         safe_states=item.safe_states,
         confidence=item.provider_confidence,
+        provider_source_item_id=provider_source_item_id,
+        source_id_origin=source_id_origin,
     )
 
 
@@ -161,7 +165,7 @@ def _native_item_fingerprint(item: NormalizedProviderItem) -> str:
 
 def _screen_parse_item(item: CandidateDiscoveryItemV1) -> NormalizedProviderItem:
     return NormalizedProviderItem(
-        source_item_id=item.source_item_id,
+        source_item_id=item.provider_source_item_id,
         kind=item.kind,
         safe_text=item.safe_text,
         source_bbox=item.source_bbox,
@@ -169,24 +173,4 @@ def _screen_parse_item(item: CandidateDiscoveryItemV1) -> NormalizedProviderItem
         safe_role=item.safe_role,
         safe_states=item.safe_states,
         provider_confidence=item.confidence,
-    )
-
-
-def _copy_screen_parse_output(output: NormalizedScreenParseOutput) -> NormalizedScreenParseOutput:
-    return NormalizedScreenParseOutput(
-        items=tuple(
-            NormalizedProviderItem(
-                source_item_id=item.source_item_id,
-                kind=item.kind,
-                safe_text=item.safe_text,
-                source_bbox=item.source_bbox,
-                source_coordinate_space=item.source_coordinate_space,
-                safe_role=item.safe_role,
-                safe_states=item.safe_states,
-                provider_confidence=item.provider_confidence,
-            )
-            for item in output.items
-        ),
-        duration_ms=output.duration_ms,
-        resource_units=output.resource_units,
     )
