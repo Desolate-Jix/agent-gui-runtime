@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 import subprocess
 import sys
@@ -21,7 +22,10 @@ def test_cli_defaults_to_preflight_and_never_builds_actual_callers() -> None:
 def test_cli_replay_runs_only_the_five_regression_cases(tmp_path: Path) -> None:
     result = _run("--mode", "replay", "--replay-dir", "tests/fixtures/simple_native_provider_smoke/replay", "--artifact-dir", str(tmp_path))
     assert result.returncode == 0
-    assert json.loads((tmp_path / "provider-diagnostic.json").read_text(encoding="utf-8"))["screen_count"] == 5
+    provider_path = tmp_path / "provider-diagnostic.json"
+    assert json.loads(provider_path.read_text(encoding="utf-8"))["screen_count"] == 5
+    report = json.loads((tmp_path / "regression-report.json").read_text(encoding="utf-8"))
+    assert report["provider_artifact_sha256"] == sha256(provider_path.read_bytes()).hexdigest()
 
 
 def test_cli_actual_requires_explicit_model_start_flag() -> None:

@@ -108,7 +108,7 @@ def main() -> int:
         from app.learn.hybrid.simple_native_smoke import run_simple_native_regression_diagnostic, score_simple_native_regression
         artifact=run_simple_native_regression_diagnostic(cases=_cases(config),slots=_replay_slots(args.replay_dir),artifact_dir=args.artifact_dir)
         report=score_simple_native_regression(provider_artifact=artifact, gold_path=ROOT / str(config["scorer_gold_path"]))
-        (args.artifact_dir / "regression-report.json").write_text(json.dumps({"correct_selected": report.correct_selected, "wrong_selected": report.wrong_selected, "abstained": report.abstained, "denominator": report.target_count, "regression_diagnostic_only": True, "promotion_eligible": False}, ensure_ascii=False), encoding="utf-8")
+        (args.artifact_dir / "regression-report.json").write_text(json.dumps({"provider_artifact_sha256": report.provider_artifact_sha256, "correct_selected": report.correct_selected, "wrong_selected": report.wrong_selected, "abstained": report.abstained, "denominator": report.target_count, "regression_diagnostic_only": True, "promotion_eligible": False}, ensure_ascii=False), encoding="utf-8")
         print(f'replay: {artifact.path}')
         return 0
     except (OSError, ValueError, KeyError, TypeError) as error:

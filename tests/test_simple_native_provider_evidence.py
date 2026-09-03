@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from PIL import Image
+import pytest
 
 
 def _cases(tmp_path: Path) -> list[object]:
@@ -22,7 +23,10 @@ def _cases(tmp_path: Path) -> list[object]:
                 image_path=path,
                 image_size=(100, 80),
                 image_sha256=sha256(path.read_bytes()).hexdigest(),
-                goals=tuple(f"goal-{index}-{target}" for target in range(5)),
+                goals=(
+                    "Select the button labeled 'replay'",
+                    *(f"Select the button labeled 'missing-{target}'" for target in range(1, 5)),
+                ),
             )
         )
     return result
@@ -212,9 +216,65 @@ def test_vista_bad_capture_sha_and_boundary_point_abstain_without_correction(
     )
 
     assert vista_calls == []
-    vista_trace = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "vista")
-    assert "sha256 mismatch" in vista_trace["parse_error"]
+    qwen_trace = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "qwen")
+    assert "sha256 mismatch" in qwen_trace["parse_error"]
     assert artifact.metrics["abstained"] >= 1
+
+
+def test_capture_mutated_by_omni_is_rejected_before_qwen(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    qwen_calls: list[Path] = []
+
+    def omni(image: Path) -> object:
+        image.write_bytes(b"mutated-by-omni")
+        return {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "replay", "interactivity": True}]}
+
+    slots = SimpleNativeSlots(
+        omni=omni,
+        qwen=lambda image, _projection: qwen_calls.append(image) or {"bindings": []},
+        vista=lambda _image, _target: "[500,500]",
+    )
+    artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "artifacts")
+
+    assert qwen_calls == []
+    assert artifact.metrics["omni"]["schema_valid"] == 0
+    assert artifact.metrics["omni"]["schema_invalid"] == 2
+    first = artifact.cases[0]["trace"]
+    assert any(entry.get("slot") == "omni" and "sha256 mismatch" in entry.get("parse_error", "") for entry in first)
+    assert len([entry for entry in first if entry.get("slot") == "vista" and entry.get("status") == "abstained"]) == 5
+
+
+def test_vista_outcomes_are_goal_bounded_with_extra_and_duplicate_candidates(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    vista_calls: list[str] = []
+    labels = ["replay", "replay", "missing-1", "missing-2", "missing-3", "noise"]
+    slots = SimpleNativeSlots(
+        omni=lambda _image: {
+            "items": [
+                {"bbox": [index / 10, 0.1, (index + 1) / 10, 0.2], "type": "text", "content": label, "interactivity": True}
+                for index, label in enumerate(labels, start=1)
+            ]
+        },
+        qwen=lambda _image, projection: {
+            "bindings": [
+                {"i": item["i"], "role": "button", "label": labels[item["i"]], "status": "BOUND", "confidence": 1}
+                for item in projection["candidates"]
+            ]
+        },
+        vista=lambda _image, target: vista_calls.append(target) or "[500,500]",
+    )
+
+    artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "artifacts")
+
+    assert len(vista_calls) == 15
+    assert artifact.metrics["vista"]["attempted"] == 15
+    for case in artifact.cases:
+        outcomes = [entry for entry in case["trace"] if entry.get("slot") == "vista"]
+        assert len(outcomes) == 5
+        assert len({entry["goal_id"] for entry in outcomes}) == 5
+        assert all(entry["goal_text"].startswith("Select the button labeled '") for entry in outcomes)
 
 
 def test_vista_rejects_inactive_and_ambiguous_candidates_before_dispatch(
@@ -304,7 +364,7 @@ def test_vista_strict_boundary_point_is_not_clipped_or_scored(tmp_path: Path) ->
     assert "capture_point" not in trace
 
 
-def test_scorer_abstains_duplicate_semantics_and_rejects_unsealed_tampering(tmp_path: Path) -> None:
+def test_scorer_rejects_duplicate_outcomes_and_unsealed_tampering(tmp_path: Path) -> None:
     from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic, score_simple_native_regression
     from app.learn.recognition.uei.canonical import seal_immutable
 
@@ -326,8 +386,8 @@ def test_scorer_abstains_duplicate_semantics_and_rejects_unsealed_tampering(tmp_
     payload["cases"][0]["trace"].append(deepcopy(first_vista))
     payload.pop("content_sha256")
     artifact.path.write_text(json.dumps(seal_immutable(payload), ensure_ascii=False), encoding="utf-8")
-    report = score_simple_native_regression(provider_artifact=artifact, gold_path=gold_path)
-    assert (report.correct_selected, report.abstained) == (4, 21)
+    with pytest.raises(ValueError, match="structure"):
+        score_simple_native_regression(provider_artifact=artifact, gold_path=gold_path)
 
     tampered = json.loads(artifact.path.read_text(encoding="utf-8"))
     tampered["cases"][0]["trace"] = []
@@ -338,3 +398,38 @@ def test_scorer_abstains_duplicate_semantics_and_rejects_unsealed_tampering(tmp_
         assert "finalized sealed" in str(error)
     else:
         raise AssertionError("unsealed provider trace reached the scorer")
+
+
+def test_scorer_rejects_self_sealed_extra_case_or_thirty_outcomes_before_gold(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic, score_simple_native_regression
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    slots = SimpleNativeSlots(
+        omni=lambda _image: {"items": [{"bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "replay", "interactivity": True}]},
+        qwen=lambda _image, projection: {"bindings": [{"i": item["i"], "role": "button", "label": "replay", "status": "BOUND", "confidence": 0.8} for item in projection["candidates"]]},
+        vista=lambda _image, _target: "[500,500]",
+    )
+    artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "artifacts")
+    baseline = json.loads(artifact.path.read_text(encoding="utf-8"))
+
+    extra_case = deepcopy(baseline)
+    extra_case["cases"].append({**deepcopy(extra_case["cases"][0]), "case_id": "case-006"})
+    extra_case.pop("content_sha256")
+    artifact.path.write_text(json.dumps(seal_immutable(extra_case), ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="structure"):
+        score_simple_native_regression(provider_artifact=artifact, gold_path=tmp_path / "must-not-open.json")
+
+    reordered = deepcopy(baseline)
+    reordered["cases"][0], reordered["cases"][1] = reordered["cases"][1], reordered["cases"][0]
+    reordered.pop("content_sha256")
+    artifact.path.write_text(json.dumps(seal_immutable(reordered), ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="structure"):
+        score_simple_native_regression(provider_artifact=artifact, gold_path=tmp_path / "must-not-open.json")
+
+    thirty_outcomes = deepcopy(baseline)
+    for case in thirty_outcomes["cases"]:
+        case["trace"].append(deepcopy(next(entry for entry in case["trace"] if entry.get("slot") == "vista")))
+    thirty_outcomes.pop("content_sha256")
+    artifact.path.write_text(json.dumps(seal_immutable(thirty_outcomes), ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="structure"):
+        score_simple_native_regression(provider_artifact=artifact, gold_path=tmp_path / "must-not-open.json")

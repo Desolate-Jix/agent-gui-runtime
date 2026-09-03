@@ -10,6 +10,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 from statistics import median
 import sys
@@ -30,6 +31,23 @@ from app.learn.hybrid.simple_native_contracts import (
 )
 from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
 from app.learn.recognition.uei.store import UEIObjectStore
+
+
+_PROVIDER_GOAL = re.compile(
+    r"\ASelect the (?P<role>[a-z][a-z0-9_-]*) labeled '(?P<label>[^'\r\n]+)'\Z"
+)
+_CLEANUP_OBSERVATION_FIELDS = {
+    "contract_version",
+    "provider",
+    "verified",
+    "cleanup_status",
+    "owned_processes",
+    "provider_processes_after",
+    "helper_processes_after",
+    "orphan_descendant_pids",
+    "active_listeners_after",
+    "lease_files_after",
+}
 
 
 class OmniNativeCaller(Protocol):
@@ -94,6 +112,49 @@ def _hash(value: object) -> str:
 
 def _raw_text(value: object) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _parse_provider_goals(case: ProviderCase) -> list[dict[str, str]]:
+    parsed: list[dict[str, str]] = []
+    seen_semantics: set[tuple[str, str]] = set()
+    for index, goal in enumerate(case.goals):
+        match = _PROVIDER_GOAL.fullmatch(goal) if isinstance(goal, str) else None
+        if match is None or match.group("label").strip() != match.group("label"):
+            raise ValueError(f"{case.case_id} provider goal is outside the closed grammar")
+        role, label = match.group("role"), match.group("label")
+        semantic = (role, label)
+        if semantic in seen_semantics:
+            raise ValueError(f"{case.case_id} provider goals contain duplicate semantic identity")
+        seen_semantics.add(semantic)
+        parsed.append({
+            "goal_id": f"{case.case_id}/goal-{index + 1:02d}/{_hash({'goal': goal})[:16]}",
+            "goal_text": goal,
+            "semantic_role": role,
+            "semantic_label": label,
+        })
+    return parsed
+
+
+def _verify_capture_freshness(capture: Mapping[str, object], provider: str) -> Path:
+    capture_path = Path(str(capture.get("capture_path") or ""))
+    expected_sha = capture.get("screenshot_sha256")
+    image_size = capture.get("image_size")
+    if not capture_path.is_file() or not isinstance(expected_sha, str):
+        raise ValueError(f"{provider} capture artifact is unavailable")
+    if sha256(capture_path.read_bytes()).hexdigest() != expected_sha:
+        raise ValueError(f"{provider} capture sha256 mismatch")
+    if (
+        not isinstance(image_size, Mapping)
+        or isinstance(image_size.get("width"), bool)
+        or not isinstance(image_size.get("width"), int)
+        or isinstance(image_size.get("height"), bool)
+        or not isinstance(image_size.get("height"), int)
+    ):
+        raise ValueError(f"{provider} capture dimensions are invalid")
+    with Image.open(capture_path) as opened:
+        if opened.size != (image_size["width"], image_size["height"]):
+            raise ValueError(f"{provider} capture dimensions changed")
+    return capture_path
 
 
 def _metric() -> dict[str, object]:
@@ -366,16 +427,14 @@ def _eligible_bindings(bindings: Mapping[str, object], inventory: Mapping[str, o
 def _persist_vista_roi_crop(
     *, capture: Mapping[str, object], candidate: Mapping[str, object], artifact_dir: Path
 ) -> dict[str, object]:
-    capture_path = Path(str(capture.get("capture_path") or ""))
+    capture_path = _verify_capture_freshness(capture, "VISTA")
     capture_sha = capture.get("screenshot_sha256")
     capture_id = capture.get("capture_id")
     image_size = capture.get("image_size")
     candidate_id = candidate.get("candidate_id")
     bbox = candidate.get("bbox_original")
-    if not capture_path.is_file() or not isinstance(capture_sha, str):
+    if not isinstance(capture_sha, str):
         raise ValueError("VISTA capture artifact is unavailable")
-    if sha256(capture_path.read_bytes()).hexdigest() != capture_sha:
-        raise ValueError("VISTA capture sha256 mismatch")
     if (
         not isinstance(image_size, Mapping)
         or isinstance(image_size.get("width"), bool)
@@ -431,6 +490,19 @@ def _record_failure(
     })
 
 
+def _record_goal_abstention(
+    *, state: dict[str, Any], goal: Mapping[str, str], reason: str, candidate_id: object = None
+) -> None:
+    state["trace"].append({
+        "slot": "vista",
+        "status": "abstained",
+        "reason": reason,
+        **deepcopy(dict(goal)),
+        "candidate_id": candidate_id,
+        "parent_capture_id": state["capture"]["capture_id"],
+    })
+
+
 def _observe_provider_cleanup(slots: SimpleNativeSlots, provider: str) -> dict[str, object]:
     if slots.release_provider is None:
         return {
@@ -440,11 +512,43 @@ def _observe_provider_cleanup(slots: SimpleNativeSlots, provider: str) -> dict[s
             "reason": "injected replay slot has no managed process lifecycle",
         }
     receipt = slots.release_provider(provider)
-    if not isinstance(receipt, Mapping) or receipt.get("provider") != provider:
+    if not isinstance(receipt, Mapping) or set(receipt) != _CLEANUP_OBSERVATION_FIELDS:
         raise ValueError(f"{provider} cleanup observation is invalid")
     observed = dict(receipt)
-    if observed.get("verified") is not True:
-        raise RuntimeError(f"{provider} cleanup is not verified; next provider is blocked")
+    if (
+        observed.get("contract_version") != "simple_native_provider_cleanup_v1"
+        or observed.get("provider") != provider
+        or not isinstance(observed.get("verified"), bool)
+        or observed.get("cleanup_status") not in {"verified", "failed"}
+        or any(
+            not isinstance(observed[field], list)
+            for field in (
+                "owned_processes",
+                "provider_processes_after",
+                "helper_processes_after",
+                "orphan_descendant_pids",
+                "active_listeners_after",
+                "lease_files_after",
+            )
+        )
+    ):
+        raise ValueError(f"{provider} cleanup observation is invalid")
+    if (
+        observed["verified"] is not True
+        or observed["cleanup_status"] != "verified"
+        or any(
+            observed[field]
+            for field in (
+                "owned_processes",
+                "provider_processes_after",
+                "helper_processes_after",
+                "orphan_descendant_pids",
+                "active_listeners_after",
+                "lease_files_after",
+            )
+        )
+    ):
+        raise RuntimeError(f"{provider} cleanup observation is not clean; next provider is blocked")
     return observed
 
 
@@ -455,7 +559,7 @@ def run_simple_native_regression_diagnostic(
     artifact_dir: Path,
 ) -> ProviderDiagnosticArtifact:
     """Run five provider-batched cases without reading Gold or acting."""
-    if len(cases) != 5 or {case.case_id for case in cases} != {f"case-{index:03d}" for index in range(1, 6)}:
+    if len(cases) != 5 or [case.case_id for case in cases] != [f"case-{index:03d}" for index in range(1, 6)]:
         raise ValueError("simple-native diagnostic requires exactly case-001 through case-005")
     if sum(len(case.goals) for case in cases) != 25:
         raise ValueError("simple-native diagnostic requires exactly 25 goals")
@@ -469,9 +573,11 @@ def run_simple_native_regression_diagnostic(
     states: list[dict[str, Any]] = []
     provider_phase_cleanup: list[dict[str, object]] = []
     for case in cases:
+        goals = _parse_provider_goals(case)
         states.append({
             "case": case,
             "capture": _prepare_capture(case, artifact_dir),
+            "goals": goals,
             "trace": [],
             "inventory": None,
             "bindings": None,
@@ -485,7 +591,9 @@ def run_simple_native_regression_diagnostic(
         metrics["omni"]["attempted"] += 1
         started, raw = perf_counter(), ""
         try:
-            raw = slots.omni(Path(capture["capture_path"]))
+            capture_path = _verify_capture_freshness(capture, "Omni")
+            raw = slots.omni(capture_path)
+            _verify_capture_freshness(capture, "Omni")
             parsed = parse_omni_native_output(raw)
             evidence = _build_omni_evidence(case=case, capture=capture, parsed=parsed, artifact_dir=artifact_dir)
             state["inventory"] = evidence["inventory"]
@@ -518,12 +626,14 @@ def run_simple_native_regression_diagnostic(
         if inventory is None or invalid_streak["qwen"] >= 2:
             continue
         capture = state["capture"]
-        runtime_request = build_qwen_binding_request(capture["bundle"], inventory)
-        projection = build_qwen_model_projection(runtime_request)
         metrics["qwen"]["attempted"] += 1
-        started, raw = perf_counter(), ""
+        started, raw, runtime_request, projection = perf_counter(), "", None, None
         try:
-            raw = slots.qwen(Path(capture["capture_path"]), projection)
+            capture_path = _verify_capture_freshness(capture, "Qwen")
+            runtime_request = build_qwen_binding_request(capture["bundle"], inventory)
+            projection = build_qwen_model_projection(runtime_request)
+            raw = slots.qwen(capture_path, projection)
+            _verify_capture_freshness(capture, "Qwen")
             expanded = expand_qwen_model_response(raw, projection=projection, runtime_request=runtime_request)
             parsed = parse_qwen_candidate_bindings(expanded, inventory, context_ref=runtime_request["context_ref"])
             state["bindings"] = parsed
@@ -546,57 +656,64 @@ def run_simple_native_regression_diagnostic(
             metrics["qwen"]["timeout"] += 1
             invalid_streak["qwen"] += 1
             _record_failure(state=state, slot="qwen", raw=raw, error=exc, error_class="timeout")
-            state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
+            if runtime_request is not None and projection is not None:
+                state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
             metrics["qwen"]["schema_invalid"] += 1
             invalid_streak["qwen"] += 1
             _record_failure(state=state, slot="qwen", raw=raw, error=exc, error_class="schema")
-            state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
+            if runtime_request is not None and projection is not None:
+                state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
         metrics["qwen"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
         metrics["qwen"]["raw_output_bytes"] += len(state["trace"][-1].get("raw", "").encode("utf-8"))
     provider_phase_cleanup.append(_observe_provider_cleanup(slots, "qwen"))
 
     for state in states:
         inventory, bindings = state["inventory"], state["bindings"]
-        if not isinstance(inventory, Mapping) or not isinstance(bindings, Mapping):
-            continue
         capture = state["capture"]
-        eligible = _eligible_bindings(bindings, inventory)
-        eligible_ids = {binding["candidate_id"] for binding, _candidate in eligible}
-        parsed_bindings = bindings.get("bindings")
-        if isinstance(parsed_bindings, list):
-            for binding in parsed_bindings:
-                if isinstance(binding, Mapping) and binding.get("candidate_id") not in eligible_ids:
-                    metrics["abstained"] += 1
-                    state["trace"].append({
-                        "slot": "vista",
-                        "status": "abstained",
-                        "reason": "candidate_not_uniquely_bound_active_eligible",
-                        "semantic_role": binding.get("role"),
-                        "semantic_label": binding.get("label"),
-                        "candidate_id": binding.get("candidate_id"),
-                        "parent_capture_id": capture["capture_id"],
-                    })
-        for binding, candidate in eligible:
+        eligible = (
+            _eligible_bindings(bindings, inventory)
+            if isinstance(inventory, Mapping) and isinstance(bindings, Mapping)
+            else []
+        )
+        for goal in state["goals"]:
+            matches = [
+                (binding, candidate)
+                for binding, candidate in eligible
+                if binding.get("role") == goal["semantic_role"]
+                and binding.get("label") == goal["semantic_label"]
+            ]
+            if len(matches) != 1:
+                metrics["abstained"] += 1
+                _record_goal_abstention(
+                    state=state,
+                    goal=goal,
+                    reason=(
+                        "provider_evidence_unavailable"
+                        if not isinstance(inventory, Mapping) or not isinstance(bindings, Mapping)
+                        else "goal_binding_not_unique_active_eligible"
+                    ),
+                )
+                continue
+            binding, candidate = matches[0]
             if invalid_streak["vista"] >= 2:
                 metrics["abstained"] += 1
-                state["trace"].append({
-                    "slot": "vista",
-                    "status": "abstained",
-                    "reason": "vista_schema_circuit_open",
-                    "semantic_role": binding["role"],
-                    "semantic_label": binding["label"],
-                    "candidate_id": binding["candidate_id"],
-                    "parent_capture_id": capture["capture_id"],
-                })
+                _record_goal_abstention(
+                    state=state,
+                    goal=goal,
+                    reason="vista_schema_circuit_open",
+                    candidate_id=binding["candidate_id"],
+                )
                 continue
             metrics["vista"]["attempted"] += 1
             started, raw, roi_crop = perf_counter(), "", None
             try:
+                _verify_capture_freshness(capture, "VISTA")
                 roi_crop = _persist_vista_roi_crop(capture=capture, candidate=candidate, artifact_dir=artifact_dir)
                 roi = tuple(roi_crop["roi_xyxy"])
                 target = f"{binding['role']}: {binding['label']}"
                 raw = slots.vista(Path(roi_crop["crop_path"]), target)
+                _verify_capture_freshness(capture, "VISTA")
                 normalized = parse_vista_normalized_point(raw)
                 point = restore_vista_point_to_capture(normalized, roi_xyxy=roi)
                 if not (roi[0] < point[0] < roi[2] and roi[1] < point[1] < roi[3]):
@@ -604,9 +721,9 @@ def run_simple_native_regression_diagnostic(
                 metrics["vista"]["schema_valid"] += 1
                 invalid_streak["vista"] = 0
                 state["trace"].append({
-                    "slot": "vista", "raw": raw, "parsed": list(normalized),
+                    "slot": "vista", "status": "selected", "raw": raw, "parsed": list(normalized),
                     "capture_point": list(point), "roi_xyxy": list(roi),
-                    "semantic_role": binding["role"], "semantic_label": binding["label"],
+                    **deepcopy(dict(goal)),
                     "candidate_id": binding["candidate_id"], "parent_capture_id": capture["capture_id"],
                     "roi_crop": roi_crop,
                     "raw_sha256": _hash(raw),
@@ -616,7 +733,7 @@ def run_simple_native_regression_diagnostic(
                 invalid_streak["vista"] += 1
                 metrics["abstained"] += 1
                 _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="timeout")
-                state["trace"][-1].update({"semantic_role": binding["role"], "semantic_label": binding["label"], "candidate_id": binding["candidate_id"]})
+                state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": binding["candidate_id"]})
                 if roi_crop is not None:
                     state["trace"][-1]["roi_crop"] = roi_crop
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -624,7 +741,7 @@ def run_simple_native_regression_diagnostic(
                 invalid_streak["vista"] += 1
                 metrics["abstained"] += 1
                 _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="schema")
-                state["trace"][-1].update({"semantic_role": binding["role"], "semantic_label": binding["label"], "candidate_id": binding["candidate_id"]})
+                state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": binding["candidate_id"]})
                 if roi_crop is not None:
                     state["trace"][-1]["roi_crop"] = roi_crop
             metrics["vista"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
@@ -634,6 +751,7 @@ def run_simple_native_regression_diagnostic(
     records = [{
         "case_id": state["case"].case_id,
         "goal_count": len(state["case"].goals),
+        "goals": deepcopy(state["goals"]),
         "capture": {key: deepcopy(value) for key, value in state["capture"].items() if key not in {"bundle", "path"}},
         "trace": state["trace"],
     } for state in states]
@@ -662,6 +780,108 @@ def run_simple_native_regression_diagnostic(
     return ProviderDiagnosticArtifact(path=path, cases=tuple(records), metrics=metrics, screen_count=5, target_count=25)
 
 
+def _validate_provider_artifact_structure(provider_payload: Mapping[str, object]) -> None:
+    cases = provider_payload.get("cases")
+    metrics = provider_payload.get("metrics")
+    vista_metrics = metrics.get("vista") if isinstance(metrics, Mapping) else None
+    if (
+        not isinstance(cases, list)
+        or len(cases) != 5
+        or [case.get("case_id") if isinstance(case, Mapping) else None for case in cases]
+        != [f"case-{index:03d}" for index in range(1, 6)]
+        or not isinstance(metrics, Mapping)
+        or not isinstance(vista_metrics, Mapping)
+        or isinstance(vista_metrics.get("attempted"), bool)
+        or not isinstance(vista_metrics.get("attempted"), int)
+        or not 0 <= vista_metrics["attempted"] <= 25
+        or isinstance(metrics.get("denominator"), bool)
+        or not isinstance(metrics.get("denominator"), int)
+        or isinstance(provider_payload.get("target_count"), bool)
+        or not isinstance(provider_payload.get("target_count"), int)
+        or metrics.get("denominator") != 25
+        or provider_payload.get("target_count") != metrics.get("denominator")
+    ):
+        raise ValueError("provider artifact structure has inconsistent cases or denominator")
+    total_goals = total_outcomes = abstained_outcomes = 0
+    for case in cases:
+        assert isinstance(case, Mapping)
+        case_id = case["case_id"]
+        goals = case.get("goals")
+        trace = case.get("trace")
+        goal_count = case.get("goal_count")
+        if (
+            isinstance(goal_count, bool)
+            or not isinstance(goal_count, int)
+            or goal_count != 5
+            or not isinstance(goals, list)
+            or len(goals) != goal_count
+            or not isinstance(trace, list)
+        ):
+            raise ValueError("provider artifact structure has invalid goals or trace")
+        validated_goals: dict[str, Mapping[str, object]] = {}
+        semantic_goals: set[tuple[object, object]] = set()
+        for index, goal in enumerate(goals):
+            if not isinstance(goal, Mapping) or set(goal) != {
+                "goal_id", "goal_text", "semantic_role", "semantic_label"
+            }:
+                raise ValueError("provider artifact structure has malformed goal identity")
+            goal_text = goal.get("goal_text")
+            match = _PROVIDER_GOAL.fullmatch(goal_text) if isinstance(goal_text, str) else None
+            expected_goal_id = (
+                f"{case_id}/goal-{index + 1:02d}/{_hash({'goal': goal_text})[:16]}"
+                if match is not None
+                else None
+            )
+            semantic = (goal.get("semantic_role"), goal.get("semantic_label"))
+            if (
+                match is None
+                or match.group("label").strip() != match.group("label")
+                or semantic != (match.group("role"), match.group("label"))
+                or goal.get("goal_id") != expected_goal_id
+                or not isinstance(goal.get("goal_id"), str)
+                or goal["goal_id"] in validated_goals
+                or semantic in semantic_goals
+            ):
+                raise ValueError("provider artifact structure has duplicate or inconsistent goals")
+            validated_goals[goal["goal_id"]] = goal
+            semantic_goals.add(semantic)
+        outcomes = [entry for entry in trace if isinstance(entry, Mapping) and entry.get("slot") == "vista"]
+        if len(outcomes) != goal_count:
+            raise ValueError("provider artifact structure must contain one VISTA outcome per goal")
+        seen_outcomes: set[str] = set()
+        semantic_outcomes: set[tuple[object, object]] = set()
+        for outcome in outcomes:
+            goal_id = outcome.get("goal_id")
+            goal = validated_goals.get(goal_id) if isinstance(goal_id, str) else None
+            semantic = (outcome.get("semantic_role"), outcome.get("semantic_label"))
+            status = outcome.get("status")
+            if (
+                goal is None
+                or goal_id in seen_outcomes
+                or semantic in semantic_outcomes
+                or outcome.get("goal_text") != goal.get("goal_text")
+                or semantic != (goal.get("semantic_role"), goal.get("semantic_label"))
+                or status not in {"selected", "abstained"}
+                or (status == "selected" and "capture_point" not in outcome)
+                or (status == "abstained" and "capture_point" in outcome)
+            ):
+                raise ValueError("provider artifact structure has duplicate or inconsistent VISTA outcomes")
+            seen_outcomes.add(goal_id)
+            semantic_outcomes.add(semantic)
+            if status == "abstained":
+                abstained_outcomes += 1
+        if seen_outcomes != set(validated_goals):
+            raise ValueError("provider artifact structure is missing a VISTA goal outcome")
+        total_goals += len(goals)
+        total_outcomes += len(outcomes)
+    if (
+        total_goals != 25
+        or total_outcomes != 25
+        or metrics.get("abstained") != abstained_outcomes
+    ):
+        raise ValueError("provider artifact structure has inconsistent outcome totals")
+
+
 def score_simple_native_regression(
     *, provider_artifact: ProviderDiagnosticArtifact, gold_path: Path
 ) -> RegressionDiagnosticReport:
@@ -678,6 +898,7 @@ def score_simple_native_regression(
         or not isinstance(provider_payload.get("cases"), list)
     ):
         raise ValueError("provider artifact is not a finalized sealed diagnostic")
+    _validate_provider_artifact_structure(provider_payload)
     gold = json.loads(gold_path.read_text(encoding="utf-8"))
     targets = gold.get("targets") if isinstance(gold, Mapping) else None
     if not isinstance(targets, list):

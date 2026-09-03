@@ -20,9 +20,29 @@ def _cases(tmp_path: Path) -> list[object]:
             image_path=image,
             image_size=(100, 100),
             image_sha256=sha256(image.read_bytes()).hexdigest(),
-            goals=tuple(f"goal-{index}-{item}" for item in range(5)),
+            goals=(
+                "Select the button labeled '\u76ee\u6807'",
+                *(f"Select the button labeled 'other-{index}-{item}'" for item in range(1, 5)),
+            ),
         ))
     return result
+
+
+def _verified_cleanup(provider: str, **changes: object) -> dict[str, object]:
+    receipt: dict[str, object] = {
+        "contract_version": "simple_native_provider_cleanup_v1",
+        "provider": provider,
+        "verified": True,
+        "cleanup_status": "verified",
+        "owned_processes": [],
+        "provider_processes_after": [],
+        "helper_processes_after": [],
+        "orphan_descendant_pids": [],
+        "active_listeners_after": [],
+        "lease_files_after": [],
+    }
+    receipt.update(changes)
+    return receipt
 
 
 def _slots():
@@ -98,9 +118,9 @@ def test_provider_batches_release_before_the_next_provider_acquires(tmp_path: Pa
     events: list[str] = []
     slots = SimpleNativeSlots(
         omni=lambda _image: events.append("omni") or {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "x", "interactivity": True}]},
-        qwen=lambda _image, projection: events.append("qwen") or {"bindings": [{"i": item["i"], "role": "button", "label": "x", "status": "BOUND", "confidence": 1} for item in projection["candidates"]]},
+        qwen=lambda _image, projection: events.append("qwen") or {"bindings": [{"i": item["i"], "role": "button", "label": "\u76ee\u6807", "status": "BOUND", "confidence": 1} for item in projection["candidates"]]},
         vista=lambda _image, _target: events.append("vista") or "[500,500]",
-        release_provider=lambda provider: events.append(f"release:{provider}") or {"provider": provider, "verified": True, "owned_processes": []},
+        release_provider=lambda provider: events.append(f"release:{provider}") or _verified_cleanup(provider),
     )
     artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
 
@@ -117,9 +137,56 @@ def test_unverified_provider_release_blocks_the_next_provider_phase(tmp_path: Pa
         omni=lambda _image: events.append("omni") or {"items": []},
         qwen=lambda _image, _projection: events.append("qwen") or {"bindings": []},
         vista=lambda _image, _target: events.append("vista") or "[500,500]",
-        release_provider=lambda provider: events.append(f"release:{provider}") or {"provider": provider, "verified": False},
+        release_provider=lambda provider: events.append(f"release:{provider}") or _verified_cleanup(
+            provider, verified=False, cleanup_status="failed"
+        ),
     )
 
-    with pytest.raises(RuntimeError, match="omni cleanup is not verified"):
+    with pytest.raises(RuntimeError, match="omni cleanup observation is not clean"):
         run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
     assert events == ["omni"] * 5 + ["release:omni"]
+
+
+def test_cleanup_claim_with_live_pid_and_failed_status_blocks_qwen(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    qwen_calls: list[Path] = []
+    slots = SimpleNativeSlots(
+        omni=lambda _image: {"items": []},
+        qwen=lambda image, _projection: qwen_calls.append(image) or {"bindings": []},
+        vista=lambda _image, _target: "[500,500]",
+        release_provider=lambda provider: _verified_cleanup(
+            provider,
+            cleanup_status="failed",
+            owned_processes=[4242],
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup observation"):
+        run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+    assert qwen_calls == []
+
+
+def test_cleanup_observation_rejects_unknown_fields(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    slots = SimpleNativeSlots(
+        omni=lambda _image: {"items": []},
+        qwen=lambda _image, _projection: {"bindings": []},
+        vista=lambda _image, _target: "[500,500]",
+        release_provider=lambda provider: {**_verified_cleanup(provider), "optimistic_note": "clean"},
+    )
+
+    with pytest.raises(ValueError, match="cleanup observation is invalid"):
+        run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+
+
+def test_provider_goal_parser_rejects_non_frozen_grammar_before_dispatch(tmp_path: Path) -> None:
+    from dataclasses import replace
+    from app.learn.hybrid.simple_native_smoke import run_simple_native_regression_diagnostic
+
+    cases = _cases(tmp_path)
+    cases[0] = replace(cases[0], goals=("click anything", *cases[0].goals[1:]))
+
+    with pytest.raises(ValueError, match="closed grammar"):
+        run_simple_native_regression_diagnostic(cases=cases, slots=_slots(), artifact_dir=tmp_path / "out")
