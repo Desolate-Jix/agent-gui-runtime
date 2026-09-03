@@ -370,9 +370,10 @@ def _omni_safe_items(parsed: Sequence[OmniNativeItem], *, image_size: tuple[int,
     return result
 
 
-def _build_omni_evidence(
+def build_omni_evidence_from_native(
     *, case: ProviderCase, capture: Mapping[str, object], parsed: Sequence[OmniNativeItem], artifact_dir: Path
 ) -> dict[str, object]:
+    """Project parsed Omni items through the shared canonical candidate conversion."""
     bundle = capture["bundle"]
     assert isinstance(bundle, Mapping)
     result, result_ref = _persist_review_only_result(
@@ -616,7 +617,7 @@ def run_simple_native_regression_diagnostic(
                 raw = slots.omni(capture_path)
                 _verify_capture_freshness(capture, "Omni")
                 parsed = parse_omni_native_output(raw)
-                evidence = _build_omni_evidence(case=case, capture=capture, parsed=parsed, artifact_dir=artifact_dir)
+                evidence = build_omni_evidence_from_native(case=case, capture=capture, parsed=parsed, artifact_dir=artifact_dir)
                 state["inventory"] = evidence["inventory"]
                 metrics["omni"]["schema_valid"] += 1
                 invalid_streak["omni"] = 0
