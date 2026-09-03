@@ -490,12 +490,28 @@ def _managed_artifact_identity(profile, selected, artifact_root=None):
 class _ManagedIncumbentSession:
     def __init__(self, profile, artifact_root, session_root, scope_name):
         from app.core import model_server
-        self.profile, self.scope_name = profile, scope_name
+        from app.learn.hybrid.windows_process_scope import WindowsProcessScope, process_scope_name
+        self.profile = profile
         self.artifact_root = artifact_root
         self.selected = model_server.profile_for_stage("understanding", "qwen3_vl_8b_q4_k_m")
         self.hashes = _managed_artifact_identity(profile, self.selected, self.artifact_root)
         self.port = self.selected["port"]
-        self.lease = model_server.ensure_and_acquire_scoped_qwen_model_lease(stage="understanding", profile_id="qwen3_vl_8b_q4_k_m", request_id="goal-binding-" + session_root.name, wait_seconds=profile["timeout_seconds"], profile_validator=lambda selected: _managed_artifact_identity(profile, selected, self.artifact_root))
+        self.scope_name = process_scope_name({"run_id": session_root.name, "workflow_revision": 1,
+            "operation_id": "goal_binding_managed_incumbent", "stage": "goal_binding",
+            "stage_execution_id": sha256((scope_name + "\0" + str(session_root)).encode("utf-8")).hexdigest()}, "qwen")
+        self.server_scope = WindowsProcessScope(self.scope_name, create=True)
+        previous_scope = os.environ.get("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME")
+        try:
+            os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = self.scope_name
+            self.lease = model_server.ensure_and_acquire_scoped_qwen_model_lease(stage="understanding", profile_id="qwen3_vl_8b_q4_k_m", request_id="goal-binding-" + session_root.name, wait_seconds=profile["timeout_seconds"], profile_validator=lambda selected: _managed_artifact_identity(profile, selected, self.artifact_root))
+        except BaseException:
+            self.server_scope.close()
+            raise
+        finally:
+            if previous_scope is None:
+                os.environ.pop("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", None)
+            else:
+                os.environ["AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME"] = previous_scope
         self.identity = self.lease["server_process_identity"]
         self.closed = False
 
@@ -513,12 +529,15 @@ class _ManagedIncumbentSession:
     def close(self):
         from app.core import model_server
         if not self.closed:
-            release = model_server.release_scoped_qwen_model_lease(self.lease, "goal_binding_arm_complete")
-            model_server._validate_exact_qwen_cleanup_evidence(release, self.lease)
-            if _managed_artifact_identity(self.profile, self.selected, self.artifact_root) != self.hashes:
-                raise ProviderIntegrityError("managed incumbent artifact changed during arm")
-            self.release = release
-            self.closed = True
+            try:
+                release = model_server.release_scoped_qwen_model_lease(self.lease, "goal_binding_arm_complete")
+                model_server._validate_exact_qwen_cleanup_evidence(release, self.lease)
+                if _managed_artifact_identity(self.profile, self.selected, self.artifact_root) != self.hashes:
+                    raise ProviderIntegrityError("managed incumbent artifact changed during arm")
+                self.release = release
+                self.closed = True
+            finally:
+                self.server_scope.close()
         return {"status": "released", "server_process_identity": self.identity, "listener_port": self.port, "managed_release": self.release, "artifact_hashes_before_after": self.hashes}
 
 

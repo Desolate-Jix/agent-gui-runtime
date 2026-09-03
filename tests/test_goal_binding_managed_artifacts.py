@@ -202,7 +202,12 @@ def test_existing_acquisition_quota_lock_prevents_report_writes(managed_fixture)
 
 def test_exact_managed_launch_callback_reuses_sealed_manifest_root(monkeypatch, tmp_path):
     from app.core import model_server
+    from app.learn.hybrid import windows_process_scope as scopes
     from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    class Scope:
+        def __init__(self, *args, **kwargs): pass
+        def close(self): pass
+    monkeypatch.setattr(scopes, "WindowsProcessScope", Scope)
     seen = []
     selected = {"port": 13240}
     def verify(profile, selected, artifact_root=None):
@@ -216,5 +221,8 @@ def test_exact_managed_launch_callback_reuses_sealed_manifest_root(monkeypatch, 
     monkeypatch.setattr(runtimes, "_managed_artifact_identity", verify)
     monkeypatch.setattr(model_server, "profile_for_stage", lambda *args: selected)
     monkeypatch.setattr(model_server, "ensure_and_acquire_scoped_qwen_model_lease", acquire)
-    runtimes._ManagedIncumbentSession({"timeout_seconds": 5}, tmp_path, tmp_path, "unused")
-    assert seen == [tmp_path, tmp_path]
+    session = runtimes._ManagedIncumbentSession({"timeout_seconds": 5}, tmp_path, tmp_path, "unused")
+    try:
+        assert seen == [tmp_path, tmp_path]
+    finally:
+        session.server_scope.close()

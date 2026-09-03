@@ -269,6 +269,7 @@ def test_managed_close_has_independent_bounded_budget(offline_arm, monkeypatch, 
         "    from scripts.model_servers import goal_binding_provider_runtimes as runtimes\n"
         "    obj = object.__new__(runtimes._ManagedIncumbentSession)\n"
         "    obj.closed=False; obj.lease={}; obj.profile={}; obj.selected={}; obj.artifact_root=None\n"
+        "    obj.server_scope=type('Scope',(),{'close':lambda self:None})()\n"
         "    obj.hashes={}; obj.identity=None; obj.port=None\n"
         f"    def release(*args): time.sleep({delay}); return {{'lease':{{}}}}\n"
         "    model_server.release_scoped_qwen_model_lease=release\n"

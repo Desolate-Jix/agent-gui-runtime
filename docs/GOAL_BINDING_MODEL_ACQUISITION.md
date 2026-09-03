@@ -66,3 +66,14 @@ The integration checks also reproduced a mailbox polling race: an atomic
 Only that temporary-file disappearance is ignored for the current scan. Existing
 oversized temporary files, missing final outputs, timeouts, hashes and exact
 identities still fail closed.
+
+Managed incumbent acquisition now uses a server-only nested Windows Job rather
+than sharing the worker's outer Job. Existing managed release can therefore
+terminate its server scope without killing the worker before its cleanup receipt
+is written; the outer Job still owns the worker and descendants. Acquisition
+restores the prior scope environment even on failure and closes its child Job.
+A no-model Windows subprocess regression reproduced exit 197 before this fix
+and verifies server absence, receipt publication and continued outer ownership
+after it. The failed attempt is not repaired or scored retroactively. Re-seal
+the incumbent code identity before a new real run; this regression alone is not
+a successful model benchmark.
