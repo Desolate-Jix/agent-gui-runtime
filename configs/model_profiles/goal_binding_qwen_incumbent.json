@@ -5,65 +5,65 @@
   "provider_id": "qwen3_vl_8b_q4_k_m",
   "model_id": "Qwen/Qwen3-VL-8B-Instruct",
   "repository_id": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+  "dtype_or_quantization": "Q4_K_M",
+  "coordinate_space": "candidate_index",
+  "license": "Apache-2.0",
   "upstream_revision": "f982a07559d4a2f6c8744d840bf6fccab30eea96",
   "artifacts": [
     {
       "role": "model",
-      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
-      "sha256": "not_acquired",
-      "bytes": "not_acquired"
+      "relative_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2",
+      "bytes": 5027784800
     },
     {
       "role": "mmproj",
-      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
-      "sha256": "not_acquired",
-      "bytes": "not_acquired"
+      "relative_path": "models/qwen3-vl-8b-instruct-q4_k_m-gguf/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+      "sha256": "c6ba85508d82f42590e6eb77d5340369ab6fecf107a7561d809523d8aa5f3bfd",
+      "bytes": 752289728
     },
     {
       "role": "runtime",
-      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/llama-server.exe",
-      "sha256": "not_acquired",
-      "bytes": "not_acquired"
+      "relative_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+      "sha256": "b76925e9fb266fbe45be32a966d357b4d8d9d66edf9d3ba6a2d96a772e716869",
+      "bytes": 13175296
     },
     {
       "role": "source",
-      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/official-source.lock",
-      "sha256": "not_acquired",
-      "bytes": "not_acquired"
+      "relative_path": "reports/managed-incumbent-80bef915b20b4fb98bd8c2685d0c012c/source.json",
+      "sha256": "01698a43088c505669ce7d0b97d1e74c0aad1d01e7b867a525d1ffe1402be751",
+      "bytes": 30697
     },
     {
       "role": "preprocessing",
-      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/preprocessing.lock",
-      "sha256": "not_acquired",
-      "bytes": "not_acquired"
+      "relative_path": "reports/managed-incumbent-80bef915b20b4fb98bd8c2685d0c012c/preprocessing.json",
+      "sha256": "a9d101f8a5bdeabb107433f5db2d40c368494f42de26b86782e612fc61ce033d",
+      "bytes": 1498
     }
   ],
   "artifact_manifest": {
-    "status": "not_acquired",
-    "relative_path": "manifests/qwen3_vl_8b_q4_k_m.json",
-    "sha256": "not_acquired"
+    "status": "verified",
+    "relative_path": "reports/managed-incumbent-80bef915b20b4fb98bd8c2685d0c012c/manifest.json",
+    "sha256": "c55d5e041ef1fff12b0ed8cdc59025adf67cc8072e8b28007ec0e8dba42f934c"
   },
   "runtime": {
     "kind": "llama_cpp",
-    "isolated_runtime_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/llama-server.exe",
-    "sha256": "not_acquired",
+    "isolated_runtime_path": "tools/llama.cpp-b8892-cuda13/llama-server.exe",
+    "sha256": "b76925e9fb266fbe45be32a966d357b4d8d9d66edf9d3ba6a2d96a772e716869",
     "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
     "entrypoint": "scripts.model_servers.goal_binding_provider_runtimes:run_llama_cpp"
   },
-  "dtype_or_quantization": "Q4_K_M",
   "native_output": {
     "kind": "qwen_goal_binding_array_v1",
     "raw_format": "utf8_native"
   },
-  "coordinate_space": "candidate_index",
   "preprocessing": {
     "identity": "sealed_incumbent_qwen_projection_v1",
-    "source_revision": "not_acquired",
-    "sha256": "not_acquired"
+    "source_revision": "local-repo@b1a60c7dd10d03a68059702442922893deb22415",
+    "sha256": "a9d101f8a5bdeabb107433f5db2d40c368494f42de26b86782e612fc61ce033d"
   },
   "max_output_bytes": 16384,
   "timeout_seconds": 120,
-  "license": "Apache-2.0",
   "artifact_is_authorization": false,
   "execute_binding_enabled": false,
   "final_submit_forbidden": true

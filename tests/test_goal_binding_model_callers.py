@@ -38,10 +38,17 @@ def test_import_and_profile_load_never_start_or_download_a_model(monkeypatch) ->
 
     touched: list[object] = []
     monkeypatch.setattr(Path, "mkdir", lambda *args, **kwargs: touched.append(args))
+    def forbidden(*args, **kwargs):
+        pytest.fail("metadata loading must not verify artifacts or start a process")
+    monkeypatch.setattr(callers, "_verified", forbidden)
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
     before = dict(__import__("os").environ)
     profiles = [callers.load_goal_binding_profile(PROFILE_DIR / name) for name in PROFILE_NAMES]
 
-    assert all(profile["artifact_manifest"]["status"] == "not_acquired" for profile in profiles)
+    assert [profile["artifact_manifest"] for profile in profiles] == [
+        json.loads((PROFILE_DIR / name).read_text(encoding="utf-8"))["artifact_manifest"]
+        for name in PROFILE_NAMES
+    ]
     assert touched == []
     assert dict(__import__("os").environ) == before
 
