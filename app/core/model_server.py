@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from hashlib import sha256
 import json
+import math
 import os
 import psutil
 import socket
@@ -758,6 +759,9 @@ def run_hybrid_vista_bare_point(
     prompt = str(target_text or "").strip()
     if not prompt or len(prompt) > 512:
         raise ValueError("VISTA target text is invalid")
+    request_timeout_seconds = float(timeout_seconds)
+    if not math.isfinite(request_timeout_seconds) or request_timeout_seconds <= 0:
+        raise ValueError("VISTA request timeout is invalid")
     profile = _profile_for_hybrid_vista_model_lease(model_lease)
     endpoint = str(profile.get("endpoint") or "").strip() or model_base_url(profile) + "/chat/completions"
     image_url = "data:" + roi_media_type + ";base64," + base64.b64encode(roi_bytes).decode("ascii")
@@ -770,6 +774,7 @@ def run_hybrid_vista_bare_point(
         "model": str(profile.get("model_name") or profile.get("model_id") or "vista"),
         "temperature": 0.0,
         "max_tokens": min(32, max(1, max_tokens)),
+        "request_timeout_seconds": request_timeout_seconds,
         "messages": [
             {
                 "role": "user",
@@ -790,7 +795,7 @@ def run_hybrid_vista_bare_point(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=float(timeout_seconds)) as response:
+        with urllib.request.urlopen(request, timeout=request_timeout_seconds) as response:
             response_bytes = response.read(_QWEN_HTTP_RESPONSE_MAX_BYTES + 1)
             if len(response_bytes) > _QWEN_HTTP_RESPONSE_MAX_BYTES:
                 raise ValueError("VISTA HTTP response byte limit exceeded")

@@ -184,8 +184,15 @@ def test_vista_bare_point_wire_uses_one_user_message_and_reuses_exact_lease(monk
 
     assert len(requests) == 3
     for body in requests:
-        assert set(body) == {"model", "temperature", "max_tokens", "messages"}
+        assert set(body) == {
+            "model",
+            "temperature",
+            "max_tokens",
+            "request_timeout_seconds",
+            "messages",
+        }
         assert body["temperature"] == 0.0 and body["max_tokens"] == 32
+        assert body["request_timeout_seconds"] == 2.0
         assert len(body["messages"]) == 1 and body["messages"][0]["role"] == "user"
         content = body["messages"][0]["content"]
         assert content[0] == {
