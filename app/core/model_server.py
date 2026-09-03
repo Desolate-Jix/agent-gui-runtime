@@ -647,6 +647,23 @@ def run_qwen_projection_model(
     timeout_seconds: float = 120.0,
 ) -> list[dict[str, Any]]:
     """Send the closed simple-native per-goal projection under an exact lease."""
+    content = run_qwen_projection_model_raw(
+        projection=projection, screenshot_bytes=screenshot_bytes,
+        screenshot_media_type=screenshot_media_type, screenshot_sha256=screenshot_sha256,
+        model_lease=model_lease, timeout_seconds=timeout_seconds,
+    )
+    parsed = json.loads(content)
+    if not isinstance(parsed, list):
+        raise ValueError("Qwen projection response is not a bare JSON array")
+    return parsed
+
+
+def run_qwen_projection_model_raw(
+    *, projection: Mapping[str, Any], screenshot_bytes: bytes,
+    screenshot_media_type: str, screenshot_sha256: str,
+    model_lease: dict[str, Any], timeout_seconds: float = 120.0,
+) -> str:
+    """保留相同租约、提示和传输合同，返回未经重序列化的消息正文。"""
     compact = deepcopy(dict(projection)) if isinstance(projection, Mapping) else None
     if not isinstance(compact, dict) or set(compact) != {"image_size", "goals", "candidates"}:
         raise ValueError("Qwen model projection is not closed")
@@ -746,10 +763,7 @@ def run_qwen_projection_model(
     content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, str):
         raise ValueError("Qwen projection response has no JSON message content")
-    parsed = json.loads(content)
-    if not isinstance(parsed, list):
-        raise ValueError("Qwen projection response is not a bare JSON array")
-    return parsed
+    return content
 
 
 def run_hybrid_vista_bare_point(

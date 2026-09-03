@@ -801,3 +801,10 @@ Then STOP. Do not run unique holdout, do not push, and report all commit hashes/
 ## Task 7 session repair checkpoint (2026-09-04)
 
 Persistent arm mailbox, exact launcher/worker Job identities, native trace v2 and explicit attempted/unattempted provider failures are now covered by real scoped subprocess tests with a tiny offline fake loader. Cleanup uses the existing Job and lease primitives; WDDM GPU baseline identities are distinguished from new owners, and N/A is not measured zero. Legacy per-call mocked supervision tests were replaced by actual mailbox/Job regression tests. Official provider load-once wrappers and managed incumbent raw join remain the next slice; no real model or matrix success is claimed. All checked-in not_acquired profiles remain non-runnable.
+
+
+## Task 7 official runtime join (2026-09-04)
+
+The follow-up slice implements load-once official provider sessions, the managed incumbent raw-content sibling without changing its existing request/config/parser behavior, scoped llama server identity/listener checks, and exact GUI/Phi adapter projection. Pinned source evidence corrected UI-Venus whitespace/trailing-period handling and 128-token inference, GUI-Actor positional inference arguments, and Phi integer-fit reshape ratio. Native Windows Phi/vLLM remains an explicit platform-incompatible provider outcome; there is no WSL fallback.
+
+The final six-file focused integration suite passed 120 tests in 61.82s, including the exact repo@commit negative control (RED/GREEN verified). This is offline/fake-loader plus real Windows Job/mailbox coverage, not live-model or matrix verification. Current v1 profiles remain not_acquired/non-runnable. Acquisition/profile-v2, sealed runtime/source bundles, and the managed D-drive artifact projection are subsequent work; none is claimed present. Missing managed-incumbent release evidence after a forced timeout remains infrastructure fail-closed.

@@ -396,6 +396,8 @@ class GoalBindingProviderSession:
         self.config = None
         self.baseline = None
         self.port = None
+        self.runtime_state = None
+        self.started_ns = time.time_ns()
 
     def _open(self):
         from app.learn.hybrid.windows_process_scope import WindowsProcessScope, benchmark_worker_scope_name_v1, spawn_process_in_scope
@@ -433,15 +435,29 @@ class GoalBindingProviderSession:
         from app.learn.hybrid.windows_process_scope import _identity_for_pid
         import psutil
         worker_identity = exact_process_identity(ready["worker_process_identity"])
-        if set(ready) != {"session_sha256", "worker_process_identity", "launcher_process_identity", "failure"} or ready["session_sha256"] != self.config_sha or ready["launcher_process_identity"] != self.launcher_identity or _identity_for_pid(worker_identity["pid"]) != worker_identity or worker_identity["pid"] not in self.scope.pids() or (worker_identity != self.launcher_identity and self.launcher_identity["pid"] not in {process.pid for process in psutil.Process(worker_identity["pid"]).parents()}):
+        if set(ready) != {"session_sha256", "worker_process_identity", "launcher_process_identity", "runtime_state", "failure"} or ready["session_sha256"] != self.config_sha or ready["launcher_process_identity"] != self.launcher_identity or _identity_for_pid(worker_identity["pid"]) != worker_identity or worker_identity["pid"] not in self.scope.pids() or (worker_identity != self.launcher_identity and self.launcher_identity["pid"] not in {process.pid for process in psutil.Process(worker_identity["pid"]).parents()}):
             raise RuntimeError("provider readiness identity mismatch")
         self.identity = worker_identity
+        self.runtime_state = ready["runtime_state"]
+        if not isinstance(self.runtime_state, Mapping) or set(self.runtime_state) != {"server_process_identity", "listener_port"}:
+            raise RuntimeError("provider runtime readiness is not closed")
+        runtime_identity = self.runtime_state["server_process_identity"]
+        if runtime_identity is not None:
+            from scripts.model_servers.goal_binding_provider_runtimes import _verify_listener
+            actual_port = self.runtime_state["listener_port"]
+            if self.profile["provider_id"] != "qwen3_vl_8b_q4_k_m" and actual_port != self.port:
+                raise RuntimeError("provider runtime listener port mismatch")
+            self.port = actual_port
+            if not _verify_listener(port=self.port, identity=exact_process_identity(runtime_identity), scope_name=self.config["scope_name"]):
+                raise RuntimeError("provider runtime listener is not ready")
         self.failure = ready["failure"]
 
     def _wait(self, path: Path):
         from scripts.model_servers.goal_binding_transformers_worker import read_json
         deadline = time.monotonic() + self.profile["timeout_seconds"]
         while True:
+            if _sha256_file(self.root / "session.json") != self.config_sha:
+                raise RuntimeError("provider session mailbox identity changed")
             for folder in (self.root, self.root / "responses", self.root / "raw"):
                 for log in folder.iterdir():
                     if log.is_file() and (log.suffix in {".bin", ".utf8"} or folder.name == "responses") and log.stat().st_size > self.profile["max_output_bytes"]:
@@ -501,10 +517,11 @@ class GoalBindingProviderSession:
                 atomic_write(self.root / "requests" / f"{self.sequence:06d}.json", body)
                 attempted = True
                 envelope = self._wait(self.root / "responses" / f"{self.sequence:06d}.json")
-                if _native_envelope(envelope) is None or envelope["worker_process_identity"] != self.identity or envelope["profile_identity"]["profile_id"] != self.profile["profile_id"]:
+                from scripts.model_servers.goal_binding_transformers_worker import _identity
+                if _native_envelope(envelope) is None or envelope["worker_process_identity"] != self.identity or envelope["profile_identity"] != _identity(self.profile) or not _resource_metrics_are_closed(envelope["resource_metrics"], request_bytes=len(body), timeout_seconds=self.profile["timeout_seconds"]):
                     raise RuntimeError("provider envelope process/profile mismatch")
                 lineage = envelope["request_lineage"]
-                if lineage.get("session_id") != self.session_id or lineage.get("sequence") != self.sequence or lineage.get("session_sha256") != self.config_sha or lineage.get("screenshot_sha256") != payload["screenshot"]["sha256"] or lineage.get("screenshot_dimensions") != [width, height] or lineage.get("code_identity") != self.config["code_identity"]:
+                if lineage.get("session_id") != self.session_id or lineage.get("sequence") != self.sequence or lineage.get("session_sha256") != self.config_sha or lineage.get("request_sha256") != _sha256(body) or lineage.get("screenshot_sha256") != payload["screenshot"]["sha256"] or lineage.get("screenshot_dimensions") != [width, height] or lineage.get("code_identity") != self.config["code_identity"]:
                     raise RuntimeError("provider envelope capture/session mismatch")
                 raw = self.root / "raw" / f"{self.sequence:06d}.utf8"
                 if raw.read_bytes() != envelope["raw_native_output"].encode("utf-8"):
@@ -543,7 +560,7 @@ class GoalBindingProviderSession:
 
     def cleanup(self) -> Mapping[str, object]:
         from app.learn.hybrid.windows_process_scope import observe_process_scope_cleanup
-        from scripts.model_servers.goal_binding_transformers_worker import write_json
+        from scripts.model_servers.goal_binding_transformers_worker import write_json, read_json
         if self.receipt is not None:
             return deepcopy(self.receipt)
         observation = {"cleanup_status": "not_started"}
@@ -567,6 +584,24 @@ class GoalBindingProviderSession:
                 self.lease.release()
             except RuntimeError as exc:
                 cleanup_errors.append(str(exc))
+        runtime_cleanup = None
+        stopped = self.root / "stopped.json"
+        if stopped.exists():
+            try:
+                stop = read_json(stopped)
+                if not isinstance(stop, Mapping) or set(stop) != {"session_sha256", "worker_process_identity", "runtime_cleanup"} or stop["session_sha256"] != self.config_sha or stop["worker_process_identity"] != self.identity:
+                    raise ValueError("worker stop identity mismatch")
+                runtime_cleanup = stop["runtime_cleanup"]
+                if not isinstance(runtime_cleanup, Mapping) or runtime_cleanup.get("status") not in {"released", "not_loaded"}:
+                    raise ValueError("provider runtime cleanup is unresolved")
+                if self.profile["provider_id"] == "qwen3_vl_8b_q4_k_m" and runtime_cleanup.get("status") == "released":
+                    from app.core.model_server import _validate_exact_qwen_cleanup_evidence
+                    release = runtime_cleanup["managed_release"]
+                    _validate_exact_qwen_cleanup_evidence(release, release["lease"])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                cleanup_errors.append(str(exc))
+        elif self.profile["provider_id"] == "qwen3_vl_8b_q4_k_m":
+            cleanup_errors.append("managed incumbent release evidence is unavailable")
         samples = []
         baseline_ids = {(owner["pid"], owner["create_time_ns"]) for owner in (self.baseline or {}).get("owners", [])}
         for _ in range(3):
@@ -579,6 +614,7 @@ class GoalBindingProviderSession:
         leases = [str(self.lease_path)] if self.lease_path.exists() else []
         verified = self.identity is not None and not self.blocked and observation.get("cleanup_status") == "verified" and all(sample.get("status") == "verified" for sample in samples) and not gpu_owners and not leases and not cleanup_errors and exit_code is not None
         evidence = {"verified": verified, "scope": observation, "baseline": self.baseline, "gpu_samples": samples, "worker_process_identity": self.identity, "exit_code": exit_code, "request_count": self.sequence, "errors": cleanup_errors, "session_id": self.session_id, "logs": {name: {"sha256": _sha256_file(self.root / name), "bytes": (self.root / name).stat().st_size} for name in ("worker.stdout.bin", "worker.stderr.bin") if (self.root / name).exists()}}
+        evidence.update(launcher_process_identity=self.launcher_identity, runtime_state=self.runtime_state, runtime_cleanup=runtime_cleanup, started_ns=self.started_ns, stopped_ns=time.time_ns(), profile=self.profile, code_identity=self.config.get("code_identity") if self.config else None)
         self.receipt = {"contract_version": "simple_native_provider_cleanup_v1", "provider": self.profile["provider_id"], "verified": verified, "cleanup_status": "verified" if verified else "failed", "owned_processes": gpu_owners, "provider_processes_after": observation.get("member_identities_after", []), "helper_processes_after": [], "orphan_descendant_pids": observation.get("member_pids_after", []), "active_listeners_after": observation.get("active_listeners_after", []), "lease_files_after": leases, "cleanup_observations": [evidence]}
         if self.root.exists():
             write_json(self.root / "cleanup.json", self.receipt)

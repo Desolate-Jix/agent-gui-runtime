@@ -108,7 +108,11 @@ def _parse_phi(raw: object, *, width: int, height: int) -> dict[str, object]:
     try: x, y = float(match.group(1)), float(match.group(2))
     except ValueError as exc: raise ValueError("Phi-Ground-Any point is invalid") from exc
     if not all(math.isfinite(v) and 0 <= v <= 10000 for v in (x,y)): raise ValueError("Phi-Ground-Any point is out of range")
-    ratio = min(1680 / width, 1008 / height)
+    from scripts.model_servers.goal_binding_provider_runtimes import phi_image_geometry
+    geometry = phi_image_geometry(width, height)
+    ratio = geometry["reshape_ratio"]
+    if x / 10000 * 1680 >= geometry["resized_dimensions"][0] or y / 10000 * 1008 >= geometry["resized_dimensions"][1]:
+        raise ValueError("Phi-Ground-Any point falls in padding or outside capture")
     px, py = x / 10000 * 1680 / ratio, y / 10000 * 1008 / ratio
     if not all(math.isfinite(v) for v in (px,py)) or not (0 <= px < width and 0 <= py < height): raise ValueError("Phi-Ground-Any point falls in padding or outside capture")
     return {"point": [px, py]}
@@ -168,14 +172,14 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
     image_path, goal, profile, screenshot = payload["image_path"], payload["goal"], payload["profile"], payload["screenshot"]
     if not isinstance(image_path, str) or not isinstance(goal, str) or not goal.strip() or len(goal) > 512 or not isinstance(profile, Mapping) or not isinstance(screenshot, Mapping): raise ValueError("worker request is invalid")
     path = Path(image_path)
-    if not path.is_file() or _sha(path.read_bytes()) != screenshot.get("sha256"): raise ValueError("worker screenshot copy/hash changed")
+    if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024 or _sha(path.read_bytes()) != screenshot.get("sha256"): raise ValueError("worker screenshot copy/hash changed or exceeds byte bound")
     from PIL import Image
     try:
         with Image.open(path) as image:
             dimensions = (image.width, image.height)
     except (OSError, SyntaxError) as exc:
         raise ValueError("worker screenshot copy is not a readable image") from exc
-    if dimensions != (screenshot.get("width"), screenshot.get("height")):
+    if dimensions != (screenshot.get("width"), screenshot.get("height")) or dimensions[0] * dimensions[1] > 32 * 1024 * 1024:
         raise ValueError("worker screenshot dimensions changed")
     identity_path = payload["parent_identity_path"]
     if not isinstance(identity_path, str): raise ValueError("worker identity path is invalid")
@@ -207,6 +211,8 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
         incumbent_request=payload.get("incumbent_request"),
         listener_port=payload.get("listener_port") if isinstance(payload.get("listener_port"), int) else None,
     )
+    if _sha_file(path) != screenshot.get("sha256"):
+        raise ValueError("worker screenshot changed during inference")
     runtime_telemetry: dict[str, object] = {
         "generation_tokens": None, "peak_vram_bytes": None,
         "peak_vram_status": "unavailable", "provider_stdout_bytes": 0,
@@ -254,6 +260,9 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
         "code_identity": verified_code,
         "child_cleanup": child_cleanup,
     }
+    if kind == "phi_ground_any_v1":
+        from scripts.model_servers.goal_binding_provider_runtimes import phi_image_geometry
+        lineage["preprocessing_geometry"] = phi_image_geometry(screenshot["width"], screenshot["height"])
     envelope = native_trace_envelope(
         profile_identity=_identity(profile), raw_native_output=raw_text,
         parsed_native=parsed, resource_metrics=metrics,
@@ -308,6 +317,8 @@ def read_json(path: Path, maximum: int = 1024 * 1024) -> object:
 def provider_failure(exc: Exception, *, attempted: bool) -> dict[str, object]:
     if isinstance(exc, TimeoutError):
         kind = "provider_timeout"
+    elif "provider_platform_incompatible" in str(exc):
+        kind = "provider_platform_incompatible"
     elif isinstance(exc, ImportError):
         kind = "provider_dependency_failure"
     elif "out of memory" in str(exc).casefold() or isinstance(exc, MemoryError):
@@ -364,12 +375,13 @@ def serve_session(config_path: Path) -> None:
     try:
         try:
             runtime = _open_session(config)
-        except (ImportError, OSError, RuntimeError, ValueError, MemoryError) as exc:
+        except (ImportError, OSError, RuntimeError, ValueError, TypeError, AttributeError, MemoryError) as exc:
             from scripts.model_servers.goal_binding_provider_runtimes import ProviderIntegrityError
             if isinstance(exc, ProviderIntegrityError):
                 raise
             failure = provider_failure(exc, attempted=False)
-        write_json(root / "ready.json", {"session_sha256": digest, "worker_process_identity": identity, "launcher_process_identity": launcher_identity, "failure": failure})
+        runtime_state = {"server_process_identity": getattr(runtime, "identity", None), "listener_port": getattr(runtime, "port", None)}
+        write_json(root / "ready.json", {"session_sha256": digest, "worker_process_identity": identity, "launcher_process_identity": launcher_identity, "runtime_state": runtime_state, "failure": failure})
         while failure is not None and not (root / "stop.json").exists():
             time.sleep(0.01)
         sequence = 1
@@ -379,6 +391,7 @@ def serve_session(config_path: Path) -> None:
                 time.sleep(0.01)
                 continue
             request = read_json(path)
+            request_sha256 = _sha_file(path)
             if not isinstance(request, Mapping) or set(request) != {"session_sha256", "sequence", "payload"} or request["session_sha256"] != digest or request["sequence"] != sequence:
                 raise ValueError("worker mailbox request identity mismatch")
             payload = request["payload"]
@@ -388,7 +401,7 @@ def serve_session(config_path: Path) -> None:
                 nonlocal failure
                 try:
                     return runtime(**kwargs)
-                except (ImportError, OSError, RuntimeError, ValueError, MemoryError) as exc:
+                except (ImportError, OSError, RuntimeError, ValueError, TypeError, AttributeError, MemoryError) as exc:
                     from scripts.model_servers.goal_binding_provider_runtimes import ProviderIntegrityError
                     if isinstance(exc, ProviderIntegrityError):
                         raise
@@ -397,7 +410,7 @@ def serve_session(config_path: Path) -> None:
             envelope = _run_provider_once(payload, request_bytes=path.stat().st_size, dispatcher=invoke)
             if failure:
                 envelope = failure_envelope(payload, failure, identity=identity, request_bytes=path.stat().st_size)
-            envelope["request_lineage"].update(session_id=config["session_id"], sequence=sequence, session_sha256=digest)
+            envelope["request_lineage"].update(session_id=config["session_id"], sequence=sequence, session_sha256=digest, request_sha256=request_sha256)
             atomic_write(root / "raw" / f"{sequence:06d}.utf8", envelope["raw_native_output"].encode("utf-8"))
             write_json(root / "responses" / f"{sequence:06d}.json", envelope)
             sequence += 1

@@ -16,6 +16,27 @@ def _qwen_projection() -> dict[str, object]:
     }
 
 
+def test_qwen_raw_sibling_preserves_message_bytes_without_changing_wire(monkeypatch):
+    from app.core import model_server
+    raw = ' \n[{"goal_index":0,"candidate_index":null,"status":"UNBOUND","confidence":0}] \n'
+    bodies = []
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return None
+        def read(self, limit): return json.dumps({"choices": [{"message": {"content": raw}}]}).encode("utf-8")
+    def open_response(request, **kw):
+        bodies.append(request.data)
+        return Response()
+    monkeypatch.setattr(model_server, "_profile_for_qwen_model_lease", lambda lease: {"endpoint": "http://127.0.0.1:8080/v1/chat/completions", "model_name": "qwen"})
+    monkeypatch.setattr(model_server, "mark_qwen_model_request_in_flight", lambda **kw: 1)
+    monkeypatch.setattr(model_server, "mark_qwen_model_response_body_complete", lambda **kw: True)
+    monkeypatch.setattr(model_server.urllib.request, "urlopen", open_response)
+    kwargs = dict(projection=_qwen_projection(), screenshot_bytes=b"image", screenshot_media_type="image/png", screenshot_sha256=sha256(b"image").hexdigest(), model_lease={})
+    assert model_server.run_qwen_projection_model_raw(**kwargs) == raw
+    assert model_server.run_qwen_projection_model(**kwargs) == json.loads(raw)
+    assert bodies[0] == bodies[1]
+
+
 def test_scoped_qwen_acquisition_skips_benchmark_materialization(monkeypatch, tmp_path: Path) -> None:
     from app.core import model_server
     from app.learn.hybrid import windows_process_scope

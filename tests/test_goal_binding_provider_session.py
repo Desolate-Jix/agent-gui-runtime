@@ -210,3 +210,188 @@ def test_probe_always_cleans_up_when_call_raises(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="bad capture"):
         callers.probe_goal_binding_profile(profile={}, image_path=tmp_path / "x.png", artifact_dir=tmp_path)
     assert cleaned == [True]
+
+
+def test_official_ui_loader_constructs_once_and_two_inferences(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    events = []
+    class Model:
+        device = "cuda"
+        def to(self, device): return self
+        def eval(self): return self
+        def generate(self, **kwargs): events.append(("generate", kwargs)); return [[1, 2]]
+    class Processor:
+        def apply_chat_template(self, messages, **kwargs): events.append(("messages", messages)); return "prompt"
+        def __call__(self, **kwargs): return {"input_ids": SimpleNamespace(shape=(1, 1))}
+        def batch_decode(self, *args, **kwargs): return ["[250,375]"]
+    def load_model(*args, **kwargs): events.append(("load", kwargs)); return Model()
+    fake_transformers = SimpleNamespace(AutoModelForImageTextToText=SimpleNamespace(from_pretrained=load_model), AutoProcessor=SimpleNamespace(from_pretrained=lambda *a, **kw: Processor()))
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(bfloat16="bf16", cuda=SimpleNamespace(is_available=lambda: False)))
+    monkeypatch.setitem(sys.modules, "qwen_vl_utils", SimpleNamespace(process_vision_info=lambda messages: ([messages[0]["content"][0]["image"]], None)))
+    monkeypatch.setattr(runtimes, "verified_artifact_paths", lambda *a: {"model": tmp_path / "model.safetensors"})
+    profile = {"provider_id": "ui_venus_1_5_2b_f16", "preprocessing": {"source_revision": "inclusionAI/UI-Venus@192a9247ad1129279ba1d6c263d4c9e7ecef3644"}}
+    session = runtimes.open_session(profile=profile, artifact_root=tmp_path, session_root=tmp_path, scope_name="unused", listener_port=None)
+    image = tmp_path / "screen.png"
+    Image.new("RGB", (2, 2)).save(image)
+    for _ in range(2):
+        result = session(image_path=image, goal="Open.", profile=profile, artifact_root=tmp_path)
+        assert result["raw_native_output"] == "[250,375]"
+    session.close()
+    assert [name for name, value in events].count("load") == 1
+    assert [name for name, value in events].count("generate") == 2
+    assert events[0][1]["local_files_only"] is True
+    assert events[0][1]["torch_dtype"] == "bf16"
+    messages = next(value for name, value in events if name == "messages")
+    assert messages[0]["content"][1]["text"] == "Output the center point of the position corresponding to the following instruction: \nOpen. \n\nThe output should just be the coordinates of a point, in the format [x,y]. Additionally, if the task is infeasible (e.g., the task is not related to the image), the output should be [-1,-1]."
+
+
+def test_tensor_telemetry_projection_preserves_order():
+    from scripts.model_servers.goal_binding_provider_runtimes import _json_safe
+    class Array:
+        def tolist(self): return [[0.9, 0.2], [0.1, 0.3]]
+    assert _json_safe({"topk_points": Array()}) == {"topk_points": [[0.9, 0.2], [0.1, 0.3]]}
+
+
+def test_phi_integer_resize_ratio_is_used_once():
+    from scripts.model_servers.goal_binding_provider_runtimes import phi_image_geometry
+    geometry = phi_image_geometry(801, 600)
+    assert geometry == {"original_dimensions": [801, 600], "canvas_dimensions": [1680, 1008], "resized_dimensions": [1345, 1008], "reshape_ratio": 1345 / 801}
+    point = worker._parse_phi("<x>5000</x><y>5000</y>", width=801, height=600)
+    assert point["point"] == [840 / (1345 / 801), 504 / (1345 / 801)]
+
+
+def test_llama_foreign_listener_rejected_before_health_or_image(monkeypatch):
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    from app.learn.hybrid import windows_process_scope
+    monkeypatch.setattr(windows_process_scope, "_listeners", lambda ports: [{"port": 12345, "pid": 999}])
+    monkeypatch.setattr(runtimes.urllib_request, "urlopen", lambda *a, **kw: pytest.fail("foreign listener must not receive HTTP"))
+    with pytest.raises(runtimes.ProviderIntegrityError, match="listener"):
+        runtimes._wait_ready(port=12345, deadline=__import__("time").monotonic() + 1, identity={"pid": 42, "create_time_ns": 99}, scope_name="unused", model_id="model")
+
+
+def test_phi_vllm_fixed_loader_parameters_and_native_windows_failure(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    profile = {"provider_id": "phi_ground_any_bf16", "preprocessing": {"source_revision": "microsoft/Phi-Ground@395640833d9b4748446d007257d87924df733ecb"}}
+    monkeypatch.setattr(runtimes, "verified_artifact_paths", lambda *a: {"model": tmp_path / "model.safetensors"})
+    with pytest.raises(RuntimeError, match="platform_incompatible"):
+        runtimes._load_dependencies(profile, tmp_path)
+    monkeypatch.setattr(runtimes.sys, "platform", "linux")
+    calls = []
+    monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(LLM=lambda **kw: calls.append(kw) or object(), SamplingParams=object))
+    runtimes._load_dependencies(profile, tmp_path)
+    assert calls[0]["max_model_len"] == 8192
+    assert calls[0]["max_num_seqs"] == 10
+    assert calls[0]["tensor_parallel_size"] == 1
+
+
+def test_managed_incumbent_session_keeps_one_lease_and_exact_raw(monkeypatch, tmp_path):
+    from app.core import model_server
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    events = []
+    lease = {"server_process_identity": {"pid": 42, "create_time_ns": 99}, "server_socket": {"port": 12345}}
+    monkeypatch.setattr(model_server, "ensure_and_acquire_scoped_qwen_model_lease", lambda **kw: events.append("load") or lease)
+    monkeypatch.setattr(model_server, "run_qwen_projection_model_raw", lambda **kw: events.append(kw["model_lease"]) or ' \n[] ')
+    monkeypatch.setattr(model_server, "release_scoped_qwen_model_lease", lambda selected, reason: events.append("close") or {"status": "released"})
+    monkeypatch.setattr(model_server, "_validate_exact_qwen_cleanup_evidence", lambda result, selected: selected)
+    monkeypatch.setattr(runtimes, "_verify_listener", lambda **kw: True, raising=False)
+    monkeypatch.setattr(runtimes, "_managed_artifact_identity", lambda *a: {"model": "a" * 64}, raising=False)
+    monkeypatch.setattr(model_server, "profile_for_stage", lambda *a: {"port": 12345})
+    session = runtimes._ManagedIncumbentSession({"timeout_seconds": 3}, tmp_path, tmp_path, "scope")
+    image = tmp_path / "image.png"
+    Image.new("RGB", (2, 2)).save(image)
+    for _ in range(2):
+        assert session(image_path=image, incumbent_projection={}, incumbent_request={})["raw_native_output"] == ' \n[] '
+    session.close()
+    assert events == ["load", lease, lease, "close"]
+
+
+def test_llama_session_owns_one_scoped_child_for_two_requests(monkeypatch, tmp_path):
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    from app.learn.hybrid import windows_process_scope as scope_api
+    from uuid import uuid4
+    if not scope_api.windows_process_scope_available():
+        pytest.skip("Windows Job unavailable")
+    name = scope_api.benchmark_worker_scope_name_v1(authority_kind="test_only", run_id="llama-test", stage="goal_binding", operation_id="llama", worker_id="fake", payload_sha256="a" * 64, execution_nonce=uuid4().hex)
+    owner = scope_api.WindowsProcessScope(name, create=True)
+    actual_spawn = scope_api.spawn_process_in_scope
+    spawned, posts = [], []
+    def spawn(command, **kwargs):
+        spawned.append(command)
+        return actual_spawn([sys._base_executable, "-c", "import time; time.sleep(30)"], **kwargs)
+    monkeypatch.setattr(scope_api, "spawn_process_in_scope", spawn)
+    monkeypatch.setattr(runtimes, "verified_artifact_paths", lambda *a: {"runtime": tmp_path / "llama.exe", "model": tmp_path / "model.gguf", "mmproj": tmp_path / "mmproj.gguf"})
+    monkeypatch.setattr(runtimes, "_wait_ready", lambda **kw: None)
+    monkeypatch.setattr(scope_api, "_listeners", lambda ports: [{"port": 12345, "pid": session.identity["pid"]}])
+    monkeypatch.setattr(runtimes, "_post_json", lambda **kw: posts.append(kw) or {"choices": [{"message": {"content": "[1,2]"}}]})
+    session = None
+    try:
+        session = runtimes._LlamaSession({"model_id": "fake", "timeout_seconds": 5}, tmp_path, tmp_path, name, 12345)
+        image = tmp_path / "image.png"
+        Image.new("RGB", (2, 2)).save(image)
+        for _ in range(2):
+            assert session(image_path=image, goal="Open")["raw_native_output"] == "[1,2]"
+        assert len(spawned) == 1 and len(posts) == 2
+        assert session.identity["pid"] in owner.pids()
+        receipt = session.close()
+        assert receipt["exit_code"] is not None
+    finally:
+        if session:
+            session.close()
+        owner.close()
+
+
+def test_worker_capture_mutation_during_inference_is_integrity_failure(monkeypatch, tmp_path):
+    request = payload(tmp_path)
+    def mutate(**kwargs):
+        Path(request["image_path"]).write_bytes(b"changed")
+        return "[250,375]"
+    monkeypatch.setattr(worker, "_dispatch_provider", mutate)
+    with pytest.raises(ValueError, match="screenshot.*changed"):
+        worker._run_provider_once(request)
+
+
+def test_gui_worker_top1_invalid_never_selects_valid_top2(monkeypatch, tmp_path):
+    from app.learn.hybrid.goal_binding_native_adapters import parse_gui_actor_top1
+    request = payload(tmp_path, "gui_actor_3b_bf16")
+    monkeypatch.setattr(worker, "_dispatch_provider", lambda **kw: {"topk_points": [[2, 2], [0.2, 0.3]], "telemetry": [1, 2]})
+    result = worker._run_provider_once(request)
+    proposal = parse_gui_actor_top1(result["parsed_native"], goal_index=0, profile={"contract_version": "goal_binding_native_profile_v1", "provider_id": "gui_actor_3b_bf16", "native_shape": "gui_actor_topk_points_v1", "coordinate_space": "normalized_0_1"})
+    assert proposal.status == "PROVIDER_FAILURE"
+    assert proposal.point is None
+
+
+def test_listener_probe_uncertainty_is_infrastructure_failure(monkeypatch):
+    from app.learn.hybrid import windows_process_scope
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    def fail(ports):
+        raise OSError("cannot inspect listeners")
+    monkeypatch.setattr(windows_process_scope, "_listeners", fail)
+    with pytest.raises(runtimes.ProviderIntegrityError, match="listener"):
+        runtimes._verify_listener(port=12345, identity={"pid": 42, "create_time_ns": 99}, scope_name="unused")
+
+
+def test_same_size_mailbox_goal_tamper_is_rejected(offline_arm, monkeypatch):
+    make, image, root = offline_arm
+    original = worker.atomic_write
+    def tamper(path, body):
+        if path.parent.name == "requests" and path.suffix == ".json":
+            request = json.loads(body)
+            request["payload"]["goal"] = "other"
+            body = json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        original(path, body)
+    monkeypatch.setattr(worker, "atomic_write", tamper)
+    arm = make()
+    with pytest.raises(RuntimeError, match="session mismatch"):
+        arm.call(image, {"goal": "valid"})
+    assert arm.cleanup()["verified"] is False
+
+
+def test_source_pin_cannot_be_transferred_to_another_repository(monkeypatch, tmp_path):
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+    monkeypatch.setattr(runtimes, "verified_artifact_paths", lambda *a: {"model": tmp_path / "model.safetensors"})
+    profile = {"provider_id": "phi_ground_any_bf16", "preprocessing": {"source_revision": "other/repo@395640833d9b4748446d007257d87924df733ecb"}}
+    with pytest.raises(runtimes.ProviderIntegrityError, match="source revision"):
+        runtimes._load_dependencies(profile, tmp_path)

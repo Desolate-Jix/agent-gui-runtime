@@ -281,7 +281,7 @@ def test_ui_venus_runtime_uses_frozen_center_prompt_and_exact_decode(tmp_path: P
         goal="button: Open",
         profile={},
         artifact_root=tmp_path,
-        dependencies={"model": Model(), "processor": Processor(), "torch": SimpleNamespace(cuda=cuda)},
+        dependencies={"model": Model(), "processor": Processor(), "torch": SimpleNamespace(cuda=cuda), "process_vision_info": lambda messages: ([messages[0]["content"][0]["image"]], None)},
     )
 
     prompt = observed["messages"][0]["content"][1]["text"]
@@ -289,6 +289,7 @@ def test_ui_venus_runtime_uses_frozen_center_prompt_and_exact_decode(tmp_path: P
     assert observed["decoded_ids"] == [[12]]
     assert observed["decode_kwargs"]["clean_up_tokenization_spaces"] is False
     assert result["raw_native_output"] == "[250,375]"
+    assert observed["generate"]["max_new_tokens"] == 128
 
 
 def test_gui_actor_runtime_calls_official_topk_three_and_preserves_all_points(tmp_path: Path) -> None:
@@ -297,8 +298,8 @@ def test_gui_actor_runtime_calls_official_topk_three_and_preserves_all_points(tm
     calls: list[dict[str, object]] = []
     prediction = {"topk_points": [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], "entropy": 0.7}
 
-    def inference(**kwargs):
-        calls.append(kwargs)
+    def inference(conversation, model, tokenizer, data_processor, *, use_placeholder, topk):
+        calls.append({"conversation": conversation, "use_placeholder": use_placeholder, "topk": topk})
         return prediction
 
     result = runtimes.run_gui_actor(
@@ -306,45 +307,15 @@ def test_gui_actor_runtime_calls_official_topk_three_and_preserves_all_points(tm
         goal="button: Open",
         profile={},
         artifact_root=tmp_path,
-        dependencies={"model": object(), "processor": object(), "inference": inference},
+        dependencies={"model": object(), "processor": object(), "tokenizer": object(), "inference": inference, "grounding_system_message": "official system"},
     )
 
     assert calls[0]["use_placeholder"] is True and calls[0]["topk"] == 3
-    assert result["parsed_native"] == prediction
+    assert result["parsed_native"] == {"topk_points": prediction["topk_points"]}
+    assert calls[0]["conversation"][0]["content"][0]["text"] == "official system"
+    assert calls[0]["conversation"][1]["content"][1]["text"] == "button: Open"
 
 
-def test_llama_runtime_always_terminates_child_and_preserves_raw_response(tmp_path: Path) -> None:
-    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
-
-    events: list[str] = []
-    (tmp_path / "screen.png").write_bytes(b"screen")
-
-    class FakeProcess:
-        pid = 77
-        returncode = None
-        def poll(self): return self.returncode
-        def terminate(self): events.append("terminate")
-        def wait(self, timeout=None): events.append("wait"); self.returncode = 0; return 0
-        def kill(self): events.append("kill")
-
-    result = runtimes.run_llama_cpp(
-        image_path=tmp_path / "screen.png",
-        goal="button: Open",
-        profile={"timeout_seconds": 7, "max_output_bytes": 200},
-        artifact_root=tmp_path,
-        incumbent_projection=None,
-        incumbent_request=None,
-        listener_port=49152,
-        dependencies={
-            "paths": {"runtime": tmp_path / "llama-server.exe", "model": tmp_path / "model.gguf", "mmproj": tmp_path / "mmproj.gguf"},
-            "popen": lambda *args, **kwargs: FakeProcess(),
-            "wait_ready": lambda **kwargs: None,
-            "post_json": lambda **kwargs: {"choices": [{"message": {"content": "[125,250]"}}], "usage": {"completion_tokens": 4}},
-        },
-    )
-
-    assert result["raw_native_output"] == "[125,250]"
-    assert events == ["terminate", "wait"]
 
 
 
