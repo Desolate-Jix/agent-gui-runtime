@@ -8,6 +8,7 @@ from threading import Event
 import pytest
 
 from app.learn.recognition.uei.contracts import UEIValidationError
+from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.recognition.uei.provider_adapters import (
     NormalizedProviderItem,
     NormalizedScreenParseOutput,
@@ -346,3 +347,144 @@ def test_task3_dispatches_the_sealed_effective_budget_to_omni_delegate():
     }]
     assert delegate.calls[0]["capture"] is request.capture
     assert delegate.calls[0]["cancellation_event"] is cancellation_event
+
+
+def test_qwen_compatibility_adapter_uses_exact_managed_envelope_and_current_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.provider_capability_adapters import (
+        QwenSemanticBindingCompatibilityAdapter,
+        project_semantic_result_to_hybrid_qwen_v1,
+    )
+    from app.learn.recognition.uei.provider_capabilities import (
+        SemanticBindingRequestV1,
+        invoke_with_capability_envelope,
+    )
+    from tests.test_learn_hybrid_qwen_binding import _qwen_facts
+
+    facts = _qwen_facts(tmp_path, monkeypatch)
+    capture_path = Path(facts["qwen_payload"]["capture_image_path"])
+    if not capture_path.is_absolute():
+        capture_path = tmp_path / capture_path
+    screenshot_bytes = capture_path.read_bytes()
+    inputs = {
+        "capture_bundle": facts["bundle"],
+        "omni_inventory": {key: value for key, value in facts["inventory"].items() if key != "content_sha256"},
+        "context_ref": facts["bundle"]["context_ref"],
+        "screenshot_bytes": screenshot_bytes,
+        "screenshot_media_type": "image/png",
+        "screenshot_sha256": facts["bundle"]["capture_identity"]["screenshot_sha256"],
+    }
+    ordered_candidate_ids = tuple(
+        candidate["candidate_id"] for candidate in inputs["omni_inventory"]["candidates"]
+    )
+    descriptor = seal_provider_bundle_descriptor_v1({
+        "contract_version": "provider_bundle_descriptor_v1",
+        "bundle_id": "bundle/local.qwen-semantic-contract",
+        "bundle_revision": "test-v1",
+        "capability": "semantic_binding",
+        "provider_id": "provider/local.qwen3",
+        "profile_id": "profile/local.qwen3",
+        "model_id": "model/qwen3",
+        "model_revision": "test-v1",
+        "prompt_spec_sha256": "1" * 64,
+        "prompt_renderer_sha256": "2" * 64,
+        "native_parser_sha256": "3" * 64,
+        "adapter_sha256": "4" * 64,
+        "preprocessing_sha256": "5" * 64,
+        "transport_sha256": "6" * 64,
+        "coordinate_convention": "capture_pixel_xyxy",
+        "decoding_config_sha256": "7" * 64,
+        "artifact_sha256s": ["8" * 64],
+        "resource_budget": ProviderRunBudget(100, 4_096, 8, 128, "gpu_vision").__dict__,
+        "resource_lease_policy": "exact_managed",
+    })
+    bundle_ref = provider_bundle_ref(descriptor)
+    lease = {
+        "contract_version": "managed_qwen_model_lease_v1",
+        "lease_id": "lease/qwen",
+        "owner_request_id": "owner/qwen",
+        "profile_id": "profile/local.qwen3",
+        "incarnation_id": "incarnation/qwen",
+        "server_base_url": "http://127.0.0.1:18080",
+        "server_model_id": "model/qwen3",
+        "profile_sha256": "9" * 64,
+        "server_process_identity": {"pid": 1, "create_time_ns": 1},
+    }
+    calls: list[dict[str, object]] = []
+
+    def runner(**kwargs: object) -> dict[str, object]:
+        calls.append(dict(kwargs))
+        return {
+            "bindings": [
+                {
+                    "candidate_id": candidate_id,
+                    "role": "site-specific-quick-apply-control",
+                    "label": f"candidate {index}",
+                    "binding_status": "BOUND",
+                    "confidence": 0.9,
+                }
+                for index, candidate_id in enumerate(ordered_candidate_ids)
+            ]
+        }
+
+    monkeypatch.setattr(
+        "app.core.model_server._profile_for_qwen_model_lease",
+        lambda value: {"profile_id": value["profile_id"]},
+    )
+    adapter = QwenSemanticBindingCompatibilityAdapter(
+        bundle_ref=bundle_ref, model_runner=runner,
+    )
+    request = SemanticBindingRequestV1(
+        envelope=ProviderInvocationEnvelopeV1(
+            bundle_ref=bundle_ref,
+            capability="semantic_binding",
+            invocation_id="invocation/qwen-compat",
+            capture_lineage_ref=inputs["capture_bundle"]["capture_identity"]["capture_lineage_ref"],
+            budget=ProviderRunBudget(1_000, 4_096, 16, 256, "gpu_vision"),
+            resource_lease=lease,
+        ),
+        ordered_candidate_ids=ordered_candidate_ids,
+        **inputs,
+    )
+    registry = TrustedProviderBundleRegistry([(descriptor, adapter)])
+    outcome = invoke_with_capability_envelope(
+        request=request, registry=registry, adapter=adapter, invoke=adapter.invoke,
+        validate_result=lambda result, _: request.validate_result(result),
+        cleanup=lambda: {"status": "released", "lease": lease},
+        validate_cleanup=lambda _: CapabilityCleanupOutcomeV1("clean", None),
+    )
+
+    assert outcome.promoted is True
+    assert outcome.failure is None
+    assert calls[0]["model_lease"] == lease
+    assert calls[0]["cancellation_event"] is request.envelope.cancellation_event
+    assert calls[0]["timeout_seconds"] == 0.1
+    legacy = project_semantic_result_to_hybrid_qwen_v1(
+        result=outcome.result, inventory=seal_immutable(dict(request.omni_inventory)), context_ref=request.context_ref,
+    )
+    assert legacy["contract_version"] == "hybrid_qwen_bindings_v1"
+    assert legacy["artifact_is_authorization"] is False
+    assert "binding_status" not in legacy["bindings"][0]
+
+
+def test_qwen_compatibility_adapter_rejects_stale_profile_or_incarnation_before_runner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.provider_capability_adapters import QwenSemanticBindingCompatibilityAdapter
+
+    adapter = QwenSemanticBindingCompatibilityAdapter(
+        bundle_ref={"id": "bundle/local.qwen", "content_sha256": "a" * 64},
+        model_runner=lambda **_: pytest.fail("stale lease reached Qwen runner"),
+    )
+    monkeypatch.setattr(
+        "app.core.model_server._profile_for_qwen_model_lease",
+        lambda _: {"profile_id": "profile/unexpected"},
+    )
+    with pytest.raises(UEIValidationError, match="resource_lease_mismatch"):
+        adapter.validate_resource_lease(
+            lease={"profile_id": "profile/local.qwen3", "incarnation_id": "stale"},
+            descriptor={"profile_id": "profile/local.qwen3"},
+            bundle_ref={"id": "bundle/local.qwen", "content_sha256": "a" * 64},
+        )

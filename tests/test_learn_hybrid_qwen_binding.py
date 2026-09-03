@@ -795,3 +795,122 @@ def test_workflow_release_failure_uses_production_reconciler_and_removes_complet
         )
 
     assert model_server.qwen_model_lease_is_active(lease) is False
+
+
+def test_qwen_neutral_projection_preserves_existing_hybrid_qwen_bindings_v1() -> None:
+    from app.learn.hybrid.qwen_binding import (
+        normalize_qwen_semantic_result,
+        parse_qwen_candidate_bindings,
+        project_semantic_result_to_hybrid_qwen_v1,
+    )
+    from app.learn.recognition.uei.canonical import canonical_json_bytes
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=4))
+    raw = _compact_wire_raw_for(inventory)
+    context_ref = {"id": "hybrid-context/test", "content_sha256": "5" * 64}
+    expected = parse_qwen_candidate_bindings(raw, inventory, context_ref=context_ref)
+
+    neutral = normalize_qwen_semantic_result(
+        raw=raw,
+        inventory=inventory,
+        bundle_ref={"id": "bundle/test.qwen.semantic", "content_sha256": "4" * 64},
+        invocation_id="invocation/qwen-test",
+        context_ref=context_ref,
+    )
+    actual = project_semantic_result_to_hybrid_qwen_v1(
+        result=neutral, inventory=inventory, context_ref=context_ref,
+    )
+
+    assert canonical_json_bytes(actual) == canonical_json_bytes(expected)
+    assert all(binding.binding_status for binding in neutral.bindings)
+    assert "binding_status" not in actual["bindings"][0]
+
+
+def test_qwen_neutral_normalization_preserves_open_roles_and_rejects_invalid_wire() -> None:
+    from app.learn.hybrid.qwen_binding import normalize_qwen_semantic_result
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
+    context_ref = {"id": "hybrid-context/test", "content_sha256": "5" * 64}
+    raw = _compact_wire_raw_for(inventory)
+    raw["bindings"][0]["role"] = "site-specific-quick-apply-control"
+
+    result = normalize_qwen_semantic_result(
+        raw=raw, inventory=inventory,
+        bundle_ref={"id": "bundle/test.qwen.semantic", "content_sha256": "4" * 64},
+        invocation_id="invocation/qwen-open-role", context_ref=context_ref,
+    )
+
+    assert result.bindings[0].role == "site-specific-quick-apply-control"
+    raw["bindings"][1]["role"] = " \t "
+    with pytest.raises(ValueError, match="non-empty string"):
+        normalize_qwen_semantic_result(
+            raw=raw, inventory=inventory,
+            bundle_ref={"id": "bundle/test.qwen.semantic", "content_sha256": "4" * 64},
+            invocation_id="invocation/qwen-invalid-role", context_ref=context_ref,
+        )
+
+
+def test_legacy_qwen_wire_response_normalizes_to_current_hybrid_qwen_bindings_v1() -> None:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
+    compact = _compact_wire_raw_for(inventory)
+    current = parse_qwen_candidate_bindings(
+        compact, inventory,
+        context_ref={"id": "hybrid-context/test", "content_sha256": "5" * 64},
+    )
+    legacy_wire = {
+        "bindings": [
+            {
+                **binding,
+                "description": "legacy provider explanation",
+                "semantic_confidence": 0.94,
+                "task_relevance": 0.9,
+                "relation": "primary_action",
+                "ambiguity": None,
+            }
+            for binding in current["bindings"]
+        ],
+        "ambiguity_sets": [],
+        "orphan_semantics": [],
+    }
+
+    parsed = parse_qwen_candidate_bindings(
+        legacy_wire, inventory,
+        context_ref={"id": "hybrid-context/test", "content_sha256": "5" * 64},
+    )
+
+    from app.learn.recognition.uei.canonical import canonical_json_bytes
+
+    assert canonical_json_bytes(parsed) == canonical_json_bytes(current)
+    assert all("binding_status" not in binding for binding in parsed["bindings"])
+
+
+def test_legacy_qwen_wire_rejects_nested_authority_alias_before_projection() -> None:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture())
+    raw = {
+        "bindings": [{
+            "candidate_id": inventory["candidates"][0]["candidate_id"],
+            "role": "button",
+            "label": "Apply",
+            "description": "legacy",
+            "semantic_confidence": 0.9,
+            "task_relevance": 0.9,
+            "relation": "primary_action",
+            "ambiguity": None,
+        }],
+        "ambiguity_sets": [{"nested": {"send": True}}],
+        "orphan_semantics": [],
+    }
+
+    with pytest.raises(ValueError, match="forbidden Qwen field"):
+        parse_qwen_candidate_bindings(
+            raw, inventory,
+            context_ref={"id": "hybrid-context/test", "content_sha256": "5" * 64},
+        )

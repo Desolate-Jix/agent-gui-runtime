@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from typing import Any, Callable
 
-from app.learn.recognition.uei.canonical import canonical_json_bytes
+from app.learn.recognition.uei.canonical import canonical_json_bytes, seal_immutable
 from app.learn.recognition.uei.contracts import UEIValidationError
 from app.learn.recognition.uei.provider_adapters import (
     NormalizedProviderItem,
@@ -15,8 +16,18 @@ from app.learn.recognition.uei.provider_capabilities import (
     CandidateDiscoveryItemV1,
     CandidateDiscoveryRequestV1,
     CandidateDiscoveryResultV1,
+    CapabilityCleanupOutcomeV1,
+    SemanticBindingRequestV1,
+    SemanticBindingResultV1,
     deterministic_neutral_source_item_id,
     reject_authority_shaped_payload,
+)
+from app.learn.hybrid.qwen_binding import (
+    QwenBindingCancelled,
+    QwenBindingTimeout,
+    build_qwen_binding_request,
+    normalize_qwen_semantic_result,
+    project_semantic_result_to_hybrid_qwen_v1,
 )
 
 
@@ -174,3 +185,113 @@ def _screen_parse_item(item: CandidateDiscoveryItemV1) -> NormalizedProviderItem
         safe_states=item.safe_states,
         provider_confidence=item.confidence,
     )
+
+
+class QwenSemanticBindingCompatibilityAdapter:
+    """将现有 Qwen wire/parser 约束投影到 transient semantic capability。"""
+
+    capability = "semantic_binding"
+
+    def __init__(
+        self,
+        *,
+        bundle_ref: dict[str, str],
+        model_runner: Callable[..., object],
+    ) -> None:
+        self.bundle_ref = dict(bundle_ref)
+        self._model_runner = model_runner
+
+    def validate_resource_lease(
+        self,
+        *,
+        lease: dict[str, object],
+        descriptor: dict[str, object],
+        bundle_ref: dict[str, str],
+    ) -> None:
+        """要求活动 Qwen lease 与已封存 profile/incarnation 精确一致。"""
+        if self.bundle_ref != dict(bundle_ref):
+            raise UEIValidationError("provider_capability_resource_lease_mismatch")
+        expected_profile_id = descriptor.get("profile_id")
+        if (
+            not isinstance(expected_profile_id, str)
+            or not expected_profile_id
+            or not isinstance(lease.get("profile_id"), str)
+            or lease.get("profile_id") != expected_profile_id
+            or not isinstance(lease.get("incarnation_id"), str)
+            or not lease.get("incarnation_id")
+        ):
+            raise UEIValidationError("provider_capability_resource_lease_mismatch")
+        from app.core.model_server import _profile_for_qwen_model_lease
+
+        try:
+            active_profile = _profile_for_qwen_model_lease(lease)
+        except (RuntimeError, ValueError, TypeError) as error:
+            raise UEIValidationError("provider_capability_resource_lease_mismatch") from error
+        if active_profile.get("profile_id") != expected_profile_id:
+            raise UEIValidationError("provider_capability_resource_lease_mismatch")
+
+    def validate_cleanup(
+        self,
+        *,
+        receipt: dict[str, object],
+        lease: dict[str, object],
+        bundle_ref: dict[str, str],
+        invocation_id: str,
+    ) -> CapabilityCleanupOutcomeV1:
+        if (
+            self.bundle_ref != dict(bundle_ref)
+            or receipt.get("status") != "released"
+            or receipt.get("lease") != lease
+            or not invocation_id
+        ):
+            return CapabilityCleanupOutcomeV1("indeterminate", None)
+        return CapabilityCleanupOutcomeV1("clean", receipt)
+
+    def invoke(self, request: SemanticBindingRequestV1) -> SemanticBindingResultV1:
+        if not isinstance(request, SemanticBindingRequestV1):
+            raise UEIValidationError("provider_capability_invalid_semantic_request")
+        if self.bundle_ref != dict(request.envelope.bundle_ref):
+            raise UEIValidationError("provider_capability_bundle_mismatch")
+        if not isinstance(request.envelope.resource_lease, dict):
+            raise UEIValidationError("provider_capability_resource_lease_required")
+        if (
+            request.envelope.cancellation_event is not None
+            and request.envelope.cancellation_event.is_set()
+        ):
+            raise QwenBindingCancelled("Qwen candidate binding cancelled")
+        sealed_inventory = seal_immutable(dict(request.omni_inventory))
+        native_request = build_qwen_binding_request(
+            request.capture_bundle, sealed_inventory,
+        )
+        try:
+            raw = self._model_runner(
+                request=native_request,
+                screenshot_bytes=request.screenshot_bytes,
+                screenshot_media_type=request.screenshot_media_type,
+                screenshot_sha256=request.screenshot_sha256,
+                cancellation_event=request.envelope.cancellation_event,
+                model_lease=request.envelope.resource_lease,
+                timeout_seconds=request.envelope.budget.timeout_ms / 1000.0,
+            )
+        except TimeoutError as error:
+            raise QwenBindingTimeout("Qwen model timeout") from error
+        except RuntimeError as error:
+            if (
+                request.envelope.cancellation_event is not None
+                and request.envelope.cancellation_event.is_set()
+            ):
+                raise QwenBindingCancelled("Qwen candidate binding cancelled") from error
+            raise
+        if (
+            request.envelope.cancellation_event is not None
+            and request.envelope.cancellation_event.is_set()
+        ):
+            raise QwenBindingCancelled("Qwen candidate binding cancelled")
+        result = normalize_qwen_semantic_result(
+            raw=raw,
+            inventory=sealed_inventory,
+            bundle_ref=dict(request.envelope.bundle_ref),
+            invocation_id=request.envelope.invocation_id,
+            context_ref=request.context_ref,
+        )
+        return request.validate_result(result)
