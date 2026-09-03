@@ -264,3 +264,18 @@ def test_qwen_goal_binding_schema_accepts_only_goal_binding_fields() -> None:
     assert item["oneOf"][0]["properties"]["candidate_index"] == {"type": "integer", "minimum": 0, "maximum": 0}
     assert item["oneOf"][1]["properties"]["status"] == {"const": "UNBOUND"}
     assert item["oneOf"][1]["properties"]["candidate_index"] == {"type": "null"}
+
+
+def test_qwen_goal_binding_schema_with_no_candidates_allows_only_unbound_null() -> None:
+    from app.core import model_server
+
+    schema = model_server._qwen_model_projection_response_schema({
+        "image_size": [100, 80],
+        "goals": [{"goal_index": 0, "role": "button", "label": "Open"}],
+        "candidates": [],
+    })
+    branches = schema["prefixItems"][0]["oneOf"]
+    assert len(branches) == 1
+    assert branches[0]["properties"]["status"] == {"const": "UNBOUND"}
+    assert branches[0]["properties"]["candidate_index"] == {"type": "null"}
+    assert "maximum" not in branches[0]["properties"]["candidate_index"]

@@ -5378,37 +5378,39 @@ def _qwen_model_projection_response_schema(projection: Mapping[str, Any]) -> dic
         if not isinstance(candidate, Mapping) or candidate.get("candidate_index") != index:
             raise ValueError("Qwen model projection candidate ordinal is invalid")
     fields = ["goal_index", "candidate_index", "status", "confidence"]
+
+    def item_schema(index: int) -> dict[str, Any]:
+        unbound = {
+            "type": "object",
+            "properties": {
+                "goal_index": {"const": index},
+                "candidate_index": {"type": "null"},
+                "status": {"const": "UNBOUND"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            },
+            "required": fields,
+            "additionalProperties": False,
+        }
+        if not candidates:
+            return {"oneOf": [unbound]}
+        return {"oneOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "goal_index": {"const": index},
+                    "candidate_index": {"type": "integer", "minimum": 0, "maximum": len(candidates) - 1},
+                    "status": {"const": "BOUND"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+                "required": fields,
+                "additionalProperties": False,
+            },
+            unbound,
+        ]}
+
     return {
         "type": "array",
-        "prefixItems": [
-            {
-                "oneOf": [
-                    {
-                        "type": "object",
-                        "properties": {
-                            "goal_index": {"const": index},
-                            "candidate_index": {"type": "integer", "minimum": 0, "maximum": len(candidates) - 1},
-                            "status": {"const": "BOUND"},
-                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                        },
-                        "required": fields,
-                        "additionalProperties": False,
-                    },
-                    {
-                        "type": "object",
-                        "properties": {
-                            "goal_index": {"const": index},
-                            "candidate_index": {"type": "null"},
-                            "status": {"const": "UNBOUND"},
-                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                        },
-                        "required": fields,
-                        "additionalProperties": False,
-                    },
-                ]
-            }
-            for index in range(len(goals))
-        ],
+        "prefixItems": [item_schema(index) for index in range(len(goals))],
         "minItems": len(goals),
         "maxItems": len(goals),
     }
