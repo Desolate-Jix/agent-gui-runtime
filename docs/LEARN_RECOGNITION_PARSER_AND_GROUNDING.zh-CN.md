@@ -518,3 +518,12 @@ safety flags
 9. 下一步：扩展到独立截图、真实 miss/rejection、wrong-surface/precondition case、ROI edge case、coordinate transform edge，再选择 UGround 2B/7B、GUI-Actor 或 ShowUI 做 actual/per-config 对比；不要把保存截图上的小样本通过解释成模型可靠性。
 
 这个顺序能避免把 fixture 通过误读成模型能力，也避免一开始下载多个模型后找不到失败层。
+
+
+## Simple-native 五屏诊断边界（Phase A）
+
+此路径固定为 5 屏 / 25 target 的 `regression_diagnostic_only=true`，`promotion_eligible=false` 离线诊断。默认 CLI 为 `preflight`，不得导入权重、启动服务、保留 GPU 或执行 click。仅在当前任务获得明确批准并同时提供 `--operator-approved-model-start` 后才能考虑 actual；实现阶段不运行 actual。
+
+Omni native output 仅有 normalized bbox、type、content、interactivity，adapter 再补 runtime 字段。Qwen 完整 runtime request 继续是 capture/freshness/provenance 的真源；模型面对短 ordinal projection，adapter 恢复 stable candidate ID 后进入既有 parser。VISTA 只传 ROI 与短 target prompt，实际 caller 不使用 generic system/json_object；bare `[x,y]` 必须经 ROI、candidate、capture strict bounds 验证，不能 clipping、nearest-point 或 bbox fallback。
+
+报告必须保留 raw UTF-8、parsed/error、hash、parent lineage、slot latency/bytes、分子/分母和 cleanup receipt。任一坐标、lineage、Gold isolation、schema 连续失败、GPU ownership 或 zero-action 不变量失败即停止。Phase B 只有在批准 actual trace、安全证据、无 holdout 和足以证明抽象必要性的第二实现/重复 seam 存在时才可另行设计；本阶段不改 Learning 或 Benchmark v2 schema。

@@ -270,3 +270,10 @@ Automatic provider selection, remote execution, raw-coordinate Agent authority, 
 ## License
 
 [ISC](LICENSE)
+
+
+## Simple-native provider smoke (Phase A)
+
+`python scripts/run_simple_native_provider_smoke.py` defaults to offline `preflight`: it validates only `case-001` through `case-005`, never starts a model, and performs no action. `replay` uses injected native-shape fixtures and writes a regression-only, non-promotable 25-target diagnostic.
+
+The three protocols remain independent: Omni emits only `{bbox,type,content,interactivity}`; Qwen keeps the complete runtime request locally while the model sees ordinal `{i,box,active}` candidates; VISTA receives a validated ROI and returns only bare normalized `[x,y]`. Runtime IDs, capture lineage, coordinate transforms, metrics, and review-only fields are adapter-owned. Actual mode additionally requires an operator flag and current explicit approval; it must stop on lineage, bounds, schema, cleanup, or action-path failures. Phase B requires an approved frozen actual run, stable native traces, safety/cleanup evidence, no holdout use, and factual evidence for any later abstraction. No Learning or Benchmark v2 schema changed.
