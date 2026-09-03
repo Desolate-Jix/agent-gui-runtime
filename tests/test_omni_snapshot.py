@@ -243,7 +243,7 @@ def test_loader_rejects_resealed_traversal_and_forbidden_semantics(tmp_path: Pat
 
     manifest_path, cases = _snapshot(tmp_path / "forbidden")
     forged = _read_json(manifest_path)
-    forged["cases"][0]["screenshot_path"] = "C:/submit.png"
+    forged["cases"][0]["screenshot_path"] = "C:/gold-regression.png"
     _seal_manifest(manifest_path, forged)
     with pytest.raises(ValueError, match="forbidden semantic"):
         load_verified_omni_snapshot(
@@ -303,6 +303,82 @@ def test_loader_rejects_symlinked_sidecar_after_resealing(tmp_path: Path) -> Non
     first["candidate_file_sha256"] = sha256(candidate.read_bytes()).hexdigest()
     _seal_manifest(manifest_path, manifest)
     with pytest.raises(ValueError, match="reparse"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
+
+
+def test_snapshot_preserves_provider_reported_inactive_candidates(tmp_path: Path) -> None:
+    """A noninteractive Omni item remains a valid, explicitly inactive frozen candidate."""
+    from app.learn.hybrid.omni_snapshot import create_omni_snapshot, load_verified_omni_snapshot
+
+    cases = _cases(tmp_path)
+    manifest = create_omni_snapshot(
+        cases=cases,
+        omni=lambda _image: {"items": [{
+            "bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "Submit Send Confirm Payment Action", "interactivity": False,
+        }]},
+        output_dir=tmp_path / "inactive",
+        provider_identity=_identity(),
+    )
+    loaded = load_verified_omni_snapshot(
+        manifest, expected_cases=cases, expected_provider_identity=_identity()
+    )
+    candidate = loaded["cases"][0]["candidates"][0]
+    assert candidate["active"] is False
+    assert candidate["inactive_reason"] == "provider_reported_inactive"
+
+
+def test_loader_rejects_resealed_malformed_native_and_forbidden_key(tmp_path: Path) -> None:
+    """Recomputed file and manifest digests do not bypass native parsing or authority-key rejection."""
+    from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
+
+    manifest_path, cases = _snapshot(tmp_path)
+    manifest = _read_json(manifest_path)
+    record = manifest["cases"][0]
+    assert isinstance(record, dict)
+    native_path = manifest_path.parent / str(record["native_output_file"])
+    native = _read_json(native_path)
+    native["raw_utf8"] = "{}"
+    native["raw_output_sha256"] = sha256(b"{}").hexdigest()
+    _write_canonical(native_path, native)
+    record["native_output_sha256"] = native["raw_output_sha256"]
+    record["native_output_file_sha256"] = sha256(native_path.read_bytes()).hexdigest()
+    candidate_path = manifest_path.parent / str(record["candidate_file"])
+    candidate = _read_json(candidate_path)
+    candidate["native_output_file_sha256"] = record["native_output_file_sha256"]
+    candidate["native_output_sha256"] = record["native_output_sha256"]
+    _write_canonical(candidate_path, candidate)
+    record["candidate_file_sha256"] = sha256(candidate_path.read_bytes()).hexdigest()
+    _seal_manifest(manifest_path, manifest)
+    with pytest.raises(ValueError, match="native output parse mismatch"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
+
+    manifest_path, cases = _snapshot(tmp_path / "key")
+    manifest = _read_json(manifest_path)
+    manifest["submit_authorized"] = False
+    _seal_manifest(manifest_path, manifest)
+    with pytest.raises(ValueError, match="forbidden semantic"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
+
+
+def test_snapshot_allows_ordinary_action_words_and_rejects_hardlink_alias(tmp_path: Path) -> None:
+    """Visible text is inert evidence, while an aliased sidecar is not an immutable file."""
+    from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
+
+    manifest_path, cases = _snapshot(tmp_path)
+    candidate_path = manifest_path.parent / "case-001.candidates.json"
+    outside = tmp_path / "candidate-alias.json"
+    candidate_path.replace(outside)
+    try:
+        os.link(outside, candidate_path)
+    except OSError as exc:
+        pytest.skip(f"hardlink unavailable: {exc}")
+    with pytest.raises(ValueError, match="hardlink aliases"):
         load_verified_omni_snapshot(
             manifest_path, expected_cases=cases, expected_provider_identity=_identity()
         )

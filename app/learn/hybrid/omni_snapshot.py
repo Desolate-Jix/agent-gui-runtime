@@ -1,16 +1,19 @@
 """Create and verify a sealed, regression-only Omni candidate snapshot."""
 from __future__ import annotations
 from copy import deepcopy
+from dataclasses import asdict
 from hashlib import sha256
 import json, os, re, stat
 from pathlib import Path
 from typing import Mapping, Sequence
 from PIL import Image
 from app.learn.hybrid.simple_native_contracts import parse_omni_native_output
-from app.learn.hybrid.simple_native_smoke import OmniNativeCaller, ProviderCase, _parse_provider_goals, _prepare_capture, _verify_capture_freshness, build_omni_evidence_from_native
+from app.learn.hybrid.contracts import stable_candidate_id
+from app.learn.hybrid.simple_native_smoke import OmniNativeCaller, ProviderCase, _hash as _native_hash, _parse_provider_goals, _prepare_capture, _verify_capture_freshness, build_omni_evidence_from_native
+from app.learn.recognition.uei.canonical import content_sha256
 _CASE_IDS=tuple(f"case-{i:03d}" for i in range(1,6))
 _IDENTITY_KEYS=frozenset({"provider_id","profile_id","model_revision","preprocessing_revision"})
-_FORBIDDEN=re.compile(r"(?<![a-z0-9])(gold|holdout|action|authority|submit|send|confirm|payment)(?![a-z0-9])",re.I)
+_DATA_PATH=re.compile(r"(?<![a-z0-9])(gold|holdout)(?![a-z0-9])",re.I)
 _SHA=re.compile(r"\A[0-9a-f]{64}\Z"); _CID=re.compile(r"\Acandidate/[0-9a-f]{64}\Z")
 def _canonical_bytes(value: object)->bytes: return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":"),allow_nan=False).encode("utf-8")
 def _sha(value: bytes)->str: return sha256(value).hexdigest()
@@ -24,15 +27,26 @@ def _read(path: Path,*,label:str)->dict[str,object]:
 def _closed(value:Mapping[str,object],keys:set[str],*,label:str)->None:
  if set(value)!=keys: raise ValueError(f"{label} has closed-contract key mismatch")
 def _forbidden(value:object,*,label:str,key:str|None=None)->None:
- if key in {"contains_holdout","artifact_is_authorization","regression_only"}: return
- if isinstance(value,str) and _FORBIDDEN.search(value): raise ValueError(f"{label} includes forbidden semantic")
+ safe_false={"contains_holdout","artifact_is_authorization","regression_only"}
+ safe_true={"final_submit_forbidden"}
+ control={"action_authorized","approved_to_click","approved_to_execute","click_authorized","execute","final_submit","submit_authorized","action_authority","click_authority","review_authority"}
+ if key is not None:
+  folded=key.casefold()
+  if key in safe_false:
+   if value is not (key=="regression_only"): raise ValueError(f"{label} violates safe declaration")
+   return
+  if key in safe_true:
+   if value is not True: raise ValueError(f"{label} violates safe declaration")
+   return
+  if "gold" in folded or "holdout" in folded or key in control: raise ValueError(f"{label} includes forbidden semantic")
+  if folded.endswith("path") and isinstance(value,str) and _DATA_PATH.search(value) is not None: raise ValueError(f"{label} includes forbidden semantic")
  if isinstance(value,Mapping):
   for k,v in value.items():
    if not isinstance(k,str): raise ValueError(f"{label} has non-string key")
-   if k not in {"contains_holdout","artifact_is_authorization","regression_only"}: _forbidden(k,label=label)
    _forbidden(v,label=label,key=k)
  elif isinstance(value,list):
   for v in value: _forbidden(v,label=label)
+
 def _cases(cases:Sequence[ProviderCase])->tuple[ProviderCase,...]:
  result=tuple(cases)
  if len(result)!=5 or tuple(c.case_id for c in result)!=_CASE_IDS: raise ValueError("Omni snapshot requires exactly case-001 through case-005")
@@ -60,6 +74,7 @@ def _file(root:Path,name:str,*,label:str)->Path:
  result=root/name
  if not os.path.lexists(result) or not result.is_file(): raise ValueError(f"{label} is unavailable")
  _safe(result,label=label)
+ if result.lstat().st_nlink != 1: raise ValueError(f"{label} must not have hardlink aliases")
  try: common=os.path.commonpath([str(root.resolve(strict=True)),str(result.resolve(strict=True))])
  except OSError as exc: raise ValueError(f"{label} cannot resolve") from exc
  if common!=str(root.resolve(strict=True)): raise ValueError(f"{label} escapes snapshot directory")
@@ -87,12 +102,12 @@ def _candidates(value:object,*,size:Mapping[str,object])->tuple[list[dict[str,ob
  for raw in value:
   if not isinstance(raw,Mapping): raise ValueError("Omni snapshot candidate is invalid")
   item=deepcopy(dict(raw)); _closed(item,keys,label="Omni snapshot candidate"); box=item["bbox_original"]; cid=item["candidate_id"]
-  if not isinstance(cid,str) or not _CID.fullmatch(cid) or cid in ids or not isinstance(box,list) or len(box)!=4 or any(isinstance(v,bool) or not isinstance(v,int) for v in box) or not(0<=box[0]<box[2]<=w and 0<=box[1]<box[3]<=h) or item["coordinate_space"]!="capture_pixel_xyxy" or not isinstance(item["active"],bool) or item["confidence"] is not None or item["inactive_reason"] is not None or not isinstance(item["source_item_id"],str): raise ValueError("Omni snapshot candidate geometry is invalid")
+  if not isinstance(cid,str) or not _CID.fullmatch(cid) or cid in ids or not isinstance(box,list) or len(box)!=4 or any(isinstance(v,bool) or not isinstance(v,int) for v in box) or not(0<=box[0]<box[2]<=w and 0<=box[1]<box[3]<=h) or item["coordinate_space"]!="capture_pixel_xyxy" or not isinstance(item["active"],bool) or item["confidence"] is not None or not isinstance(item["source_item_id"],str) or (item["active"] is True and item["inactive_reason"] is not None) or (item["active"] is False and item["inactive_reason"] != "provider_reported_inactive"): raise ValueError("Omni snapshot candidate geometry is invalid")
   item["provider_result_ref"]=_ref(item["provider_result_ref"],label="Omni snapshot provider result ref")
   if not isinstance(item["provenance"],Mapping): raise ValueError("Omni snapshot candidate provenance is invalid")
   p=deepcopy(dict(item["provenance"])); _closed(p,{"contract_version","content_sha256","provider_result_ref","source_item_id"},label="Omni snapshot candidate provenance")
   p["provider_result_ref"]=_ref(p["provider_result_ref"],label="Omni snapshot candidate provenance ref")
-  if p["contract_version"]!="hybrid_candidate_provenance_v1" or p["source_item_id"]!=item["source_item_id"] or p["provider_result_ref"]!=item["provider_result_ref"] or not isinstance(p["content_sha256"],str) or not _SHA.fullmatch(p["content_sha256"]): raise ValueError("Omni snapshot candidate provenance is invalid")
+  if p["contract_version"]!="hybrid_candidate_provenance_v1" or p["source_item_id"]!=item["source_item_id"] or p["provider_result_ref"]!=item["provider_result_ref"] or not isinstance(p["content_sha256"],str) or p["content_sha256"] != content_sha256(p) or item["candidate_id"] != stable_candidate_id(provider_result_ref=item["provider_result_ref"], source_item_id=item["source_item_id"]): raise ValueError("Omni snapshot candidate provenance is invalid")
   item["provenance"]=p; ids.add(cid); items.append(item); geometry.append({"candidate_id":cid,"bbox_original":list(box),"active":item["active"]})
  return items,geometry
 def _inventory(case_id:str,capture:Mapping[str,object],candidates:list[dict[str,object]])->str: return _hash({"contract_version":"omni_snapshot_canonical_inventory_v1","case_id":case_id,"capture":capture,"candidates":candidates})
@@ -141,11 +156,15 @@ def _verify_case(root:Path,record:Mapping[str,object])->dict[str,object]:
  native=_read(native_path,label="Omni snapshot native file"); payload=_read(candidate_path,label="Omni snapshot candidate file"); _forbidden(native,label="Omni snapshot native file"); _forbidden(payload,label="Omni snapshot candidate file")
  _closed(native,{"contract_version","case_id","raw_utf8","raw_output_sha256","artifact_is_authorization"},label="Omni snapshot native file")
  if native["contract_version"]!="omni_snapshot_native_output_v1" or native["case_id"]!=cid or native["artifact_is_authorization"] is not False or not isinstance(native["raw_utf8"],str) or _sha(native["raw_utf8"].encode("utf-8"))!=native["raw_output_sha256"] or native["raw_output_sha256"]!=record["native_output_sha256"]: raise ValueError("Omni snapshot native output mismatch")
+ try: parsed_native=parse_omni_native_output(json.loads(native["raw_utf8"],parse_constant=_no_constant))
+ except (ValueError,json.JSONDecodeError,TypeError) as exc: raise ValueError("Omni snapshot native output parse mismatch") from exc
+ source_ids={f"omni-native/{index:04d}/{_native_hash(asdict(item))[:16]}" for index,item in enumerate(parsed_native)}
  _closed(payload,{"contract_version","case_id","capture","native_output_file","native_output_file_sha256","native_output_sha256","canonical_inventory_sha256","candidates","artifact_is_authorization"},label="Omni snapshot candidate file")
  if payload["contract_version"]!="omni_snapshot_candidates_v1" or payload["case_id"]!=cid or payload["artifact_is_authorization"] is not False or payload["native_output_file"]!=native_name or payload["native_output_file_sha256"]!=record["native_output_file_sha256"] or payload["native_output_sha256"]!=record["native_output_sha256"]: raise ValueError("Omni snapshot candidate native reference mismatch")
  cap=_capture(payload["capture"],label="Omni snapshot candidate capture")
  if cap["capture_id"]!=record["capture_id"] or cap["screenshot_sha256"]!=record["capture_sha256"] or cap["image_size"]!=record["image_size"] or _hash(cap["capture_lineage_ref"])!=record["capture_lineage_sha256"]: raise ValueError("Omni snapshot candidate capture mismatch")
  candidates,geometry=_candidates(payload["candidates"],size=cap["image_size"]); ids=[x["candidate_id"] for x in candidates]
+ if any(candidate["source_item_id"] not in source_ids for candidate in candidates): raise ValueError("Omni snapshot source item lineage mismatch")
  if ids!=record["candidate_ids"] or _hash(ids)!=record["candidate_order_sha256"] or _hash(geometry)!=record["candidate_geometry_sha256"]: raise ValueError("Omni snapshot candidate order or geometry mismatch")
  if _inventory(cid,cap,candidates)!=payload["canonical_inventory_sha256"] or payload["canonical_inventory_sha256"]!=record["canonical_inventory_sha256"]: raise ValueError("Omni snapshot canonical inventory mismatch")
  return {"case_id":cid,"capture":cap,"candidates":deepcopy(candidates),"candidate_file":str(candidate_path)}
