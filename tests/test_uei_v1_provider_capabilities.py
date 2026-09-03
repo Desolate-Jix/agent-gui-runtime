@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 from hashlib import sha256
 from pathlib import Path
+from threading import Event
 
 import pytest
 
@@ -19,6 +20,8 @@ from app.learn.recognition.uei.provider_capabilities import (
     CandidateDiscoveryItemV1,
     CandidateDiscoveryRequestV1,
     CandidateDiscoveryResultV1,
+    CapabilityCleanupOutcomeV1,
+    CapabilityInvocationOutcome,
     GroundingRefinementRequestV1,
     GroundingRefinementResultV1,
     ProviderInvocationEnvelopeV1,
@@ -27,6 +30,7 @@ from app.learn.recognition.uei.provider_capabilities import (
     SemanticBindingResultV1,
     deterministic_neutral_source_item_id,
     effective_provider_budget,
+    invoke_with_capability_envelope,
     reject_authority_shaped_payload,
 )
 
@@ -633,3 +637,229 @@ def test_frozen_semantic_and_grounding_evidence_support_deepcopy_materialization
     provider_request = deepcopy(grounding_request.provider_request)
     assert isinstance(provider_request, dict)
     assert provider_request == {"state": "BOUND", "nested": {"evidence": "safe"}}
+
+
+class _InvocationAdapter:
+    def __init__(
+        self,
+        *,
+        bundle_ref: dict[str, str] | None = None,
+        capability: str = "candidate_discovery",
+        requires_managed_resource: bool = False,
+        profile_id: str = "profile/managed",
+        incarnation_id: str = "incarnation/current",
+        descriptor_bundle_ref: dict[str, str] | None = None,
+    ) -> None:
+        self.bundle_ref = dict(BUNDLE_REF if bundle_ref is None else bundle_ref)
+        self.capability = capability
+        self.requires_managed_resource = requires_managed_resource
+        self.descriptor = {
+            "profile_id": profile_id,
+            "bundle_ref": dict(BUNDLE_REF if descriptor_bundle_ref is None else descriptor_bundle_ref),
+        }
+        self.incarnation_id = incarnation_id
+
+
+def _invocation_request(
+    *,
+    cancellation_event: Event | None = None,
+    resource_lease: dict[str, object] | None = None,
+) -> CandidateDiscoveryRequestV1:
+    return CandidateDiscoveryRequestV1(
+        envelope=ProviderInvocationEnvelopeV1(
+            bundle_ref=dict(BUNDLE_REF),
+            capability="candidate_discovery",
+            invocation_id="invocation/capability-envelope",
+            capture_lineage_ref=dict(LINEAGE_REF),
+            budget=budget(),
+            resource_lease=resource_lease,
+            cancellation_event=cancellation_event,
+        ),
+        capture=capture(),
+    )
+
+
+def _validate_fake_cleanup(receipt: dict[str, object]) -> CapabilityCleanupOutcomeV1:
+    if receipt.get("status") != "released":
+        return CapabilityCleanupOutcomeV1("indeterminate", receipt)
+    return CapabilityCleanupOutcomeV1(str(receipt["cleanup_status"]), receipt)
+
+
+def run_fake_invocation(
+    *,
+    calls: list[str] | None = None,
+    cancel_stage: str | None = None,
+    duration_ms: int = 1,
+    output_bytes: int = 1,
+    provider_failure: bool = False,
+    cleanup_status: str = "clean",
+    adapter: _InvocationAdapter | None = None,
+    resource_lease: dict[str, object] | None = None,
+) -> CapabilityInvocationOutcome[dict[str, int]]:
+    transitions = [] if calls is None else calls
+    cancellation_event = Event()
+    if cancel_stage == "before_acquire":
+        cancellation_event.set()
+    request = _invocation_request(
+        cancellation_event=cancellation_event,
+        resource_lease=resource_lease,
+    )
+    selected_adapter = adapter or _InvocationAdapter()
+
+    def fake_invoke(_: CandidateDiscoveryRequestV1) -> dict[str, int]:
+        transitions.extend(("acquire", "invoke"))
+        if cancel_stage == "during_invoke":
+            cancellation_event.set()
+        if provider_failure:
+            raise RuntimeError("provider transport failed")
+        return {"duration_ms": duration_ms, "output_bytes": output_bytes}
+
+    def validate_result(
+        result: dict[str, int], run_budget: ProviderRunBudget
+    ) -> dict[str, int]:
+        if (
+            result["duration_ms"] > run_budget.timeout_ms
+            or result["output_bytes"] > run_budget.max_output_bytes
+        ):
+            raise UEIValidationError("provider_capability_result_budget_exceeded")
+        if cancel_stage == "before_promote":
+            cancellation_event.set()
+        if not cancellation_event.is_set():
+            transitions.append("promote")
+        return result
+
+    def fake_cleanup() -> dict[str, object]:
+        transitions.append("cleanup")
+        return {"status": "released", "cleanup_status": cleanup_status}
+
+    outcome = invoke_with_capability_envelope(
+        request=request,
+        adapter=selected_adapter,
+        invoke=fake_invoke,
+        validate_result=validate_result,
+        cleanup=fake_cleanup,
+        validate_cleanup=_validate_fake_cleanup,
+    )
+    transitions.append("return")
+    return outcome
+
+
+@pytest.mark.parametrize("cancel_stage", ["before_acquire", "during_invoke", "before_promote"])
+def test_cancellation_fails_closed_and_cleanup_is_exactly_once(cancel_stage):
+    calls: list[str] = []
+    result = run_fake_invocation(cancel_stage=cancel_stage, calls=calls)
+    assert result.failure.reason == "cancelled"
+    assert calls.count("cleanup") == (0 if cancel_stage == "before_acquire" else 1)
+    assert "promote" not in calls
+
+
+def test_timeout_and_output_bounds_fail_before_promotion_with_one_cleanup():
+    calls: list[str] = []
+    result = run_fake_invocation(
+        calls=calls,
+        duration_ms=30_001,
+        output_bytes=65_537,
+    )
+    assert result.failure.stage == "validation"
+    assert result.failure.cleanup_status == "clean"
+    assert calls.count("cleanup") == 1
+    assert "promote" not in calls
+
+
+def test_cleanup_ambiguity_overrides_success_and_fails_closed():
+    result = run_fake_invocation(cleanup_status="indeterminate")
+    assert result.failure.reason == "cleanup_ambiguous"
+    assert result.promoted is False
+
+
+def test_structured_cleanup_receipt_is_preserved_on_success_and_failure():
+    success = run_fake_invocation(cleanup_status="clean")
+    assert success.cleanup.status == "clean"
+    assert success.cleanup.receipt["status"] == "released"
+    failed = run_fake_invocation(provider_failure=True, cleanup_status="clean")
+    assert failed.failure.reason == "provider_failed"
+    assert failed.cleanup.receipt["status"] == "released"
+
+
+@pytest.mark.parametrize(
+    ("adapter", "reason"),
+    [
+        (_InvocationAdapter(bundle_ref={"id": "bundle/unknown", "content_sha256": "f" * 64}), "unknown_bundle"),
+        (_InvocationAdapter(capability="semantic_binding"), "capability_mismatch"),
+    ],
+)
+def test_unknown_bundle_or_capability_mismatch_fail_before_invocation(adapter, reason):
+    calls: list[str] = []
+    result = run_fake_invocation(calls=calls, adapter=adapter)
+    assert result.failure.reason == reason
+    assert "acquire" not in calls
+    assert "invoke" not in calls
+    assert "cleanup" not in calls
+
+
+@pytest.mark.parametrize(
+    ("resource_lease", "adapter"),
+    [
+        (None, _InvocationAdapter(requires_managed_resource=True)),
+        (
+            {"profile_id": "profile/wrong", "incarnation_id": "incarnation/current"},
+            _InvocationAdapter(requires_managed_resource=True),
+        ),
+        (
+            {"profile_id": "profile/managed", "incarnation_id": "incarnation/stale"},
+            _InvocationAdapter(requires_managed_resource=True),
+        ),
+        (
+            {"profile_id": "profile/managed", "incarnation_id": "incarnation/current"},
+            _InvocationAdapter(
+                requires_managed_resource=True,
+                descriptor_bundle_ref={"id": "bundle/other", "content_sha256": "e" * 64},
+            ),
+        ),
+    ],
+)
+def test_managed_resource_envelope_failures_precede_transport_dispatch(resource_lease, adapter):
+    calls: list[str] = []
+    result = run_fake_invocation(
+        calls=calls,
+        adapter=adapter,
+        resource_lease=resource_lease,
+    )
+    assert result.failure.stage == "validation"
+    assert "acquire" not in calls
+    assert "invoke" not in calls
+
+
+def test_qwen_shaped_cleanup_receipt_is_preserved_byte_for_byte():
+    calls: list[str] = []
+    receipt = {
+        "contract_version": "qwen_model_release_v1",
+        "status": "released",
+        "cleanup_status": "clean",
+        "lease": {"lease_id": "lease/exact", "incarnation_id": "incarnation/current"},
+        "shared_server_retained": False,
+    }
+    request = _invocation_request()
+
+    def fake_invoke(_: CandidateDiscoveryRequestV1) -> dict[str, int]:
+        calls.extend(("acquire", "invoke"))
+        return {"duration_ms": 1, "output_bytes": 1}
+
+    def validate_result(result: dict[str, int], _: ProviderRunBudget) -> dict[str, int]:
+        calls.append("promote")
+        return result
+
+    def fake_cleanup() -> dict[str, object]:
+        calls.append("cleanup")
+        return receipt
+
+    outcome = invoke_with_capability_envelope(
+        request=request,
+        adapter=_InvocationAdapter(),
+        invoke=fake_invoke,
+        validate_result=validate_result,
+        cleanup=fake_cleanup,
+        validate_cleanup=_validate_fake_cleanup,
+    )
+    assert outcome.failure is None
+    assert outcome.cleanup.receipt is receipt

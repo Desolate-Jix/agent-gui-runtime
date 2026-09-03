@@ -9,12 +9,13 @@ from hashlib import sha256
 import math
 import re
 from threading import Event
-from typing import Protocol
+from typing import Callable, Generic, Protocol, TypeVar
 
 from app.learn.hybrid.contracts import validate_capture_identity, validate_omni_inventory
 from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256
 from app.learn.recognition.uei.contracts import UEIValidationError
 from app.learn.recognition.uei.provider_adapters import (
+    AdapterFailure,
     ProviderRunBudget,
     RestrictedCaptureLease,
 )
@@ -33,6 +34,10 @@ _MAX_ITEM_TEXT_LENGTH = 4_096
 _MAX_ROLE_LENGTH = 64
 _MAX_LABEL_LENGTH = 256
 _MAX_STATE_COUNT = 64
+_TERMINAL_CLEANUP_STATUSES = frozenset({"clean", "not_required"})
+
+TRequest = TypeVar("TRequest")
+TResult = TypeVar("TResult")
 
 
 def _non_empty_string(value: object, *, name: str, maximum: int = _MAX_ID_LENGTH) -> str:
@@ -286,6 +291,179 @@ class ProviderInvocationEnvelopeV1:
         object.__setattr__(self, "capture_lineage_ref", _freeze(self.capture_lineage_ref))
         if self.resource_lease is not None:
             object.__setattr__(self, "resource_lease", _freeze(self.resource_lease))
+
+
+@dataclass(frozen=True)
+class CapabilityCleanupOutcomeV1:
+    status: str
+    receipt: dict[str, object] | None
+
+
+@dataclass(frozen=True)
+class CapabilityInvocationFailure:
+    stage: str
+    reason: str
+    retryable: bool
+    cleanup_status: str
+
+
+@dataclass(frozen=True)
+class CapabilityInvocationOutcome(Generic[TResult]):
+    result: TResult | None
+    failure: CapabilityInvocationFailure | None
+    cleanup: CapabilityCleanupOutcomeV1
+    promoted: bool
+
+
+def _invocation_envelope_failure(
+    *, request: object, adapter: object, cleanup: Callable[[], dict[str, object]] | None
+) -> str | None:
+    envelope = getattr(request, "envelope", None)
+    if not isinstance(envelope, ProviderInvocationEnvelopeV1):
+        return "invalid_envelope"
+    if not isinstance(envelope.budget, ProviderRunBudget):
+        return "invalid_budget"
+    adapter_bundle_ref = getattr(adapter, "bundle_ref", None)
+    if not isinstance(adapter_bundle_ref, Mapping) or dict(adapter_bundle_ref) != dict(envelope.bundle_ref):
+        return "unknown_bundle"
+    adapter_capability = getattr(adapter, "capability", None)
+    descriptor = getattr(adapter, "descriptor", None)
+    if adapter_capability is None and isinstance(descriptor, Mapping):
+        adapter_capability = descriptor.get("capability")
+    if adapter_capability is not None and adapter_capability != envelope.capability:
+        return "capability_mismatch"
+    if envelope.resource_lease is not None and cleanup is None:
+        return "resource_cleanup_required"
+    if not bool(getattr(adapter, "requires_managed_resource", False)):
+        return None
+    lease = envelope.resource_lease
+    if not isinstance(lease, Mapping):
+        return "resource_lease_required"
+    if not isinstance(descriptor, Mapping):
+        return "managed_descriptor_invalid"
+    descriptor_bundle_ref = descriptor.get("bundle_ref")
+    if descriptor_bundle_ref is None and {
+        "bundle_id", "content_sha256"
+    }.issubset(descriptor):
+        descriptor_bundle_ref = {
+            "id": descriptor["bundle_id"],
+            "content_sha256": descriptor["content_sha256"],
+        }
+    if (
+        not isinstance(descriptor_bundle_ref, Mapping)
+        or dict(descriptor_bundle_ref) != dict(envelope.bundle_ref)
+    ):
+        return "unknown_bundle"
+    profile_id = descriptor.get("profile_id")
+    if not isinstance(profile_id, str) or lease.get("profile_id") != profile_id:
+        return "resource_lease_profile_mismatch"
+    expected_incarnation = getattr(adapter, "incarnation_id", None)
+    if expected_incarnation is None:
+        expected_incarnation = descriptor.get("incarnation_id")
+    if (
+        not isinstance(expected_incarnation, str)
+        or not expected_incarnation
+        or lease.get("incarnation_id") != expected_incarnation
+    ):
+        return "resource_lease_stale"
+    return None
+
+
+def _cleanup_outcome(
+    *, cleanup: Callable[[], dict[str, object]] | None,
+    acquired: bool,
+    validate_cleanup: Callable[[dict[str, object]], CapabilityCleanupOutcomeV1],
+) -> CapabilityCleanupOutcomeV1:
+    if not acquired or cleanup is None:
+        return CapabilityCleanupOutcomeV1("not_required", None)
+    try:
+        receipt = cleanup()
+        validated = validate_cleanup(receipt)
+    except Exception:
+        return CapabilityCleanupOutcomeV1("indeterminate", None)
+    if not isinstance(validated, CapabilityCleanupOutcomeV1):
+        return CapabilityCleanupOutcomeV1("indeterminate", receipt)
+    return CapabilityCleanupOutcomeV1(validated.status, receipt)
+
+
+def invoke_with_capability_envelope(
+    *,
+    request: TRequest,
+    adapter: object,
+    invoke: Callable[[TRequest], TResult],
+    validate_result: Callable[[TResult, ProviderRunBudget], TResult],
+    cleanup: Callable[[], dict[str, object]] | None,
+    validate_cleanup: Callable[[dict[str, object]], CapabilityCleanupOutcomeV1],
+) -> CapabilityInvocationOutcome[TResult]:
+    """执行一次受限 provider 调用；不持久化、不重试、不授予权限。"""
+    failure: CapabilityInvocationFailure | None = None
+    result: TResult | None = None
+    promoted = False
+    acquired = False
+    terminal_cleanup = CapabilityCleanupOutcomeV1("not_required", None)
+    try:
+        envelope = getattr(request, "envelope", None)
+        validation_failure = _invocation_envelope_failure(
+            request=request, adapter=adapter, cleanup=cleanup
+        )
+        if validation_failure is not None:
+            failure = CapabilityInvocationFailure(
+                "validation", validation_failure, False, "not_required"
+            )
+        elif envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
+            failure = CapabilityInvocationFailure("cancellation", "cancelled", False, "not_required")
+        else:
+            try:
+                acquired = True
+                raw_result = invoke(request)
+            except AdapterFailure as error:
+                failure = CapabilityInvocationFailure(
+                    "invocation", error.reason_class, error.retryable, "not_required"
+                )
+            except Exception:
+                failure = CapabilityInvocationFailure(
+                    "invocation", "provider_failed", False, "not_required"
+                )
+            else:
+                if envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
+                    failure = CapabilityInvocationFailure(
+                        "cancellation", "cancelled", False, "not_required"
+                    )
+                else:
+                    try:
+                        validated_result = validate_result(raw_result, envelope.budget)
+                    except Exception:
+                        failure = CapabilityInvocationFailure(
+                            "validation", "result_validation_failed", False, "not_required"
+                        )
+                    else:
+                        if envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
+                            failure = CapabilityInvocationFailure(
+                                "cancellation", "cancelled", False, "not_required"
+                            )
+                        else:
+                            result = validated_result
+                            promoted = True
+    finally:
+        terminal_cleanup = _cleanup_outcome(
+            cleanup=cleanup, acquired=acquired, validate_cleanup=validate_cleanup
+        )
+    if terminal_cleanup.status not in _TERMINAL_CLEANUP_STATUSES:
+        return CapabilityInvocationOutcome(
+            result=None,
+            failure=CapabilityInvocationFailure(
+                "cleanup", "cleanup_ambiguous", False, terminal_cleanup.status
+            ),
+            cleanup=terminal_cleanup,
+            promoted=False,
+        )
+    if failure is not None:
+        failure = CapabilityInvocationFailure(
+            failure.stage, failure.reason, failure.retryable, terminal_cleanup.status
+        )
+    return CapabilityInvocationOutcome(
+        result=result, failure=failure, cleanup=terminal_cleanup, promoted=promoted
+    )
 
 
 @dataclass(frozen=True)
