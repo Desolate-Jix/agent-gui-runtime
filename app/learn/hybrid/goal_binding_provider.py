@@ -9,6 +9,18 @@ import math
 
 _CONTRACT_VERSION = "goal_binding_provider_result_v1"
 _COORDINATE_SPACES = frozenset({"normalized_0_1", "normalized_0_1000", "capture_pixels"})
+_INCUMBENT_CONTROL_PROVIDER_IDS = frozenset({"qwen3_vl_8b_q4_k_m"})
+_UNBOUND_REASONS = frozenset({"no_active_candidate_hit", "ambiguous_active_candidate_hit"})
+_PROVIDER_FAILURE_REASONS = frozenset(
+    {
+        "provider_call_failed",
+        "provider_timeout",
+        "provider_unavailable",
+        "malformed_native_output",
+        "invalid_native_point",
+        "invalid_native_confidence",
+    }
+)
 _RESULT_FIELDS = frozenset(
     {
         "contract_version",
@@ -16,6 +28,7 @@ _RESULT_FIELDS = frozenset(
         "candidate_index",
         "candidate_id",
         "status",
+        "reason",
         "binding_basis",
         "confidence",
         "canonical_capture_pixel_point",
@@ -39,7 +52,12 @@ class NativePointProposal:
 
 
 def _is_finite_number(value: object) -> bool:
-    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
 
 
 def _require_number(value: object, *, field: str, low: float, high: float) -> float:
@@ -58,6 +76,11 @@ def _require_image_size(value: object) -> tuple[int, int]:
         or any(isinstance(part, bool) or not isinstance(part, int) or part <= 0 for part in value)
     ):
         raise ValueError("image_size is invalid")
+    try:
+        if not all(math.isfinite(float(part)) for part in value):
+            raise ValueError("image_size is invalid")
+    except OverflowError as exc:
+        raise ValueError("image_size is invalid") from exc
     return value
 
 
@@ -89,12 +112,14 @@ def _provider_failure(
     native_output_ref: dict[str, str],
     omni_snapshot_ref: dict[str, str],
     capture_ref: dict[str, str],
+    reason: str,
 ) -> dict[str, object]:
     return _result(
         goal_index=goal_index,
         candidate_index=None,
         candidate_id=None,
         status="PROVIDER_FAILURE",
+        reason=reason,
         binding_basis="native_point",
         confidence=None,
         point=None,
@@ -111,6 +136,7 @@ def _result(
     candidate_index: int | None,
     candidate_id: str | None,
     status: str,
+    reason: str | None,
     binding_basis: str,
     confidence: float | None,
     point: tuple[float, float] | None,
@@ -125,6 +151,7 @@ def _result(
         "candidate_index": candidate_index,
         "candidate_id": candidate_id,
         "status": status,
+        "reason": reason,
         "binding_basis": binding_basis,
         "confidence": confidence,
         "canonical_capture_pixel_point": list(point) if point is not None else None,
@@ -170,6 +197,12 @@ def _proposal_goal_index(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError("proposal goal_index is invalid")
     return value
+
+
+def _native_failure_reason(value: object) -> str:
+    if isinstance(value, str) and value in _PROVIDER_FAILURE_REASONS:
+        return value
+    return "malformed_native_output"
 
 
 def _capture_point(
@@ -224,14 +257,20 @@ def map_native_point_to_candidate(
             native_output_ref=native_output_ref,
             omni_snapshot_ref=omni_snapshot_ref,
             capture_ref=capture_ref,
+            reason=(
+                _native_failure_reason(proposal.failure_reason)
+                if proposal.point is None and proposal.confidence is None
+                else "malformed_native_output"
+            ),
         )
-    if proposal.status != "OK":
+    if not isinstance(proposal.status, str) or proposal.status != "OK" or proposal.failure_reason is not None:
         return _provider_failure(
             goal_index=goal_index,
             provider_id=provider_id,
             native_output_ref=native_output_ref,
             omni_snapshot_ref=omni_snapshot_ref,
             capture_ref=capture_ref,
+            reason="malformed_native_output",
         )
     try:
         confidence = (
@@ -239,6 +278,16 @@ def map_native_point_to_candidate(
             if proposal.confidence is None
             else _require_number(proposal.confidence, field="proposal confidence", low=0.0, high=1.0)
         )
+    except ValueError:
+        return _provider_failure(
+            goal_index=goal_index,
+            provider_id=provider_id,
+            native_output_ref=native_output_ref,
+            omni_snapshot_ref=omni_snapshot_ref,
+            capture_ref=capture_ref,
+            reason="invalid_native_confidence",
+        )
+    try:
         point = _capture_point(
             proposal.point, coordinate_space=proposal.coordinate_space, image_size=image_size
         )
@@ -249,6 +298,7 @@ def map_native_point_to_candidate(
             native_output_ref=native_output_ref,
             omni_snapshot_ref=omni_snapshot_ref,
             capture_ref=capture_ref,
+            reason="invalid_native_point",
         )
     hits: list[tuple[int, Mapping[str, object]]] = []
     for candidate_index, candidate in enumerate(candidates):
@@ -263,6 +313,11 @@ def map_native_point_to_candidate(
             candidate_index=None,
             candidate_id=None,
             status="UNBOUND",
+            reason=(
+                "no_active_candidate_hit"
+                if not hits
+                else "ambiguous_active_candidate_hit"
+            ),
             binding_basis="native_point",
             confidence=confidence,
             point=point,
@@ -277,6 +332,7 @@ def map_native_point_to_candidate(
         candidate_index=candidate_index,
         candidate_id=candidate["candidate_id"],  # type: ignore[arg-type]
         status="BOUND",
+        reason=None,
         binding_basis="native_point",
         confidence=confidence,
         point=point,
@@ -296,9 +352,12 @@ def validate_goal_binding_provider_result(value: object) -> dict[str, object]:
     goal_index = _proposal_goal_index(value["goal_index"])
     status = value["status"]
     binding_basis = value["binding_basis"]
-    if status not in {"BOUND", "UNBOUND", "PROVIDER_FAILURE"}:
+    if not isinstance(status, str) or status not in {"BOUND", "UNBOUND", "PROVIDER_FAILURE"}:
         raise ValueError("goal binding provider result status is invalid")
-    if binding_basis not in {"native_point", "direct_candidate_index"}:
+    if (
+        not isinstance(binding_basis, str)
+        or binding_basis not in {"native_point", "direct_candidate_index"}
+    ):
         raise ValueError("goal binding provider result binding_basis is invalid")
     candidate_index, candidate_id, point = (
         value["candidate_index"],
@@ -309,6 +368,8 @@ def validate_goal_binding_provider_result(value: object) -> dict[str, object]:
         raise ValueError("goal binding provider result must be non-authorizing")
     if not isinstance(value["provider_id"], str) or not value["provider_id"].strip():
         raise ValueError("goal binding provider result provider_id is invalid")
+    provider_id = value["provider_id"]
+    reason = value["reason"]
     confidence = value["confidence"]
     if confidence is not None:
         confidence = _require_number(confidence, field="result confidence", low=0.0, high=1.0)
@@ -318,6 +379,8 @@ def validate_goal_binding_provider_result(value: object) -> dict[str, object]:
         "capture_ref": _require_ref(value["capture_ref"], field="capture_ref"),
     }
     if status == "BOUND":
+        if reason is not None:
+            raise ValueError("bound result reason must be null")
         if isinstance(candidate_index, bool) or not isinstance(candidate_index, int) or candidate_index < 0:
             raise ValueError("bound result candidate_index is invalid")
         if not isinstance(candidate_id, str) or not candidate_id.strip():
@@ -330,6 +393,8 @@ def validate_goal_binding_provider_result(value: object) -> dict[str, object]:
                 for part in point
             ]
         else:
+            if provider_id not in _INCUMBENT_CONTROL_PROVIDER_IDS:
+                raise ValueError("direct_candidate_index is reserved for the incumbent control")
             if point is not None:
                 raise ValueError("direct_candidate_index must not invent a canonical point")
             canonical_point = None
@@ -339,10 +404,14 @@ def validate_goal_binding_provider_result(value: object) -> dict[str, object]:
         if candidate_index is not None or candidate_id is not None:
             raise ValueError("unbound or provider failure result carries a candidate")
         if status == "PROVIDER_FAILURE":
+            if not isinstance(reason, str) or reason not in _PROVIDER_FAILURE_REASONS:
+                raise ValueError("provider failure result reason is invalid")
             if point is not None:
                 raise ValueError("provider failure result carries a point")
             canonical_point = None
         else:
+            if not isinstance(reason, str) or reason not in _UNBOUND_REASONS:
+                raise ValueError("unbound result reason is invalid")
             if not isinstance(point, (list, tuple)) or len(point) != 2:
                 raise ValueError("unbound native_point result point is invalid")
             canonical_point = [
@@ -355,10 +424,11 @@ def validate_goal_binding_provider_result(value: object) -> dict[str, object]:
         "candidate_index": candidate_index,
         "candidate_id": candidate_id,
         "status": status,
+        "reason": reason,
         "binding_basis": binding_basis,
         "confidence": confidence,
         "canonical_capture_pixel_point": canonical_point,
-        "provider_id": value["provider_id"],
+        "provider_id": provider_id,
         "native_output_ref": lineage["native_output_ref"],
         "omni_snapshot_ref": lineage["omni_snapshot_ref"],
         "capture_ref": lineage["capture_ref"],

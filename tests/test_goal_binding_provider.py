@@ -37,12 +37,16 @@ def _proposal(**changes: object) -> object:
     return NativePointProposal(**values)  # type: ignore[arg-type]
 
 
-def _map(proposal: object, candidates: list[dict[str, object]] | None = None) -> dict[str, object]:
+def _map(
+    proposal: object,
+    candidates: list[dict[str, object]] | None = None,
+    image_size: tuple[int, int] = (100, 80),
+) -> dict[str, object]:
     from app.learn.hybrid.goal_binding_provider import map_native_point_to_candidate
 
     return map_native_point_to_candidate(
         proposal=proposal,  # type: ignore[arg-type]
-        image_size=(100, 80),
+        image_size=image_size,
         candidates=_candidates() if candidates is None else candidates,
         provider_id="ui_venus_1_5_2b_f16",
         **_refs(),
@@ -58,6 +62,7 @@ def test_one_strict_active_hit_binds_existing_candidate() -> None:
         "candidate_index": 1,
         "candidate_id": "candidate/apply",
         "status": "BOUND",
+        "reason": None,
         "binding_basis": "native_point",
         "confidence": 0.91,
         "canonical_capture_pixel_point": [25.0, 30.0],
@@ -80,6 +85,8 @@ def test_zero_hit_and_overlapping_hits_are_unbound() -> None:
     assert no_hit["candidate_index"] is no_hit["candidate_id"] is None
     assert overlapping["candidate_index"] is overlapping["candidate_id"] is None
     assert no_hit["canonical_capture_pixel_point"] == [50.0, 70.0]
+    assert no_hit["reason"] == "no_active_candidate_hit"
+    assert overlapping["reason"] == "ambiguous_active_candidate_hit"
 
 
 def test_boundary_and_inactive_hits_are_unbound() -> None:
@@ -91,12 +98,24 @@ def test_boundary_and_inactive_hits_are_unbound() -> None:
 
 
 def test_provider_failure_never_carries_candidate_or_point() -> None:
-    result = _map(_proposal(status="PROVIDER_FAILURE", point=None, confidence=None, failure_reason="timeout"))
+    result = _map(
+        _proposal(
+            status="PROVIDER_FAILURE",
+            point=None,
+            confidence=None,
+            failure_reason="provider_timeout",
+        )
+    )
 
     assert result["status"] == "PROVIDER_FAILURE"
     assert result["candidate_index"] is result["candidate_id"] is None
     assert result["canonical_capture_pixel_point"] is None
     assert result["confidence"] is None
+    assert result["reason"] == "provider_timeout"
+
+    malformed_success = _map(_proposal(failure_reason="provider_timeout"))
+    assert malformed_success["status"] == "PROVIDER_FAILURE"
+    assert malformed_success["reason"] == "malformed_native_output"
 
 
 @pytest.mark.parametrize(
@@ -105,6 +124,7 @@ def test_provider_failure_never_carries_candidate_or_point() -> None:
         {"point": (math.nan, 0.5)},
         {"point": (math.inf, 0.5)},
         {"point": (1.1, 0.5)},
+        {"point": (10 ** 1000, 0.5)},
         {"point": (100, 20), "coordinate_space": "capture_pixels"},
         {"point": (1001, 1), "coordinate_space": "normalized_0_1000"},
     ],
@@ -118,6 +138,8 @@ def test_mapper_rejects_nan_infinity_bad_space_and_out_of_bounds(proposal: dict[
         _map(_proposal(coordinate_space="unknown"))
     with pytest.raises(ValueError, match="coordinate_space"):
         _map(_proposal(coordinate_space=[]))
+    with pytest.raises(ValueError, match="image_size"):
+        _map(_proposal(), image_size=(10 ** 1000, 80))
 
 
 def test_mapper_never_mutates_or_expands_omni_geometry() -> None:
@@ -143,6 +165,13 @@ def test_canonical_result_is_closed_non_authorizing_and_lineage_bound() -> None:
     broken_lineage["capture_ref"] = {"id": "capture/case-001", "sha256": "not-a-hash"}
     with pytest.raises(ValueError, match="lineage"):
         validate_goal_binding_provider_result(broken_lineage)
+    with pytest.raises(ValueError, match="status"):
+        validate_goal_binding_provider_result(dict(result, status=[]))
+    with pytest.raises(ValueError, match="binding_basis"):
+        validate_goal_binding_provider_result(dict(result, binding_basis=[]))
+    unbound = _map(_proposal(point=(50, 70), coordinate_space="capture_pixels"))
+    with pytest.raises(ValueError, match="reason"):
+        validate_goal_binding_provider_result(dict(unbound, reason="provider_timeout"))
 
 
 def test_missing_provider_confidence_remains_null_not_fabricated() -> None:
@@ -156,8 +185,17 @@ def test_incumbent_direct_index_basis_is_closed_and_has_no_invented_point() -> N
     from app.learn.hybrid.goal_binding_provider import validate_goal_binding_provider_result
 
     result = _map(_proposal())
-    control = dict(result, binding_basis="direct_candidate_index", canonical_capture_pixel_point=None)
+    control = dict(
+        result,
+        binding_basis="direct_candidate_index",
+        canonical_capture_pixel_point=None,
+        provider_id="qwen3_vl_8b_q4_k_m",
+    )
     assert validate_goal_binding_provider_result(control) == control
 
     with pytest.raises(ValueError, match="direct_candidate_index"):
         validate_goal_binding_provider_result(dict(control, canonical_capture_pixel_point=[25.0, 30.0]))
+    with pytest.raises(ValueError, match="direct_candidate_index"):
+        validate_goal_binding_provider_result(
+            dict(control, provider_id="ui_venus_1_5_2b_f16")
+        )
