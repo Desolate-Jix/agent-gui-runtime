@@ -663,7 +663,8 @@ def _sealed_grounding_descriptor(*, bundle_ref: dict[str, str]) -> dict[str, obj
 
 
 def test_vista_compatibility_adapter_projects_exact_bound_request_without_authority(
-    ) -> None:
+    tmp_path,
+) -> None:
     from app.learn.hybrid.provider_capability_adapters import (
         VistaGroundingRefinementCompatibilityAdapter,
     )
@@ -671,9 +672,17 @@ def test_vista_compatibility_adapter_projects_exact_bound_request_without_author
         normalize_vista_grounding_result,
         project_grounding_result_to_hybrid_vista_refinement_v1,
     )
-    from tests.test_learn_hybrid_vista_refinement import _raw_result, _request
+    from tests.test_learn_hybrid_vista_refinement import (
+        _raw_result,
+        _stored_authoritative_inputs,
+    )
+    from app.learn.hybrid.vista_refinement import build_vista_requests
 
-    legacy_request = _request()
+    fusion, bundle, inventory, bindings, receipt, context = _stored_authoritative_inputs(tmp_path)
+    legacy_request = build_vista_requests(
+        fusion, bundle, omni_inventory=inventory, qwen_bindings=bindings,
+        qwen_cleanup_receipt=receipt, expected_workflow_revision=bundle["workflow_revision"],
+    )[0]
     bundle_ref = {"id": "bundle/local.vista-grounding", "content_sha256": "a" * 64}
     descriptor = _sealed_grounding_descriptor(bundle_ref=bundle_ref)
     bundle_ref = provider_bundle_ref(descriptor)
@@ -700,6 +709,7 @@ def test_vista_compatibility_adapter_projects_exact_bound_request_without_author
     )
     adapter = VistaGroundingRefinementCompatibilityAdapter(
         bundle_ref=bundle_ref, provider_runner=runner,
+        authoritative_context_resolver=lambda _: context,
     )
 
     result = adapter.invoke(request)
@@ -717,17 +727,28 @@ def test_vista_compatibility_adapter_projects_exact_bound_request_without_author
         result=normalize_vista_grounding_result(
             request=legacy_request, raw_result=raw, bundle_ref=bundle_ref,
             invocation_id=request.envelope.invocation_id,
+            authoritative_context=context,
         ),
     )
 
 
-def test_vista_compatibility_adapter_rejects_non_bound_or_authority_raw_before_projection() -> None:
+def test_vista_compatibility_adapter_rejects_non_bound_or_authority_raw_before_projection(
+    tmp_path,
+) -> None:
     from app.learn.hybrid.provider_capability_adapters import (
         VistaGroundingRefinementCompatibilityAdapter,
     )
-    from tests.test_learn_hybrid_vista_refinement import _raw_result, _request
+    from tests.test_learn_hybrid_vista_refinement import (
+        _raw_result,
+        _stored_authoritative_inputs,
+    )
+    from app.learn.hybrid.vista_refinement import build_vista_requests
 
-    legacy_request = _request()
+    fusion, bundle, inventory, bindings, receipt, context = _stored_authoritative_inputs(tmp_path)
+    legacy_request = build_vista_requests(
+        fusion, bundle, omni_inventory=inventory, qwen_bindings=bindings,
+        qwen_cleanup_receipt=receipt, expected_workflow_revision=bundle["workflow_revision"],
+    )[0]
     bundle_ref = {"id": "bundle/local.vista-grounding", "content_sha256": "a" * 64}
     request = GroundingRefinementRequestV1(
         envelope=ProviderInvocationEnvelopeV1(
@@ -746,6 +767,473 @@ def test_vista_compatibility_adapter_rejects_non_bound_or_authority_raw_before_p
     raw["provenance"]["nested"] = {"execute": True}
     adapter = VistaGroundingRefinementCompatibilityAdapter(
         bundle_ref=bundle_ref, provider_runner=lambda **_: raw,
+        authoritative_context_resolver=lambda _: context,
     )
     with pytest.raises(ValueError, match="non_authorizing"):
         adapter.invoke(request)
+
+
+def _production_vista_profile(tmp_path: Path) -> dict[str, object]:
+    return {
+        "profile_id": "profile/local.vista",
+        "host": "127.0.0.1",
+        "port": 18081,
+        "pid_file": str(tmp_path / "vista.pid"),
+    }
+
+
+def _production_vista_lease(
+    tmp_path: Path,
+    *,
+    identity: dict[str, int] | None = None,
+    scope_name: str | None = None,
+) -> dict[str, object]:
+    from app.learn.recognition.uei.canonical import content_sha256
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    process_identity = identity or {"pid": 123, "create_time_ns": 456}
+    identities = [process_identity]
+    profile = _production_vista_profile(tmp_path)
+    scope = scope_name or process_scope_name({
+        "run_id": "run/vista-cleanup",
+        "workflow_revision": 1,
+        "operation_id": "operation/vista-cleanup",
+        "stage": "vista",
+        "stage_execution_id": "stage/vista-cleanup",
+    }, "vista")
+    return {
+        "contract_version": "hybrid_vista_model_lease_v2",
+        "provider": "vista",
+        "incarnation_id": content_sha256({
+            "profile_id": profile["profile_id"],
+            "process_identities": identities,
+        }),
+        "profile": profile,
+        "process_identities": identities,
+        "process_scope_name": scope,
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": scope,
+            "member_pids": [process_identity["pid"]],
+            "process_identities": identities,
+        },
+    }
+
+
+class _FakeVistaScope:
+    def __init__(self, name: str, *, create: bool, pids: list[int]) -> None:
+        assert create is False
+        self.name = name
+        self._pids = pids
+
+    def pids(self) -> list[int]:
+        return list(self._pids)
+
+    def close(self) -> None:
+        pass
+
+
+def _install_live_vista_observation(
+    monkeypatch,
+    *,
+    lease: dict[str, object],
+    process_status: str = "exact_live",
+    scope_pids: list[int] | None = None,
+    listener_pids: list[int] | None = None,
+) -> None:
+    from app.core import model_server
+    from app.learn.hybrid import windows_process_scope
+
+    identities = lease["process_identities"]
+    expected_pids = [item["pid"] for item in identities]
+    monkeypatch.setattr(model_server, "load_model_profiles", lambda: [dict(lease["profile"])])
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda identity: {
+            "status": process_status,
+            "identity": dict(identity) if process_status == "exact_live" else None,
+            **({} if process_status == "exact_live" else {"reason": "test"}),
+        },
+    )
+    monkeypatch.setattr(
+        windows_process_scope,
+        "WindowsProcessScope",
+        lambda name, create: _FakeVistaScope(
+            name,
+            create=create,
+            pids=list(expected_pids if scope_pids is None else scope_pids),
+        ),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_listening_pids_for_port",
+        lambda port: list(expected_pids if listener_pids is None else listener_pids),
+    )
+
+
+def test_live_vista_lease_validator_attests_exact_profile_process_scope_and_listener(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.core.model_server import validate_live_hybrid_vista_model_lease
+
+    lease = _production_vista_lease(tmp_path)
+    _install_live_vista_observation(monkeypatch, lease=lease)
+
+    assert validate_live_hybrid_vista_model_lease(
+        lease,
+        expected_profile_id="profile/local.vista",
+    ) == lease["profile"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["fabricated", "extra_field", "dead", "unobservable", "wrong_scope", "wrong_listener"],
+)
+def test_live_vista_lease_validator_fails_closed_on_unproved_runtime_identity(
+    tmp_path,
+    monkeypatch,
+    failure: str,
+) -> None:
+    from app.core.model_server import validate_live_hybrid_vista_model_lease
+
+    lease = _production_vista_lease(tmp_path)
+    if failure == "fabricated":
+        lease["incarnation_id"] = "f" * 64
+    elif failure == "extra_field":
+        lease["forged"] = True
+    _install_live_vista_observation(
+        monkeypatch,
+        lease=lease,
+        process_status=(
+            "proven_absent" if failure == "dead"
+            else "unobservable" if failure == "unobservable"
+            else "exact_live"
+        ),
+        scope_pids=[] if failure == "wrong_scope" else None,
+        listener_pids=[999] if failure == "wrong_listener" else None,
+    )
+
+    with pytest.raises((RuntimeError, ValueError)):
+        validate_live_hybrid_vista_model_lease(
+            lease,
+            expected_profile_id="profile/local.vista",
+        )
+
+
+def _vista_cleanup_receipt(
+    lease: dict[str, object],
+    *,
+    identity: dict[str, object] | None = None,
+    evidence_lease: dict[str, object] | None = None,
+) -> dict[str, object]:
+    from app.learn.hybrid.gpu_lifecycle import release_hybrid_provider
+
+    lineage = {
+        "run_id": "run/vista-cleanup",
+        "workflow_revision": 1,
+        "operation_id": "operation/vista-cleanup",
+        "stage": "vista",
+        "stage_execution_id": "stage/vista-cleanup",
+    }
+    scope_name = lease["process_scope_name"]
+    identities = lease["process_identities"]
+    scope_cleanup = {
+        "contract_version": "hybrid_windows_process_scope_v1",
+        "scope_name": scope_name,
+        "authority": "windows_job_object",
+        "scope_absent_after_owner_close": False,
+        "cleanup_status": "verified",
+        "observed_member_pids_before": [item["pid"] for item in identities],
+        "observed_member_identities_before": identities,
+        "member_pids_after": [],
+        "member_identities_after": [],
+        "active_listeners_after": [],
+        "pid_file_after": None,
+        "stable_zero_observations": 3,
+        "samples": [
+            {"pids": [], "process_identities": [], "listeners": []},
+            {"pids": [], "process_identities": [], "listeners": []},
+            {"pids": [], "process_identities": [], "listeners": []},
+        ],
+    }
+    provider_identity = identity or {
+        "incarnation_id": lease["incarnation_id"],
+        "profile_id": lease["profile"]["profile_id"],
+        "process_identities": identities,
+        "process_scope_name": scope_name,
+    }
+    inventory = {
+        "contract_version": "hybrid_provider_process_inventory_v2",
+        "provider": "vista",
+        "observer_contract": "hybrid_vista_cleanup_observer_v1",
+        "release_status": "verified",
+        "termination_reason": "completed",
+        "lineage": lineage,
+        "provider_lease_identity": provider_identity,
+        "predecessor_sha256": "a" * 64,
+        "provider_result_sha256": "b" * 64,
+        "provider_processes_after": [],
+        "helper_processes_after": [],
+        "orphan_descendant_pids": [],
+        "active_listeners_after": [],
+        "lease_files_after": [],
+        "source_cleanup_evidence": {
+            "contract_version": "hybrid_vista_cleanup_evidence_v2",
+            "status": "verified",
+            "model_lease": evidence_lease or lease,
+            "stop_result": {"stopped": True},
+            "inventory_observable": True,
+            "process_scope_cleanup": scope_cleanup,
+            "provider_probes": [
+                {"status": "proven_absent", "identity": None, "reason": "no_such_process"}
+                for _ in identities
+            ],
+        },
+    }
+    return release_hybrid_provider("vista", process_inventory=lambda _: inventory)
+
+
+def test_vista_cleanup_validator_binds_exact_lease_and_reattests_live_absence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from app.core import model_server
+
+    lease = _production_vista_lease(tmp_path)
+    receipt = _vista_cleanup_receipt(lease)
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda _: {"status": "proven_absent", "identity": None, "reason": "no_such_process"},
+    )
+    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda _: [])
+
+    assert model_server.validate_hybrid_vista_cleanup_receipt(
+        receipt,
+        model_lease=lease,
+    ) == receipt
+
+
+@pytest.mark.parametrize("mismatch", ["profile", "pid", "scope"])
+def test_vista_cleanup_validator_rejects_cross_lease_identity(
+    tmp_path,
+    monkeypatch,
+    mismatch: str,
+) -> None:
+    from app.core import model_server
+
+    lease = _production_vista_lease(tmp_path)
+    identity = {
+        "incarnation_id": lease["incarnation_id"],
+        "profile_id": lease["profile"]["profile_id"],
+        "process_identities": lease["process_identities"],
+        "process_scope_name": lease["process_scope_name"],
+    }
+    if mismatch == "profile":
+        identity["profile_id"] = "profile/different"
+    elif mismatch == "pid":
+        identity["process_identities"] = [{"pid": 999, "create_time_ns": 456}]
+    else:
+        identity["process_scope_name"] = "Local\\AgentGuiHybrid-vista-" + "2" * 64
+    receipt = _vista_cleanup_receipt(lease, identity=identity)
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda _: {"status": "proven_absent", "identity": None, "reason": "no_such_process"},
+    )
+    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda _: [])
+
+    with pytest.raises((RuntimeError, ValueError)):
+        model_server.validate_hybrid_vista_cleanup_receipt(receipt, model_lease=lease)
+
+
+@pytest.mark.parametrize("residue", ["exact_live", "unobservable", "listener"])
+def test_vista_cleanup_validator_fails_closed_on_live_residue(
+    tmp_path,
+    monkeypatch,
+    residue: str,
+) -> None:
+    from app.core import model_server
+
+    lease = _production_vista_lease(tmp_path)
+    receipt = _vista_cleanup_receipt(lease)
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda identity: (
+            {"status": "exact_live", "identity": identity}
+            if residue == "exact_live"
+            else {"status": "unobservable", "identity": None, "reason": "AccessDenied"}
+            if residue == "unobservable"
+            else {"status": "proven_absent", "identity": None, "reason": "no_such_process"}
+        ),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_listening_pids_for_port",
+        lambda _: [lease["process_identities"][0]["pid"]] if residue == "listener" else [],
+    )
+
+    with pytest.raises((RuntimeError, ValueError)):
+        model_server.validate_hybrid_vista_cleanup_receipt(receipt, model_lease=lease)
+
+
+@pytest.mark.parametrize("mutation", ["evidence_lease", "evidence_status", "scope_shape"])
+def test_vista_cleanup_validator_rejects_unbound_or_malformed_source_evidence(
+    tmp_path,
+    monkeypatch,
+    mutation: str,
+) -> None:
+    from app.core import model_server
+    from app.learn.recognition.uei.canonical import seal_immutable
+
+    lease = _production_vista_lease(tmp_path)
+    receipt = _vista_cleanup_receipt(lease)
+    mutated = {key: value for key, value in receipt.items() if key != "content_sha256"}
+    evidence = dict(mutated["source_cleanup_evidence"])
+    if mutation == "evidence_lease":
+        evidence["model_lease"] = {**lease, "incarnation_id": "f" * 64}
+    elif mutation == "evidence_status":
+        evidence["status"] = "failed"
+    else:
+        evidence["process_scope_cleanup"] = {
+            **evidence["process_scope_cleanup"],
+            "forged": True,
+        }
+    mutated["source_cleanup_evidence"] = evidence
+    receipt = seal_immutable(mutated)
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda _: {"status": "proven_absent", "identity": None, "reason": "no_such_process"},
+    )
+    monkeypatch.setattr(model_server, "_listening_pids_for_port", lambda _: [])
+
+    with pytest.raises((RuntimeError, ValueError)):
+        model_server.validate_hybrid_vista_cleanup_receipt(receipt, model_lease=lease)
+
+
+@pytest.mark.parametrize("scenario", ["success", "cancel_before", "cancel_after", "failure", "timeout"])
+def test_registered_vista_capability_cleans_exactly_once_on_every_terminal_path(
+    tmp_path,
+    monkeypatch,
+    scenario: str,
+) -> None:
+    from app.core import model_server
+    from app.learn.hybrid.provider_capability_adapters import (
+        VistaGroundingRefinementCompatibilityAdapter,
+    )
+    from app.learn.hybrid.vista_refinement import build_vista_requests
+    from tests.test_learn_hybrid_vista_refinement import (
+        _raw_result,
+        _stored_authoritative_inputs,
+    )
+
+    fusion, bundle, inventory, bindings, qwen_receipt, context = _stored_authoritative_inputs(tmp_path)
+    legacy_request = build_vista_requests(
+        fusion,
+        bundle,
+        omni_inventory=inventory,
+        qwen_bindings=bindings,
+        qwen_cleanup_receipt=qwen_receipt,
+        expected_workflow_revision=bundle["workflow_revision"],
+    )[0]
+    lease = _production_vista_lease(tmp_path)
+    descriptor_seed = _sealed_grounding_descriptor(
+        bundle_ref={"id": "bundle/local.vista-grounding", "content_sha256": "a" * 64},
+    )
+    bundle_ref = provider_bundle_ref(descriptor_seed)
+    event = Event()
+    if scenario == "cancel_before":
+        event.set()
+    cleaned = False
+    cleanup_calls = 0
+    runner_calls = 0
+
+    from app.learn.hybrid import windows_process_scope
+
+    monkeypatch.setattr(model_server, "load_model_profiles", lambda: [dict(lease["profile"])])
+    monkeypatch.setattr(
+        windows_process_scope,
+        "WindowsProcessScope",
+        lambda name, create: _FakeVistaScope(
+            name,
+            create=create,
+            pids=[] if cleaned else [lease["process_identities"][0]["pid"]],
+        ),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_probe_exact_qwen_process",
+        lambda identity: (
+            {"status": "proven_absent", "identity": None, "reason": "no_such_process"}
+            if cleaned
+            else {"status": "exact_live", "identity": dict(identity)}
+        ),
+    )
+    monkeypatch.setattr(
+        model_server,
+        "_listening_pids_for_port",
+        lambda _: [] if cleaned else [lease["process_identities"][0]["pid"]],
+    )
+
+    def runner(**_: object) -> dict[str, object]:
+        nonlocal runner_calls
+        runner_calls += 1
+        if scenario == "cancel_after":
+            event.set()
+        if scenario == "failure":
+            raise RuntimeError("provider failed")
+        if scenario == "timeout":
+            raise TimeoutError("provider timed out")
+        return _raw_result(legacy_request)
+
+    def cleanup() -> dict[str, object]:
+        nonlocal cleaned, cleanup_calls
+        cleanup_calls += 1
+        cleaned = True
+        return _vista_cleanup_receipt(lease)
+
+    request = GroundingRefinementRequestV1(
+        envelope=ProviderInvocationEnvelopeV1(
+            bundle_ref=bundle_ref,
+            capability="grounding_refinement",
+            invocation_id=f"invocation/vista-{scenario}",
+            capture_lineage_ref=legacy_request["capture_lineage_ref"],
+            budget=ProviderRunBudget(1_000, 4_096, 8, 128, "vista-test"),
+            resource_lease=lease,
+            cancellation_event=event,
+        ),
+        candidate_id=legacy_request["candidate_id"],
+        candidate_bbox=tuple(legacy_request["candidate_bbox_ref"]["xyxy"]),
+        permitted_roi=tuple(legacy_request["roi_ref"]["xyxy"]),
+        provider_request={"state": "BOUND", "vista_request": legacy_request},
+    )
+    adapter = VistaGroundingRefinementCompatibilityAdapter(
+        bundle_ref=bundle_ref,
+        provider_runner=runner,
+        authoritative_context_resolver=lambda _: context,
+    )
+    registry = TrustedProviderBundleRegistry([(descriptor_seed, adapter)])
+
+    outcome = invoke_with_capability_envelope(
+        request=request,
+        registry=registry,
+        adapter=adapter,
+        invoke=adapter.invoke,
+        validate_result=lambda result, _: request.validate_result(result),
+        cleanup=cleanup,
+        validate_cleanup=lambda receipt: adapter.validate_cleanup(
+            receipt=receipt,
+            lease=lease,
+            bundle_ref=bundle_ref,
+            invocation_id=request.envelope.invocation_id,
+        ),
+    )
+
+    assert cleanup_calls == 1
+    assert outcome.cleanup.status == "clean"
+    assert outcome.promoted is (scenario == "success")
+    assert runner_calls == (0 if scenario == "cancel_before" else 1)

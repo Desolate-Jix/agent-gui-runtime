@@ -193,8 +193,31 @@ def normalize_vista_grounding_result(
     raw_result: Mapping[str, Any],
     bundle_ref: dict[str, str],
     invocation_id: str,
+    authoritative_context: Mapping[str, Any] | None = None,
 ) -> GroundingRefinementResultV1:
     """验证精确 lineage、变换和严格内点，返回临时证据。"""
+    if not isinstance(authoritative_context, Mapping):
+        raise ValueError("VISTA authoritative context is required")
+    normalized_request = validate_vista_request_pre_acquisition(
+        request=request,
+        authoritative_context=authoritative_context,
+    )
+    return _normalize_vista_grounding_result_compat(
+        request=normalized_request,
+        raw_result=raw_result,
+        bundle_ref=bundle_ref,
+        invocation_id=invocation_id,
+    )
+
+
+def _normalize_vista_grounding_result_compat(
+    *,
+    request: Mapping[str, Any],
+    raw_result: Mapping[str, Any],
+    bundle_ref: dict[str, str],
+    invocation_id: str,
+) -> GroundingRefinementResultV1:
+    """仅供已验证的新路径和历史 v1 投影复用的兼容实现。"""
     if not isinstance(raw_result, Mapping):
         raise ValueError("VISTA raw result must be an object")
     raw = deepcopy(dict(raw_result))
@@ -327,7 +350,7 @@ def validate_vista_proposal(
     """校验 provider 提议；任何失败都只投影到人工审核。"""
     raw = deepcopy(dict(raw_result)) if isinstance(raw_result, Mapping) else {"raw_value": deepcopy(raw_result)}
     try:
-        result = normalize_vista_grounding_result(
+        result = _normalize_vista_grounding_result_compat(
             request=request, raw_result=raw,
             bundle_ref=deepcopy(_LEGACY_VISTA_GROUNDING_BUNDLE_REF),
             invocation_id="legacy/vista-grounding-refinement",

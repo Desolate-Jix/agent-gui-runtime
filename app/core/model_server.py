@@ -4727,6 +4727,267 @@ def build_hybrid_vista_model_lease(
     }
 
 
+_HYBRID_VISTA_LEASE_FIELDS = {
+    "contract_version",
+    "provider",
+    "incarnation_id",
+    "profile",
+    "process_identities",
+    "process_scope_name",
+    "process_scope_acquisition",
+}
+_HYBRID_VISTA_SCOPE_ACQUISITION_FIELDS = {
+    "contract_version",
+    "scope_name",
+    "member_pids",
+    "process_identities",
+}
+_HYBRID_VISTA_SCOPE_CLEANUP_FIELDS = {
+    "contract_version",
+    "scope_name",
+    "authority",
+    "scope_absent_after_owner_close",
+    "cleanup_status",
+    "observed_member_pids_before",
+    "observed_member_identities_before",
+    "member_pids_after",
+    "member_identities_after",
+    "active_listeners_after",
+    "pid_file_after",
+    "stable_zero_observations",
+    "samples",
+}
+_HYBRID_VISTA_CLEANUP_EVIDENCE_FIELDS = {
+    "contract_version",
+    "status",
+    "model_lease",
+    "stop_result",
+    "inventory_observable",
+    "process_scope_cleanup",
+    "provider_probes",
+}
+
+
+def _validated_hybrid_vista_model_lease_shape(
+    model_lease: object,
+) -> dict[str, Any]:
+    if not isinstance(model_lease, Mapping):
+        raise ValueError("exact Hybrid VISTA model lease is required")
+    lease = deepcopy(dict(model_lease))
+    if (
+        set(lease) != _HYBRID_VISTA_LEASE_FIELDS
+        or lease.get("contract_version") != "hybrid_vista_model_lease_v2"
+        or lease.get("provider") != "vista"
+    ):
+        raise ValueError("Hybrid VISTA model lease shape is invalid")
+    profile = lease.get("profile")
+    profile_id = profile.get("profile_id") if isinstance(profile, dict) else None
+    identities = lease.get("process_identities")
+    if (
+        not isinstance(profile, dict)
+        or not isinstance(profile_id, str)
+        or not profile_id
+        or not isinstance(identities, list)
+        or not identities
+        or any(
+            not _valid_process_identity(identity)
+            or set(identity) != {"pid", "create_time_ns"}
+            or isinstance(identity.get("pid"), bool)
+            or isinstance(identity.get("create_time_ns"), bool)
+            for identity in identities
+        )
+        or identities
+        != sorted(identities, key=lambda item: (item["pid"], item["create_time_ns"]))
+        or len({(item["pid"], item["create_time_ns"]) for item in identities})
+        != len(identities)
+    ):
+        raise ValueError("Hybrid VISTA model lease process identities are invalid")
+    if lease.get("incarnation_id") != content_sha256({
+        "profile_id": profile_id,
+        "process_identities": identities,
+    }):
+        raise ValueError("Hybrid VISTA model lease incarnation is invalid")
+    from app.learn.hybrid.windows_process_scope import validate_process_scope_name
+
+    scope_name = lease.get("process_scope_name")
+    if (
+        not isinstance(scope_name, str)
+        or validate_process_scope_name(scope_name) != scope_name
+        or not scope_name.startswith("Local\\AgentGuiHybrid-vista-")
+    ):
+        raise ValueError("Hybrid VISTA process scope identity is invalid")
+    acquisition = lease.get("process_scope_acquisition")
+    member_pids = [identity["pid"] for identity in identities]
+    if (
+        not isinstance(acquisition, dict)
+        or set(acquisition) != _HYBRID_VISTA_SCOPE_ACQUISITION_FIELDS
+        or acquisition.get("contract_version")
+        != "hybrid_process_scope_acquisition_v1"
+        or acquisition.get("scope_name") != scope_name
+        or acquisition.get("member_pids") != member_pids
+        or acquisition.get("process_identities") != identities
+    ):
+        raise ValueError("Hybrid VISTA process scope acquisition is invalid")
+    return lease
+
+
+def validate_live_hybrid_vista_model_lease(
+    model_lease: object,
+    *,
+    expected_profile_id: object,
+) -> dict[str, Any]:
+    """在 VISTA dispatch 前重新证明精确 profile、进程、Job 与监听归属。"""
+    lease = _validated_hybrid_vista_model_lease_shape(model_lease)
+    if not isinstance(expected_profile_id, str) or not expected_profile_id:
+        raise ValueError("Hybrid VISTA model lease shape is invalid")
+    profile = lease.get("profile")
+    profiles = [
+        _public_profile(item)
+        for item in load_model_profiles()
+        if item.get("profile_id") == expected_profile_id
+    ]
+    if (
+        len(profiles) != 1
+        or not isinstance(profile, dict)
+        or profile.get("profile_id") != expected_profile_id
+        or canonical_json_bytes(profile) != canonical_json_bytes(profiles[0])
+    ):
+        raise ValueError("Hybrid VISTA model lease profile is invalid")
+    identities = lease["process_identities"]
+    scope_name = lease.get("process_scope_name")
+    member_pids = [identity["pid"] for identity in identities]
+    for identity in identities:
+        if _probe_exact_qwen_process(identity).get("status") != "exact_live":
+            raise RuntimeError("Hybrid VISTA process identity is not exact-live")
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+    scope = WindowsProcessScope(scope_name, create=False)
+    try:
+        current_members = scope.pids()
+    finally:
+        scope.close()
+    if current_members != member_pids:
+        raise RuntimeError("Hybrid VISTA process scope membership changed")
+    port = profile.get("port")
+    if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
+        raise ValueError("Hybrid VISTA profile listener port is invalid")
+    listener_pids = _listening_pids_for_port(port)
+    if not listener_pids or any(pid not in member_pids for pid in listener_pids):
+        raise RuntimeError("Hybrid VISTA listener ownership changed")
+    return deepcopy(profile)
+
+
+def validate_hybrid_vista_cleanup_receipt(
+    receipt: object,
+    *,
+    model_lease: object,
+) -> dict[str, Any]:
+    """验证 VISTA cleanup 的完整 lease 绑定，并重新证明 PID/监听已消失。"""
+    from app.learn.hybrid.gpu_lifecycle import (
+        validate_hybrid_cleanup_receipt,
+        validate_hybrid_lineage,
+    )
+    from app.learn.hybrid.windows_process_scope import process_scope_name
+
+    lease = _validated_hybrid_vista_model_lease_shape(model_lease)
+    validated = validate_hybrid_cleanup_receipt(receipt)
+    lineage = validate_hybrid_lineage(validated.get("lineage"))
+    profile = lease.get("profile")
+    identities = lease.get("process_identities")
+    scope_name = lease.get("process_scope_name")
+    expected_identity = {
+        "incarnation_id": lease.get("incarnation_id"),
+        "profile_id": profile.get("profile_id") if isinstance(profile, dict) else None,
+        "process_identities": identities,
+        "process_scope_name": scope_name,
+    }
+    if (
+        validated.get("provider") != "vista"
+        or validated.get("observer_contract") != "hybrid_vista_cleanup_observer_v1"
+        or validated.get("cleanup_status") != "verified"
+        or validated.get("termination_reason") != "completed"
+        or validated.get("provider_lease_identity") != expected_identity
+        or not isinstance(scope_name, str)
+        or process_scope_name(lineage, "vista") != scope_name
+        or not isinstance(profile, dict)
+        or not isinstance(identities, list)
+        or not identities
+    ):
+        raise ValueError("Hybrid VISTA cleanup receipt lease binding is invalid")
+    evidence = validated.get("source_cleanup_evidence")
+    if (
+        not isinstance(evidence, dict)
+        or set(evidence) != _HYBRID_VISTA_CLEANUP_EVIDENCE_FIELDS
+        or evidence.get("contract_version") != "hybrid_vista_cleanup_evidence_v2"
+        or evidence.get("status") != "verified"
+        or evidence.get("model_lease") != lease
+        or evidence.get("inventory_observable") is not True
+        or not isinstance(evidence.get("stop_result"), dict)
+    ):
+        raise ValueError("Hybrid VISTA cleanup source evidence is invalid")
+    scope_cleanup = evidence.get("process_scope_cleanup")
+    if (
+        not isinstance(scope_cleanup, dict)
+        or set(scope_cleanup) != _HYBRID_VISTA_SCOPE_CLEANUP_FIELDS
+        or scope_cleanup.get("contract_version") != "hybrid_windows_process_scope_v1"
+        or scope_cleanup.get("scope_name") != scope_name
+        or scope_cleanup.get("authority") != "windows_job_object"
+        or not isinstance(scope_cleanup.get("scope_absent_after_owner_close"), bool)
+        or scope_cleanup.get("cleanup_status") != "verified"
+        or scope_cleanup.get("member_pids_after") != []
+        or scope_cleanup.get("member_identities_after") != []
+        or scope_cleanup.get("active_listeners_after") != []
+        or scope_cleanup.get("pid_file_after") is not None
+        or isinstance(scope_cleanup.get("stable_zero_observations"), bool)
+        or not isinstance(scope_cleanup.get("stable_zero_observations"), int)
+        or scope_cleanup["stable_zero_observations"] < 2
+        or not isinstance(scope_cleanup.get("observed_member_pids_before"), list)
+        or not isinstance(scope_cleanup.get("observed_member_identities_before"), list)
+        or not isinstance(scope_cleanup.get("samples"), list)
+        or len(scope_cleanup["samples"]) < scope_cleanup["stable_zero_observations"]
+    ):
+        raise ValueError("Hybrid VISTA cleanup process scope evidence is invalid")
+    for sample in scope_cleanup["samples"][-scope_cleanup["stable_zero_observations"] :]:
+        if (
+            not isinstance(sample, dict)
+            or set(sample) != {"pids", "process_identities", "listeners"}
+            or sample != {"pids": [], "process_identities": [], "listeners": []}
+        ):
+            raise ValueError("Hybrid VISTA cleanup stable-zero evidence is invalid")
+    probes = evidence.get("provider_probes")
+    if (
+        not isinstance(probes, list)
+        or len(probes) != len(identities)
+        or any(
+            not isinstance(probe, dict)
+            or set(probe) != {"status", "identity", "reason"}
+            or probe.get("status") != "proven_absent"
+            or not isinstance(probe.get("reason"), str)
+            or not probe["reason"]
+            for probe in probes
+        )
+    ):
+        raise ValueError("Hybrid VISTA cleanup process evidence is invalid")
+    for identity in identities:
+        if _probe_exact_qwen_process(identity).get("status") != "proven_absent":
+            raise RuntimeError("Hybrid VISTA process absence is not observable")
+    port = profile.get("port")
+    if isinstance(port, bool) or not isinstance(port, int) or port <= 0:
+        raise ValueError("Hybrid VISTA cleanup listener port is invalid")
+    if _listening_pids_for_port(port):
+        raise RuntimeError("Hybrid VISTA listener remains active")
+    pid_path = model_profile_pid_path(profile)
+    try:
+        pid_path.stat()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise RuntimeError("Hybrid VISTA lease file absence is unobservable") from error
+    else:
+        raise RuntimeError("Hybrid VISTA lease file remains")
+    return validated
+
+
 def release_hybrid_vista_model_lease(
     model_lease: dict[str, Any],
     *,

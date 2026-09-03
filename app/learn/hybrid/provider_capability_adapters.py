@@ -28,6 +28,7 @@ from app.learn.recognition.uei.provider_capabilities import (
 from app.learn.hybrid.vista_refinement import (
     _validated_request,
     normalize_vista_grounding_result,
+    validate_vista_request_pre_acquisition,
 )
 from app.learn.hybrid.qwen_binding import (
     QwenBindingCancelled,
@@ -378,32 +379,34 @@ class VistaGroundingRefinementCompatibilityAdapter:
     capability = "grounding_refinement"
 
     def __init__(
-        self, *, bundle_ref: dict[str, str], provider_runner: Callable[..., object],
+        self,
+        *,
+        bundle_ref: dict[str, str],
+        provider_runner: Callable[..., object],
+        authoritative_context_resolver: Callable[
+            [GroundingRefinementRequestV1], dict[str, object]
+        ],
     ) -> None:
         self.bundle_ref = dict(bundle_ref)
         self._provider_runner = provider_runner
+        if not callable(authoritative_context_resolver):
+            raise TypeError("VISTA authoritative context resolver is required")
+        self._authoritative_context_resolver = authoritative_context_resolver
 
     def validate_resource_lease(
         self, *, lease: dict[str, object], descriptor: dict[str, object], bundle_ref: dict[str, str],
     ) -> None:
         """验证 VISTA v2 精确 lease 的 profile、进程 scope 与 listener 所有权。"""
-        if self.bundle_ref != dict(bundle_ref) or lease.get("contract_version") != "hybrid_vista_model_lease_v2" or lease.get("provider") != "vista":
+        if self.bundle_ref != dict(bundle_ref):
             raise UEIValidationError("provider_capability_resource_lease_mismatch")
-        profile = lease.get("profile")
-        identities = lease.get("process_identities")
-        acquisition = lease.get("process_scope_acquisition")
-        if (
-            not isinstance(profile, dict) or profile.get("profile_id") != descriptor.get("profile_id")
-            or not isinstance(lease.get("incarnation_id"), str) or not lease["incarnation_id"]
-            or not isinstance(identities, list) or not identities
-            or not isinstance(lease.get("process_scope_name"), str) or not lease["process_scope_name"]
-            or not isinstance(acquisition, dict)
-            or acquisition.get("contract_version") != "hybrid_process_scope_acquisition_v1"
-            or acquisition.get("scope_name") != lease["process_scope_name"]
-            or acquisition.get("process_identities") != identities
-            or not isinstance(acquisition.get("member_pids"), list)
-            or any(not isinstance(item, dict) or not isinstance(item.get("pid"), int) or not isinstance(item.get("create_time_ns"), int) or item["pid"] not in acquisition["member_pids"] for item in identities)
-        ):
+        from app.core.model_server import validate_live_hybrid_vista_model_lease
+
+        try:
+            validate_live_hybrid_vista_model_lease(
+                lease,
+                expected_profile_id=descriptor.get("profile_id"),
+            )
+        except (RuntimeError, TypeError, ValueError) as error:
             raise UEIValidationError("provider_capability_resource_lease_mismatch")
 
     def validate_cleanup(
@@ -412,16 +415,13 @@ class VistaGroundingRefinementCompatibilityAdapter:
         if self.bundle_ref != dict(bundle_ref) or not invocation_id:
             return CapabilityCleanupOutcomeV1("indeterminate", None)
         try:
-            from app.learn.hybrid.gpu_lifecycle import validate_hybrid_cleanup_receipt
-            validated = validate_hybrid_cleanup_receipt(receipt)
-            evidence = validated.get("source_cleanup_evidence")
-            if (
-                validated.get("provider") != "vista" or not isinstance(evidence, dict)
-                or evidence.get("model_lease") != lease
-                or validated.get("provider_lease_identity", {}).get("incarnation_id") != lease.get("incarnation_id")
-            ):
-                return CapabilityCleanupOutcomeV1("indeterminate", None)
-        except (TypeError, ValueError):
+            from app.core.model_server import validate_hybrid_vista_cleanup_receipt
+
+            validated = validate_hybrid_vista_cleanup_receipt(
+                receipt,
+                model_lease=lease,
+            )
+        except (RuntimeError, TypeError, ValueError):
             return CapabilityCleanupOutcomeV1("indeterminate", None)
         return CapabilityCleanupOutcomeV1("clean", validated)
 
@@ -443,9 +443,14 @@ class VistaGroundingRefinementCompatibilityAdapter:
         legacy_request = provider_request.get("vista_request")
         if not isinstance(legacy_request, dict):
             raise UEIValidationError("provider_capability_invalid_vista_request")
-        _validate_vista_grounding_request(request=request, legacy_request=legacy_request)
-        raw = self._provider_runner(
+        authoritative_context = self._authoritative_context_resolver(request)
+        validated_request = validate_vista_request_pre_acquisition(
             request=legacy_request,
+            authoritative_context=authoritative_context,
+        )
+        _validate_vista_grounding_request(request=request, legacy_request=validated_request)
+        raw = self._provider_runner(
+            request=validated_request,
             timeout_seconds=request.envelope.budget.timeout_ms / 1000.0,
             cancellation_event=request.envelope.cancellation_event,
             model_lease=request.envelope.resource_lease,
@@ -459,9 +464,10 @@ class VistaGroundingRefinementCompatibilityAdapter:
         if not isinstance(raw, dict):
             raise UEIValidationError("provider_capability_invalid_vista_result")
         result = normalize_vista_grounding_result(
-            request=legacy_request, raw_result=raw,
+            request=validated_request, raw_result=raw,
             bundle_ref=dict(request.envelope.bundle_ref),
             invocation_id=request.envelope.invocation_id,
+            authoritative_context=authoritative_context,
         )
         return request.validate_result(result)
 

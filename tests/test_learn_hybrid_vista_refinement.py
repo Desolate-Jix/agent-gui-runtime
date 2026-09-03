@@ -5,6 +5,7 @@ from copy import deepcopy
 import pytest
 
 from app.learn.hybrid.vista_refinement import (
+    _normalize_vista_grounding_result_compat,
     build_vista_requests,
     normalize_vista_grounding_result,
     project_grounding_result_to_hybrid_vista_refinement_v1,
@@ -13,6 +14,7 @@ from app.learn.hybrid.vista_refinement import (
 from app.core.model_server import build_qwen_cleanup_receipt
 from app.learn.hybrid.fusion import fuse_hybrid_candidates
 from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256, seal_immutable
+from app.learn.recognition.uei.contracts import UEIValidationError
 from app.learn.recognition.uei.provider_capabilities import reject_authority_shaped_payload
 from tests.test_learn_hybrid_fusion import _inputs
 
@@ -153,12 +155,17 @@ def _old_v1_artifact(request: dict, raw: dict) -> dict:
     }
 
 
-def test_vista_neutral_projection_is_canonical_byte_equivalent_to_old_v1_artifact() -> None:
-    request = _request()
+def test_vista_neutral_projection_is_canonical_byte_equivalent_to_old_v1_artifact(tmp_path) -> None:
+    fusion, bundle, inventory, bindings, receipt, context = _stored_authoritative_inputs(tmp_path)
+    request = build_vista_requests(
+        fusion, bundle, omni_inventory=inventory, qwen_bindings=bindings,
+        qwen_cleanup_receipt=receipt, expected_workflow_revision=bundle["workflow_revision"],
+    )[0]
     raw = _raw_result(request)
     result = normalize_vista_grounding_result(
         request=request, raw_result=raw, bundle_ref=grounding_bundle_ref(),
         invocation_id="invocation/vista-projection",
+        authoritative_context=context,
     )
 
     projected = project_grounding_result_to_hybrid_vista_refinement_v1(
@@ -178,7 +185,7 @@ def test_vista_raw_trace_authority_keys_are_rejected_before_projection(key: str)
     raw = _raw_result(request)
     raw["provenance"]["nested"] = {key: True}
     with pytest.raises(ValueError, match="non_authorizing"):
-        normalize_vista_grounding_result(
+        _normalize_vista_grounding_result_compat(
             request=request, raw_result=raw, bundle_ref=grounding_bundle_ref(),
             invocation_id="invocation/vista-authority-test",
         )
@@ -203,7 +210,7 @@ def test_neutral_vista_rejects_every_candidate_edge_and_corner(point: list[int])
     request = _request_with_geometry(
         candidate_bbox=[100, 100, 140, 130], roi=[80, 80, 180, 160],
     )
-    result = normalize_vista_grounding_result(
+    result = _normalize_vista_grounding_result_compat(
         request=request, raw_result=_raw_result(request, point=point),
         bundle_ref=grounding_bundle_ref(), invocation_id="invocation/vista-edge",
     )
@@ -219,7 +226,7 @@ def test_neutral_vista_rejects_every_permitted_roi_edge_and_corner(point: list[i
     request = _request_with_geometry(
         candidate_bbox=[60, 60, 190, 170], roi=[80, 80, 180, 160],
     )
-    result = normalize_vista_grounding_result(
+    result = _normalize_vista_grounding_result_compat(
         request=request, raw_result=_raw_result(request, point=point),
         bundle_ref=grounding_bundle_ref(), invocation_id="invocation/vista-roi-edge",
     )
@@ -526,8 +533,12 @@ def test_vision_pre_acquisition_invalid_lineage_has_zero_provider_calls(tmp_path
     assert calls == []
 
 
-def test_neutral_vista_requires_submitted_and_same_roi_capture_lineage() -> None:
-    request = _request()
+def test_neutral_vista_requires_submitted_and_same_roi_capture_lineage(tmp_path) -> None:
+    fusion, bundle, inventory, bindings, receipt, context = _stored_authoritative_inputs(tmp_path)
+    request = build_vista_requests(
+        fusion, bundle, omni_inventory=inventory, qwen_bindings=bindings,
+        qwen_cleanup_receipt=receipt, expected_workflow_revision=bundle["workflow_revision"],
+    )[0]
     unsubmitted = deepcopy(request)
     unsubmitted["submission_status"] = "NOT_SUBMITTED"
     unsubmitted.pop("content_sha256")
@@ -536,6 +547,7 @@ def test_neutral_vista_requires_submitted_and_same_roi_capture_lineage() -> None
         normalize_vista_grounding_result(
             request=unsubmitted, raw_result=_raw_result(request),
             bundle_ref=grounding_bundle_ref(), invocation_id="invocation/vista-unsubmitted",
+            authoritative_context=context,
         )
 
     stale_roi = deepcopy(request)
@@ -548,4 +560,117 @@ def test_neutral_vista_requires_submitted_and_same_roi_capture_lineage() -> None
         normalize_vista_grounding_result(
             request=stale_roi, raw_result=_raw_result(request),
             bundle_ref=grounding_bundle_ref(), invocation_id="invocation/vista-stale-roi",
+            authoritative_context=context,
+        )
+
+
+def test_neutral_vista_requires_current_authoritative_context(tmp_path) -> None:
+    fusion, bundle, inventory, bindings, receipt, context = _stored_authoritative_inputs(tmp_path)
+    current = build_vista_requests(
+        fusion,
+        bundle,
+        omni_inventory=inventory,
+        qwen_bindings=bindings,
+        qwen_cleanup_receipt=receipt,
+        expected_workflow_revision=bundle["workflow_revision"],
+    )[0]
+
+    with pytest.raises(ValueError, match="authoritative"):
+        normalize_vista_grounding_result(
+            request=current,
+            raw_result=_raw_result(current),
+            bundle_ref=grounding_bundle_ref(),
+            invocation_id="invocation/vista-missing-authority",
+            authoritative_context=None,
+        )
+
+    stale = _request()
+    with pytest.raises(ValueError, match="authoritative current lineage"):
+        normalize_vista_grounding_result(
+            request=stale,
+            raw_result=_raw_result(stale),
+            bundle_ref=grounding_bundle_ref(),
+            invocation_id="invocation/vista-stale-current",
+            authoritative_context=context,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["unsealed", "not_submitted", "stale_current", "roi_lineage", "substituted_bbox"],
+)
+def test_neutral_vista_adapter_rejects_non_authoritative_request_before_runner(
+    tmp_path,
+    mutation: str,
+) -> None:
+    from app.learn.hybrid.provider_capability_adapters import (
+        VistaGroundingRefinementCompatibilityAdapter,
+    )
+    from app.learn.recognition.uei.provider_adapters import ProviderRunBudget
+    from app.learn.recognition.uei.provider_capabilities import (
+        GroundingRefinementRequestV1,
+        ProviderInvocationEnvelopeV1,
+    )
+
+    fusion, bundle, inventory, bindings, receipt, context = _stored_authoritative_inputs(tmp_path)
+    current = build_vista_requests(
+        fusion,
+        bundle,
+        omni_inventory=inventory,
+        qwen_bindings=bindings,
+        qwen_cleanup_receipt=receipt,
+        expected_workflow_revision=bundle["workflow_revision"],
+    )[0]
+    if mutation == "stale_current":
+        candidate = _request()
+    else:
+        candidate = deepcopy(current)
+        candidate.pop("content_sha256", None)
+        if mutation == "not_submitted":
+            candidate["submission_status"] = "NOT_SUBMITTED"
+        elif mutation == "roi_lineage":
+            candidate["roi_ref"] = seal_immutable({
+                **{key: value for key, value in candidate["roi_ref"].items() if key != "content_sha256"},
+                "capture_lineage_ref": {"id": "capture/stale", "content_sha256": "d" * 64},
+            })
+        elif mutation == "substituted_bbox":
+            candidate["candidate_bbox_ref"] = seal_immutable({
+                **{key: value for key, value in candidate["candidate_bbox_ref"].items() if key != "content_sha256"},
+                "contract_version": "substituted_bbox_v99",
+                "extra": "forged",
+            })
+        if mutation != "unsealed":
+            candidate = seal_immutable(candidate)
+    calls: list[dict[str, object]] = []
+    bundle_ref = {"id": "bundle/local.vista-grounding", "content_sha256": "a" * 64}
+    neutral = GroundingRefinementRequestV1(
+        envelope=ProviderInvocationEnvelopeV1(
+            bundle_ref=bundle_ref,
+            capability="grounding_refinement",
+            invocation_id=f"invocation/vista-{mutation}",
+            capture_lineage_ref=candidate["capture_lineage_ref"],
+            budget=ProviderRunBudget(1_000, 4_096, 8, 128, "vista-test"),
+            resource_lease={"lease": "present"},
+        ),
+        candidate_id=candidate["candidate_id"],
+        candidate_bbox=tuple(candidate["candidate_bbox_ref"]["xyxy"]),
+        permitted_roi=tuple(candidate["roi_ref"]["xyxy"]),
+        provider_request={"state": "BOUND", "vista_request": candidate},
+    )
+    adapter = VistaGroundingRefinementCompatibilityAdapter(
+        bundle_ref=bundle_ref,
+        provider_runner=lambda **kwargs: calls.append(kwargs),
+        authoritative_context_resolver=lambda _: context,
+    )
+
+    with pytest.raises((ValueError, UEIValidationError)):
+        adapter.invoke(neutral)
+    assert calls == []
+    with pytest.raises((ValueError, UEIValidationError)):
+        normalize_vista_grounding_result(
+            request=candidate,
+            raw_result=_raw_result(candidate),
+            bundle_ref=bundle_ref,
+            invocation_id=f"invocation/vista-direct-{mutation}",
+            authoritative_context=context,
         )
