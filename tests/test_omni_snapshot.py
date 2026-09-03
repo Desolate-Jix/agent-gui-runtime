@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 
 from PIL import Image
@@ -70,6 +71,27 @@ def _write_canonical(path: Path, payload: dict[str, object]) -> None:
     path.write_bytes(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
+def _seal_manifest(manifest_path: Path, manifest: dict[str, object]) -> None:
+    records = manifest["cases"]
+    assert isinstance(records, list)
+    manifest["provider_identity_sha256"] = sha256(
+        json.dumps(manifest["provider_identity"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    manifest["aggregate_snapshot_sha256"] = sha256(
+        json.dumps({"provider_identity": manifest["provider_identity"], "cases": records}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    unsigned = deepcopy(manifest)
+    unsigned.pop("content_sha256", None)
+    manifest["content_sha256"] = sha256(
+        json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    _write_canonical(manifest_path, manifest)
+    journal_path = manifest_path.parent / "creation.journal.json"
+    journal = _read_json(journal_path)
+    journal["manifest_content_sha256"] = manifest["content_sha256"]
+    _write_canonical(journal_path, journal)
+
+
 def test_snapshot_runs_omni_exactly_once_per_five_screens(tmp_path: Path) -> None:
     """A frozen snapshot executes discovery once for each of the five captures."""
     from app.learn.hybrid.omni_snapshot import create_omni_snapshot, load_verified_omni_snapshot
@@ -84,7 +106,7 @@ def test_snapshot_runs_omni_exactly_once_per_five_screens(tmp_path: Path) -> Non
     manifest = create_omni_snapshot(
         cases=cases, omni=omni, output_dir=tmp_path / "snapshot", provider_identity=_identity()
     )
-    loaded = load_verified_omni_snapshot(manifest, expected_cases=cases)
+    loaded = load_verified_omni_snapshot(manifest, expected_cases=cases, expected_provider_identity=_identity())
 
     assert len(calls) == 5
     assert loaded["target_count"] == 25
@@ -111,7 +133,7 @@ def test_snapshot_seals_native_and_canonical_bytes_and_candidate_order(tmp_path:
     candidate_payload["candidates"][0]["bbox_original"] = [11, 20, 30, 40]
     _write_canonical(candidates, candidate_payload)
     with pytest.raises(ValueError, match="candidate file sha256 mismatch"):
-        load_verified_omni_snapshot(manifest_path, expected_cases=cases)
+        load_verified_omni_snapshot(manifest_path, expected_cases=cases, expected_provider_identity=_identity())
 
 
 def test_all_arms_receive_byte_identical_candidate_files(tmp_path: Path) -> None:
@@ -119,12 +141,12 @@ def test_all_arms_receive_byte_identical_candidate_files(tmp_path: Path) -> None
     from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
 
     manifest_path, cases = _snapshot(tmp_path)
-    first_arm = load_verified_omni_snapshot(manifest_path, expected_cases=cases)
-    second_arm = load_verified_omni_snapshot(manifest_path, expected_cases=cases)
+    first_arm = load_verified_omni_snapshot(manifest_path, expected_cases=cases, expected_provider_identity=_identity())
+    second_arm = load_verified_omni_snapshot(manifest_path, expected_cases=cases, expected_provider_identity=_identity())
     assert first_arm == second_arm
     assert first_arm is not second_arm
     first_arm["cases"][0]["candidates"][0]["active"] = False
-    third_arm = load_verified_omni_snapshot(manifest_path, expected_cases=cases)
+    third_arm = load_verified_omni_snapshot(manifest_path, expected_cases=cases, expected_provider_identity=_identity())
     assert third_arm["cases"][0]["candidates"][0]["active"] is True
 
 
@@ -148,14 +170,14 @@ def test_snapshot_rejects_changed_capture_sha_geometry_order_or_profile(tmp_path
             changed["cases"][0][field] = value
         _write_canonical(manifest_path, changed)
         with pytest.raises(ValueError, match="mismatch"):
-            load_verified_omni_snapshot(manifest_path, expected_cases=cases)
+            load_verified_omni_snapshot(manifest_path, expected_cases=cases, expected_provider_identity=_identity())
     _write_canonical(manifest_path, original)
     candidate_path = manifest_path.parent / str(first["candidate_file"])
     candidate = _read_json(candidate_path)
     candidate["candidates"][0]["bbox_original"] = [12, 20, 30, 40]
     _write_canonical(candidate_path, candidate)
     with pytest.raises(ValueError, match="candidate file sha256 mismatch"):
-        load_verified_omni_snapshot(manifest_path, expected_cases=cases)
+        load_verified_omni_snapshot(manifest_path, expected_cases=cases, expected_provider_identity=_identity())
 
 
 def test_snapshot_contains_no_gold_holdout_or_action_authority(tmp_path: Path) -> None:
@@ -176,5 +198,111 @@ def test_snapshot_loader_never_constructs_an_omni_caller(tmp_path: Path) -> None
     from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
 
     manifest_path, cases = _snapshot(tmp_path)
-    loaded = load_verified_omni_snapshot(manifest_path, expected_cases=cases)
+    loaded = load_verified_omni_snapshot(manifest_path, expected_cases=cases, expected_provider_identity=_identity())
     assert loaded["contract_version"] == "omni_snapshot_v1"
+
+
+def test_loader_requires_trusted_identity_and_exact_sealed_goal_order(tmp_path: Path) -> None:
+    """A self-resealed provider profile or goal replacement cannot impersonate a trusted snapshot."""
+    from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
+
+    manifest_path, cases = _snapshot(tmp_path)
+    forged = _read_json(manifest_path)
+    forged["provider_identity"] = {**_identity(), "model_revision": "forged-revision"}
+    _seal_manifest(manifest_path, forged)
+    with pytest.raises(ValueError, match="trusted provider identity mismatch"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
+
+    manifest_path, cases = _snapshot(tmp_path / "goals")
+    forged = _read_json(manifest_path)
+    forged["cases"][0]["goals"][0] = "Select the button labeled 'replacement'"
+    forged["cases"][0]["goals_sha256"] = sha256(
+        json.dumps(forged["cases"][0]["goals"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    _seal_manifest(manifest_path, forged)
+    with pytest.raises(ValueError, match="goal order mismatch"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
+
+
+def test_loader_rejects_resealed_traversal_and_forbidden_semantics(tmp_path: Path) -> None:
+    """A forged manifest cannot redirect sidecars or smuggle action semantics after resealing."""
+    from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
+
+    manifest_path, cases = _snapshot(tmp_path)
+    forged = _read_json(manifest_path)
+    forged["cases"][0]["candidate_file"] = "../case-001.candidates.json"
+    _seal_manifest(manifest_path, forged)
+    with pytest.raises(ValueError, match="candidate filename mismatch"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
+
+    manifest_path, cases = _snapshot(tmp_path / "forbidden")
+    forged = _read_json(manifest_path)
+    forged["cases"][0]["screenshot_path"] = "C:/submit.png"
+    _seal_manifest(manifest_path, forged)
+    with pytest.raises(ValueError, match="forbidden semantic"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
+
+
+def test_create_refuses_existing_or_interrupted_snapshot_before_any_retry(tmp_path: Path) -> None:
+    """A retry never overwrites an existing output directory or repeats a partial Omni run."""
+    from app.learn.hybrid.omni_snapshot import create_omni_snapshot
+
+    cases = _cases(tmp_path)
+    preexisting = tmp_path / "preexisting"
+    preexisting.mkdir()
+    calls: list[Path] = []
+    with pytest.raises(ValueError, match="output directory already exists"):
+        create_omni_snapshot(
+            cases=cases,
+            omni=lambda image: calls.append(image) or _omni_result(image),
+            output_dir=preexisting,
+            provider_identity=_identity(),
+        )
+    assert calls == []
+
+    partial = tmp_path / "partial"
+
+    def interrupted(image: Path) -> object:
+        assert (partial / "creation.journal.json").is_file()
+        calls.append(image)
+        if len(calls) == 2:
+            raise RuntimeError("interrupted")
+        return _omni_result(image)
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        create_omni_snapshot(cases=cases, omni=interrupted, output_dir=partial, provider_identity=_identity())
+    first_attempts = len(calls)
+    with pytest.raises(ValueError, match="output directory already exists"):
+        create_omni_snapshot(cases=cases, omni=interrupted, output_dir=partial, provider_identity=_identity())
+    assert len(calls) == first_attempts
+
+
+def test_loader_rejects_symlinked_sidecar_after_resealing(tmp_path: Path) -> None:
+    """A sidecar symlink is rejected even if a forged manifest updates every digest."""
+    from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
+
+    manifest_path, cases = _snapshot(tmp_path)
+    manifest = _read_json(manifest_path)
+    first = manifest["cases"][0]
+    assert isinstance(first, dict)
+    candidate = manifest_path.parent / str(first["candidate_file"])
+    outside = tmp_path / "outside.candidates.json"
+    candidate.replace(outside)
+    try:
+        os.symlink(outside, candidate)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    first["candidate_file_sha256"] = sha256(candidate.read_bytes()).hexdigest()
+    _seal_manifest(manifest_path, manifest)
+    with pytest.raises(ValueError, match="reparse"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
