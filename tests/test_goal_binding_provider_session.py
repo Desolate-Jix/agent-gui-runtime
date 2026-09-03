@@ -167,6 +167,37 @@ def test_persistent_arm_real_mailbox_one_load_two_calls_one_cleanup(offline_arm)
     assert (root / "events.txt").read_text().splitlines() == ["load", "call", "call", "close"]
 
 
+@pytest.mark.parametrize("scenario", ["atomic_rename", "missing_final", "oversized_tmp"])
+def test_atomic_response_rename_does_not_hide_other_output_failures(offline_arm, monkeypatch, scenario):
+    make, image, _ = offline_arm
+    original_write, original_is_file = worker.atomic_write, Path.is_file
+    name = "000008.json" if scenario == "missing_final" else "000008.json.tmp"
+    raced = []
+    def write(path, body):
+        if path.parent.name == "requests" and path.suffix == ".json":
+            transient = path.parent.parent / "responses" / name
+            transient.write_bytes(b"x" * (65537 if scenario == "oversized_tmp" else 1))
+        original_write(path, body)
+    def is_file(path):
+        result = original_is_file(path)
+        if result and path.name == name and path.parent.name == "responses" and scenario != "oversized_tmp":
+            path.unlink()
+            raced.append(path.name)
+        return result
+    monkeypatch.setattr(worker, "atomic_write", write)
+    monkeypatch.setattr(Path, "is_file", is_file)
+    arm = make()
+    if scenario == "atomic_rename":
+        assert arm.call(image, {"goal": "valid"})["outcome"] == "native_output"
+        assert raced == [name]
+        assert arm.cleanup()["verified"] is True
+    else:
+        expected = FileNotFoundError if scenario == "missing_final" else RuntimeError
+        with pytest.raises(expected):
+            arm.call(image, {"goal": "valid"})
+        assert arm.cleanup()["verified"] is False
+
+
 def test_real_mailbox_separates_model_and_run_roots(offline_arm):
     make, image, root = offline_arm
     run_root = root.parent / (root.name + "-run")

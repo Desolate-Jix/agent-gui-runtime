@@ -461,7 +461,15 @@ class GoalBindingProviderSession:
                 raise RuntimeError("provider session mailbox identity changed")
             for folder in (self.root, self.root / "responses", self.root / "raw"):
                 for log in folder.iterdir():
-                    if log.is_file() and (log.suffix in {".bin", ".utf8"} or folder.name == "responses") and log.stat().st_size > self.profile["max_output_bytes"]:
+                    if not log.is_file() or not (log.suffix in {".bin", ".utf8"} or folder.name == "responses"):
+                        continue
+                    try:
+                        size = log.stat().st_size
+                    except FileNotFoundError:
+                        if folder.name == "responses" and log.name.endswith(".json.tmp"):
+                            continue
+                        raise
+                    if size > self.profile["max_output_bytes"]:
                         raise RuntimeError("provider live output exceeds byte bound")
             if (self.root / "fatal.json").exists():
                 raise RuntimeError("provider mailbox integrity failure: " + str(read_json(self.root / "fatal.json")))
