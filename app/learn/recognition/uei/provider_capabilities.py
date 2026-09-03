@@ -498,8 +498,6 @@ def invoke_with_capability_envelope(
                                 lease_validator(lease=dict(lease), descriptor=descriptor, bundle_ref=dict(envelope.bundle_ref))
                             except Exception:
                                 failure = CapabilityInvocationFailure("validation", "resource_lease_mismatch", False, "not_required")
-                    if isinstance(lease, Mapping) and lease.get("profile_id") != descriptor["profile_id"]:
-                        failure = CapabilityInvocationFailure("validation", "resource_lease_mismatch", False, "not_required")
                 if failure is None and envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
                     failure = CapabilityInvocationFailure("cancellation", "cancelled", False, "not_required")
                 if failure is None:

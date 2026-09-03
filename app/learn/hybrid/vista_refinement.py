@@ -433,8 +433,13 @@ def _validated_request(value: Mapping[str, Any]) -> dict[str, Any]:
     if request.get("contract_version") != VISTA_REQUEST_CONTRACT:
         raise ValueError("VISTA request contract is invalid")
     candidate_id = _required_text(request.get("candidate_id"), "candidate_id")
+    if request.get("submission_status") != "SUBMITTED":
+        raise ValueError("VISTA request was not submitted")
     source_revision = _required_text(request.get("source_revision"), "source_revision")
     capture_sha256 = _required_text(request.get("capture_sha256"), "capture_sha256")
+    capture_lineage_ref = _object(request.get("capture_lineage_ref"), "capture lineage ref")
+    _required_text(capture_lineage_ref.get("id"), "capture lineage ref id")
+    _required_text(capture_lineage_ref.get("content_sha256"), "capture lineage ref digest")
     _image_size(request.get("capture_image_size"))
     from app.core.model_server import validate_qwen_cleanup_receipt
 
@@ -462,6 +467,8 @@ def _validated_request(value: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError("VISTA request source lineage mismatch")
     bbox = _xyxy(bbox_ref.get("xyxy"), "candidate bbox ref")
     roi = _xyxy(roi_ref.get("xyxy"), "ROI ref")
+    if canonical_json_bytes(roi_ref.get("capture_lineage_ref")) != canonical_json_bytes(capture_lineage_ref):
+        raise ValueError("VISTA ROI capture lineage mismatch")
     if roi_ref.get("permitted_for_refinement") is not True:
         raise ValueError("ROI is not permitted for refinement")
     expected_roi_ref = {

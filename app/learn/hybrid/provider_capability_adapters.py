@@ -25,7 +25,10 @@ from app.learn.recognition.uei.provider_capabilities import (
     enforce_provider_native_output_budget,
     reject_authority_shaped_payload,
 )
-from app.learn.hybrid.vista_refinement import normalize_vista_grounding_result
+from app.learn.hybrid.vista_refinement import (
+    _validated_request,
+    normalize_vista_grounding_result,
+)
 from app.learn.hybrid.qwen_binding import (
     QwenBindingCancelled,
     QwenBindingTimeout,
@@ -380,6 +383,48 @@ class VistaGroundingRefinementCompatibilityAdapter:
         self.bundle_ref = dict(bundle_ref)
         self._provider_runner = provider_runner
 
+    def validate_resource_lease(
+        self, *, lease: dict[str, object], descriptor: dict[str, object], bundle_ref: dict[str, str],
+    ) -> None:
+        """验证 VISTA v2 精确 lease 的 profile、进程 scope 与 listener 所有权。"""
+        if self.bundle_ref != dict(bundle_ref) or lease.get("contract_version") != "hybrid_vista_model_lease_v2" or lease.get("provider") != "vista":
+            raise UEIValidationError("provider_capability_resource_lease_mismatch")
+        profile = lease.get("profile")
+        identities = lease.get("process_identities")
+        acquisition = lease.get("process_scope_acquisition")
+        if (
+            not isinstance(profile, dict) or profile.get("profile_id") != descriptor.get("profile_id")
+            or not isinstance(lease.get("incarnation_id"), str) or not lease["incarnation_id"]
+            or not isinstance(identities, list) or not identities
+            or not isinstance(lease.get("process_scope_name"), str) or not lease["process_scope_name"]
+            or not isinstance(acquisition, dict)
+            or acquisition.get("contract_version") != "hybrid_process_scope_acquisition_v1"
+            or acquisition.get("scope_name") != lease["process_scope_name"]
+            or acquisition.get("process_identities") != identities
+            or not isinstance(acquisition.get("member_pids"), list)
+            or any(not isinstance(item, dict) or not isinstance(item.get("pid"), int) or not isinstance(item.get("create_time_ns"), int) or item["pid"] not in acquisition["member_pids"] for item in identities)
+        ):
+            raise UEIValidationError("provider_capability_resource_lease_mismatch")
+
+    def validate_cleanup(
+        self, *, receipt: dict[str, object], lease: dict[str, object], bundle_ref: dict[str, str], invocation_id: str,
+    ) -> CapabilityCleanupOutcomeV1:
+        if self.bundle_ref != dict(bundle_ref) or not invocation_id:
+            return CapabilityCleanupOutcomeV1("indeterminate", None)
+        try:
+            from app.learn.hybrid.gpu_lifecycle import validate_hybrid_cleanup_receipt
+            validated = validate_hybrid_cleanup_receipt(receipt)
+            evidence = validated.get("source_cleanup_evidence")
+            if (
+                validated.get("provider") != "vista" or not isinstance(evidence, dict)
+                or evidence.get("model_lease") != lease
+                or validated.get("provider_lease_identity", {}).get("incarnation_id") != lease.get("incarnation_id")
+            ):
+                return CapabilityCleanupOutcomeV1("indeterminate", None)
+        except (TypeError, ValueError):
+            return CapabilityCleanupOutcomeV1("indeterminate", None)
+        return CapabilityCleanupOutcomeV1("clean", validated)
+
     def invoke(
         self, request: GroundingRefinementRequestV1,
     ) -> GroundingRefinementResultV1:
@@ -387,6 +432,8 @@ class VistaGroundingRefinementCompatibilityAdapter:
             raise UEIValidationError("provider_capability_invalid_grounding_request")
         if self.bundle_ref != dict(request.envelope.bundle_ref):
             raise UEIValidationError("provider_capability_bundle_mismatch")
+        if not isinstance(request.envelope.resource_lease, dict):
+            raise UEIValidationError("provider_capability_resource_lease_required")
         if (
             request.envelope.cancellation_event is not None
             and request.envelope.cancellation_event.is_set()
@@ -401,6 +448,7 @@ class VistaGroundingRefinementCompatibilityAdapter:
             request=legacy_request,
             timeout_seconds=request.envelope.budget.timeout_ms / 1000.0,
             cancellation_event=request.envelope.cancellation_event,
+            model_lease=request.envelope.resource_lease,
         )
         if (
             request.envelope.cancellation_event is not None
@@ -422,12 +470,13 @@ def _validate_vista_grounding_request(
     *, request: GroundingRefinementRequestV1, legacy_request: dict[str, object],
 ) -> None:
     """确保 compatibility runner 只能细化同一个已绑定候选。"""
+    validated = _validated_request(legacy_request)
     if (
-        legacy_request.get("candidate_id") != request.candidate_id
-        or tuple(legacy_request.get("candidate_bbox_ref", {}).get("xyxy", ()))
+        validated.get("candidate_id") != request.candidate_id
+        or tuple(validated.get("candidate_bbox_ref", {}).get("xyxy", ()))
         != request.candidate_bbox
-        or tuple(legacy_request.get("roi_ref", {}).get("xyxy", ()))
+        or tuple(validated.get("roi_ref", {}).get("xyxy", ()))
         != request.permitted_roi
-        or legacy_request.get("capture_lineage_ref") != dict(request.envelope.capture_lineage_ref)
+        or validated.get("capture_lineage_ref") != dict(request.envelope.capture_lineage_ref)
     ):
         raise UEIValidationError("provider_capability_grounding_request_mismatch")

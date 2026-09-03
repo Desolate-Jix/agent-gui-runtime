@@ -623,6 +623,21 @@ def test_qwen_cleanup_requires_terminal_receipt_and_inactive_exact_lease(
     ).status == "indeterminate"
 
 
+
+def _vista_lease() -> dict[str, object]:
+    identities = [{"pid": 123, "create_time_ns": 456}]
+    return {
+        "contract_version": "hybrid_vista_model_lease_v2", "provider": "vista",
+        "incarnation_id": "vista-incarnation",
+        "profile": {"profile_id": "profile/local.vista", "host": "127.0.0.1", "port": 18081},
+        "process_identities": identities, "process_scope_name": "scope/vista",
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": "scope/vista", "member_pids": [123],
+            "process_identities": identities,
+        },
+    }
+
 def _sealed_grounding_descriptor(*, bundle_ref: dict[str, str]) -> dict[str, object]:
     return seal_provider_bundle_descriptor_v1({
         "contract_version": "provider_bundle_descriptor_v1",
@@ -643,7 +658,7 @@ def _sealed_grounding_descriptor(*, bundle_ref: dict[str, str]) -> dict[str, obj
         "decoding_config_sha256": "7" * 64,
         "artifact_sha256s": ["8" * 64],
         "resource_budget": ProviderRunBudget(1_000, 4_096, 8, 128, "vista-test").__dict__,
-        "resource_lease_policy": "none",
+        "resource_lease_policy": "exact_managed",
     })
 
 
@@ -669,12 +684,14 @@ def test_vista_compatibility_adapter_projects_exact_bound_request_without_author
         calls.append(dict(kwargs))
         return raw
 
+    lease = _vista_lease()
     request = GroundingRefinementRequestV1(
         envelope=ProviderInvocationEnvelopeV1(
             bundle_ref=bundle_ref, capability="grounding_refinement",
             invocation_id="invocation/vista-adapter",
             capture_lineage_ref=legacy_request["capture_lineage_ref"],
             budget=ProviderRunBudget(2_000, 8_192, 16, 256, "vista-test"),
+            resource_lease=lease,
         ),
         candidate_id=legacy_request["candidate_id"],
         candidate_bbox=tuple(legacy_request["candidate_bbox_ref"]["xyxy"]),
@@ -691,7 +708,7 @@ def test_vista_compatibility_adapter_projects_exact_bound_request_without_author
     assert result.point == tuple(raw["point"])
     assert calls == [{
         "request": legacy_request, "timeout_seconds": 2.0,
-        "cancellation_event": request.envelope.cancellation_event,
+        "cancellation_event": request.envelope.cancellation_event, "model_lease": lease,
     }]
     assert project_grounding_result_to_hybrid_vista_refinement_v1(
         request=legacy_request, raw_result=raw, result=result,
@@ -718,6 +735,7 @@ def test_vista_compatibility_adapter_rejects_non_bound_or_authority_raw_before_p
             invocation_id="invocation/vista-adapter-reject",
             capture_lineage_ref=legacy_request["capture_lineage_ref"],
             budget=ProviderRunBudget(1_000, 4_096, 8, 128, "vista-test"),
+            resource_lease=_vista_lease(),
         ),
         candidate_id=legacy_request["candidate_id"],
         candidate_bbox=tuple(legacy_request["candidate_bbox_ref"]["xyxy"]),

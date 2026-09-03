@@ -524,3 +524,28 @@ def test_vision_pre_acquisition_invalid_lineage_has_zero_provider_calls(tmp_path
     vision._run_hybrid_vista_validation(target, image_path=str(image_path), image_size={"width":1280,"height":720},
         local_config={"profile_id":"fake"}, timeout_seconds=1)
     assert calls == []
+
+
+def test_neutral_vista_requires_submitted_and_same_roi_capture_lineage() -> None:
+    request = _request()
+    unsubmitted = deepcopy(request)
+    unsubmitted["submission_status"] = "NOT_SUBMITTED"
+    unsubmitted.pop("content_sha256")
+    unsubmitted = seal_immutable(unsubmitted)
+    with pytest.raises(ValueError, match="submitted"):
+        normalize_vista_grounding_result(
+            request=unsubmitted, raw_result=_raw_result(request),
+            bundle_ref=grounding_bundle_ref(), invocation_id="invocation/vista-unsubmitted",
+        )
+
+    stale_roi = deepcopy(request)
+    stale_roi["roi_ref"]["capture_lineage_ref"] = {"id": "capture/stale", "content_sha256": "d" * 64}
+    stale_roi["roi_ref"].pop("content_sha256")
+    stale_roi["roi_ref"] = seal_immutable(stale_roi["roi_ref"])
+    stale_roi.pop("content_sha256")
+    stale_roi = seal_immutable(stale_roi)
+    with pytest.raises(ValueError, match="ROI capture lineage"):
+        normalize_vista_grounding_result(
+            request=stale_roi, raw_result=_raw_result(request),
+            bundle_ref=grounding_bundle_ref(), invocation_id="invocation/vista-stale-roi",
+        )
