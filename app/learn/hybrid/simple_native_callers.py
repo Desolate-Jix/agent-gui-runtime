@@ -228,7 +228,6 @@ class SimpleNativeActualSession:
             max_string_length=4096,
             resource_group="gpu_vision",
         )
-        invocation_started = False
         try:
             if self._omni_adapter is None:
                 self._omni_adapter = self._dependencies.build_omni_adapter()
@@ -237,7 +236,6 @@ class SimpleNativeActualSession:
                 raise RuntimeError("managed Omni adapter has no native invocation")
             if getattr(self._omni_adapter, "profile_id", None) != self._profiles["omni"]:
                 raise RuntimeError("managed Omni adapter profile does not match actual configuration")
-            invocation_started = True
             result = invoke(
                 capture=capture,
                 budget=budget,
@@ -252,7 +250,7 @@ class SimpleNativeActualSession:
             phase["dispatch_failed"] = True
             raise
         finally:
-            if invocation_started:
+            if runtime_path.is_file():
                 phase["invocation_ids"].append(invocation_id)
             phase["call_count"] += 1
 

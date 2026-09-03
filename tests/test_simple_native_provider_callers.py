@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import os
 from pathlib import Path
 
 import pytest
@@ -210,6 +212,101 @@ def test_actual_qwen_dispatch_failure_releases_once_before_vista_is_blocked(tmp_
     with pytest.raises(RuntimeError, match="blocked"):
         slots.vista(image, "button: Open")
     assert events.count("qwen_release") == 1 and "vista_acquire" not in events
+
+
+@pytest.mark.parametrize("owner_persisted", [False, True])
+def test_actual_omni_failure_cleanup_depends_on_persisted_owner(
+    tmp_path: Path,
+    owner_persisted: bool,
+) -> None:
+    from app.learn.hybrid.simple_native_callers import (
+        SimpleNativeActualDependencies,
+        make_actual_simple_native_slots,
+    )
+
+    cleanup_loads: list[str] = []
+    scope_observations: list[tuple[str, object, object]] = []
+    qwen_acquisitions: list[object] = []
+
+    class Scope:
+        def close(self) -> None:
+            return None
+
+    class Omni:
+        profile_id = "omni"
+
+        def invoke_native(self, **_kwargs):
+            if owner_persisted:
+                Path(os.environ["AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH"]).write_text(
+                    "{}", encoding="utf-8"
+                )
+            raise RuntimeError("omni preflight rejected")
+
+    def observe_scope(name: str, **kwargs):
+        scope_observations.append(
+            (name, kwargs.get("terminate"), kwargs.get("stable_zero_observations"))
+        )
+        return {
+            "cleanup_status": "verified",
+            "member_pids_after": [],
+            "member_identities_after": [],
+            "active_listeners_after": [],
+            "pid_file_after": None,
+        }
+
+    def load_omni_cleanup(invocation_id: str):
+        cleanup_loads.append(invocation_id)
+        if not owner_persisted:
+            raise AssertionError("cleanup load must require a persisted owner")
+        return {
+            "cleanup_status": "verified",
+            "inventory_observable": True,
+            "provider_processes_after": [],
+            "orphan_descendant_identities": [],
+            "active_listeners_after": [],
+            "lease_files_after": [],
+            "process_scope_cleanup": {"cleanup_status": "verified"},
+        }
+
+    dependencies = SimpleNativeActualDependencies(
+        scope_name=lambda _lineage, provider: f"scope-{provider}",
+        create_scope=lambda _name: Scope(),
+        observe_scope_cleanup=observe_scope,
+        build_omni_adapter=Omni,
+        load_omni_cleanup=load_omni_cleanup,
+        acquire_qwen=lambda **kwargs: qwen_acquisitions.append(kwargs) or {},
+        run_qwen=lambda **_kwargs: {"bindings": []},
+        release_qwen=lambda _lease, _reason: {},
+        acquire_vista=lambda **_kwargs: {},
+        run_vista=lambda **_kwargs: "[1,1]",
+        release_vista=lambda **_kwargs: {},
+    )
+    config = {
+        "provider": {
+            "profile_ids": {"omni": "omni", "qwen": "qwen", "vista": "vista"}
+        },
+        "limits": {"timeout_seconds": 120, "max_output_bytes": 1024},
+    }
+    image = tmp_path / "image.png"
+    Image.new("RGB", (2, 2)).save(image)
+    slots = make_actual_simple_native_slots(
+        config=config,
+        artifact_dir=tmp_path / "artifacts",
+        dependencies=dependencies,
+    )
+
+    with pytest.raises(RuntimeError, match="omni preflight rejected"):
+        try:
+            slots.omni(image)
+        finally:
+            receipt = slots.release_provider("omni")
+
+    assert receipt["verified"] is True
+    assert len(cleanup_loads) == (1 if owner_persisted else 0)
+    assert scope_observations == [("scope-omni", True, 3)]
+    with pytest.raises(RuntimeError, match="transition is blocked"):
+        slots.qwen(image, {"image_size": [2, 2], "candidates": []})
+    assert qwen_acquisitions == []
 
 
 def test_actual_lifecycle_is_exclusive_bounded_and_records_verified_cleanup() -> None:
