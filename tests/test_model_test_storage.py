@@ -36,11 +36,11 @@ def test_projected_download_over_30_gib_is_rejected_before_write(tmp_path: Path)
 def test_download_manifest_requires_immutable_revision_size_and_sha(tmp_path: Path) -> None:
     from app.learn.hybrid.model_test_storage import register_downloaded_artifact
 
-    weight = _write(tmp_path / "weights" / "model.bin", b"model")
+    weight = _write(tmp_path / "artifacts" / "provider-a" / ("a" * 40) / "model.bin", b"model")
     manifest = register_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/model", revision="a" * 40, files=[weight])
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert payload["revision"] == "a" * 40
-    assert payload["files"] == [{"relative_path": "weights/model.bin", "bytes": 5, "sha256": sha256(b"model").hexdigest()}]
+    assert payload["files"] == [{"relative_path": f"artifacts/provider-a/{'a' * 40}/model.bin", "bytes": 5, "sha256": sha256(b"model").hexdigest()}]
     with pytest.raises(ValueError, match="immutable"):
         register_downloaded_artifact(root=tmp_path, provider_id="provider-b", repo_id="org/model", revision="main", files=[weight])
 
@@ -48,12 +48,12 @@ def test_download_manifest_requires_immutable_revision_size_and_sha(tmp_path: Pa
 def test_safe_delete_rejects_root_outside_symlink_reparse_and_unregistered_path(tmp_path: Path) -> None:
     from app.learn.hybrid.model_test_storage import delete_registered_artifact, register_downloaded_artifact
 
-    weight = _write(tmp_path / "weights" / "model.bin", b"model")
+    weight = _write(tmp_path / "artifacts" / "provider-a" / ("a" * 40) / "model.bin", b"model")
     manifest = register_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/model", revision="a" * 40, files=[weight])
     outside = _write(tmp_path.parent / "outside.bin", b"outside")
     payload = json.loads(manifest.read_text(encoding="utf-8")); payload["files"][0]["relative_path"] = "../outside.bin"
     manifest.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="outside|traversal"):
+    with pytest.raises(ValueError, match="registration"):
         delete_registered_artifact(root=tmp_path, manifest_path=manifest)
     assert outside.exists() and weight.exists()
     with pytest.raises(ValueError, match="root"):
@@ -63,7 +63,7 @@ def test_safe_delete_rejects_root_outside_symlink_reparse_and_unregistered_path(
 def test_safe_delete_removes_only_registered_weights_and_keeps_report_manifest(tmp_path: Path) -> None:
     from app.learn.hybrid.model_test_storage import delete_registered_artifact, register_downloaded_artifact
 
-    weight = _write(tmp_path / "weights" / "model.bin", b"model")
+    weight = _write(tmp_path / "artifacts" / "provider-a" / ("a" * 40) / "model.bin", b"model")
     untouched = _write(tmp_path / "weights" / "keep.bin", b"keep")
     report = _write(tmp_path / "reports" / "run.json", b"report")
     manifest = register_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/model", revision="a" * 40, files=[weight])
@@ -76,17 +76,17 @@ def test_safe_delete_removes_only_registered_weights_and_keeps_report_manifest(t
 def test_safe_delete_rejects_windows_reparse_target(tmp_path: Path) -> None:
     from app.learn.hybrid.model_test_storage import delete_registered_artifact, register_downloaded_artifact
 
-    weight = _write(tmp_path / "weights" / "model.bin", b"model")
+    weight = _write(tmp_path / "artifacts" / "provider-a" / ("a" * 40) / "model.bin", b"model")
     manifest = register_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/model", revision="a" * 40, files=[weight])
     outside = _write(tmp_path.parent / "reparse-outside.bin", b"outside")
-    link = tmp_path / "weights" / "linked.bin"
+    link = tmp_path / "artifacts" / "provider-a" / ("a" * 40) / "linked.bin"
     try:
         os.symlink(outside, link)
     except OSError:
         pytest.skip("Windows symlink privilege is unavailable")
-    payload = json.loads(manifest.read_text(encoding="utf-8")); payload["files"][0]["relative_path"] = "weights/linked.bin"
+    payload = json.loads(manifest.read_text(encoding="utf-8")); payload["files"][0]["relative_path"] = f"artifacts/provider-a/{'a' * 40}/linked.bin"
     manifest.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="reparse|symlink"):
+    with pytest.raises(ValueError, match="registration|reparse|symlink"):
         delete_registered_artifact(root=tmp_path, manifest_path=manifest)
     assert outside.exists()
 
@@ -119,7 +119,7 @@ def test_chinese_storage_root_round_trips_as_utf8(tmp_path: Path) -> None:
 def test_delete_rejects_modified_or_hardlinked_registered_file(tmp_path: Path) -> None:
     from app.learn.hybrid.model_test_storage import delete_registered_artifact, register_downloaded_artifact
 
-    weight = _write(tmp_path / "weights" / "model.bin", b"model")
+    weight = _write(tmp_path / "artifacts" / "provider-a" / ("a" * 40) / "model.bin", b"model")
     manifest = register_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/model", revision="a" * 40, files=[weight])
     weight.write_bytes(b"changed")
     with pytest.raises(ValueError, match="modified"):
@@ -127,7 +127,7 @@ def test_delete_rejects_modified_or_hardlinked_registered_file(tmp_path: Path) -
     assert weight.exists()
     if hasattr(os, "link"):
         weight.write_bytes(b"model")
-        alias = tmp_path / "weights" / "alias.bin"
+        alias = tmp_path / "artifacts" / "provider-a" / ("a" * 40) / "alias.bin"
         try:
             os.link(weight, alias)
         except OSError:

@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import tempfile
 
 
 MODEL_TEST_ROOT = Path(r"E:\模型测试")
@@ -15,6 +16,7 @@ MODEL_TEST_MAX_BYTES = 32_212_254_720
 _STAGING_MARGIN_NUMERATOR = 105
 _MANIFEST_VERSION = "model_test_artifact_manifest_v1"
 _RESERVED_TOP_LEVEL = frozenset({"manifests", "reports", "staging"})
+_REGISTRY_NAME = "artifact-registry.json"
 
 
 def _is_reparse(path: Path) -> bool:
@@ -76,6 +78,43 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _guarded_directory(root: Path, *parts: str) -> Path:
+    """Create a guarded internal directory; callers must not treat injected roots as production authority."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    current = root
+    if _is_reparse(current):
+        raise ValueError("storage root is a reparse point")
+    for part in parts:
+        current /= part
+        if current.exists() and _is_reparse(current):
+            raise ValueError("storage destination contains a symlink or reparse point")
+        current.mkdir(exist_ok=True)
+        if _is_reparse(current):
+            raise ValueError("storage destination became a reparse point")
+    return current
+
+
+def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
+    parent = path.parent
+    if _is_reparse(parent):
+        raise ValueError("storage destination parent is a reparse point")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=False, sort_keys=True, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if _is_reparse(temporary) or _is_reparse(parent):
+            raise ValueError("storage temporary destination is a reparse point")
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _logical_files(root: Path) -> list[Path]:
@@ -154,14 +193,25 @@ def register_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, 
         seen.add(relative)
         entries.append({"relative_path": relative, "bytes": resolved.stat().st_size, "sha256": _sha256(resolved)})
     entries.sort(key=lambda entry: str(entry["relative_path"]))
-    manifest = _manifest_path(root, provider_id, revision)
-    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest = _guarded_directory(root, "manifests") / _manifest_path(root, provider_id, revision).name
     if manifest.exists():
         raise ValueError("artifact manifest already exists")
     payload = {"contract_version": _MANIFEST_VERSION, "provider_id": provider_id, "repo_id": repo_id, "revision": revision, "files": entries, "artifact_is_authorization": False}
-    temporary = manifest.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(manifest)
+    _atomic_json(manifest, payload)
+    registry_path = _guarded_directory(root, "reports") / _REGISTRY_NAME
+    registry: dict[str, object] = {"contract_version": "model_test_artifact_registry_v1", "manifests": {}}
+    if registry_path.exists():
+        loaded = json.loads(registry_path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict) or loaded.get("contract_version") != registry["contract_version"] or not isinstance(loaded.get("manifests"), dict):
+            raise ValueError("artifact registry is invalid")
+        registry = loaded
+    records = registry["manifests"]
+    assert isinstance(records, dict)
+    key = manifest.relative_to(Path(root).resolve()).as_posix()
+    if key in records:
+        raise ValueError("artifact registry already contains manifest")
+    records[key] = sha256(manifest.read_bytes()).hexdigest()
+    _atomic_json(registry_path, registry)
     return manifest
 
 
@@ -181,6 +231,15 @@ def _load_manifest(root: Path, manifest_path: Path) -> tuple[dict[str, object], 
     _immutable_revision(revision)
     if resolved_manifest != _manifest_path(root_resolved, provider, revision):
         raise ValueError("manifest path does not match its identity")
+    registry_path = root_resolved / "reports" / _REGISTRY_NAME
+    _guard(root_resolved, registry_path)
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("artifact registry is unavailable") from exc
+    key = resolved_manifest.relative_to(root_resolved).as_posix()
+    if not isinstance(registry, Mapping) or not isinstance(registry.get("manifests"), Mapping) or registry["manifests"].get(key) != sha256(resolved_manifest.read_bytes()).hexdigest():
+        raise ValueError("manifest does not match durable registration")
     if not isinstance(payload.get("files"), list) or not payload["files"]:
         raise ValueError("manifest files are invalid")
     return dict(payload), root_resolved, resolved_manifest
@@ -199,6 +258,9 @@ def delete_registered_artifact(*, root: Path, manifest_path: Path) -> dict[str, 
         if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) or expected_bytes < 0 or not isinstance(expected_sha, str) or len(expected_sha) != 64:
             raise ValueError("manifest entry is invalid")
         candidate = root_resolved / Path(relative)
+        namespace = Path("artifacts") / str(payload["provider_id"]) / str(payload["revision"])
+        if not Path(relative).is_relative_to(namespace):
+            raise ValueError("manifest entry is outside its exact artifact namespace")
         resolved, actual_relative = _validate_registered_file(root_resolved, candidate)
         if actual_relative != relative or relative in seen:
             raise ValueError("manifest entry is unregistered or duplicated")
@@ -206,13 +268,15 @@ def delete_registered_artifact(*, root: Path, manifest_path: Path) -> dict[str, 
         if resolved.stat().st_size != expected_bytes or _sha256(resolved) != expected_sha:
             raise ValueError("registered file was modified")
         registered.append(resolved)
+    reports = _guarded_directory(root_resolved, "reports")
+    journal = reports / f"{payload['provider_id']}-{payload['revision']}-deletion-pending.json"
+    _atomic_json(journal, {"contract_version": "model_test_artifact_deletion_journal_v1", "manifest_path": str(resolved_manifest), "files": sorted(seen), "status": "pending"})
     for file in registered:
         file.unlink()
     receipt = {"contract_version": "model_test_artifact_deletion_receipt_v1", "provider_id": payload["provider_id"], "revision": payload["revision"], "deleted_count": len(registered), "deleted_files": sorted(seen), "manifest_path": str(resolved_manifest), "verified": True}
-    reports = root_resolved / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
     receipt_path = reports / f"{payload['provider_id']}-{payload['revision']}-deletion.json"
-    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    _atomic_json(receipt_path, receipt)
+    _atomic_json(journal, {"contract_version": "model_test_artifact_deletion_journal_v1", "manifest_path": str(resolved_manifest), "files": sorted(seen), "status": "complete", "receipt_path": str(receipt_path)})
     receipt["receipt_path"] = str(receipt_path)
     return receipt
 
@@ -249,4 +313,10 @@ def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: st
         raise ValueError("artifact destination already exists")
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging.rename(destination)
-    return register_downloaded_artifact(root=root_resolved, provider_id=provider_id, repo_id=repo_id, revision=revision, files=sorted(actual_path for actual_path in destination.rglob("*") if actual_path.is_file()))
+    try:
+        return register_downloaded_artifact(root=root_resolved, provider_id=provider_id, repo_id=repo_id, revision=revision, files=sorted(actual_path for actual_path in destination.rglob("*") if actual_path.is_file()))
+    except BaseException:
+        if destination.exists() and not staging.exists():
+            _guard(root_resolved, destination)
+            destination.rename(staging)
+        raise
