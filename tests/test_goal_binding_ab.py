@@ -54,10 +54,10 @@ def _snapshot(tmp_path: Path, *, items: list[dict[str, object]] | None = None) -
     return manifest, _cases(tmp_path), calls
 
 
-def _clean() -> dict[str, object]:
+def _clean(provider: str = "ui_venus_1_5_2b_f16") -> dict[str, object]:
     return {
         "contract_version": "simple_native_provider_cleanup_v1",
-        "provider": "binder",
+        "provider": provider,
         "verified": True,
         "cleanup_status": "verified",
         "owned_processes": [],
@@ -72,7 +72,11 @@ def _clean() -> dict[str, object]:
 def _arm(*, call, adapt, cleanup=_clean):
     from app.learn.hybrid.goal_binding_ab import GoalBindingArm
 
-    return GoalBindingArm("challenger", "ui_venus_1_5_2b_f16", call, adapt, cleanup)
+    provider = "ui_venus_1_5_2b_f16"
+    return GoalBindingArm(
+        "challenger", provider, call, adapt,
+        (lambda: _clean(provider)) if cleanup is _clean else cleanup,
+    )
 
 
 def _native_adapter(raw: object, goal_index: int, context: dict[str, object]) -> dict[str, object]:
@@ -85,12 +89,19 @@ def _native_adapter(raw: object, goal_index: int, context: dict[str, object]) ->
     )(raw, goal_index, context)
 
 
-def _run(tmp_path: Path, *, arm, manifest: Path | None = None, cases: list[object] | None = None, vista=lambda _image, _target: "[500,500]"):
+def _run(tmp_path: Path, *, arm, manifest: Path | None = None, cases: list[object] | None = None, vista=lambda _image, _target: "[500,500]", expected_omni_provider_identity: dict[str, object] | None = None):
     from app.learn.hybrid.goal_binding_ab import run_goal_binding_arm
 
     if manifest is None or cases is None:
         manifest, cases, _ = _snapshot(tmp_path)
-    return run_goal_binding_arm(cases=cases, snapshot_path=manifest, arm=arm, vista=vista, artifact_dir=tmp_path / "arm")
+    return run_goal_binding_arm(
+        cases=cases,
+        snapshot_path=manifest,
+        arm=arm,
+        vista=vista,
+        artifact_dir=tmp_path / "arm",
+        expected_omni_provider_identity=_identity() if expected_omni_provider_identity is None else expected_omni_provider_identity,
+    )
 
 
 def test_arm_runner_never_calls_omni_and_verifies_snapshot_first(tmp_path: Path) -> None:
@@ -124,7 +135,7 @@ def test_malformed_native_output_is_provider_failure_not_fallback(tmp_path: Path
     arm = _arm(call=lambda _image, _request: {"not": "a point"}, adapt=_native_adapter)
     artifact = _run(tmp_path, arm=arm, vista=lambda _image, target: vista_calls.append(target) or "[500,500]")
     binders = [entry for case in artifact.cases for entry in case["trace"] if entry["slot"] == "binder"]
-    assert len(binders) == 25 and {entry["binding"]["status"] for entry in binders} == {"PROVIDER_FAILURE"}
+    assert len(binders) == 25 and {entry["canonical_binding"]["status"] for entry in binders} == {"PROVIDER_FAILURE"}
     assert vista_calls == []
 
 
@@ -160,7 +171,7 @@ def test_runner_records_native_raw_parsed_error_and_parent_hashes(tmp_path: Path
     payload = json.loads(artifact.path.read_text(encoding="utf-8"))
     binder = next(entry for entry in payload["cases"][0]["trace"] if entry["slot"] == "binder")
     assert binder["native_raw_sha256"] and binder["native_parsed_sha256"] and binder["native_error_sha256"] is None
-    assert binder["binding"]["omni_snapshot_ref"] == binder["parent_omni_snapshot_ref"]
+    assert binder["canonical_binding"]["omni_snapshot_ref"] == binder["parent_omni_snapshot_ref"]
 
 
 def test_runner_preserves_role_label_by_deterministic_goal_inheritance(tmp_path: Path) -> None:
@@ -179,11 +190,11 @@ def test_incumbent_control_uses_existing_index_parser_without_fake_point(tmp_pat
         call=lambda _image, _request: [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 0.9}],
         adapt=adapt_incumbent_candidate_index,
     )
-    arm = type(arm)("incumbent", "qwen3_vl_8b_q4_k_m", arm.call, arm.adapt, arm.cleanup)
+    arm = type(arm)("incumbent", "qwen3_vl_8b_q4_k_m", arm.call, arm.adapt, lambda: _clean("qwen3_vl_8b_q4_k_m"))
     artifact = _run(tmp_path, arm=arm)
     binder = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "binder")
-    assert binder["binding"]["binding_basis"] == "direct_candidate_index"
-    assert binder["binding"]["canonical_capture_pixel_point"] is None
+    assert binder["canonical_binding"]["binding_basis"] == "direct_candidate_index"
+    assert binder["canonical_binding"]["canonical_capture_pixel_point"] is None
 
 
 def test_runner_is_regression_only_non_authorizing_and_has_zero_actions(tmp_path: Path) -> None:
@@ -202,3 +213,112 @@ def test_cleanup_failure_blocks_arm_finalization_and_next_model(tmp_path: Path) 
     with pytest.raises(RuntimeError, match="cleanup"):
         _run(tmp_path, arm=arm)
     assert not (tmp_path / "arm" / "provider-diagnostic.json").exists()
+
+
+def test_runner_runs_cleanup_after_all_binders_and_before_any_vista(tmp_path: Path) -> None:
+    events: list[str] = []
+    arm = _arm(
+        call=lambda _image, _request: events.append("binder") or {"point": [0.2, 0.375]},
+        adapt=_native_adapter,
+        cleanup=lambda: events.append("cleanup") or _clean(),
+    )
+    _run(tmp_path, arm=arm, vista=lambda _image, _target: events.append("vista") or "[500,500]")
+    assert events == ["binder"] * 25 + ["cleanup"] + ["vista"] * 25
+
+
+def test_cleanup_failure_prevents_all_vista_dispatch(tmp_path: Path) -> None:
+    vista_calls: list[str] = []
+    arm = _arm(
+        call=lambda _image, _request: {"point": [0.2, 0.375]},
+        adapt=_native_adapter,
+        cleanup=lambda: _clean() | {"verified": False, "cleanup_status": "failed"},
+    )
+    with pytest.raises(RuntimeError, match="cleanup"):
+        _run(tmp_path, arm=arm, vista=lambda _image, target: vista_calls.append(target) or "[500,500]")
+    assert vista_calls == []
+
+
+def test_fully_resealed_provider_identity_substitution_is_rejected(tmp_path: Path) -> None:
+    manifest, cases, _ = _snapshot(tmp_path)
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["provider_identity"] = _identity() | {"model_revision": "forged"}
+    document["provider_identity_sha256"] = sha256(json.dumps(document["provider_identity"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    document["aggregate_snapshot_sha256"] = sha256(json.dumps({"provider_identity": document["provider_identity"], "cases": document["cases"]}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    unsigned = dict(document); unsigned.pop("content_sha256")
+    document["content_sha256"] = sha256(json.dumps(unsigned, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    manifest.write_text(json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    journal = json.loads((manifest.parent / "creation.journal.json").read_text(encoding="utf-8"))
+    journal["manifest_content_sha256"] = document["content_sha256"]
+    (manifest.parent / "creation.journal.json").write_text(json.dumps(journal, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    calls: list[Path] = []
+    arm = _arm(call=lambda image, _request: calls.append(image) or {"point": [0.2, 0.375]}, adapt=_native_adapter)
+    with pytest.raises(ValueError, match="trusted provider identity"):
+        _run(tmp_path, arm=arm, manifest=manifest, cases=cases)
+    assert calls == []
+
+
+def test_provider_failure_does_not_count_as_schema_valid(tmp_path: Path) -> None:
+    arm = _arm(call=lambda _image, _request: {"bad": True}, adapt=_native_adapter)
+    artifact = _run(tmp_path, arm=arm)
+    assert artifact.metrics["binder"]["schema_valid"] == 0
+    assert artifact.metrics["binder"]["schema_invalid"] == 25
+
+
+def test_runner_hashes_the_exact_persisted_native_raw_and_parsed_values(tmp_path: Path) -> None:
+    raw = '{"point":[0.2,0.375]}'
+    arm = _arm(call=lambda _image, _request: raw, adapt=_native_adapter)
+    artifact = _run(tmp_path, arm=arm)
+    binder = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "binder")
+    assert binder["native_raw"] == raw
+    assert binder["native_raw_sha256"] == sha256(raw.encode("utf-8")).hexdigest()
+    assert binder["native_parsed_sha256"] == sha256(json.dumps(binder["native_parsed"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    assert binder["canonical_binding_sha256"] == sha256(json.dumps(binder["canonical_binding"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def test_mutating_adapter_copy_or_forging_a_bound_candidate_cannot_change_authority(tmp_path: Path) -> None:
+    vista_calls: list[str] = []
+
+    def malicious(raw: object, goal_index: int, context: dict[str, object]) -> dict[str, object]:
+        result = _native_adapter(raw, goal_index, context)
+        context["candidates"][0]["bbox_original"] = [0, 0, 1, 1]
+        context["candidates"][0]["active"] = False
+        return result
+
+    arm = _arm(call=lambda _image, _request: {"point": [0.2, 0.375]}, adapt=malicious)
+    artifact = _run(tmp_path, arm=arm, vista=lambda _image, target: vista_calls.append(target) or "[500,500]")
+    assert len(vista_calls) == 25
+    assert next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "vista")["roi_xyxy"] == [10, 20, 30, 40]
+
+    overlapping = [
+        {"bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "target", "interactivity": True},
+        {"bbox": [0.15, 0.3, 0.35, 0.55], "type": "text", "content": "target-2", "interactivity": True},
+    ]
+    manifest, cases, _ = _snapshot(tmp_path / "forged", items=overlapping)
+
+    def forged(raw: object, goal_index: int, context: dict[str, object]) -> dict[str, object]:
+        context["candidates"].pop()
+        return _native_adapter(raw, goal_index, context)
+
+    forged_arm = _arm(call=lambda _image, _request: {"point": [0.2, 0.375]}, adapt=forged)
+    forged_artifact = _run(tmp_path / "forged", arm=forged_arm, manifest=manifest, cases=cases)
+    assert forged_artifact.metrics["binder"]["schema_invalid"] == 25
+
+
+def test_cleanup_provider_must_match_arm_provider(tmp_path: Path) -> None:
+    arm = _arm(call=lambda _image, _request: {"point": [0.2, 0.375]}, adapt=_native_adapter, cleanup=lambda: _clean("wrong-provider"))
+    with pytest.raises(RuntimeError, match="provider"):
+        _run(tmp_path, arm=arm)
+
+
+def test_incumbent_bound_record_keeps_frozen_scoring_geometry_when_vista_fails(tmp_path: Path) -> None:
+    from app.learn.hybrid.goal_binding_ab import adapt_incumbent_candidate_index
+
+    arm = _arm(
+        call=lambda _image, _request: [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 0.9}],
+        adapt=adapt_incumbent_candidate_index,
+    )
+    arm = type(arm)("incumbent", "qwen3_vl_8b_q4_k_m", arm.call, arm.adapt, lambda: _clean("qwen3_vl_8b_q4_k_m"))
+    artifact = _run(tmp_path, arm=arm, vista=lambda _image, _target: "not-a-point")
+    binder = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "binder")
+    assert binder["selected_candidate"]["bbox_original"] == [10, 20, 30, 40]
+    assert binder["selected_candidate"]["center_capture_pixel"] == [20.0, 30.0]

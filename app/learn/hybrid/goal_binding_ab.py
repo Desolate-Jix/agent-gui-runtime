@@ -66,6 +66,10 @@ def _hash(value: object) -> str:
     return sha256(_canonical(value)).hexdigest()
 
 
+def _text_hash(value: str) -> str:
+    return sha256(value.encode("utf-8")).hexdigest()
+
+
 def _raw_text(value: object) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
 
@@ -94,22 +98,6 @@ def _require_arm(arm: GoalBindingArm) -> None:
         or not callable(arm.cleanup)
     ):
         raise ValueError("goal-binding arm is invalid")
-
-
-def _snapshot_identity(path: Path) -> Mapping[str, object]:
-    """Read only the identity needed by Task 3's verifying loader.
-
-    The loader independently seals and verifies this manifest, all candidate
-    sidecars, captures, goals, and the returned identity before a model call.
-    """
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError("frozen Omni snapshot manifest is unreadable") from exc
-    identity = payload.get("provider_identity") if isinstance(payload, Mapping) else None
-    if not isinstance(identity, Mapping):
-        raise ValueError("frozen Omni snapshot identity is unavailable")
-    return deepcopy(dict(identity))
 
 
 def _snapshot_ref(snapshot: Mapping[str, object]) -> dict[str, str]:
@@ -162,6 +150,43 @@ def _provider_failure(*, goal_index: int, provider_id: str, context: Mapping[str
     )
 
 
+def _record_native_parsed(context: Mapping[str, object], value: Mapping[str, object]) -> None:
+    """Record adapter parsing as diagnostic-only evidence, never as authority."""
+    recorder = context.get("record_native_parsed")
+    if recorder is None:
+        return
+    if not callable(recorder) or not isinstance(value, Mapping):
+        raise ValueError("native parsed evidence recorder is invalid")
+    recorder(deepcopy(dict(value)))
+
+
+def _selected_candidate_evidence(
+    *, binding: Mapping[str, object], candidate: Mapping[str, object], capture_ref: Mapping[str, str], snapshot_ref: Mapping[str, str]
+) -> dict[str, object]:
+    index, bbox = binding.get("candidate_index"), candidate.get("bbox_original")
+    if (
+        isinstance(index, bool)
+        or not isinstance(index, int)
+        or not isinstance(bbox, list)
+        or len(bbox) != 4
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in bbox)
+        or not bbox[0] < bbox[2]
+        or not bbox[1] < bbox[3]
+    ):
+        raise ValueError("selected frozen candidate geometry is invalid")
+    return {
+        "candidate_id": binding["candidate_id"],
+        "candidate_index": index,
+        "bbox_original": list(bbox),
+        "center_capture_pixel": [
+            (bbox[0] + bbox[2]) / 2.0,
+            (bbox[1] + bbox[3]) / 2.0,
+        ],
+        "capture_ref": deepcopy(dict(capture_ref)),
+        "omni_snapshot_ref": deepcopy(dict(snapshot_ref)),
+    }
+
+
 def make_native_point_adapter(
     parser: Callable[[object], NativePointProposal] | Callable[..., NativePointProposal],
     profile: Mapping[str, object],
@@ -176,6 +201,15 @@ def make_native_point_adapter(
             raise ValueError("native point parser invocation failed") from exc
         if not isinstance(proposal, NativePointProposal):
             raise ValueError("native point parser returned an invalid proposal")
+        _record_native_parsed(context, {
+            "contract_version": "goal_binding_native_point_proposal_v1",
+            "goal_index": proposal.goal_index,
+            "point": list(proposal.point) if proposal.point is not None else None,
+            "coordinate_space": proposal.coordinate_space,
+            "confidence": proposal.confidence,
+            "status": proposal.status,
+            "failure_reason": proposal.failure_reason,
+        })
         return map_native_point_to_candidate(
             proposal=proposal,
             image_size=context["image_size"],  # type: ignore[arg-type]
@@ -199,6 +233,7 @@ def adapt_incumbent_candidate_index(
     if not isinstance(projection, Mapping) or not isinstance(request, Mapping) or not isinstance(candidates, list):
         raise ValueError("incumbent candidate-index context is unavailable")
     expanded = expand_qwen_goal_binding_response(raw, projection=projection, runtime_request=request)
+    _record_native_parsed(context, expanded)
     bindings = expanded.get("bindings")
     if not isinstance(bindings, list) or len(bindings) != 1 or not isinstance(bindings[0], Mapping):
         raise ValueError("incumbent candidate-index response is incomplete")
@@ -284,6 +319,28 @@ def _validated_binding(binding: object, *, goal_index: int, arm: GoalBindingArm,
             or candidates[index].get("active") is not True
         ):
             raise ValueError("adapter bound candidate is not a legal frozen candidate")
+        if result["binding_basis"] == "native_point":
+            point = result["canonical_capture_pixel_point"]
+            if not isinstance(point, list) or len(point) != 2:
+                raise ValueError("adapter native point is invalid")
+            recomputed = map_native_point_to_candidate(
+                proposal=NativePointProposal(
+                    goal_index=goal_index,
+                    point=(point[0], point[1]),  # type: ignore[arg-type]
+                    coordinate_space="capture_pixels",
+                    confidence=result["confidence"],  # type: ignore[arg-type]
+                    status="OK",
+                    failure_reason=None,
+                ),
+                image_size=context["image_size"],  # type: ignore[arg-type]
+                candidates=context["candidates"],  # type: ignore[arg-type]
+                provider_id=arm.provider_id,
+                capture_ref=context["capture_ref"],  # type: ignore[arg-type]
+                native_output_ref=context["native_output_ref"],  # type: ignore[arg-type]
+                omni_snapshot_ref=context["omni_snapshot_ref"],  # type: ignore[arg-type]
+            )
+            if recomputed != result:
+                raise ValueError("adapter native bound result differs from authoritative frozen mapping")
     return result
 
 
@@ -292,10 +349,11 @@ def _cleanup(arm: GoalBindingArm) -> dict[str, object]:
     if not isinstance(receipt, Mapping) or set(receipt) != _CLEANUP_FIELDS:
         raise RuntimeError("binder cleanup observation is invalid; next model is blocked")
     result = deepcopy(dict(receipt))
+    if result.get("provider") != arm.provider_id:
+        raise RuntimeError("binder cleanup provider does not match the arm; next model is blocked")
     if (
         result.get("contract_version") != "simple_native_provider_cleanup_v1"
         or not isinstance(result.get("provider"), str)
-        or not result["provider"].strip()
         or result.get("verified") is not True
         or result.get("cleanup_status") != "verified"
         or any(not isinstance(result[field], list) or result[field] for field in _CLEANUP_LISTS)
@@ -346,6 +404,7 @@ def _vista_outcome(
 def run_goal_binding_arm(
     *, cases: Sequence[ProviderCase], snapshot_path: Path, arm: GoalBindingArm,
     vista: VistaNativeCaller, artifact_dir: Path,
+    expected_omni_provider_identity: Mapping[str, object],
 ) -> ProviderDiagnosticArtifact:
     """Run one 25-goal non-authorizing arm against a verified frozen snapshot."""
     _require_arm(arm)
@@ -356,7 +415,7 @@ def run_goal_binding_arm(
     snapshot = load_verified_omni_snapshot(
         snapshot_path,
         expected_cases=expected,
-        expected_provider_identity=_snapshot_identity(snapshot_path),
+        expected_provider_identity=expected_omni_provider_identity,
     )
     snapshot_ref = _snapshot_ref(snapshot)
     frozen_cases = snapshot.get("cases")
@@ -368,7 +427,7 @@ def run_goal_binding_arm(
         "omni": _metric(), "binder": _metric(), "vista": _metric(), "denominator": 25,
         "abstained": 0, "correct_selected": 0, "wrong_selected": 0,
     }
-    records: list[dict[str, object]] = []
+    states: list[dict[str, object]] = []
     try:
         for case, frozen_case in zip(expected, frozen_cases, strict=True):
             if not isinstance(frozen_case, Mapping) or frozen_case.get("case_id") != case.case_id:
@@ -404,43 +463,95 @@ def run_goal_binding_arm(
                 binder_metrics = metrics["binder"]
                 assert isinstance(binder_metrics, dict)
                 binder_metrics["attempted"] = int(binder_metrics["attempted"]) + 1
+                parsed_evidence: list[dict[str, object]] = []
+
+                def record_native_parsed(value: object) -> None:
+                    if not isinstance(value, Mapping) or parsed_evidence:
+                        raise ValueError("native parsed evidence is invalid")
+                    parsed_evidence.append(deepcopy(dict(value)))
+
                 try:
                     _verify_capture_freshness(capture, "GoalBindingProvider")
                     raw = arm.call(case.image_path, request)
                     _verify_capture_freshness(capture, "GoalBindingProvider")
-                    native_ref["sha256"] = _hash(raw)
-                    binding = _validated_binding(arm.adapt(raw, goal_index, context), goal_index=goal_index, arm=arm, context=context)
-                    binder_metrics["schema_valid"] = int(binder_metrics["schema_valid"]) + 1
+                    raw_text = _raw_text(raw)
+                    native_ref["sha256"] = _text_hash(raw_text)
+                    adapter_context = deepcopy(context)
+                    adapter_context["record_native_parsed"] = record_native_parsed
+                    binding = _validated_binding(arm.adapt(raw, goal_index, adapter_context), goal_index=goal_index, arm=arm, context=context)
+                    if binding["status"] == "PROVIDER_FAILURE":
+                        reason = binding["reason"]
+                        if reason == "provider_timeout":
+                            binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
+                        else:
+                            binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
+                    else:
+                        binder_metrics["schema_valid"] = int(binder_metrics["schema_valid"]) + 1
                 except TimeoutError as exc:
                     error = str(exc)
-                    native_ref["sha256"] = _hash(raw)
+                    raw_text = _raw_text(raw)
+                    native_ref["sha256"] = _text_hash(raw_text)
                     binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="provider_timeout")
                     binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
                 except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                     error = str(exc)
-                    native_ref["sha256"] = _hash(raw)
+                    raw_text = _raw_text(raw)
+                    native_ref["sha256"] = _text_hash(raw_text)
                     binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="malformed_native_output")
                     binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
                 finally:
                     binder_metrics["latencies"].append(round((perf_counter() - started) * 1000, 3))
                     binder_metrics["raw_output_bytes"] = int(binder_metrics["raw_output_bytes"]) + len(_raw_text(raw).encode("utf-8"))
-                trace.append({
-                    "slot": "binder", **deepcopy(goal), "raw": _raw_text(raw), "native_raw_sha256": native_ref["sha256"],
-                    "binding": binding, "native_parsed_sha256": _hash(binding), "native_error": error,
-                    "native_error_sha256": _hash(error) if error is not None else None,
-                    "parent_capture_id": capture["capture_id"], "parent_omni_snapshot_ref": deepcopy(snapshot_ref),
-                })
+                raw_text = _raw_text(raw)
+                selected_candidate = None
                 candidate = None
                 if binding["status"] == "BOUND":
                     index = binding["candidate_index"]
                     assert isinstance(index, int)
                     candidate = candidates[index]
-                trace.append(_vista_outcome(binding=binding, goal=goal, capture=capture, candidate=candidate, vista=vista, artifact_dir=artifact_dir, metrics=metrics, snapshot_ref=snapshot_ref))
-            records.append({
+                    selected_candidate = _selected_candidate_evidence(
+                        binding=binding, candidate=candidate, capture_ref=capture_ref, snapshot_ref=snapshot_ref,
+                    )
+                trace.append({
+                    "slot": "binder", **deepcopy(goal), "native_raw": raw_text, "native_raw_sha256": native_ref["sha256"],
+                    "native_parsed": parsed_evidence[0] if parsed_evidence else None,
+                    "native_parsed_sha256": _hash(parsed_evidence[0]) if parsed_evidence else None,
+                    "canonical_binding": binding, "canonical_binding_sha256": _hash(binding),
+                    "selected_candidate": selected_candidate, "native_error": error,
+                    "native_error_sha256": _text_hash(error) if error is not None else None,
+                    "parent_capture_id": capture["capture_id"], "parent_omni_snapshot_ref": deepcopy(snapshot_ref),
+                })
+            states.append({
                 "case_id": case.case_id, "goal_count": len(goals), "goals": deepcopy(goals), "capture": deepcopy(capture), "trace": trace,
             })
     finally:
         cleanup_receipt = _cleanup(arm)
+    # A verified binder cleanup is a hard precondition for all VISTA dispatch.
+    for state in states:
+        trace = state["trace"]
+        assert isinstance(trace, list)
+        capture = state["capture"]
+        assert isinstance(capture, Mapping)
+        binder_by_goal = {
+            entry["goal_id"]: entry for entry in trace
+            if isinstance(entry, Mapping) and entry.get("slot") == "binder" and isinstance(entry.get("goal_id"), str)
+        }
+        for goal in state["goals"]:
+            assert isinstance(goal, Mapping)
+            binder = binder_by_goal.get(goal["goal_id"])
+            if not isinstance(binder, Mapping):
+                raise ValueError("binder outcome is missing before VISTA dispatch")
+            binding = binder.get("canonical_binding")
+            selected = binder.get("selected_candidate")
+            candidate = None
+            if isinstance(selected, Mapping):
+                bbox = selected.get("bbox_original")
+                candidate_id = selected.get("candidate_id")
+                if isinstance(bbox, list) and isinstance(candidate_id, str):
+                    candidate = {"candidate_id": candidate_id, "bbox_original": list(bbox), "active": True}
+            if not isinstance(binding, Mapping):
+                raise ValueError("canonical binder outcome is unavailable")
+            trace.append(_vista_outcome(binding=binding, goal=goal, capture=capture, candidate=candidate, vista=vista, artifact_dir=artifact_dir, metrics=metrics, snapshot_ref=snapshot_ref))
     for name in ("omni", "binder", "vista"):
         metric = metrics[name]
         assert isinstance(metric, dict)
@@ -448,10 +559,10 @@ def run_goal_binding_arm(
     payload = seal_immutable({
         "contract_version": "simple_native_provider_diagnostic_v2", "regression_diagnostic_only": True,
         "promotion_eligible": False, "screen_count": 5, "target_count": 25, "metrics": metrics,
-        "cases": records, "provider_phase_cleanup": [cleanup_receipt], "cleanup_receipt": cleanup_receipt,
+        "cases": states, "provider_phase_cleanup": [cleanup_receipt], "cleanup_receipt": cleanup_receipt,
         "action_candidates": [], "artifact_is_authorization": False, "execute_binding": False,
         "arm_id": arm.arm_id, "provider_id": arm.provider_id, "omni_snapshot_ref": snapshot_ref,
     })
     path = artifact_dir / "provider-diagnostic.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return ProviderDiagnosticArtifact(path=path, cases=tuple(records), metrics=metrics, screen_count=5, target_count=25)
+    return ProviderDiagnosticArtifact(path=path, cases=tuple(states), metrics=metrics, screen_count=5, target_count=25)
