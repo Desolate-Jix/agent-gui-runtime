@@ -5029,3 +5029,18 @@ def _model_id(payload: dict[str, Any]) -> str | None:
     if isinstance(models, list) and models and isinstance(models[0], dict):
         return str(models[0].get("name") or models[0].get("model") or "") or None
     return None
+
+
+def _qwen_model_projection_response_schema(projection: Mapping[str, Any]) -> dict[str, Any]:
+    """为短 ordinal projection 构造独立 schema，不替换完整 runtime schema。"""
+    candidates = projection.get("candidates")
+    if not isinstance(candidates, list):
+        raise ValueError("Qwen model projection candidates must be a list")
+    ordinals = []
+    for candidate in candidates:
+        ordinal = candidate.get("i") if isinstance(candidate, Mapping) else None
+        if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal != len(ordinals):
+            raise ValueError("Qwen model projection ordinal is invalid")
+        ordinals.append(ordinal)
+    fields = ["i", "role", "label", "status", "confidence"]
+    return {"type": "object", "properties": {"bindings": {"type": "array", "prefixItems": [{"type": "object", "properties": {"i": {"const": i}, "role": {"type": "string", "minLength": 1, "maxLength": 64}, "label": {"type": "string", "minLength": 1, "maxLength": 256}, "status": {"enum": ["BOUND", "UNBOUND", "AMBIGUOUS", "CONFLICT"]}, "confidence": {"type": "number", "minimum": 0, "maximum": 1}}, "required": fields, "additionalProperties": False} for i in ordinals], "minItems": len(ordinals), "maxItems": len(ordinals)}}, "required": ["bindings"], "additionalProperties": False}
