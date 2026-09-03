@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -9,7 +10,10 @@ import pytest
 from app.learn.recognition.uei.canonical import seal_immutable
 
 
-def _cleanup(provider: str = "provider-a") -> dict[str, object]:
+_INCUMBENT = "qwen3_vl_8b_q4_k_m"
+
+
+def _cleanup(provider: str = _INCUMBENT) -> dict[str, object]:
     return {
         "contract_version": "simple_native_provider_cleanup_v1",
         "provider": provider,
@@ -59,7 +63,7 @@ def _write_inputs(tmp_path: Path, *, statuses: tuple[str, ...] = ("BOUND",) * 5,
                 "binding_basis": "direct_candidate_index" if status in {"BOUND", "UNBOUND"} else "native_point",
                 "confidence": 0.9 if status != "PROVIDER_FAILURE" else None,
                 "canonical_capture_pixel_point": None,
-                "provider_id": "qwen3_vl_8b_q4_k_m" if status != "PROVIDER_FAILURE" else "provider-a",
+                "provider_id": _INCUMBENT,
                 "native_output_ref": {"id": f"native/{case_id}/{goal_index}", "sha256": "b" * 64},
                 "omni_snapshot_ref": snapshot_ref,
                 "capture_ref": capture_ref,
@@ -131,7 +135,7 @@ def _write_inputs(tmp_path: Path, *, statuses: tuple[str, ...] = ("BOUND",) * 5,
         "artifact_is_authorization": False,
         "execute_binding": False,
         "arm_id": "arm-a",
-        "provider_id": "provider-a",
+        "provider_id": _INCUMBENT,
         "omni_snapshot_ref": snapshot_ref,
     })
     artifact = tmp_path / "provider-diagnostic.json"
@@ -182,11 +186,91 @@ def test_scorer_rejects_resealed_non_deterministic_selected_geometry(tmp_path: P
         score_goal_binding_arm(provider_artifact=artifact, gold_path=gold)
 
 
+def test_scorer_projects_real_frozen_gold_to_the_five_frozen_cases(tmp_path: Path) -> None:
+    from app.learn.hybrid.goal_binding_ab_score import score_goal_binding_arm
+
+    artifact, _ = _write_inputs(tmp_path, region_bound=True)
+    real_gold = Path(__file__).parent / "fixtures" / "portfolio_hybrid_v1_1" / "gold.v1.json"
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    records = json.loads(real_gold.read_text(encoding="utf-8"))["targets"]
+    wanted = {f"case-{number:03d}" for number in range(1, 6)}
+    by_case = {
+        case_id: [record for record in records if record["partition"] == "regression" and record["screen_id"] == case_id]
+        for case_id in wanted
+    }
+    for case in payload["cases"]:
+        for index, target in enumerate(by_case[case["case_id"]]):
+            goal = case["goals"][index]
+            goal.update({"goal_text": target["goal"], "semantic_role": target["role"], "semantic_label": target["label"]})
+            binder = case["trace"][index]
+            binder.update(goal)
+            binding = binder["canonical_binding"]
+            binding.update({"goal_index": index, "candidate_index": index, "candidate_id": target["acceptable_candidate_ids"][0], "provider_id": _INCUMBENT})
+            bbox = target["acceptable_regions"][0]
+            binder["selected_candidate"].update({
+                "candidate_id": binding["candidate_id"], "candidate_index": index,
+                "bbox_original": bbox,
+                "center_capture_pixel": [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2],
+            })
+    artifact.write_text(json.dumps(seal_immutable({key: value for key, value in payload.items() if key != "content_sha256"})), encoding="utf-8")
+    report = score_goal_binding_arm(provider_artifact=artifact, gold_path=real_gold)
+    assert report["metrics"]["correct"] == {"numerator": 25, "denominator": 25}
+
+
+def test_scorer_rejects_resealed_binding_provider_or_goal_index_mismatch(tmp_path: Path) -> None:
+    from app.learn.hybrid.goal_binding_ab_score import score_goal_binding_arm
+
+    artifact, gold = _write_inputs(tmp_path)
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    binding = payload["cases"][0]["trace"][0]["canonical_binding"]
+    binding.update({"provider_id": "other-provider", "binding_basis": "native_point", "canonical_capture_pixel_point": [20, 20]})
+    artifact.write_text(json.dumps(seal_immutable({key: value for key, value in payload.items() if key != "content_sha256"})), encoding="utf-8")
+    with pytest.raises(ValueError, match="provider provenance"):
+        score_goal_binding_arm(provider_artifact=artifact, gold_path=gold)
+    artifact, gold = _write_inputs(tmp_path)
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    payload["cases"][0]["trace"][0]["canonical_binding"]["goal_index"] = 4
+    artifact.write_text(json.dumps(seal_immutable({key: value for key, value in payload.items() if key != "content_sha256"})), encoding="utf-8")
+    with pytest.raises(ValueError, match="goal provenance"):
+        score_goal_binding_arm(provider_artifact=artifact, gold_path=gold)
+
+
+def test_scorer_uses_one_artifact_byte_read_before_opening_gold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.learn.hybrid.goal_binding_ab_score import score_goal_binding_arm
+
+    artifact, gold = _write_inputs(tmp_path)
+    original = artifact.read_bytes()
+    real_read_bytes = Path.read_bytes
+    real_read_text = Path.read_text
+    calls = 0
+
+    def read_bytes_once(path: Path) -> bytes:
+        nonlocal calls
+        if path == artifact:
+            calls += 1
+            if calls > 1:
+                raise AssertionError("provider artifact was reread")
+            artifact.write_bytes(original + b" ")
+            return original
+        return real_read_bytes(path)
+
+    def reject_artifact_text_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path == artifact:
+            raise AssertionError("provider artifact text was read separately")
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes_once)
+    monkeypatch.setattr(Path, "read_text", reject_artifact_text_read)
+    report = score_goal_binding_arm(provider_artifact=artifact, gold_path=gold)
+    assert calls == 1
+    assert report["provider_artifact_sha256"] == sha256(original).hexdigest()
+
+
 def test_hard_gate_requires_zero_wrong_25_parse_10_correct_and_zero_residue() -> None:
     from app.learn.hybrid.goal_binding_ab_score import evaluate_binding_hard_gate
 
     receipt = _cleanup()
-    report = {"arm_id": "arm-a", "provider_id": "provider-a", "cleanup_receipt": receipt, "metrics": {"wrong": {"numerator": 0, "denominator": 25}, "native_parse_success": {"numerator": 25, "denominator": 25}, "correct": {"numerator": 10, "denominator": 25}}}
+    report = {"arm_id": "arm-a", "provider_id": _INCUMBENT, "cleanup_receipt": receipt, "metrics": {"wrong": {"numerator": 0, "denominator": 25}, "native_parse_success": {"numerator": 25, "denominator": 25}, "correct": {"numerator": 10, "denominator": 25}}}
     assert evaluate_binding_hard_gate(binder_report=report, cleanup_receipt=_cleanup())["passed"] is True
     assert evaluate_binding_hard_gate(binder_report=deepcopy(report) | {"metrics": deepcopy(report["metrics"]) | {"wrong": {"numerator": 1, "denominator": 25}}}, cleanup_receipt=_cleanup())["passed"] is False
     assert evaluate_binding_hard_gate(binder_report=report, cleanup_receipt=_cleanup() | {"lease_files_after": ["x"]})["passed"] is False

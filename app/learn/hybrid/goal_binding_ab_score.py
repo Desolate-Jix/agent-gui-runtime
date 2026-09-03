@@ -51,12 +51,11 @@ def _contains_forbidden(value: object) -> bool:
     return False
 
 
-def _load_artifact(path: Path) -> dict[str, object]:
-    if not path.is_file():
-        raise ValueError("provider artifact must be finalized before scoring")
+def _load_artifact(path: Path) -> tuple[dict[str, object], str]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        raw = path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("provider artifact is unreadable") from exc
     if not isinstance(payload, Mapping) or payload.get("content_sha256") != content_sha256(dict(payload)):
         raise ValueError("provider artifact is not a finalized immutable diagnostic")
@@ -78,7 +77,7 @@ def _load_artifact(path: Path) -> dict[str, object]:
         })
     ):
         raise ValueError("provider artifact is not a non-authorizing regression diagnostic")
-    return result
+    return result, sha256(raw).hexdigest()
 
 
 def _ref(value: object, *, name: str) -> dict[str, str]:
@@ -142,7 +141,7 @@ def _selected_geometry(selected: Mapping[str, object], binding: Mapping[str, obj
     return center
 
 
-def _gold(path: Path) -> dict[tuple[str, str, str], dict[str, object]]:
+def _gold(path: Path, *, required_cases: frozenset[str]) -> dict[tuple[str, str, str], dict[str, object]]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -152,7 +151,7 @@ def _gold(path: Path) -> dict[tuple[str, str, str], dict[str, object]]:
         raise ValueError("regression Gold targets are invalid")
     result: dict[tuple[str, str, str], dict[str, object]] = {}
     for target in targets:
-        if not isinstance(target, Mapping) or target.get("partition") != "regression":
+        if not isinstance(target, Mapping) or target.get("partition") != "regression" or target.get("screen_id") not in required_cases:
             continue
         screen, role, label, goal, candidate_ids = (target.get("screen_id"), target.get("role"), target.get("label"), target.get("goal"), target.get("acceptable_candidate_ids"))
         if not all(isinstance(item, str) and item for item in (screen, role, label, goal)) or not isinstance(candidate_ids, list) or any(not isinstance(item, str) for item in candidate_ids):
@@ -161,22 +160,30 @@ def _gold(path: Path) -> dict[tuple[str, str, str], dict[str, object]]:
         if key in result:
             raise ValueError("regression Gold semantic target is duplicated")
         result[key] = {"goal": goal, "acceptable_candidate_ids": list(candidate_ids), "acceptable_regions": _regions(target.get("acceptable_regions"))}
-    if len(result) != _DENOMINATOR:
+    if len(result) != _DENOMINATOR or {key[0] for key in result} != required_cases or any(sum(key[0] == case_id for key in result) != 5 for case_id in required_cases):
         raise ValueError("regression Gold denominator is not exactly 25")
     return result
 
 
 def score_goal_binding_arm(*, provider_artifact: Path, gold_path: Path) -> dict[str, object]:
     """Score a finalized Task 4 artifact; this is the sole Gold-reading boundary."""
-    artifact = _load_artifact(provider_artifact)
+    artifact, artifact_file_sha256 = _load_artifact(provider_artifact)
     cases = artifact.get("cases")
     snapshot_ref = _ref(artifact.get("omni_snapshot_ref"), name="artifact snapshot")
-    if not isinstance(cases, list) or len(cases) != 5 or not isinstance(artifact.get("arm_id"), str) or not isinstance(artifact.get("provider_id"), str):
+    required_case_ids = tuple(f"case-{index:03d}" for index in range(1, 6))
+    if (
+        not isinstance(cases, list)
+        or len(cases) != 5
+        or not all(isinstance(case, Mapping) for case in cases)
+        or [case.get("case_id") for case in cases] != list(required_case_ids)
+        or not isinstance(artifact.get("arm_id"), str)
+        or not isinstance(artifact.get("provider_id"), str)
+    ):
         raise ValueError("provider artifact structure is invalid")
     cleanup_receipt = _verified_cleanup_receipt(artifact.get("cleanup_receipt"), provider_id=artifact["provider_id"])
     if cleanup_receipt is None or artifact.get("provider_phase_cleanup") != [cleanup_receipt]:
         raise ValueError("provider artifact cleanup receipt is not exact and verified")
-    gold = _gold(gold_path)
+    gold = _gold(gold_path, required_cases=frozenset(required_case_ids))
     seen: set[tuple[str, str, str]] = set()
     capture_lineage: list[dict[str, str]] = []
     correct = wrong = unbound = provider_failure = native_parse = vista_dispatch = vista_validated = vista_out_of_bounds = end_to_end_correct = 0
@@ -196,7 +203,7 @@ def score_goal_binding_arm(*, provider_artifact: Path, gold_path: Path) -> dict[
         by_goal = {entry.get("goal_id"): entry for entry in binders if isinstance(entry.get("goal_id"), str)}
         if len(by_goal) != 5:
             raise ValueError("provider artifact binder goals are duplicated")
-        for goal in goals:
+        for goal_index, goal in enumerate(goals):
             if not isinstance(goal, Mapping):
                 raise ValueError("provider artifact goal is invalid")
             key = (case_id, goal.get("semantic_role"), goal.get("semantic_label"))
@@ -209,6 +216,10 @@ def score_goal_binding_arm(*, provider_artifact: Path, gold_path: Path) -> dict[
             if not isinstance(binder, Mapping) or binder.get("semantic_role") != key[1] or binder.get("semantic_label") != key[2]:
                 raise ValueError("provider artifact binder semantics are invalid")
             binding = validate_goal_binding_provider_result(binder.get("canonical_binding"))
+            if binding["provider_id"] != artifact["provider_id"]:
+                raise ValueError("provider artifact binder provider provenance is inconsistent")
+            if binding["goal_index"] != goal_index:
+                raise ValueError("provider artifact binder goal provenance is inconsistent")
             if binding["omni_snapshot_ref"] != snapshot_ref or binding["capture_ref"] != capture_ref:
                 raise ValueError("provider artifact binder lineage is inconsistent")
             if binding["status"] != "PROVIDER_FAILURE" and isinstance(binder.get("native_parsed"), Mapping):
@@ -260,7 +271,7 @@ def score_goal_binding_arm(*, provider_artifact: Path, gold_path: Path) -> dict[
     return {
         "contract_version": "goal_binding_arm_binder_report_v1",
         "arm_id": artifact["arm_id"], "provider_id": artifact["provider_id"],
-        "provider_artifact_sha256": sha256(provider_artifact.read_bytes()).hexdigest(),
+        "provider_artifact_sha256": artifact_file_sha256,
         "omni_snapshot_ref": snapshot_ref, "capture_lineage": sorted(capture_lineage, key=lambda item: item["id"]),
         "regression_diagnostic_only": True, "promotion_eligible": False, "contains_holdout": False, "holdout_accessed": False,
         "artifact_is_authorization": False, "action_candidates": [], "metrics": metrics,
