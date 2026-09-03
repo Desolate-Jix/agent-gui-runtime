@@ -5,6 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from PIL import Image
+import pytest
 
 
 def _cases(tmp_path: Path) -> list[object]:
@@ -89,3 +90,36 @@ def test_runner_writes_raw_parsed_error_lineage_and_cleanup_receipt(tmp_path: Pa
     artifact=run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=_slots(), artifact_dir=tmp_path / "out")
     raw=json.loads(artifact.path.read_text(encoding="utf-8"))
     assert raw["cleanup_receipt"]["verified"] is False and raw["cases"][0]["trace"][0]["raw"]
+
+
+def test_provider_batches_release_before_the_next_provider_acquires(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    events: list[str] = []
+    slots = SimpleNativeSlots(
+        omni=lambda _image: events.append("omni") or {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "x", "interactivity": True}]},
+        qwen=lambda _image, projection: events.append("qwen") or {"bindings": [{"i": item["i"], "role": "button", "label": "x", "status": "BOUND", "confidence": 1} for item in projection["candidates"]]},
+        vista=lambda _image, _target: events.append("vista") or "[500,500]",
+        release_provider=lambda provider: events.append(f"release:{provider}") or {"provider": provider, "verified": True, "owned_processes": []},
+    )
+    artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+
+    assert events == ["omni"] * 5 + ["release:omni"] + ["qwen"] * 5 + ["release:qwen"] + ["vista"] * 5 + ["release:vista"]
+    payload = json.loads(artifact.path.read_text(encoding="utf-8"))
+    assert [item["provider"] for item in payload["provider_phase_cleanup"]] == ["omni", "qwen", "vista"]
+
+
+def test_unverified_provider_release_blocks_the_next_provider_phase(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    events: list[str] = []
+    slots = SimpleNativeSlots(
+        omni=lambda _image: events.append("omni") or {"items": []},
+        qwen=lambda _image, _projection: events.append("qwen") or {"bindings": []},
+        vista=lambda _image, _target: events.append("vista") or "[500,500]",
+        release_provider=lambda provider: events.append(f"release:{provider}") or {"provider": provider, "verified": False},
+    )
+
+    with pytest.raises(RuntimeError, match="omni cleanup is not verified"):
+        run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+    assert events == ["omni"] * 5 + ["release:omni"]

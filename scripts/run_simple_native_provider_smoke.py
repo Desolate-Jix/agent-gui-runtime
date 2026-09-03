@@ -102,10 +102,11 @@ def main() -> int:
         if args.mode == 'preflight': print('preflight: validated five regression screens; no model callers constructed'); return 0
         if args.mode == 'actual':
             if not args.operator_approved_model_start: raise ValueError('actual requires --operator-approved-model-start')
-            raise ValueError('actual requires current user approval; model callers are not constructed by default')
+            from app.learn.hybrid.simple_native_callers import actual_lifecycle_blocker_message
+            raise ValueError(actual_lifecycle_blocker_message())
         if args.artifact_dir is None or args.replay_dir is None: raise ValueError('replay requires --artifact-dir and --replay-dir')
         from app.learn.hybrid.simple_native_smoke import run_simple_native_regression_diagnostic, score_simple_native_regression
-        artifact=run_simple_native_regression_diagnostic(cases=_cases(config),slots=_replay_slots(args.replay_dir),artifact_dir=args.artifact_dir, cleanup_receipt={"verified": True, "mode": "replay", "owned_processes": []})
+        artifact=run_simple_native_regression_diagnostic(cases=_cases(config),slots=_replay_slots(args.replay_dir),artifact_dir=args.artifact_dir)
         report=score_simple_native_regression(provider_artifact=artifact, gold_path=ROOT / str(config["scorer_gold_path"]))
         (args.artifact_dir / "regression-report.json").write_text(json.dumps({"correct_selected": report.correct_selected, "wrong_selected": report.wrong_selected, "abstained": report.abstained, "denominator": report.target_count, "regression_diagnostic_only": True, "promotion_eligible": False}, ensure_ascii=False), encoding="utf-8")
         print(f'replay: {artifact.path}')

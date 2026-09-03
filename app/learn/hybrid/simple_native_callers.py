@@ -5,6 +5,19 @@ from pathlib import Path
 from typing import Any, Protocol
 from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots
 
+
+class SimpleNativeActualBlocked(RuntimeError):
+    """缺少精确受管 provider 生命周期时，在构造前 fail closed。"""
+
+
+def actual_lifecycle_blocker_message() -> str:
+    return (
+        "BLOCKED: actual simple-native diagnostic needs a managed compact Qwen "
+        "ordinal-run API and a managed VISTA acquire/run/release API that return "
+        "exact per-provider cleanup observations; repository APIs do not expose "
+        "those two boundaries without recreating a supervisor"
+    )
+
 class HTTPTransport(Protocol):
     def post(self, *, url: str, payload: Mapping[str, object], timeout: float) -> object: ...
 
@@ -29,26 +42,9 @@ def project_omni_official_items(items: Sequence[Mapping[str, object]]) -> dict[s
     return {'items':[{'bbox':item.get('bbox'),'type':item.get('type'),'content':item.get('content'),'interactivity':item.get('interactivity')} for item in items]}
 
 def make_actual_simple_native_slots(*, config: Mapping[str, object], lifecycle: object, transport: HTTPTransport) -> SimpleNativeSlots:
-    """Create closures only; the first invocation proves exclusive ownership before transport."""
-    endpoints=config.get('endpoints') if isinstance(config.get('endpoints'),Mapping) else {}
-    started = False
-    def ensure_started() -> None:
-        nonlocal started
-        if started: return
-        start = getattr(lifecycle, 'start_exclusive', None) or getattr(lifecycle, 'start', None)
-        if not callable(start): raise ValueError('actual lifecycle must provide exclusive start')
-        result = start()
-        if result is False: raise RuntimeError('actual lifecycle did not prove exclusive ownership')
-        started = True
-    def omni(image: Path) -> object:
-        ensure_started()
-        response=transport.post(url=str(endpoints.get('omni','omni')),payload={'image_path':str(image)},timeout=120.0)
-        return _response_value(response)
-    def qwen(image: Path, projection: Mapping[str, object]) -> object:
-        ensure_started(); return call_qwen_projected_binding(image_path=image,projection=projection,transport=transport)
-    def vista(image: Path, target: str) -> str:
-        ensure_started(); return call_vista_bare_point(roi_path=image,target_text=target,transport=transport)
-    return SimpleNativeSlots(omni=omni,qwen=qwen,vista=vista,cleanup=lambda: cancel_owned_processes(lifecycle))
+    """精确受管 API 缺失时拒绝 generic lifecycle。"""
+    del config, lifecycle, transport
+    raise SimpleNativeActualBlocked(actual_lifecycle_blocker_message())
 
 def verify_cleanup_receipt(receipt: Mapping[str, object]) -> bool:
     return receipt.get('verified') is True and receipt.get('owned_processes') == []

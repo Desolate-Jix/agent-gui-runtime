@@ -29,9 +29,10 @@ def test_cli_actual_requires_explicit_model_start_flag() -> None:
     assert result.returncode != 0 and "operator-approved-model-start" in result.stderr
 
 
-def test_cli_actual_flag_does_not_bypass_current_user_approval_policy() -> None:
+def test_cli_actual_flag_reports_exact_managed_lifecycle_blocker() -> None:
     result = _run("--mode", "actual", "--operator-approved-model-start", "--artifact-dir", ".artifacts/nope")
-    assert result.returncode != 0 and "current user approval" in result.stderr
+    assert result.returncode != 0
+    assert "BLOCKED" in result.stderr and "managed compact Qwen" in result.stderr
 
 
 def test_config_contains_no_holdout_and_no_scorer_fields_in_provider_projection() -> None:
@@ -52,3 +53,28 @@ def test_cli_replay_rejects_malformed_jsonl(tmp_path: Path) -> None:
         (replay / name).write_text("THIS IS INVALID\n", encoding="utf-8")
     result=_run("--mode", "replay", "--replay-dir", str(replay), "--artifact-dir", str(tmp_path / "out"))
     assert result.returncode != 0 and "replay fixture invalid" in result.stderr
+
+
+def test_cli_replay_abstains_when_qwen_cardinality_disagrees_with_omni(tmp_path: Path) -> None:
+    replay = tmp_path / "replay"
+    replay.mkdir()
+    omni = {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "x", "interactivity": True}]}
+    incompatible = {
+        "bindings": [
+            {"i": index, "role": "button", "label": "x", "status": "BOUND", "confidence": 1}
+            for index in range(5)
+        ]
+    }
+    (replay / "omni.jsonl").write_text("\n".join(json.dumps(omni) for _ in range(5)) + "\n", encoding="utf-8")
+    (replay / "qwen.jsonl").write_text("\n".join(json.dumps(incompatible) for _ in range(5)) + "\n", encoding="utf-8")
+    (replay / "vista.jsonl").write_text("[500,500]\n", encoding="utf-8")
+
+    artifact_dir = tmp_path / "out"
+    result = _run("--mode", "replay", "--replay-dir", str(replay), "--artifact-dir", str(artifact_dir))
+
+    assert result.returncode == 0
+    provider = json.loads((artifact_dir / "provider-diagnostic.json").read_text(encoding="utf-8"))
+    report = json.loads((artifact_dir / "regression-report.json").read_text(encoding="utf-8"))
+    assert provider["metrics"]["qwen"]["schema_invalid"] == 2
+    assert provider["metrics"]["vista"]["attempted"] == 0
+    assert report["abstained"] == report["denominator"] == 25

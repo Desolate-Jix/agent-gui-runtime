@@ -272,9 +272,9 @@ Automatic provider selection、remote execution、raw-coordinate Agent authority
 
 ## Simple-native provider smoke（Phase A）
 
-`python scripts/run_simple_native_provider_smoke.py` 默认进入离线 `preflight`：只校验 `case-001` 至 `case-005`，绝不启动模型，也不执行任何动作。`replay` 使用可注入的原生形状 fixture，写入仅回归诊断、不可 promotion 的 25-target 报告。
+`python scripts/run_simple_native_provider_smoke.py` 默认进入离线 `preflight`：只校验 `case-001` 至 `case-005`，绝不启动模型，也不执行任何动作。`replay` 使用可注入的原生形状 fixture，写入仅回归诊断、不可 promotion 的 25-target 报告。它把每张公开 regression 图片逐字节复制到 artifact 目录，封存带有明确 empty/unavailable OCR 与 UIA 观测的 capture bundle；所有 candidate bbox 只来自 Omni 输出，ordinal 展开后必须进入既有权威 Qwen parser。
 
-三个协议保持独立：Omni 只输出 `{bbox,type,content,interactivity}`；Qwen 在本地保留完整 runtime request，模型只看 ordinal `{i,box,active}` candidates；VISTA 接收已验证 ROI，且只返回 bare normalized `[x,y]`。runtime ID、capture lineage、坐标变换、metrics 和 review-only 字段均由 adapter 持有。actual mode 除 operator flag 外还需要当前任务的明确批准；lineage、bounds、schema、cleanup 或 action path 失败均必须停止。Phase B 需要已批准且冻结的 actual run、稳定 native trace、安全/cleanup evidence、零 holdout 使用，以及任何后续抽象的事实依据。Learning 与 Benchmark v2 schema 均未改变。
+三个协议保持独立：Omni 只输出 `{bbox,type,content,interactivity}`；Qwen 在本地保留完整 runtime request，模型只看 ordinal `{i,box,active}` candidates；VISTA 接收新持久化的 candidate crop，且只返回 bare normalized `[x,y]`。runtime ID、capture lineage、crop hash、坐标变换、metrics 和 review-only 字段均由 adapter 持有。provider 阶段固定批处理为 `Omni -> cleanup -> Qwen -> cleanup -> VISTA -> cleanup`；受管 cleanup 未验证时不得进入下一阶段。只有 scorer 能在 provider artifact 封存后打开 Gold，并先按精确 role + label 连接，再检查 point geometry。
 
 
-> 实现状态：当前 worktree 中已验证的 CLI 仅为 replay/preflight；actual 模型启动保持 guard，且不属于本次离线验证证据。
+> 实现状态：当前 CLI 仅支持 replay/preflight。即使提供 `--operator-approved-model-start`，`actual` 也会以 `BLOCKED` fail-closed：仓库还缺少带精确逐 provider cleanup 观测的 managed compact-Qwen ordinal-run 边界，以及 managed VISTA acquire/run/release 边界；不会用 generic lifecycle receipt 冒充完成。

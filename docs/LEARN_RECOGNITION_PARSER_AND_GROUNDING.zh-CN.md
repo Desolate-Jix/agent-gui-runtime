@@ -524,9 +524,11 @@ safety flags
 
 此路径固定为 5 屏 / 25 target 的 `regression_diagnostic_only=true`，`promotion_eligible=false` 离线诊断。默认 CLI 为 `preflight`，不得导入权重、启动服务、保留 GPU 或执行 click。仅在当前任务获得明确批准并同时提供 `--operator-approved-model-start` 后才能考虑 actual；实现阶段不运行 actual。
 
-Omni native output 仅有 normalized bbox、type、content、interactivity，adapter 再补 runtime 字段。Qwen 完整 runtime request 继续是 capture/freshness/provenance 的真源；模型面对短 ordinal projection，adapter 恢复 stable candidate ID 后进入既有 parser。VISTA 只传 ROI 与短 target prompt，实际 caller 不使用 generic system/json_object；bare `[x,y]` 必须经 ROI、candidate、capture strict bounds 验证，不能 clipping、nearest-point 或 bbox fallback。
+Omni native output 仅有 normalized bbox、type、content、interactivity，adapter 再补 runtime 字段。诊断先逐字节复制公开 regression image，并建立同一 capture 的 bundle；没有同源 OCR/UIA 时持久化明确 empty/unavailable 的 review-only source，不能伪造 item。Omni normalized bbox 经确定性的 lower-floor / upper-ceil 映射形成 `provider_safe_result_v1 -> hybrid_omni_candidate_ledger_v1 -> hybrid_omni_inventory_v1`，不得从 Gold 或 target 常量补几何。
+
+Qwen 完整 runtime request 继续是 capture/freshness/provenance 的真源；模型面对短 ordinal projection，adapter 恢复 stable candidate ID 后必须进入 `parse_qwen_candidate_bindings`。VISTA 对每个唯一 BOUND、active、无 ambiguity 的 candidate 新建并持久化 ROI crop，只传 crop 与 role/label 短 prompt；bare `[x,y]` 必须经 crop hash、capture hash、candidate、capture strict bounds 验证，不能 clipping、nearest-point 或 bbox fallback。scorer 在 provider artifact 封存后才读取 Gold，按精确 role + label 连接并检查 point/candidate geometry；缺失、重复或冲突连接均 abstain。
 
 报告必须保留 raw UTF-8、parsed/error、hash、parent lineage、slot latency/bytes、分子/分母和 cleanup receipt。任一坐标、lineage、Gold isolation、schema 连续失败、GPU ownership 或 zero-action 不变量失败即停止。Phase B 只有在批准 actual trace、安全证据、无 holdout 和足以证明抽象必要性的第二实现/重复 seam 存在时才可另行设计；本阶段不改 Learning 或 Benchmark v2 schema。
 
 
-> 实现状态：当前 worktree 中已验证的 CLI 仅为 replay/preflight；actual 模型启动保持 guard，且不属于本次离线验证证据。
+> 实现状态：当前 CLI 仅验证 replay/preflight。provider 阶段按 `Omni -> cleanup -> Qwen -> cleanup -> VISTA -> cleanup` 批处理。actual 当前明确 `BLOCKED`，因为仓库尚无同时满足 compact ordinal wire 与 exact Qwen lease 的公开 managed run API，也没有返回 exact cleanup observation 的 VISTA acquire/run/release API；本路径不会复制 Benchmark v2 supervisor，也不会伪造 cleanup receipt。

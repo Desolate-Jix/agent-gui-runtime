@@ -49,6 +49,7 @@ class SimpleNativeSlots:
     omni: OmniNativeCaller
     qwen: QwenNativeCaller
     vista: VistaNativeCaller
+    release_provider: Callable[[str], Mapping[str, object]] | None = None
     cleanup: Callable[[], Mapping[str, object]] | None = None
 
 
@@ -430,12 +431,28 @@ def _record_failure(
     })
 
 
+def _observe_provider_cleanup(slots: SimpleNativeSlots, provider: str) -> dict[str, object]:
+    if slots.release_provider is None:
+        return {
+            "provider": provider,
+            "verified": False,
+            "not_applicable": True,
+            "reason": "injected replay slot has no managed process lifecycle",
+        }
+    receipt = slots.release_provider(provider)
+    if not isinstance(receipt, Mapping) or receipt.get("provider") != provider:
+        raise ValueError(f"{provider} cleanup observation is invalid")
+    observed = dict(receipt)
+    if observed.get("verified") is not True:
+        raise RuntimeError(f"{provider} cleanup is not verified; next provider is blocked")
+    return observed
+
+
 def run_simple_native_regression_diagnostic(
     *,
     cases: Sequence[ProviderCase],
     slots: SimpleNativeSlots,
     artifact_dir: Path,
-    cleanup_receipt: Mapping[str, object] | None = None,
 ) -> ProviderDiagnosticArtifact:
     """Run five provider-batched cases without reading Gold or acting."""
     if len(cases) != 5 or {case.case_id for case in cases} != {f"case-{index:03d}" for index in range(1, 6)}:
@@ -450,6 +467,7 @@ def run_simple_native_regression_diagnostic(
     }
     invalid_streak = {"omni": 0, "qwen": 0, "vista": 0}
     states: list[dict[str, Any]] = []
+    provider_phase_cleanup: list[dict[str, object]] = []
     for case in cases:
         states.append({
             "case": case,
@@ -493,6 +511,7 @@ def run_simple_native_regression_diagnostic(
             _record_failure(state=state, slot="omni", raw=raw, error=exc, error_class="schema")
         metrics["omni"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
         metrics["omni"]["raw_output_bytes"] += len(state["trace"][-1].get("raw", "").encode("utf-8"))
+    provider_phase_cleanup.append(_observe_provider_cleanup(slots, "omni"))
 
     for state in states:
         inventory = state["inventory"]
@@ -535,6 +554,7 @@ def run_simple_native_regression_diagnostic(
             state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
         metrics["qwen"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
         metrics["qwen"]["raw_output_bytes"] += len(state["trace"][-1].get("raw", "").encode("utf-8"))
+    provider_phase_cleanup.append(_observe_provider_cleanup(slots, "qwen"))
 
     for state in states:
         inventory, bindings = state["inventory"], state["bindings"]
@@ -609,6 +629,7 @@ def run_simple_native_regression_diagnostic(
                     state["trace"][-1]["roi_crop"] = roi_crop
             metrics["vista"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
             metrics["vista"]["raw_output_bytes"] += len(raw.encode("utf-8"))
+    provider_phase_cleanup.append(_observe_provider_cleanup(slots, "vista"))
 
     records = [{
         "case_id": state["case"].case_id,
@@ -619,8 +640,7 @@ def run_simple_native_regression_diagnostic(
     for slot in ("omni", "qwen", "vista"):
         metrics[slot] = _finish(metrics[slot])
     observed_cleanup = (
-        dict(cleanup_receipt) if cleanup_receipt is not None
-        else dict(slots.cleanup()) if slots.cleanup is not None
+        dict(slots.cleanup()) if slots.cleanup is not None
         else {"verified": False, "reason": "runner received no lifecycle cleanup observation"}
     )
     payload = seal_immutable({
@@ -631,6 +651,7 @@ def run_simple_native_regression_diagnostic(
         "target_count": 25,
         "metrics": metrics,
         "cases": records,
+        "provider_phase_cleanup": provider_phase_cleanup,
         "cleanup_receipt": observed_cleanup,
         "action_candidates": [],
         "artifact_is_authorization": False,

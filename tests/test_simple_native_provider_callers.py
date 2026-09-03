@@ -1,6 +1,8 @@
 from __future__ import annotations
 from pathlib import Path
 
+import pytest
+
 
 def test_qwen_actual_caller_sends_projection_not_full_runtime_request(tmp_path: Path) -> None:
     from app.learn.hybrid.simple_native_callers import call_qwen_projected_binding
@@ -38,11 +40,19 @@ def test_omni_worker_projects_only_native_fields_before_runtime_adapter() -> Non
     assert project_omni_official_items([{"bbox":[0,0,1,1],"type":"text","content":"x","interactivity":False,"source_item_id":"bad"}]) == {"items":[{"bbox":[0,0,1,1],"type":"text","content":"x","interactivity":False}]}
 
 
-def test_actual_slots_are_lazy_and_default_cli_starts_no_models() -> None:
-    from app.learn.hybrid.simple_native_callers import make_actual_simple_native_slots
-    class Lifecycle: started=False
-    slots=make_actual_simple_native_slots(config={"endpoints":{"qwen":"q","vista":"v","omni":"o"}},lifecycle=Lifecycle(),transport=object())
-    assert slots.omni and not Lifecycle.started
+def test_actual_slots_fail_closed_when_exact_managed_session_is_unavailable() -> None:
+    from app.learn.hybrid.simple_native_callers import SimpleNativeActualBlocked, make_actual_simple_native_slots
+
+    class Lifecycle:
+        started = False
+
+        def start(self):
+            self.started = True
+
+    lifecycle = Lifecycle()
+    with pytest.raises(SimpleNativeActualBlocked, match="managed compact Qwen"):
+        make_actual_simple_native_slots(config={}, lifecycle=lifecycle, transport=object())
+    assert lifecycle.started is False
 
 
 def test_actual_lifecycle_is_exclusive_bounded_and_records_verified_cleanup() -> None:
