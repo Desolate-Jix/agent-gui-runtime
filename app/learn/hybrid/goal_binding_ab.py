@@ -80,8 +80,21 @@ def _native_envelope(value: object) -> dict[str, object] | None:
     if not isinstance(value, Mapping) or value.get("contract_version") != "goal_binding_native_trace_v1":
         return None
     required = {"contract_version", "profile_identity", "raw_native_output", "raw_native_output_sha256", "parsed_native", "resource_metrics", "worker_process_identity", "request_lineage"}
-    if set(value) != required or not isinstance(value.get("raw_native_output"), str) or _text_hash(value["raw_native_output"]) != value.get("raw_native_output_sha256"):
+    extended = required | {"cleanup_evidence", "cleanup_ref"}
+    if set(value) not in (required, extended) or not isinstance(value.get("raw_native_output"), str) or _text_hash(value["raw_native_output"]) != value.get("raw_native_output_sha256"):
         raise ValueError("provider native trace envelope is invalid")
+    if set(value) == extended:
+        cleanup = value.get("cleanup_evidence")
+        cleanup_ref = value.get("cleanup_ref")
+        if (
+            not isinstance(cleanup, Mapping)
+            or cleanup.get("contract_version") != "goal_binding_provider_call_cleanup_v1"
+            or cleanup.get("verified") is not True
+            or not isinstance(cleanup_ref, Mapping)
+            or set(cleanup_ref) != {"id", "sha256"}
+            or cleanup_ref.get("sha256") != _hash(cleanup)
+        ):
+            raise ValueError("provider native trace cleanup evidence is invalid")
     return deepcopy(dict(value))
 
 
@@ -366,7 +379,9 @@ def _validated_binding(binding: object, *, goal_index: int, arm: GoalBindingArm,
 
 def _cleanup(arm: GoalBindingArm) -> dict[str, object]:
     receipt = arm.cleanup()
-    if not isinstance(receipt, Mapping) or set(receipt) != _CLEANUP_FIELDS:
+    if not isinstance(receipt, Mapping) or set(receipt) not in (
+        _CLEANUP_FIELDS, _CLEANUP_FIELDS | {"cleanup_observations"}
+    ):
         raise RuntimeError("binder cleanup observation is invalid; next model is blocked")
     result = deepcopy(dict(receipt))
     if result.get("provider") != arm.provider_id:
@@ -379,6 +394,15 @@ def _cleanup(arm: GoalBindingArm) -> dict[str, object]:
         or any(not isinstance(result[field], list) or result[field] for field in _CLEANUP_LISTS)
     ):
         raise RuntimeError("binder cleanup is not clean; arm finalization and next model are blocked")
+    if "cleanup_observations" in result:
+        observations = result["cleanup_observations"]
+        if not isinstance(observations, list) or not observations or any(
+            not isinstance(item, Mapping)
+            or item.get("contract_version") != "goal_binding_provider_call_cleanup_v1"
+            or item.get("verified") is not True
+            for item in observations
+        ):
+            raise RuntimeError("binder cleanup evidence is incomplete; next model is blocked")
     return result
 
 
@@ -510,10 +534,12 @@ def run_goal_binding_arm(
                     context["incumbent_runtime_request"] = request
                     context["incumbent_projection"] = projection
                 request = {
-                    "contract_version": "goal_binding_arm_request_v1", "regression_diagnostic_only": True,
-                    "artifact_is_authorization": False, "execute_binding": False, "goal": deepcopy(goal),
-                    "image_size": list(case.image_size), "candidates": deepcopy(candidates), "omni_snapshot_ref": deepcopy(snapshot_ref),
+                    "contract_version": "goal_binding_arm_request_v1",
+                    "goal": deepcopy(goal),
                 }
+                if arm.provider_id == "qwen3_vl_8b_q4_k_m":
+                    request["incumbent_runtime_request"] = deepcopy(context["incumbent_runtime_request"])
+                    request["incumbent_projection"] = deepcopy(context["incumbent_projection"])
                 binder_metrics = metrics["binder"]
                 assert isinstance(binder_metrics, dict)
                 parsed_evidence: list[dict[str, object]] = []

@@ -42,7 +42,7 @@
     "isolated_runtime_path": "artifacts/ui_venus_1_5_2b_f16/not_acquired/python.exe",
     "sha256": "not_acquired",
     "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
-    "entrypoint": "ui_venus.inference:run_goal_binding"
+    "entrypoint": "scripts.model_servers.goal_binding_provider_runtimes:run_ui_venus"
   },
   "dtype_or_quantization": "f16_weights_bf16_compute",
   "native_output": {

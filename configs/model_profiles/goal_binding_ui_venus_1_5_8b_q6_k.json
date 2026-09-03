@@ -48,7 +48,7 @@
     "isolated_runtime_path": "artifacts/ui_venus_1_5_8b_q6_k/not_acquired/llama-server.exe",
     "sha256": "not_acquired",
     "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
-    "entrypoint": "llama_cpp.inference:run_goal_binding"
+    "entrypoint": "scripts.model_servers.goal_binding_provider_runtimes:run_llama_cpp"
   },
   "dtype_or_quantization": "Q6_K",
   "native_output": {

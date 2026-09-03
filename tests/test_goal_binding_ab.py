@@ -197,6 +197,34 @@ def test_incumbent_control_uses_existing_index_parser_without_fake_point(tmp_pat
     assert binder["canonical_binding"]["canonical_capture_pixel_point"] is None
 
 
+def test_only_incumbent_receives_frozen_runtime_request_and_projection(tmp_path: Path) -> None:
+    from app.learn.hybrid.goal_binding_ab import adapt_incumbent_candidate_index
+
+    incumbent_requests: list[dict[str, object]] = []
+    challenger_requests: list[dict[str, object]] = []
+    incumbent = _arm(
+        call=lambda _image, request: incumbent_requests.append(dict(request)) or [
+            {"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 0.9}
+        ],
+        adapt=adapt_incumbent_candidate_index,
+    )
+    incumbent = type(incumbent)(
+        "incumbent", "qwen3_vl_8b_q4_k_m", incumbent.call, incumbent.adapt,
+        lambda: _clean("qwen3_vl_8b_q4_k_m"),
+    )
+    _run(tmp_path / "incumbent", arm=incumbent)
+
+    challenger = _arm(
+        call=lambda _image, request: challenger_requests.append(dict(request)) or [0.2, 0.375],
+        adapt=_native_adapter,
+    )
+    _run(tmp_path / "challenger", arm=challenger)
+
+    assert all("incumbent_runtime_request" in item and "incumbent_projection" in item for item in incumbent_requests)
+    assert all("candidates" not in item for item in challenger_requests)
+    assert all("incumbent_runtime_request" not in item and "incumbent_projection" not in item for item in challenger_requests)
+
+
 def test_runner_is_regression_only_non_authorizing_and_has_zero_actions(tmp_path: Path) -> None:
     arm = _arm(call=lambda _image, _request: [0.2, 0.375], adapt=_native_adapter)
     artifact = _run(tmp_path, arm=arm)

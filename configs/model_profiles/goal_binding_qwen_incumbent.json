@@ -14,6 +14,12 @@
       "bytes": "not_acquired"
     },
     {
+      "role": "mmproj",
+      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/mmproj-model-f16.gguf",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    },
+    {
       "role": "runtime",
       "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/llama-server.exe",
       "sha256": "not_acquired",
@@ -42,7 +48,7 @@
     "isolated_runtime_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/llama-server.exe",
     "sha256": "not_acquired",
     "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
-    "entrypoint": "qwen_incumbent.inference:run_goal_binding"
+    "entrypoint": "scripts.model_servers.goal_binding_provider_runtimes:run_llama_cpp"
   },
   "dtype_or_quantization": "Q4_K_M",
   "native_output": {

@@ -42,7 +42,7 @@
     "isolated_runtime_path": "artifacts/gui_actor_3b_bf16/not_acquired/python.exe",
     "sha256": "not_acquired",
     "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
-    "entrypoint": "gui_actor.inference:run_goal_binding"
+    "entrypoint": "scripts.model_servers.goal_binding_provider_runtimes:run_gui_actor"
   },
   "dtype_or_quantization": "bf16",
   "native_output": {
