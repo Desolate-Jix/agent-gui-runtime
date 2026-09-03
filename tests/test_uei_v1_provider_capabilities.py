@@ -664,6 +664,27 @@ class _InvocationAdapter:
         }
         self.incarnation_id = incarnation_id
 
+    def validate_resource_lease(
+        self, *, lease: dict[str, object], descriptor: dict[str, object], bundle_ref: dict[str, str]
+    ) -> None:
+        if (
+            set(lease) != {
+                "contract_version", "lease_id", "owner_request_id", "profile_id",
+                "incarnation_id", "server_base_url", "server_model_id", "profile_sha256",
+                "server_process_identity",
+            }
+            or lease["profile_id"] != descriptor["profile_id"]
+            or lease["incarnation_id"] != self.incarnation_id
+        ):
+            raise ValueError("exact lease required")
+
+    def validate_cleanup(
+        self, *, receipt: dict[str, object], lease: dict[str, object], bundle_ref: dict[str, str], invocation_id: str
+    ) -> CapabilityCleanupOutcomeV1:
+        if receipt.get("status") != "released" or receipt.get("lease") != lease:
+            return CapabilityCleanupOutcomeV1("indeterminate", None)
+        return CapabilityCleanupOutcomeV1("clean", receipt)
+
 
 def _invocation_request(
     *,
@@ -708,6 +729,7 @@ def _sealed_invocation_descriptor(
         "decoding_config_sha256": "7" * 64,
         "artifact_sha256s": ["8" * 64],
         "resource_budget": budget().__dict__,
+        "resource_lease_policy": "exact_managed" if "qwen" in provider_id else "none",
     })
 
 

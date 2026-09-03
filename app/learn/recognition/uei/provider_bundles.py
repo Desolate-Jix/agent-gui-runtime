@@ -41,6 +41,7 @@ _DESCRIPTOR_KEYS = frozenset({
     "decoding_config_sha256",
     "artifact_sha256s",
     "resource_budget",
+    "resource_lease_policy",
 })
 _SEALED_DESCRIPTOR_KEYS = _DESCRIPTOR_KEYS | {"content_sha256"}
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -106,6 +107,8 @@ def _validate_descriptor_shape(value: object, *, sealed: bool) -> dict[str, obje
         ProviderRunBudget(**budget)
     except (TypeError, UEIValidationError) as error:
         raise UEIValidationError("provider_bundle_resource_budget") from error
+    if value["resource_lease_policy"] not in {"none", "exact_managed"}:
+        raise UEIValidationError("provider_bundle_resource_lease_policy")
     if sealed:
         _require_sha256(value["content_sha256"], "content_sha256")
         if value["content_sha256"] != content_sha256(value):

@@ -38,6 +38,7 @@ def descriptor_fixture(*, capability: str = "semantic_binding") -> dict[str, obj
             "max_string_length": 4_096,
             "resource_group": "gpu_vision",
         },
+        "resource_lease_policy": "none",
     }
 
 
