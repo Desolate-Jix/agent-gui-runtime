@@ -382,3 +382,89 @@ def test_snapshot_allows_ordinary_action_words_and_rejects_hardlink_alias(tmp_pa
         load_verified_omni_snapshot(
             manifest_path, expected_cases=cases, expected_provider_identity=_identity()
         )
+
+
+def _two_candidate_snapshot(tmp_path: Path) -> tuple[Path, list[object]]:
+    from app.learn.hybrid.omni_snapshot import create_omni_snapshot
+
+    cases = _cases(tmp_path)
+    return create_omni_snapshot(
+        cases=cases,
+        omni=lambda _image: {"items": [
+            {"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "first", "interactivity": True},
+            {"bbox": [0.4, 0.4, 0.6, 0.6], "type": "text", "content": "second", "interactivity": True},
+        ]},
+        output_dir=tmp_path / "two-candidates",
+        provider_identity=_identity(),
+    ), cases
+
+
+def _reseal_candidate_sidecar(manifest_path: Path, manifest: dict[str, object]) -> None:
+    record = manifest["cases"][0]
+    assert isinstance(record, dict)
+    candidate_path = manifest_path.parent / str(record["candidate_file"])
+    payload = _read_json(candidate_path)
+    candidates = payload["candidates"]
+    capture = payload["capture"]
+    assert isinstance(candidates, list) and isinstance(capture, dict)
+    payload["canonical_inventory_sha256"] = sha256(json.dumps(
+        {"contract_version": "omni_snapshot_canonical_inventory_v1", "case_id": payload["case_id"], "capture": capture, "candidates": candidates},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    _write_canonical(candidate_path, payload)
+    record["canonical_inventory_sha256"] = payload["canonical_inventory_sha256"]
+    record["candidate_file_sha256"] = sha256(candidate_path.read_bytes()).hexdigest()
+    record["candidate_ids"] = [candidate["candidate_id"] for candidate in candidates]
+    record["candidate_order_sha256"] = sha256(json.dumps(
+        record["candidate_ids"], ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    record["candidate_geometry_sha256"] = sha256(json.dumps([
+        {"candidate_id": candidate["candidate_id"], "bbox_original": candidate["bbox_original"], "active": candidate["active"]}
+        for candidate in candidates
+    ], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    _seal_manifest(manifest_path, manifest)
+
+
+@pytest.mark.parametrize("mutation", ["delete", "reorder", "duplicate_source", "bbox", "flip_active", "mixed_ref"])
+def test_loader_rejects_resealed_candidates_not_exactly_rebuilt_from_native(
+    tmp_path: Path, mutation: str,
+) -> None:
+    """Every frozen candidate must exactly match the ordered native Omni reconstruction."""
+    from app.learn.hybrid.contracts import stable_candidate_id
+    from app.learn.recognition.uei.canonical import content_sha256
+    from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
+
+    manifest_path, cases = _two_candidate_snapshot(tmp_path / mutation)
+    manifest = _read_json(manifest_path)
+    record = manifest["cases"][0]
+    assert isinstance(record, dict)
+    candidate_path = manifest_path.parent / str(record["candidate_file"])
+    payload = _read_json(candidate_path)
+    candidates = payload["candidates"]
+    assert isinstance(candidates, list)
+    if mutation == "delete":
+        candidates.pop()
+    elif mutation == "reorder":
+        candidates.reverse()
+    elif mutation == "duplicate_source":
+        candidates[1]["source_item_id"] = candidates[0]["source_item_id"]
+    elif mutation == "bbox":
+        candidates[0]["bbox_original"] = [11, 10, 20, 20]
+    elif mutation == "flip_active":
+        candidates[0]["active"] = False
+        candidates[0]["inactive_reason"] = "provider_reported_inactive"
+    else:
+        second = candidates[1]
+        ref = {"id": "result/other", "content_sha256": "a" * 64}
+        second["provider_result_ref"] = ref
+        second["provenance"]["provider_result_ref"] = ref
+        second["provenance"]["content_sha256"] = content_sha256(second["provenance"])
+        second["candidate_id"] = stable_candidate_id(
+            provider_result_ref=ref, source_item_id=second["source_item_id"],
+        )
+    _write_canonical(candidate_path, payload)
+    _reseal_candidate_sidecar(manifest_path, manifest)
+    with pytest.raises(ValueError, match="(native candidate equality|provider result lineage|provenance)"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )

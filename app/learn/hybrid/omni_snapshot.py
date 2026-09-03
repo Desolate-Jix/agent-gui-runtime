@@ -1,7 +1,6 @@
 """Create and verify a sealed, regression-only Omni candidate snapshot."""
 from __future__ import annotations
 from copy import deepcopy
-from dataclasses import asdict
 from hashlib import sha256
 import json, os, re, stat
 from pathlib import Path
@@ -9,8 +8,8 @@ from typing import Mapping, Sequence
 from PIL import Image
 from app.learn.hybrid.simple_native_contracts import parse_omni_native_output
 from app.learn.hybrid.contracts import stable_candidate_id
-from app.learn.hybrid.simple_native_smoke import OmniNativeCaller, ProviderCase, _hash as _native_hash, _parse_provider_goals, _prepare_capture, _verify_capture_freshness, build_omni_evidence_from_native
-from app.learn.recognition.uei.canonical import content_sha256
+from app.learn.hybrid.simple_native_smoke import OmniNativeCaller, ProviderCase, _parse_provider_goals, _prepare_capture, _verify_capture_freshness, build_omni_evidence_from_native, canonical_omni_candidates_from_native
+from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256
 _CASE_IDS=tuple(f"case-{i:03d}" for i in range(1,6))
 _IDENTITY_KEYS=frozenset({"provider_id","profile_id","model_revision","preprocessing_revision"})
 _DATA_PATH=re.compile(r"(?<![a-z0-9])(gold|holdout)(?![a-z0-9])",re.I)
@@ -158,13 +157,18 @@ def _verify_case(root:Path,record:Mapping[str,object])->dict[str,object]:
  if native["contract_version"]!="omni_snapshot_native_output_v1" or native["case_id"]!=cid or native["artifact_is_authorization"] is not False or not isinstance(native["raw_utf8"],str) or _sha(native["raw_utf8"].encode("utf-8"))!=native["raw_output_sha256"] or native["raw_output_sha256"]!=record["native_output_sha256"]: raise ValueError("Omni snapshot native output mismatch")
  try: parsed_native=parse_omni_native_output(json.loads(native["raw_utf8"],parse_constant=_no_constant))
  except (ValueError,json.JSONDecodeError,TypeError) as exc: raise ValueError("Omni snapshot native output parse mismatch") from exc
- source_ids={f"omni-native/{index:04d}/{_native_hash(asdict(item))[:16]}" for index,item in enumerate(parsed_native)}
  _closed(payload,{"contract_version","case_id","capture","native_output_file","native_output_file_sha256","native_output_sha256","canonical_inventory_sha256","candidates","artifact_is_authorization"},label="Omni snapshot candidate file")
  if payload["contract_version"]!="omni_snapshot_candidates_v1" or payload["case_id"]!=cid or payload["artifact_is_authorization"] is not False or payload["native_output_file"]!=native_name or payload["native_output_file_sha256"]!=record["native_output_file_sha256"] or payload["native_output_sha256"]!=record["native_output_sha256"]: raise ValueError("Omni snapshot candidate native reference mismatch")
  cap=_capture(payload["capture"],label="Omni snapshot candidate capture")
  if cap["capture_id"]!=record["capture_id"] or cap["screenshot_sha256"]!=record["capture_sha256"] or cap["image_size"]!=record["image_size"] or _hash(cap["capture_lineage_ref"])!=record["capture_lineage_sha256"]: raise ValueError("Omni snapshot candidate capture mismatch")
  candidates,geometry=_candidates(payload["candidates"],size=cap["image_size"]); ids=[x["candidate_id"] for x in candidates]
- if any(candidate["source_item_id"] not in source_ids for candidate in candidates): raise ValueError("Omni snapshot source item lineage mismatch")
+ if candidates:
+  provider_refs={canonical_json_bytes(candidate["provider_result_ref"]) for candidate in candidates}
+  if len(provider_refs)!=1: raise ValueError("Omni snapshot provider result lineage mismatch")
+  rebuilt=canonical_omni_candidates_from_native(parsed=parsed_native,image_size=(cap["image_size"]["width"],cap["image_size"]["height"]),provider_result_ref=candidates[0]["provider_result_ref"])
+  if canonical_json_bytes(rebuilt)!=canonical_json_bytes(candidates): raise ValueError("Omni snapshot native candidate equality mismatch")
+ elif parsed_native:
+  raise ValueError("Omni snapshot native candidate equality mismatch")
  if ids!=record["candidate_ids"] or _hash(ids)!=record["candidate_order_sha256"] or _hash(geometry)!=record["candidate_geometry_sha256"]: raise ValueError("Omni snapshot candidate order or geometry mismatch")
  if _inventory(cid,cap,candidates)!=payload["canonical_inventory_sha256"] or payload["canonical_inventory_sha256"]!=record["canonical_inventory_sha256"]: raise ValueError("Omni snapshot canonical inventory mismatch")
  return {"case_id":cid,"capture":cap,"candidates":deepcopy(candidates),"candidate_file":str(candidate_path)}

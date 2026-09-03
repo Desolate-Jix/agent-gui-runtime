@@ -20,6 +20,7 @@ from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 
 from PIL import Image
 
+from app.learn.hybrid.contracts import stable_candidate_id
 from app.learn.hybrid.omni_candidates import build_omni_candidate_ledger, omni_inventory_from_ledger
 from app.learn.hybrid.qwen_binding import build_simple_native_goal_binding_request
 from app.learn.hybrid.simple_native_contracts import (
@@ -368,6 +369,39 @@ def _omni_safe_items(parsed: Sequence[OmniNativeItem], *, image_size: tuple[int,
             "provider_confidence": None,
         })
     return result
+
+
+def canonical_omni_candidates_from_native(
+    *, parsed: Sequence[OmniNativeItem], image_size: tuple[int, int], provider_result_ref: Mapping[str, str]
+) -> list[dict[str, object]]:
+    """Rebuild canonical Omni candidates using the sole normalized-bbox projection."""
+    reference = deepcopy(dict(provider_result_ref))
+    if set(reference) != {"id", "content_sha256"} or not all(isinstance(reference[key], str) for key in reference):
+        raise ValueError("Omni provider result reference is invalid")
+    candidates: list[dict[str, object]] = []
+    for item in _omni_safe_items(parsed, image_size=image_size):
+        source_item_id = item["source_item_id"]
+        assert isinstance(source_item_id, str)
+        inactive = "inactive" in item["safe_states"]
+        provenance = seal_immutable({
+            "contract_version": "hybrid_candidate_provenance_v1",
+            "provider_result_ref": deepcopy(reference),
+            "source_item_id": source_item_id,
+        })
+        candidates.append({
+            "candidate_id": stable_candidate_id(
+                provider_result_ref=reference, source_item_id=source_item_id,
+            ),
+            "provider_result_ref": deepcopy(reference),
+            "source_item_id": source_item_id,
+            "bbox_original": deepcopy(item["capture_bbox"]),
+            "coordinate_space": "capture_pixel_xyxy",
+            "confidence": item["provider_confidence"],
+            "active": not inactive,
+            "inactive_reason": "provider_reported_inactive" if inactive else None,
+            "provenance": provenance,
+        })
+    return candidates
 
 
 def build_omni_evidence_from_native(
