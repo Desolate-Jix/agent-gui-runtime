@@ -34,6 +34,7 @@ def managed_fixture(tmp_path, monkeypatch):
 
 def test_build_materialize_verify_readonly_incumbent_without_copy(managed_fixture):
     managed, _, template, paths, root = managed_fixture
+    template_before = deepcopy(template)
     before = {role: path.read_bytes() for role, path in paths.items()}
     profile_path = managed.materialize_incumbent_profile(template, root)
     from app.learn.hybrid.goal_binding_model_callers import load_goal_binding_profile, _verified
@@ -46,7 +47,7 @@ def test_build_materialize_verify_readonly_incumbent_without_copy(managed_fixtur
     assert all(path.is_relative_to(root / "reports") or path.name == ".goal-binding-quota.lock" for path in root.rglob("*") if path.is_file())
     assert not list(root.rglob("*.gguf")) and not list(root.rglob("*.dll"))
     assert before == {role: path.read_bytes() for role, path in paths.items()}
-    assert template["artifact_manifest"]["status"] == "not_acquired"
+    assert template == template_before
 
 
 @pytest.mark.parametrize("role", ["model", "mmproj", "runtime", "dll"])
