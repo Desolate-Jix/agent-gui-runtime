@@ -296,6 +296,26 @@ def cleanup_failed_staging(*, root: Path, staging_path: Path) -> None:
         current.rmdir()
 
 
+def remove_huggingface_local_metadata(*, root: Path, staging_path: Path) -> None:
+    """Remove only Hugging Face local-dir metadata after it was charged to quota."""
+    root_resolved, staging = _guard(Path(root), Path(staging_path))
+    metadata = staging / ".cache" / "huggingface"
+    if not metadata.exists():
+        return
+    _guard(root_resolved, metadata)
+    for path in sorted(_logical_files(metadata), key=lambda item: len(item.parts), reverse=True):
+        _guard(root_resolved, path)
+        if path.is_file():
+            path.unlink()
+    for directory, _, _ in os.walk(metadata, topdown=False, followlinks=False):
+        current = Path(directory)
+        _guard(root_resolved, current)
+        current.rmdir()
+    cache = staging / ".cache"
+    if cache.exists() and not any(cache.iterdir()):
+        cache.rmdir()
+
+
 def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, revision: str, staging_path: Path, expected_files: Mapping[str, int]) -> Path:
     _safe_component(provider_id, name="provider_id")
     _immutable_revision(revision)
@@ -308,10 +328,12 @@ def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: st
     actual = {path.relative_to(staging).as_posix(): path for path in _logical_files(staging) if path.is_file()}
     if set(actual) != set(expected_files) or any(not isinstance(size, int) or size < 0 or actual[name].stat().st_size != size for name, size in expected_files.items()):
         raise ValueError("downloaded files do not match expected bytes")
-    destination = root_resolved / "artifacts" / provider_id / revision
+    destination_parent = _guarded_directory(root_resolved, "artifacts", provider_id)
+    destination = destination_parent / revision
     if destination.exists():
         raise ValueError("artifact destination already exists")
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    if _is_reparse(destination_parent):
+        raise ValueError("artifact destination parent is a reparse point")
     staging.rename(destination)
     try:
         return register_downloaded_artifact(root=root_resolved, provider_id=provider_id, repo_id=repo_id, revision=revision, files=sorted(actual_path for actual_path in destination.rglob("*") if actual_path.is_file()))

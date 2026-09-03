@@ -20,7 +20,9 @@ from app.learn.hybrid.model_test_storage import (
     cleanup_failed_staging,
     inventory_storage,
     materialize_downloaded_artifact,
+    remove_huggingface_local_metadata,
 )
+from app.learn.hybrid.model_test_storage import _immutable_revision, _safe_component
 
 
 def _digest(path: Path) -> str:
@@ -62,11 +64,12 @@ def _quota_reservation(root: Path):
 
 def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
     """Resolve and download only explicitly declared files; imported lazily on request."""
-    if Path(root) != MODEL_TEST_ROOT:
+    if Path(root).absolute() != MODEL_TEST_ROOT.absolute():
         raise ValueError("production acquisition is pinned to E:\\模型测试; injected roots are test-only library primitives")
     provider_id, repo_id, requested = profile.get("provider_id"), profile.get("repo_id"), profile.get("artifact_files")
     if not isinstance(provider_id, str) or not isinstance(repo_id, str) or not isinstance(requested, list) or not requested or any(not isinstance(name, str) or not name or Path(name).is_absolute() or ".." in Path(name).parts for name in requested):
         raise ValueError("profile artifact declaration is invalid")
+    _safe_component(provider_id, name="provider_id")
     try:
         from huggingface_hub import HfApi, hf_hub_download
     except ImportError as exc:
@@ -75,7 +78,11 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
     requested_revision = profile.get("revision", "main")
     info = api.model_info(repo_id, revision=requested_revision, files_metadata=True)
     revision = getattr(info, "sha", None)
-    if not isinstance(revision, str) or len(revision) != 40:
+    try:
+        _immutable_revision(revision)
+    except ValueError as exc:
+        raise ValueError("Hugging Face did not resolve an immutable lowercase commit") from exc
+    if not isinstance(revision, str):
         raise ValueError("Hugging Face did not resolve an immutable commit")
     siblings = {getattr(item, "rfilename", None): item for item in getattr(info, "siblings", ())}
     expected: dict[str, int] = {}
@@ -89,7 +96,7 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
         if not isinstance(size, int) or size < 0:
             raise ValueError(f"Hugging Face size is unavailable for {name}")
         expected[name] = size
-        oid = lfs.get("oid") if isinstance(lfs, dict) else getattr(lfs, "oid", None)
+        oid = (lfs.get("sha256") or lfs.get("oid")) if isinstance(lfs, dict) else (getattr(lfs, "sha256", None) or getattr(lfs, "oid", None))
         if isinstance(oid, str) and len(oid) == 64:
             expected_hashes[name] = oid
     root = Path(root)
@@ -107,6 +114,7 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
                     target.write_bytes(downloaded.read_bytes())
                 if target.stat().st_size != expected[name] or (name in expected_hashes and _digest(target) != expected_hashes[name]):
                     raise ValueError(f"download verification failed for {name}")
+            remove_huggingface_local_metadata(root=root, staging_path=staging)
             return materialize_downloaded_artifact(root=root, provider_id=provider_id, repo_id=repo_id, revision=revision, staging_path=staging, expected_files=expected)
         except BaseException:
             if staging.exists():

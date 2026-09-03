@@ -144,3 +144,17 @@ def test_partial_download_never_materializes_or_registers_a_manifest(tmp_path: P
     with pytest.raises(ValueError, match="expected"):
         materialize_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/model", revision="a" * 40, staging_path=staging, expected_files={"model.bin": 99})
     assert not (tmp_path / "artifacts" / "provider-a").exists()
+
+
+def test_registry_rejects_manifest_edit_to_another_in_root_artifact(tmp_path: Path) -> None:
+    from app.learn.hybrid.model_test_storage import delete_registered_artifact, register_downloaded_artifact
+
+    first = _write(tmp_path / "artifacts" / "provider-a" / ("a" * 40) / "first.bin", b"first")
+    second = _write(tmp_path / "artifacts" / "provider-b" / ("b" * 40) / "second.bin", b"second")
+    manifest = register_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/a", revision="a" * 40, files=[first])
+    register_downloaded_artifact(root=tmp_path, provider_id="provider-b", repo_id="org/b", revision="b" * 40, files=[second])
+    payload = json.loads(manifest.read_text(encoding="utf-8")); payload["files"][0]["relative_path"] = f"artifacts/provider-b/{'b' * 40}/second.bin"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="registration"):
+        delete_registered_artifact(root=tmp_path, manifest_path=manifest)
+    assert first.exists() and second.exists()
