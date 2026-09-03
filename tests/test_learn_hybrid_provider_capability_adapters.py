@@ -25,6 +25,7 @@ from app.learn.recognition.uei.provider_capabilities import (
     CandidateDiscoveryRequestV1,
     CandidateDiscoveryResultV1,
     CapabilityCleanupOutcomeV1,
+    GroundingRefinementRequestV1,
     ProviderInvocationEnvelopeV1,
     deterministic_neutral_source_item_id,
     invoke_with_capability_envelope,
@@ -620,3 +621,113 @@ def test_qwen_cleanup_requires_terminal_receipt_and_inactive_exact_lease(
     assert adapter.validate_cleanup(
         receipt=shared, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
     ).status == "indeterminate"
+
+
+def _sealed_grounding_descriptor(*, bundle_ref: dict[str, str]) -> dict[str, object]:
+    return seal_provider_bundle_descriptor_v1({
+        "contract_version": "provider_bundle_descriptor_v1",
+        "bundle_id": bundle_ref["id"],
+        "bundle_revision": "test-v1",
+        "capability": "grounding_refinement",
+        "provider_id": "provider/local.vista",
+        "profile_id": "profile/local.vista",
+        "model_id": "model/vista",
+        "model_revision": "test-v1",
+        "prompt_spec_sha256": "1" * 64,
+        "prompt_renderer_sha256": "2" * 64,
+        "native_parser_sha256": "3" * 64,
+        "adapter_sha256": "4" * 64,
+        "preprocessing_sha256": "5" * 64,
+        "transport_sha256": "6" * 64,
+        "coordinate_convention": "capture_pixel_xyxy",
+        "decoding_config_sha256": "7" * 64,
+        "artifact_sha256s": ["8" * 64],
+        "resource_budget": ProviderRunBudget(1_000, 4_096, 8, 128, "vista-test").__dict__,
+        "resource_lease_policy": "none",
+    })
+
+
+def test_vista_compatibility_adapter_projects_exact_bound_request_without_authority(
+    ) -> None:
+    from app.learn.hybrid.provider_capability_adapters import (
+        VistaGroundingRefinementCompatibilityAdapter,
+    )
+    from app.learn.hybrid.vista_refinement import (
+        normalize_vista_grounding_result,
+        project_grounding_result_to_hybrid_vista_refinement_v1,
+    )
+    from tests.test_learn_hybrid_vista_refinement import _raw_result, _request
+
+    legacy_request = _request()
+    bundle_ref = {"id": "bundle/local.vista-grounding", "content_sha256": "a" * 64}
+    descriptor = _sealed_grounding_descriptor(bundle_ref=bundle_ref)
+    bundle_ref = provider_bundle_ref(descriptor)
+    raw = _raw_result(legacy_request)
+    calls: list[dict[str, object]] = []
+
+    def runner(**kwargs: object) -> dict[str, object]:
+        calls.append(dict(kwargs))
+        return raw
+
+    request = GroundingRefinementRequestV1(
+        envelope=ProviderInvocationEnvelopeV1(
+            bundle_ref=bundle_ref, capability="grounding_refinement",
+            invocation_id="invocation/vista-adapter",
+            capture_lineage_ref=legacy_request["capture_lineage_ref"],
+            budget=ProviderRunBudget(2_000, 8_192, 16, 256, "vista-test"),
+        ),
+        candidate_id=legacy_request["candidate_id"],
+        candidate_bbox=tuple(legacy_request["candidate_bbox_ref"]["xyxy"]),
+        permitted_roi=tuple(legacy_request["roi_ref"]["xyxy"]),
+        provider_request={"state": "BOUND", "vista_request": legacy_request},
+    )
+    adapter = VistaGroundingRefinementCompatibilityAdapter(
+        bundle_ref=bundle_ref, provider_runner=runner,
+    )
+
+    result = adapter.invoke(request)
+
+    assert result.status == "PROPOSED"
+    assert result.point == tuple(raw["point"])
+    assert calls == [{
+        "request": legacy_request, "timeout_seconds": 2.0,
+        "cancellation_event": request.envelope.cancellation_event,
+    }]
+    assert project_grounding_result_to_hybrid_vista_refinement_v1(
+        request=legacy_request, raw_result=raw, result=result,
+    ) == project_grounding_result_to_hybrid_vista_refinement_v1(
+        request=legacy_request, raw_result=raw,
+        result=normalize_vista_grounding_result(
+            request=legacy_request, raw_result=raw, bundle_ref=bundle_ref,
+            invocation_id=request.envelope.invocation_id,
+        ),
+    )
+
+
+def test_vista_compatibility_adapter_rejects_non_bound_or_authority_raw_before_projection() -> None:
+    from app.learn.hybrid.provider_capability_adapters import (
+        VistaGroundingRefinementCompatibilityAdapter,
+    )
+    from tests.test_learn_hybrid_vista_refinement import _raw_result, _request
+
+    legacy_request = _request()
+    bundle_ref = {"id": "bundle/local.vista-grounding", "content_sha256": "a" * 64}
+    request = GroundingRefinementRequestV1(
+        envelope=ProviderInvocationEnvelopeV1(
+            bundle_ref=bundle_ref, capability="grounding_refinement",
+            invocation_id="invocation/vista-adapter-reject",
+            capture_lineage_ref=legacy_request["capture_lineage_ref"],
+            budget=ProviderRunBudget(1_000, 4_096, 8, 128, "vista-test"),
+        ),
+        candidate_id=legacy_request["candidate_id"],
+        candidate_bbox=tuple(legacy_request["candidate_bbox_ref"]["xyxy"]),
+        permitted_roi=tuple(legacy_request["roi_ref"]["xyxy"]),
+        provider_request={"state": "BOUND", "vista_request": legacy_request},
+    )
+    raw = _raw_result(legacy_request)
+    raw["provenance"]["nested"] = {"execute": True}
+    adapter = VistaGroundingRefinementCompatibilityAdapter(
+        bundle_ref=bundle_ref, provider_runner=lambda **_: raw,
+    )
+    with pytest.raises(ValueError, match="non_authorizing"):
+        adapter.invoke(request)

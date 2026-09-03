@@ -17,12 +17,15 @@ from app.learn.recognition.uei.provider_capabilities import (
     CandidateDiscoveryRequestV1,
     CandidateDiscoveryResultV1,
     CapabilityCleanupOutcomeV1,
+    GroundingRefinementRequestV1,
+    GroundingRefinementResultV1,
     SemanticBindingRequestV1,
     SemanticBindingResultV1,
     deterministic_neutral_source_item_id,
     enforce_provider_native_output_budget,
     reject_authority_shaped_payload,
 )
+from app.learn.hybrid.vista_refinement import normalize_vista_grounding_result
 from app.learn.hybrid.qwen_binding import (
     QwenBindingCancelled,
     QwenBindingTimeout,
@@ -364,3 +367,67 @@ def _validate_qwen_release_terminal_receipt(
     ):
         raise ValueError("Qwen owned release receipt is not terminal")
     return dict(receipt)
+
+
+class VistaGroundingRefinementCompatibilityAdapter:
+    """将现有 VISTA 调用投影为受限的 grounding capability。"""
+
+    capability = "grounding_refinement"
+
+    def __init__(
+        self, *, bundle_ref: dict[str, str], provider_runner: Callable[..., object],
+    ) -> None:
+        self.bundle_ref = dict(bundle_ref)
+        self._provider_runner = provider_runner
+
+    def invoke(
+        self, request: GroundingRefinementRequestV1,
+    ) -> GroundingRefinementResultV1:
+        if not isinstance(request, GroundingRefinementRequestV1):
+            raise UEIValidationError("provider_capability_invalid_grounding_request")
+        if self.bundle_ref != dict(request.envelope.bundle_ref):
+            raise UEIValidationError("provider_capability_bundle_mismatch")
+        if (
+            request.envelope.cancellation_event is not None
+            and request.envelope.cancellation_event.is_set()
+        ):
+            raise UEIValidationError("provider_capability_cancelled")
+        provider_request = dict(request.provider_request)
+        legacy_request = provider_request.get("vista_request")
+        if not isinstance(legacy_request, dict):
+            raise UEIValidationError("provider_capability_invalid_vista_request")
+        _validate_vista_grounding_request(request=request, legacy_request=legacy_request)
+        raw = self._provider_runner(
+            request=legacy_request,
+            timeout_seconds=request.envelope.budget.timeout_ms / 1000.0,
+            cancellation_event=request.envelope.cancellation_event,
+        )
+        if (
+            request.envelope.cancellation_event is not None
+            and request.envelope.cancellation_event.is_set()
+        ):
+            raise UEIValidationError("provider_capability_cancelled")
+        enforce_provider_native_output_budget(raw, request.envelope.budget)
+        if not isinstance(raw, dict):
+            raise UEIValidationError("provider_capability_invalid_vista_result")
+        result = normalize_vista_grounding_result(
+            request=legacy_request, raw_result=raw,
+            bundle_ref=dict(request.envelope.bundle_ref),
+            invocation_id=request.envelope.invocation_id,
+        )
+        return request.validate_result(result)
+
+
+def _validate_vista_grounding_request(
+    *, request: GroundingRefinementRequestV1, legacy_request: dict[str, object],
+) -> None:
+    """确保 compatibility runner 只能细化同一个已绑定候选。"""
+    if (
+        legacy_request.get("candidate_id") != request.candidate_id
+        or tuple(legacy_request.get("candidate_bbox_ref", {}).get("xyxy", ()))
+        != request.candidate_bbox
+        or tuple(legacy_request.get("roi_ref", {}).get("xyxy", ()))
+        != request.permitted_roi
+        or legacy_request.get("capture_lineage_ref") != dict(request.envelope.capture_lineage_ref)
+    ):
+        raise UEIValidationError("provider_capability_grounding_request_mismatch")

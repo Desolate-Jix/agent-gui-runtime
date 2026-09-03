@@ -6,11 +6,14 @@ import pytest
 
 from app.learn.hybrid.vista_refinement import (
     build_vista_requests,
+    normalize_vista_grounding_result,
+    project_grounding_result_to_hybrid_vista_refinement_v1,
     validate_vista_proposal,
 )
 from app.core.model_server import build_qwen_cleanup_receipt
 from app.learn.hybrid.fusion import fuse_hybrid_candidates
-from app.learn.recognition.uei.canonical import seal_immutable
+from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256, seal_immutable
+from app.learn.recognition.uei.provider_capabilities import reject_authority_shaped_payload
 from tests.test_learn_hybrid_fusion import _inputs
 
 
@@ -125,6 +128,103 @@ def _request_with_geometry(*, candidate_bbox: list[int], roi: list[int]) -> dict
     request.pop("content_sha256", None)
     return seal_immutable(request)
 
+
+
+def grounding_bundle_ref() -> dict[str, str]:
+    return {"id": "bundle/legacy.vista.grounding-refinement", "content_sha256": "0" * 64}
+
+
+def _old_v1_artifact(request: dict, raw: dict) -> dict:
+    return {
+        "contract_version": "hybrid_vista_refinement_proposal_v1",
+        "status": "PROPOSED",
+        "review_status": "REVIEW_REQUIRED",
+        "automatic_acceptance": False,
+        "raw_provider_result": raw,
+        "provider_provenance": raw["provenance"],
+        **{field: request[field] for field in (
+            "candidate_id", "candidate_bbox_ref", "roi_ref",
+            "affine_transform_ref", "source_revision", "capture_sha256",
+        )},
+        "canonical_point": {
+            "coordinate_space": "capture_pixel_xyxy",
+            "xy": raw["point"],
+        },
+    }
+
+
+def test_vista_neutral_projection_is_canonical_byte_equivalent_to_old_v1_artifact() -> None:
+    request = _request()
+    raw = _raw_result(request)
+    result = normalize_vista_grounding_result(
+        request=request, raw_result=raw, bundle_ref=grounding_bundle_ref(),
+        invocation_id="invocation/vista-projection",
+    )
+
+    projected = project_grounding_result_to_hybrid_vista_refinement_v1(
+        request=request, raw_result=raw, result=result,
+    )
+
+    assert canonical_json_bytes(projected) == canonical_json_bytes(
+        _old_v1_artifact(request, raw)
+    )
+
+
+@pytest.mark.parametrize("key", [
+    "approved_to_click", "execute", "final_submit", "send", "confirm", "payment",
+])
+def test_vista_raw_trace_authority_keys_are_rejected_before_projection(key: str) -> None:
+    request = _request()
+    raw = _raw_result(request)
+    raw["provenance"]["nested"] = {key: True}
+    with pytest.raises(ValueError, match="non_authorizing"):
+        normalize_vista_grounding_result(
+            request=request, raw_result=raw, bundle_ref=grounding_bundle_ref(),
+            invocation_id="invocation/vista-authority-test",
+        )
+
+    legacy = validate_vista_proposal(request=request, raw_result=raw)
+    quarantine = {
+        "quarantined": True,
+        "content_sha256": content_sha256({"raw_provider_result": raw}),
+    }
+    assert legacy["review_status"] == "REVIEW_REQUIRED"
+    assert legacy["automatic_acceptance"] is False
+    assert legacy["raw_provider_result"] == quarantine
+    assert legacy["provider_provenance"] == quarantine
+    reject_authority_shaped_payload(legacy)
+
+
+@pytest.mark.parametrize("point", [
+    [100, 115], [140, 115], [120, 100], [120, 130],
+    [100, 100], [140, 100], [100, 130], [140, 130],
+])
+def test_neutral_vista_rejects_every_candidate_edge_and_corner(point: list[int]) -> None:
+    request = _request_with_geometry(
+        candidate_bbox=[100, 100, 140, 130], roi=[80, 80, 180, 160],
+    )
+    result = normalize_vista_grounding_result(
+        request=request, raw_result=_raw_result(request, point=point),
+        bundle_ref=grounding_bundle_ref(), invocation_id="invocation/vista-edge",
+    )
+    assert result.status == "VISTA_OUT_OF_BOUNDS"
+    assert result.point is None
+
+
+@pytest.mark.parametrize("point", [
+    [80, 120], [180, 120], [130, 80], [130, 160],
+    [80, 80], [180, 80], [80, 160], [180, 160],
+])
+def test_neutral_vista_rejects_every_permitted_roi_edge_and_corner(point: list[int]) -> None:
+    request = _request_with_geometry(
+        candidate_bbox=[60, 60, 190, 170], roi=[80, 80, 180, 160],
+    )
+    result = normalize_vista_grounding_result(
+        request=request, raw_result=_raw_result(request, point=point),
+        bundle_ref=grounding_bundle_ref(), invocation_id="invocation/vista-roi-edge",
+    )
+    assert result.status == "VISTA_OUT_OF_BOUNDS"
+    assert result.point is None
 
 def test_build_vista_requests_submits_only_exact_bound_candidate_lineage() -> None:
     fusion, bundle, inventory, bindings, receipt = _authoritative_inputs()

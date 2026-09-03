@@ -13,6 +13,14 @@ from app.learn.recognition.uei.canonical import (
     content_sha256,
     seal_immutable,
 )
+from app.learn.recognition.uei.contracts import UEIValidationError
+from app.learn.recognition.uei.provider_adapters import ProviderRunBudget
+from app.learn.recognition.uei.provider_capabilities import (
+    GroundingRefinementRequestV1,
+    GroundingRefinementResultV1,
+    ProviderInvocationEnvelopeV1,
+    reject_authority_shaped_payload,
+)
 
 
 VISTA_REQUEST_CONTRACT = "hybrid_vista_refinement_request_v1"
@@ -173,14 +181,109 @@ def build_vista_requests(
     return requests
 
 
-def validate_vista_proposal(
+_LEGACY_VISTA_GROUNDING_BUNDLE_REF = {
+    "id": "bundle/legacy.vista.grounding-refinement",
+    "content_sha256": "0" * 64,
+}
+
+
+def normalize_vista_grounding_result(
     *,
     request: Mapping[str, Any],
     raw_result: Mapping[str, Any],
-) -> dict[str, Any]:
-    """校验 provider 提议；任何失败都只投影到人工审核。"""
+    bundle_ref: dict[str, str],
+    invocation_id: str,
+) -> GroundingRefinementResultV1:
+    """验证精确 lineage、变换和严格内点，返回临时证据。"""
+    if not isinstance(raw_result, Mapping):
+        raise ValueError("VISTA raw result must be an object")
+    raw = deepcopy(dict(raw_result))
+    try:
+        reject_authority_shaped_payload(raw)
+    except UEIValidationError as error:
+        raise ValueError("VISTA raw result must be non_authorizing") from error
+    normalized_request = _validated_request(request)
+    grounding_request = _grounding_request_from_vista_request(
+        request=normalized_request, bundle_ref=bundle_ref, invocation_id=invocation_id,
+    )
+    evidence_refs = (
+        {
+            "id": "vista/raw_provider_result",
+            "content_sha256": content_sha256({"raw_provider_result": raw}),
+        },
+    )
+    raw_status = str(raw.get("status") or "PROPOSED").strip()
+    if raw_status in {"VISTA_FAILED", "FAILED", "ERROR"} or raw.get("success") is False:
+        return GroundingRefinementResultV1(
+            bundle_ref=deepcopy(bundle_ref), invocation_id=invocation_id,
+            capture_lineage_ref=deepcopy(normalized_request["capture_lineage_ref"]),
+            candidate_id=normalized_request["candidate_id"], status="VISTA_FAILED",
+            point=None, coordinate_space="capture_pixel_xyxy", confidence=None,
+            evidence_refs=evidence_refs, duration_ms=0, resource_units=0,
+        )
+    for field in ("candidate_id", "capture_id", "capture_sha256", "source_revision"):
+        if raw.get(field) != normalized_request[field]:
+            raise ValueError(f"VISTA raw result {field} mismatch")
+    if canonical_json_bytes(raw.get("affine_transform_ref")) != canonical_json_bytes(
+        normalized_request["affine_transform_ref"]
+    ):
+        raise ValueError("VISTA affine transform mismatch")
+    point = _point(raw.get("point"))
+    coordinate_space = str(raw.get("point_coordinate_space") or "capture_pixel_xyxy").strip()
+    if coordinate_space == "roi_pixel_xy":
+        point = _apply_affine(normalized_request["affine_transform_ref"]["matrix"], point)
+    elif coordinate_space != "capture_pixel_xyxy":
+        raise ValueError("VISTA point coordinate space is invalid")
+    if not (
+        _point_inside(point, normalized_request["candidate_bbox_ref"]["xyxy"])
+        and _point_inside(point, normalized_request["roi_ref"]["xyxy"])
+    ):
+        return GroundingRefinementResultV1(
+            bundle_ref=deepcopy(bundle_ref), invocation_id=invocation_id,
+            capture_lineage_ref=deepcopy(normalized_request["capture_lineage_ref"]),
+            candidate_id=normalized_request["candidate_id"], status="VISTA_OUT_OF_BOUNDS",
+            point=None, coordinate_space="capture_pixel_xyxy", confidence=None,
+            evidence_refs=evidence_refs, duration_ms=0, resource_units=0,
+        )
+    result = GroundingRefinementResultV1(
+        bundle_ref=deepcopy(bundle_ref), invocation_id=invocation_id,
+        capture_lineage_ref=deepcopy(normalized_request["capture_lineage_ref"]),
+        candidate_id=normalized_request["candidate_id"], status="PROPOSED",
+        point=(point[0], point[1]), coordinate_space="capture_pixel_xyxy",
+        confidence=None, evidence_refs=evidence_refs, duration_ms=0, resource_units=0,
+    )
+    try:
+        return grounding_request.validate_result(result)
+    except UEIValidationError as error:
+        raise ValueError(str(error)) from error
 
-    raw = deepcopy(dict(raw_result)) if isinstance(raw_result, Mapping) else {"raw_value": deepcopy(raw_result)}
+
+def project_grounding_result_to_hybrid_vista_refinement_v1(
+    *,
+    request: Mapping[str, Any],
+    raw_result: Mapping[str, Any],
+    result: GroundingRefinementResultV1,
+) -> dict[str, Any]:
+    """保持现有 hybrid_vista_refinement_proposal_v1 字段与语义。"""
+    if not isinstance(raw_result, Mapping):
+        raise ValueError("VISTA raw result must be an object")
+    if not isinstance(result, GroundingRefinementResultV1):
+        raise ValueError("VISTA grounding result is invalid")
+    raw = deepcopy(dict(raw_result))
+    try:
+        reject_authority_shaped_payload(raw)
+        reject_authority_shaped_payload(vars(result))
+    except UEIValidationError as error:
+        raise ValueError("VISTA projection must be non_authorizing") from error
+    normalized_request = _validated_request(request)
+    grounding_request = _grounding_request_from_vista_request(
+        request=normalized_request, bundle_ref=dict(result.bundle_ref),
+        invocation_id=result.invocation_id,
+    )
+    try:
+        grounding_request.validate_result(result)
+    except UEIValidationError as error:
+        raise ValueError(str(error)) from error
     base: dict[str, Any] = {
         "contract_version": VISTA_PROPOSAL_CONTRACT,
         "status": "TRANSFORM_INVALID",
@@ -188,63 +291,104 @@ def validate_vista_proposal(
         "automatic_acceptance": False,
         "raw_provider_result": raw,
         "provider_provenance": deepcopy(raw.get("provenance"))
-        if isinstance(raw.get("provenance"), Mapping)
-        else {},
+        if isinstance(raw.get("provenance"), Mapping) else {},
     }
-    try:
-        normalized_request = _validated_request(request)
-        for field in (
-            "candidate_id",
-            "candidate_bbox_ref",
-            "roi_ref",
-            "affine_transform_ref",
-            "source_revision",
-            "capture_sha256",
-        ):
-            base[field] = deepcopy(normalized_request[field])
-        if normalized_request["submission_status"] != "SUBMITTED":
-            raise ValueError("VISTA request was not submitted")
-        raw_status = str(raw.get("status") or "PROPOSED").strip()
-        if raw_status in {"VISTA_FAILED", "FAILED", "ERROR"} or raw.get("success") is False:
-            base["status"] = "VISTA_FAILED"
-            return base
-        for field in (
-            "candidate_id",
-            "capture_id",
-            "capture_sha256",
-            "source_revision",
-        ):
-            if raw.get(field) != normalized_request[field]:
-                raise ValueError(f"VISTA raw result {field} mismatch")
-        if canonical_json_bytes(raw.get("affine_transform_ref")) != canonical_json_bytes(
-            normalized_request["affine_transform_ref"]
-        ):
-            raise ValueError("VISTA affine transform mismatch")
-        point = _point(raw.get("point"))
-        coordinate_space = str(
-            raw.get("point_coordinate_space") or "capture_pixel_xyxy"
-        ).strip()
-        if coordinate_space == "roi_pixel_xy":
-            point = _apply_affine(
-                normalized_request["affine_transform_ref"]["matrix"],
-                point,
-            )
-        elif coordinate_space != "capture_pixel_xyxy":
-            raise ValueError("VISTA point coordinate space is invalid")
-        candidate_bbox = normalized_request["candidate_bbox_ref"]["xyxy"]
-        roi = normalized_request["roi_ref"]["xyxy"]
-        if not (_point_inside(point, candidate_bbox) and _point_inside(point, roi)):
-            base["status"] = "VISTA_OUT_OF_BOUNDS"
-            return base
+    for field in (
+        "candidate_id", "candidate_bbox_ref", "roi_ref", "affine_transform_ref",
+        "source_revision", "capture_sha256",
+    ):
+        base[field] = deepcopy(normalized_request[field])
+    if normalized_request["submission_status"] != "SUBMITTED":
+        raise ValueError("VISTA request was not submitted")
+    if result.status == "VISTA_FAILED":
+        base["status"] = "VISTA_FAILED"
+    elif result.status == "VISTA_OUT_OF_BOUNDS":
+        base["status"] = "VISTA_OUT_OF_BOUNDS"
+    elif result.status == "PROPOSED" and result.point is not None:
         base["status"] = "PROPOSED"
         base["canonical_point"] = {
             "coordinate_space": "capture_pixel_xyxy",
-            "xy": [_compact_number(point[0]), _compact_number(point[1])],
+            "xy": [_compact_number(result.point[0]), _compact_number(result.point[1])],
         }
+    else:
+        raise ValueError("VISTA grounding result status is invalid")
+    try:
+        reject_authority_shaped_payload(base)
+    except UEIValidationError as error:
+        raise ValueError("VISTA projection must be non_authorizing") from error
+    return base
+
+
+def validate_vista_proposal(
+    *,
+    request: Mapping[str, Any],
+    raw_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    """校验 provider 提议；任何失败都只投影到人工审核。"""
+    raw = deepcopy(dict(raw_result)) if isinstance(raw_result, Mapping) else {"raw_value": deepcopy(raw_result)}
+    try:
+        result = normalize_vista_grounding_result(
+            request=request, raw_result=raw,
+            bundle_ref=deepcopy(_LEGACY_VISTA_GROUNDING_BUNDLE_REF),
+            invocation_id="legacy/vista-grounding-refinement",
+        )
+        return project_grounding_result_to_hybrid_vista_refinement_v1(
+            request=request, raw_result=raw, result=result,
+        )
+    except (TypeError, ValueError) as error:
+        quarantined = "non_authorizing" in str(error)
+        raw_value: dict[str, Any]
+        provenance: dict[str, Any]
+        if quarantined:
+            quarantine = {
+                "quarantined": True,
+                "content_sha256": content_sha256({"raw_provider_result": raw}),
+            }
+            raw_value = quarantine
+            provenance = deepcopy(quarantine)
+        else:
+            raw_value = raw
+            provenance = deepcopy(raw.get("provenance")) if isinstance(raw.get("provenance"), Mapping) else {}
+        base: dict[str, Any] = {
+            "contract_version": VISTA_PROPOSAL_CONTRACT,
+            "status": "TRANSFORM_INVALID",
+            "review_status": "REVIEW_REQUIRED",
+            "automatic_acceptance": False,
+            "raw_provider_result": raw_value,
+            "provider_provenance": provenance,
+        }
+        try:
+            normalized_request = _validated_request(request)
+            for field in (
+                "candidate_id", "candidate_bbox_ref", "roi_ref", "affine_transform_ref",
+                "source_revision", "capture_sha256",
+            ):
+                base[field] = deepcopy(normalized_request[field])
+        except (TypeError, ValueError):
+            pass
+        base["validation_error"] = str(error)
+        try:
+            reject_authority_shaped_payload(base)
+        except UEIValidationError as authority_error:
+            raise ValueError("VISTA failure projection must be non_authorizing") from authority_error
         return base
-    except (TypeError, ValueError) as exc:
-        base["validation_error"] = str(exc)
-        return base
+
+
+def _grounding_request_from_vista_request(
+    *, request: Mapping[str, Any], bundle_ref: dict[str, str], invocation_id: str,
+) -> GroundingRefinementRequestV1:
+    return GroundingRefinementRequestV1(
+        envelope=ProviderInvocationEnvelopeV1(
+            bundle_ref=deepcopy(bundle_ref), capability="grounding_refinement",
+            invocation_id=invocation_id,
+            capture_lineage_ref=deepcopy(request["capture_lineage_ref"]),
+            budget=ProviderRunBudget(1, 1, 1, 1, "vista-compatibility"),
+        ),
+        candidate_id=request["candidate_id"],
+        candidate_bbox=tuple(request["candidate_bbox_ref"]["xyxy"]),
+        permitted_roi=tuple(request["roi_ref"]["xyxy"]),
+        provider_request={"state": "BOUND"},
+    )
 
 
 def validate_vista_request_pre_acquisition(
@@ -443,6 +587,8 @@ def _compact_number(value: float) -> int | float:
 
 __all__ = [
     "build_vista_requests",
+    "normalize_vista_grounding_result",
+    "project_grounding_result_to_hybrid_vista_refinement_v1",
     "validate_vista_request_pre_acquisition",
     "validate_vista_proposal",
 ]
