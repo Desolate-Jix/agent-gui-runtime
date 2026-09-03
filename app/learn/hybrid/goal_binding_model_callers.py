@@ -207,6 +207,10 @@ def _verified(profile: Mapping[str, object], artifact_dir: Path) -> dict[str, ob
         manifest = json.loads(raw.decode("utf-8"), object_pairs_hook=_closed_object)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("verified goal-binding artifact manifest is unreadable") from exc
+    from app.learn.hybrid.goal_binding_managed_artifacts import VERSION, verify_managed_artifacts
+    if isinstance(manifest, Mapping) and manifest.get("contract_version") == VERSION:
+        verify_managed_artifacts(sealed, artifact_dir)
+        return sealed
     if _sha256(raw) != ref["sha256"] or not isinstance(manifest, Mapping) or set(manifest) != {"contract_version", "provider_id", "repo_id", "revision", "files", "artifact_is_authorization"}:
         raise ValueError("verified goal-binding artifact manifest is invalid")
     if manifest["contract_version"] != "model_test_artifact_manifest_v1" or manifest["provider_id"] != sealed["provider_id"] or manifest["repo_id"] != sealed["repository_id"] or manifest["revision"] != sealed["upstream_revision"] or manifest["artifact_is_authorization"] is not False or not isinstance(manifest["files"], list):

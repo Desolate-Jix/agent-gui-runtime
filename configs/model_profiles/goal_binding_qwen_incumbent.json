@@ -4,8 +4,8 @@
   "arm_id": "goal_binding_qwen_incumbent",
   "provider_id": "qwen3_vl_8b_q4_k_m",
   "model_id": "Qwen/Qwen3-VL-8B-Instruct",
-  "repository_id": "Qwen/Qwen3-VL-8B-Instruct",
-  "upstream_revision": "not_acquired",
+  "repository_id": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+  "upstream_revision": "f982a07559d4a2f6c8744d840bf6fccab30eea96",
   "artifacts": [
     {
       "role": "model",
@@ -15,7 +15,7 @@
     },
     {
       "role": "mmproj",
-      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/mmproj-model-f16.gguf",
+      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
       "sha256": "not_acquired",
       "bytes": "not_acquired"
     },

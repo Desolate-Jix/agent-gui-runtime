@@ -59,6 +59,9 @@ def verified_artifact_paths(
     profile: Mapping[str, object], artifact_root: Path
 ) -> dict[str, Path]:
     """Resolve and re-hash every profile-declared runtime artifact."""
+    if profile.get("provider_id") == "qwen3_vl_8b_q4_k_m":
+        from app.learn.hybrid.goal_binding_managed_artifacts import verify_managed_artifacts
+        return verify_managed_artifacts(profile, artifact_root)
     artifacts = profile.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         raise ValueError("provider artifact list is unavailable")
@@ -467,8 +470,13 @@ class _LlamaSession:
         return {"status": "released", "server_process_identity": self.identity, "listener_port": self.port, "exit_code": getattr(self, "exit_code", None)}
 
 
-def _managed_artifact_identity(profile, selected):
+def _managed_artifact_identity(profile, selected, artifact_root=None):
     from app.core import model_server
+    if artifact_root is not None:
+        paths = verified_artifact_paths(profile, artifact_root)
+        if any(paths[role] != (model_server.ROOT_DIR / selected[key]).resolve() for role, key in (("model", "model_path"), ("mmproj", "mmproj_path"), ("runtime", "server_path"))):
+            raise ProviderIntegrityError("managed incumbent selected paths changed")
+        return {item["role"]: item["sha256"] for item in profile["artifacts"] if item["role"] in {"model", "mmproj", "runtime"}}
     result = {}
     for role, key in (("model", "model_path"), ("mmproj", "mmproj_path"), ("runtime", "server_path")):
         path = (model_server.ROOT_DIR / selected[key]).resolve()
@@ -483,10 +491,11 @@ class _ManagedIncumbentSession:
     def __init__(self, profile, artifact_root, session_root, scope_name):
         from app.core import model_server
         self.profile, self.scope_name = profile, scope_name
+        self.artifact_root = artifact_root
         self.selected = model_server.profile_for_stage("understanding", "qwen3_vl_8b_q4_k_m")
-        self.hashes = _managed_artifact_identity(profile, self.selected)
+        self.hashes = _managed_artifact_identity(profile, self.selected, self.artifact_root)
         self.port = self.selected["port"]
-        self.lease = model_server.ensure_and_acquire_scoped_qwen_model_lease(stage="understanding", profile_id="qwen3_vl_8b_q4_k_m", request_id="goal-binding-" + session_root.name, wait_seconds=profile["timeout_seconds"], profile_validator=lambda selected: _managed_artifact_identity(profile, selected))
+        self.lease = model_server.ensure_and_acquire_scoped_qwen_model_lease(stage="understanding", profile_id="qwen3_vl_8b_q4_k_m", request_id="goal-binding-" + session_root.name, wait_seconds=profile["timeout_seconds"], profile_validator=lambda selected: _managed_artifact_identity(profile, selected, self.artifact_root))
         self.identity = self.lease["server_process_identity"]
         self.closed = False
 
@@ -506,7 +515,7 @@ class _ManagedIncumbentSession:
         if not self.closed:
             release = model_server.release_scoped_qwen_model_lease(self.lease, "goal_binding_arm_complete")
             model_server._validate_exact_qwen_cleanup_evidence(release, self.lease)
-            if _managed_artifact_identity(self.profile, self.selected) != self.hashes:
+            if _managed_artifact_identity(self.profile, self.selected, self.artifact_root) != self.hashes:
                 raise ProviderIntegrityError("managed incumbent artifact changed during arm")
             self.release = release
             self.closed = True
