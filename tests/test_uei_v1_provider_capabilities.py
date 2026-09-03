@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
-from app.learn.hybrid.contracts import stable_candidate_id
+from app.learn.hybrid.contracts import stable_candidate_id, validate_omni_inventory
 from app.learn.recognition.uei.canonical import seal_immutable
 from app.learn.recognition.uei.contracts import UEIValidationError
 from app.learn.recognition.uei.provider_adapters import (
@@ -583,7 +584,7 @@ def test_semantic_evidence_is_copied_before_geometry_or_order_mutation():
     request = _bound_semantic_request(**values)
     values["omni_inventory"]["candidates"][0]["bbox_original"][0] = 11
     values["omni_inventory"]["candidates"].reverse()
-    assert request.omni_inventory["candidates"][0]["bbox_original"] == (10, 10, 20, 20)
+    assert request.omni_inventory["candidates"][0]["bbox_original"] == [10, 10, 20, 20]
     assert request.ordered_candidate_ids == tuple(
         candidate["candidate_id"] for candidate in request.omni_inventory["candidates"]
     )
@@ -602,3 +603,33 @@ def test_grounding_request_is_copied_before_state_or_authority_mutation():
     provider_request["nested"]["execute"] = True
     assert request.provider_request["state"] == "BOUND"
     reject_authority_shaped_payload(request.provider_request)
+
+
+
+def test_frozen_discovery_capture_keeps_existing_omni_delegate_json_contract():
+    request = _discovery_request()
+    assert isinstance(request.capture.image_size, dict)
+    payload = json.dumps({
+        "input_path": str(request.capture.local_path),
+        "image_size": request.capture.image_size,
+    })
+    assert json.loads(payload)["image_size"] == {"width": 100, "height": 100}
+
+
+def test_frozen_semantic_and_grounding_evidence_support_deepcopy_materialization():
+    semantic_request = _bound_semantic_request()
+    inventory = deepcopy(semantic_request.omni_inventory)
+    assert isinstance(inventory, dict)
+    assert isinstance(inventory["candidates"], list)
+    assert validate_omni_inventory(inventory)["candidates"]
+
+    grounding_request = GroundingRefinementRequestV1(
+        envelope=envelope("grounding_refinement"),
+        candidate_id="candidate/one",
+        candidate_bbox=(10, 10, 20, 20),
+        permitted_roi=(10, 10, 20, 20),
+        provider_request={"state": "BOUND", "nested": {"evidence": "safe"}},
+    )
+    provider_request = deepcopy(grounding_request.provider_request)
+    assert isinstance(provider_request, dict)
+    assert provider_request == {"state": "BOUND", "nested": {"evidence": "safe"}}

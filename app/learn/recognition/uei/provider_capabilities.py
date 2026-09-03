@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 import math
 import re
 from threading import Event
-from types import MappingProxyType
 from typing import Protocol
 
 from app.learn.hybrid.contracts import validate_capture_identity, validate_omni_inventory
@@ -60,10 +60,72 @@ def _same_ref(left: dict[str, str], right: dict[str, str], *, name: str) -> None
         raise UEIValidationError(f"provider_capability_{name}_mismatch")
 
 
+class _FrozenDict(dict[object, object]):
+    """保持 dict/JSON 兼容性、但不允许就地修改的防御性副本。"""
+
+    __slots__ = ()
+
+    def __init__(self, value: Mapping[object, object]) -> None:
+        dict.__init__(self, value)
+
+    @staticmethod
+    def _immutable(*args: object, **kwargs: object) -> None:
+        raise TypeError("provider capability evidence is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+    def copy(self) -> dict[object, object]:
+        return dict(self)
+
+    def __deepcopy__(self, memo: dict[int, object]) -> dict[object, object]:
+        return deepcopy(dict(self), memo)
+
+
+class _FrozenList(list[object]):
+    """保持 list/JSON 兼容性的不可变证据序列。"""
+
+    __slots__ = ()
+
+    def __init__(self, value: list[object] | tuple[object, ...]) -> None:
+        list.__init__(self, value)
+
+    @staticmethod
+    def _immutable(*args: object, **kwargs: object) -> None:
+        raise TypeError("provider capability evidence is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    __iadd__ = _immutable
+    __imul__ = _immutable
+    append = _immutable
+    clear = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    reverse = _immutable
+    sort = _immutable
+
+    def copy(self) -> list[object]:
+        return list(self)
+
+    def __deepcopy__(self, memo: dict[int, object]) -> list[object]:
+        return deepcopy(list(self), memo)
+
+
 def _freeze(value: object) -> object:
     if isinstance(value, Mapping):
-        return MappingProxyType({key: _freeze(child) for key, child in value.items()})
-    if isinstance(value, (list, tuple)):
+        return _FrozenDict({key: _freeze(child) for key, child in value.items()})
+    if isinstance(value, list):
+        return _FrozenList([_freeze(child) for child in value])
+    if isinstance(value, tuple):
         return tuple(_freeze(child) for child in value)
     return value
 
