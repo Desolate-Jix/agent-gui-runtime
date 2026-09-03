@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 from hashlib import sha256
 from pathlib import Path
 import subprocess
@@ -33,10 +34,42 @@ def test_cli_actual_requires_explicit_model_start_flag() -> None:
     assert result.returncode != 0 and "operator-approved-model-start" in result.stderr
 
 
-def test_cli_actual_flag_reports_exact_managed_lifecycle_blocker() -> None:
-    result = _run("--mode", "actual", "--operator-approved-model-start", "--artifact-dir", ".artifacts/nope")
-    assert result.returncode != 0
-    assert "BLOCKED" in result.stderr and "managed compact Qwen" in result.stderr
+def test_cli_actual_flag_reaches_only_injected_lazy_factory(tmp_path: Path, monkeypatch) -> None:
+    from scripts import run_simple_native_provider_smoke as cli
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setenv("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
+    monkeypatch.setattr(
+        cli,
+        "_arguments",
+        lambda: argparse.Namespace(
+            mode="actual",
+            config=ROOT / "configs/benchmarks/simple_native_provider_smoke_v1.json",
+            artifact_dir=tmp_path / "actual",
+            replay_dir=None,
+            operator_approved_model_start=True,
+        ),
+    )
+
+    def factory(*, config, artifact_dir):
+        calls.append({"config": config, "artifact_dir": artifact_dir})
+        return cli._replay_slots(ROOT / "tests/fixtures/simple_native_provider_smoke/replay")
+
+    assert cli.main(actual_slots_factory=factory) == 0
+    assert len(calls) == 1
+    assert "scorer_gold_path" not in calls[0]["config"]
+    assert (tmp_path / "actual" / "provider-diagnostic.json").is_file()
+
+
+def test_config_names_exact_launchable_provider_profiles() -> None:
+    config = json.loads(
+        (ROOT / "configs/benchmarks/simple_native_provider_smoke_v1.json").read_text(encoding="utf-8")
+    )
+    assert config["provider"]["profile_ids"] == {
+        "omni": "local.runtime/omniparser/shadow-v2",
+        "qwen": "qwen3_vl_8b_q4_k_m",
+        "vista": "vista_4b_transformers",
+    }
 
 
 def test_config_contains_no_holdout_and_no_scorer_fields_in_provider_projection() -> None:

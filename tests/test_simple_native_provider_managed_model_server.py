@@ -5,6 +5,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _qwen_projection() -> dict[str, object]:
     return {
@@ -186,7 +188,10 @@ def test_vista_bare_point_wire_uses_one_user_message_and_reuses_exact_lease(monk
         assert body["temperature"] == 0.0 and body["max_tokens"] == 32
         assert len(body["messages"]) == 1 and body["messages"][0]["role"] == "user"
         content = body["messages"][0]["content"]
-        assert content[0] == {"type": "text", "text": "button labeled 'Open'"}
+        assert content[0] == {
+            "type": "text",
+            "text": "button labeled 'Open'\nReturn only [x,y] normalized to 0..1000.",
+        }
         assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
         assert "response_format" not in body
     for index in range(3):
@@ -195,3 +200,38 @@ def test_vista_bare_point_wire_uses_one_user_message_and_reuses_exact_lease(monk
             "open",
             "read",
         ]
+
+
+def test_vista_exact_lease_rejects_mutated_profile_before_process_or_wire(monkeypatch) -> None:
+    from app.core import model_server
+
+    profile = {
+        "profile_id": "vista-test",
+        "endpoint": "http://127.0.0.1:13244/v1/chat/completions",
+        "port": 13244,
+    }
+    identities = [{"pid": 123, "create_time_ns": 456}]
+    lease = {
+        "contract_version": "hybrid_vista_model_lease_v2",
+        "provider": "vista",
+        "incarnation_id": model_server.content_sha256(
+            {"profile_id": "vista-test", "process_identities": identities}
+        ),
+        "profile": profile,
+        "process_identities": identities,
+        "process_scope_name": "scope-vista",
+        "process_scope_acquisition": {
+            "contract_version": "hybrid_process_scope_acquisition_v1",
+            "scope_name": "scope-vista",
+            "member_pids": [123],
+            "process_identities": identities,
+        },
+    }
+    monkeypatch.setattr(
+        model_server,
+        "profile_for_stage",
+        lambda _stage, _profile_id: {**profile, "endpoint": "http://127.0.0.1:1/v1/chat/completions"},
+    )
+
+    with pytest.raises(ValueError, match="installed configuration"):
+        model_server._profile_for_hybrid_vista_model_lease(lease)

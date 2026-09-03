@@ -90,9 +90,9 @@
       "vista": "vista_bare_pair_v1"
     },
     "profile_ids": {
-      "omni": "omniparser",
-      "qwen": "qwen",
-      "vista": "vista"
+      "omni": "local.runtime/omniparser/shadow-v2",
+      "qwen": "qwen3_vl_8b_q4_k_m",
+      "vista": "vista_4b_transformers"
     }
   },
   "scorer_gold_path": "tests/fixtures/portfolio_hybrid_v1_1/gold.v1.json",

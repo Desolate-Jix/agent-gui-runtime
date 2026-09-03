@@ -765,6 +765,7 @@ def run_hybrid_vista_bare_point(
         max_tokens = int(profile.get("max_new_tokens") or 32)
     except (TypeError, ValueError) as error:
         raise ValueError("VISTA max token limit is invalid") from error
+    wire_prompt = prompt + "\nReturn only [x,y] normalized to 0..1000."
     body_payload = {
         "model": str(profile.get("model_name") or profile.get("model_id") or "vista"),
         "temperature": 0.0,
@@ -773,7 +774,7 @@ def run_hybrid_vista_bare_point(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": prompt},
+                    {"type": "text", "text": wire_prompt},
                     {"type": "image_url", "image_url": {"url": image_url}},
                 ],
             }
@@ -1223,10 +1224,10 @@ def ensure_and_acquire_scoped_qwen_model_lease(
 ) -> dict[str, Any]:
     """不创建 benchmark owner/materialization 的精确 scoped Qwen 租约。"""
     owner_request_id = _normalized_qwen_request_id(request_id)
-    paths = _qwen_acquisition_artifact_paths(owner_request_id)
-    if any(path.exists() for path in paths.values()):
-        raise ValueError("scoped Qwen request collides with benchmark acquisition artifacts")
     with _qwen_acquisition_lock():
+        paths = _qwen_acquisition_artifact_paths(owner_request_id)
+        if any(path.exists() for path in paths.values()):
+            raise ValueError("scoped Qwen request collides with benchmark acquisition artifacts")
         profile = deepcopy(profile_for_stage(stage, profile_id))
         if profile_validator is not None:
             profile_validator(deepcopy(profile))
@@ -5016,6 +5017,11 @@ def _profile_for_hybrid_vista_model_lease(model_lease: object) -> dict[str, Any]
         != content_sha256({"profile_id": profile["profile_id"], "process_identities": identities})
     ):
         raise ValueError("exact Hybrid VISTA model lease is invalid")
+    installed_profile = _public_profile(
+        profile_for_stage("grounding", str(profile["profile_id"]))
+    )
+    if installed_profile != profile:
+        raise ValueError("Hybrid VISTA model lease profile no longer matches installed configuration")
     if any(_current_process_identity(identity["pid"]) != identity for identity in identities):
         raise RuntimeError("VISTA provider process ownership changed before request")
     from app.learn.hybrid.windows_process_scope import WindowsProcessScope

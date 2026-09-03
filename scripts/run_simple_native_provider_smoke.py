@@ -1,6 +1,7 @@
 """CLI for the deliberately offline-first simple-native diagnostic."""
 from __future__ import annotations
 import argparse
+from copy import deepcopy
 from hashlib import sha256
 import json
 from collections import deque
@@ -95,22 +96,33 @@ def _replay_slots(replay_dir: Path):
         return values.popleft()
     return SimpleNativeSlots(omni=lambda _: take(omni,"omni.jsonl"), qwen=lambda _, __: take(qwen,"qwen.jsonl"), vista=lambda _, __: str(take(vista,"vista.jsonl")))
 
-def main() -> int:
+def main(*, actual_slots_factory=None) -> int:
     args=_arguments()
     try:
         config=_config(args.config); preflight(config)
         if args.mode == 'preflight': print('preflight: validated five regression screens; no model callers constructed'); return 0
         if args.mode == 'actual':
             if not args.operator_approved_model_start: raise ValueError('actual requires --operator-approved-model-start')
-            from app.learn.hybrid.simple_native_callers import actual_lifecycle_blocker_message
-            raise ValueError(actual_lifecycle_blocker_message())
-        if args.artifact_dir is None or args.replay_dir is None: raise ValueError('replay requires --artifact-dir and --replay-dir')
+            if args.artifact_dir is None: raise ValueError('actual requires --artifact-dir')
+            if actual_slots_factory is None:
+                from app.learn.hybrid.simple_native_callers import make_actual_simple_native_slots
+                actual_slots_factory = make_actual_simple_native_slots
+            slots = actual_slots_factory(
+                config={
+                    "provider": deepcopy(config["provider"]),
+                    "limits": deepcopy(config["limits"]),
+                },
+                artifact_dir=args.artifact_dir,
+            )
+        else:
+            if args.artifact_dir is None or args.replay_dir is None: raise ValueError('replay requires --artifact-dir and --replay-dir')
+            slots = _replay_slots(args.replay_dir)
         from app.learn.hybrid.simple_native_smoke import run_simple_native_regression_diagnostic, score_simple_native_regression
-        artifact=run_simple_native_regression_diagnostic(cases=_cases(config),slots=_replay_slots(args.replay_dir),artifact_dir=args.artifact_dir)
+        artifact=run_simple_native_regression_diagnostic(cases=_cases(config),slots=slots,artifact_dir=args.artifact_dir)
         report=score_simple_native_regression(provider_artifact=artifact, gold_path=ROOT / str(config["scorer_gold_path"]))
         (args.artifact_dir / "regression-report.json").write_text(json.dumps({"provider_artifact_sha256": report.provider_artifact_sha256, "correct_selected": report.correct_selected, "wrong_selected": report.wrong_selected, "abstained": report.abstained, "denominator": report.target_count, "regression_diagnostic_only": True, "promotion_eligible": False}, ensure_ascii=False), encoding="utf-8")
-        print(f'replay: {artifact.path}')
+        print(f'{args.mode}: {artifact.path}')
         return 0
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         print(str(error),file=sys.stderr); return 2
 if __name__ == '__main__': raise SystemExit(main())
