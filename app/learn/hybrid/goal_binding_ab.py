@@ -520,13 +520,19 @@ def run_goal_binding_arm(
                         raw = arm.call(case.image_path, request)
                     except TimeoutError as exc:
                         error = str(exc)
+                        raw_text = _raw_text(raw)
+                        native_ref["sha256"] = _text_hash(raw_text)
                         binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="provider_timeout")
                         binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
                     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                         error = str(exc)
+                        raw_text = _raw_text(raw)
+                        native_ref["sha256"] = _text_hash(raw_text)
                         binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="malformed_native_output")
                         binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
                     else:
+                        raw_text = _raw_text(raw)
+                        native_ref["sha256"] = _text_hash(raw_text)
                         # 此验证必须位于解析和适配失败处理之外。
                         _verify_capture_freshness(capture, "GoalBindingProvider")
                         try:
@@ -548,7 +554,6 @@ def run_goal_binding_arm(
                                 binder_metrics["schema_valid"] = int(binder_metrics["schema_valid"]) + 1
                 finally:
                     raw_text = _raw_text(raw)
-                    native_ref["sha256"] = _text_hash(raw_text)
                     binder_metrics["latencies"].append(round((perf_counter() - started) * 1000, 3))
                     binder_metrics["raw_output_bytes"] = int(binder_metrics["raw_output_bytes"]) + len(raw_text.encode("utf-8"))
                 raw_text = _raw_text(raw)

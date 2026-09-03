@@ -271,8 +271,22 @@ def test_runner_hashes_the_exact_persisted_native_raw_and_parsed_values(tmp_path
     binder = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "binder")
     assert binder["native_raw"] == raw
     assert binder["native_raw_sha256"] == sha256(raw.encode("utf-8")).hexdigest()
+    assert binder["canonical_binding"]["native_output_ref"]["sha256"] == binder["native_raw_sha256"]
     assert binder["native_parsed_sha256"] == sha256(json.dumps(binder["native_parsed"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     assert binder["canonical_binding_sha256"] == sha256(json.dumps(binder["canonical_binding"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize("call", [
+    lambda _image, _request: "malformed",
+    lambda _image, _request: (_ for _ in ()).throw(TimeoutError("timeout")),
+    lambda _image, _request: (_ for _ in ()).throw(ValueError("provider failure")),
+])
+def test_canonical_native_ref_matches_persisted_raw_on_all_failure_paths(tmp_path: Path, call) -> None:
+    arm = _arm(call=call, adapt=_native_adapter)
+    artifact = _run(tmp_path, arm=arm)
+    for case in artifact.cases:
+        binder = next(entry for entry in case["trace"] if entry["slot"] == "binder")
+        assert binder["canonical_binding"]["native_output_ref"]["sha256"] == binder["native_raw_sha256"]
 
 
 def test_mutating_adapter_copy_or_forging_a_bound_candidate_cannot_change_authority(tmp_path: Path) -> None:
