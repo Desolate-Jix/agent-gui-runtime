@@ -69,7 +69,8 @@ def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = Fals
     except ValueError as error:
         raise ValueError("worker_output_invalid") from error
     normalized: list[dict[str, object]] = []
-    for index, item in enumerate(items):
+    official_items = project_omni_official_items(items)["items"]
+    for index, item in enumerate(official_items):
         if not isinstance(item, dict):
             raise ValueError("worker_output_invalid")
         bbox = item.get("bbox")
@@ -140,3 +141,11 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def project_omni_official_items(items: list[dict[str, object]]) -> dict[str, object]:
+    """在 runtime adapter 附加字段前，保留官方 Omni 的四个 native 字段。"""
+    return {"items": [
+        {"bbox": item.get("bbox"), "type": item.get("type"), "content": item.get("content"), "interactivity": item.get("interactivity")}
+        for item in items
+    ]}
