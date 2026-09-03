@@ -433,6 +433,9 @@ def test_qwen_compatibility_adapter_uses_exact_managed_envelope_and_current_runn
         "app.core.model_server._profile_for_qwen_model_lease",
         lambda value: {"profile_id": value["profile_id"]},
     )
+    monkeypatch.setattr(
+        "app.core.model_server.qwen_model_lease_is_active", lambda value: False,
+    )
     adapter = QwenSemanticBindingCompatibilityAdapter(
         bundle_ref=bundle_ref, model_runner=runner,
     )
@@ -452,8 +455,13 @@ def test_qwen_compatibility_adapter_uses_exact_managed_envelope_and_current_runn
     outcome = invoke_with_capability_envelope(
         request=request, registry=registry, adapter=adapter, invoke=adapter.invoke,
         validate_result=lambda result, _: request.validate_result(result),
-        cleanup=lambda: {"status": "released", "lease": lease},
-        validate_cleanup=lambda _: CapabilityCleanupOutcomeV1("clean", None),
+        cleanup=lambda: {
+            "status": "released", "lease": lease,
+            "shared_server_retained": True,
+            "server_termination": "not_required_shared",
+            "reason": "test-shared-server",
+        },
+        validate_cleanup=adapter.validate_cleanup,
     )
 
     assert outcome.promoted is True
@@ -467,6 +475,43 @@ def test_qwen_compatibility_adapter_uses_exact_managed_envelope_and_current_runn
     assert legacy["contract_version"] == "hybrid_qwen_bindings_v1"
     assert legacy["artifact_is_authorization"] is False
     assert "binding_status" not in legacy["bindings"][0]
+
+    valid_bindings = runner()["bindings"]
+    legacy_bindings = [{
+        "candidate_id": binding["candidate_id"], "role": binding["role"],
+        "label": binding["label"], "description": "legacy", "semantic_confidence": 0.9,
+        "task_relevance": 0.8, "relation": "candidate_binding", "ambiguity": None,
+    } for binding in valid_bindings]
+    raw_cases = [
+        {"bindings": valid_bindings, "padding": "x" * 5_000},
+        {"bindings": [{**valid_bindings[0], "candidate_id": "candidate/unknown"}, valid_bindings[1]]},
+        {"bindings": valid_bindings[:-1]},
+        {"bindings": [valid_bindings[0], {**valid_bindings[1], "candidate_id": valid_bindings[0]["candidate_id"]}]},
+        {"bindings": legacy_bindings, "ambiguity_sets": [{
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": [candidate["candidate_id"] for candidate in facts["inventory"]["candidates"]],
+        }, {
+            "contract_version": "hybrid_semantic_ambiguity_set_v1",
+            "candidate_ids": [candidate["candidate_id"] for candidate in facts["inventory"]["candidates"]],
+        }], "orphan_semantics": []},
+        {"bindings": legacy_bindings, "ambiguity_sets": [], "orphan_semantics": [{
+            "semantic_id": "candidate/unknown", "role": "text", "label": "orphan",
+            "description": "invalid", "reason": "ORPHAN_SEMANTIC",
+        }]},
+    ]
+    for raw in raw_cases:
+        adapter._model_runner = lambda **_: raw
+        rejected = invoke_with_capability_envelope(
+            request=request, registry=registry, adapter=adapter, invoke=adapter.invoke,
+            validate_result=lambda result, _: request.validate_result(result),
+            cleanup=lambda: {
+                "status": "released", "lease": lease, "shared_server_retained": True,
+                "server_termination": "not_required_shared", "reason": "test-shared-server",
+            },
+            validate_cleanup=adapter.validate_cleanup,
+        )
+        assert rejected.promoted is False
+        assert rejected.failure is not None and rejected.failure.stage == "invocation"
 
 
 def test_qwen_compatibility_adapter_rejects_stale_profile_or_incarnation_before_runner(
@@ -488,3 +533,79 @@ def test_qwen_compatibility_adapter_rejects_stale_profile_or_incarnation_before_
             descriptor={"profile_id": "profile/local.qwen3"},
             bundle_ref={"id": "bundle/local.qwen", "content_sha256": "a" * 64},
         )
+
+
+def test_qwen_cleanup_requires_terminal_receipt_and_inactive_exact_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.learn.hybrid.provider_capability_adapters import QwenSemanticBindingCompatibilityAdapter
+
+    lease = {
+        "contract_version": "managed_qwen_model_lease_v1",
+        "lease_id": "lease/qwen",
+        "owner_request_id": "owner/qwen",
+        "profile_id": "profile/local.qwen3",
+        "incarnation_id": "incarnation/qwen",
+        "server_base_url": "http://127.0.0.1:18080",
+        "server_model_id": "model/qwen3",
+        "profile_sha256": "9" * 64,
+        "server_process_identity": {"pid": 1, "create_time_ns": 1},
+    }
+    adapter = QwenSemanticBindingCompatibilityAdapter(
+        bundle_ref={"id": "bundle/local.qwen", "content_sha256": "a" * 64},
+        model_runner=lambda **_: pytest.fail("cleanup must not run a model"),
+    )
+    shared = {
+        "status": "released",
+        "lease": lease,
+        "shared_server_retained": True,
+        "server_termination": "not_required_shared",
+        "reason": "completed",
+    }
+    monkeypatch.setattr("app.core.model_server.qwen_model_lease_is_active", lambda _: True)
+    assert adapter.validate_cleanup(
+        receipt=shared, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
+    ).status == "indeterminate"
+
+    monkeypatch.setattr("app.core.model_server.qwen_model_lease_is_active", lambda _: False)
+    assert adapter.validate_cleanup(
+        receipt=shared, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
+    ).status == "clean"
+    assert adapter.validate_cleanup(
+        receipt={"status": "released", "lease": lease},
+        lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
+    ).status == "indeterminate"
+
+    external = {**shared, "server_termination": "not_owned", "reason": "external"}
+    assert adapter.validate_cleanup(
+        receipt=external, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
+    ).status == "clean"
+    owned = {
+        "status": "released", "lease": lease, "shared_server_retained": False,
+        "server_termination": "verified_exact_process_exited",
+        "release": {"status": "proven_absent", "identity": None, "reason": "no_such_process"},
+        "after": {"status": "stopped"},
+        "process_identity": lease["server_process_identity"],
+        "hybrid_descendant_cleanup": {"status": "verified"},
+        "hybrid_process_scope_name": "scope/qwen",
+        "hybrid_process_scope_acquisition": {"contract_version": "hybrid_process_scope_acquisition_v1"},
+        "hybrid_process_scope_cleanup": {"cleanup_status": "verified"},
+    }
+    assert adapter.validate_cleanup(
+        receipt=owned, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
+    ).status == "clean"
+    for invalid in (
+        {**shared, "status": "pending"},
+        {**shared, "shared_server_retained": False},
+        {**owned, "process_identity": {"pid": 2, "create_time_ns": 1}},
+    ):
+        assert adapter.validate_cleanup(
+            receipt=invalid, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
+        ).status == "indeterminate"
+    monkeypatch.setattr(
+        "app.core.model_server.qwen_model_lease_is_active",
+        lambda _: (_ for _ in ()).throw(RuntimeError("lease observer failed")),
+    )
+    assert adapter.validate_cleanup(
+        receipt=shared, lease=lease, bundle_ref=adapter.bundle_ref, invocation_id="invocation/qwen",
+    ).status == "indeterminate"

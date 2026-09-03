@@ -224,18 +224,19 @@ def _candidate_ids_from_inventory(
 
 
 def reject_authority_shaped_payload(value: object) -> None:
-    """Reject nested provider data that attempts to carry execution authority."""
-    if isinstance(value, Mapping):
-        forbidden = sorted(set(value) & AUTHORITY_SHAPED_KEYS)
-        if forbidden:
-            raise UEIValidationError(
-                f"provider_capability_non_authorizing_{forbidden[0]}"
-            )
-        for child in value.values():
-            reject_authority_shaped_payload(child)
-    elif isinstance(value, (list, tuple)):
-        for child in value:
-            reject_authority_shaped_payload(child)
+    """拒绝任意深度携带执行权限键的 provider 数据。"""
+    stack = [value]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, Mapping):
+            forbidden = sorted(set(current) & AUTHORITY_SHAPED_KEYS)
+            if forbidden:
+                raise UEIValidationError(
+                    f"provider_capability_non_authorizing_{forbidden[0]}"
+                )
+            stack.extend(current.values())
+        elif isinstance(current, (list, tuple)):
+            stack.extend(current)
 
 
 def effective_provider_budget(
@@ -374,10 +375,34 @@ def _string_lengths(value: object) -> list[int]:
     return []
 
 
-def _enforce_result_budget(result: object, budget: ProviderRunBudget) -> None:
-    payload = _json_value(result)
+def enforce_provider_native_output_budget(
+    value: object, budget: ProviderRunBudget,
+) -> None:
+    """在 adapter 丢弃或归一化 native 数据前执行统一输出预算检查。"""
+    if not isinstance(budget, ProviderRunBudget):
+        raise UEIValidationError("provider_capability_invalid_budget")
+    payload = _json_value(value)
     if len(canonical_json_bytes(payload)) > budget.max_output_bytes:
         raise UEIValidationError("provider_capability_output_bytes_exceeded")
+    if isinstance(payload, Mapping):
+        item_count = sum(
+            len(payload.get(field, ()))
+            for field in ("items", "bindings", "ambiguity_sets", "orphan_semantics")
+            if isinstance(payload.get(field), list)
+        )
+    elif isinstance(payload, list):
+        item_count = len(payload)
+    else:
+        item_count = 0
+    if item_count > budget.max_element_count:
+        raise UEIValidationError("provider_capability_output_items_exceeded")
+    if any(length > budget.max_string_length for length in _string_lengths(payload)):
+        raise UEIValidationError("provider_capability_output_string_exceeded")
+
+
+def _enforce_result_budget(result: object, budget: ProviderRunBudget) -> None:
+    enforce_provider_native_output_budget(result, budget)
+    payload = _json_value(result)
     duration_ms = _result_field(result, "duration_ms", 0)
     resource_units = _result_field(result, "resource_units", 0)
     if (
@@ -780,6 +805,7 @@ class SemanticBindingResultV1:
     bindings: tuple[SemanticBindingItemV1, ...]
     duration_ms: int
     resource_units: int
+    compatibility_payload: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         _ref(self.bundle_ref, name="bundle")
@@ -792,6 +818,20 @@ class SemanticBindingResultV1:
             raise UEIValidationError("provider_capability_candidate_duplicate")
         _non_negative_int(self.duration_ms, name="duration_ms")
         _non_negative_int(self.resource_units, name="resource_units")
+        if self.compatibility_payload is not None:
+            if (
+                not isinstance(self.compatibility_payload, dict)
+                or set(self.compatibility_payload)
+                != {"contract_version", "bindings", "ambiguity_sets", "orphan_semantics"}
+                or self.compatibility_payload.get("contract_version")
+                != "qwen_legacy_semantic_projection_v1"
+            ):
+                raise UEIValidationError("provider_capability_invalid_compatibility_payload")
+            reject_authority_shaped_payload(self.compatibility_payload)
+            _json_value(self.compatibility_payload)
+            object.__setattr__(
+                self, "compatibility_payload", _freeze(self.compatibility_payload)
+            )
         object.__setattr__(self, "bundle_ref", _freeze(self.bundle_ref))
         object.__setattr__(self, "capture_lineage_ref", _freeze(self.capture_lineage_ref))
 

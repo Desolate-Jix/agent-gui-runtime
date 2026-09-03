@@ -20,6 +20,7 @@ from app.learn.recognition.uei.provider_capabilities import (
     SemanticBindingRequestV1,
     SemanticBindingResultV1,
     deterministic_neutral_source_item_id,
+    enforce_provider_native_output_budget,
     reject_authority_shaped_payload,
 )
 from app.learn.hybrid.qwen_binding import (
@@ -238,14 +239,18 @@ class QwenSemanticBindingCompatibilityAdapter:
         bundle_ref: dict[str, str],
         invocation_id: str,
     ) -> CapabilityCleanupOutcomeV1:
-        if (
-            self.bundle_ref != dict(bundle_ref)
-            or receipt.get("status") != "released"
-            or receipt.get("lease") != lease
-            or not invocation_id
-        ):
+        """只接受真实 managed Qwen release 的终态，并重新证明 owner lease 已失效。"""
+        if self.bundle_ref != dict(bundle_ref) or not invocation_id:
             return CapabilityCleanupOutcomeV1("indeterminate", None)
-        return CapabilityCleanupOutcomeV1("clean", receipt)
+        try:
+            valid_terminal = _validate_qwen_release_terminal_receipt(receipt, lease)
+            from app.core.model_server import qwen_model_lease_is_active
+
+            if qwen_model_lease_is_active(lease):
+                return CapabilityCleanupOutcomeV1("indeterminate", None)
+        except (RuntimeError, TypeError, ValueError):
+            return CapabilityCleanupOutcomeV1("indeterminate", None)
+        return CapabilityCleanupOutcomeV1("clean", valid_terminal)
 
     def invoke(self, request: SemanticBindingRequestV1) -> SemanticBindingResultV1:
         if not isinstance(request, SemanticBindingRequestV1):
@@ -287,6 +292,7 @@ class QwenSemanticBindingCompatibilityAdapter:
             and request.envelope.cancellation_event.is_set()
         ):
             raise QwenBindingCancelled("Qwen candidate binding cancelled")
+        enforce_provider_native_output_budget(raw, request.envelope.budget)
         result = normalize_qwen_semantic_result(
             raw=raw,
             inventory=sealed_inventory,
@@ -295,3 +301,54 @@ class QwenSemanticBindingCompatibilityAdapter:
             context_ref=request.context_ref,
         )
         return request.validate_result(result)
+
+
+def _validate_qwen_release_terminal_receipt(
+    receipt: object, lease: dict[str, object],
+) -> dict[str, object]:
+    if not isinstance(receipt, dict) or receipt.get("lease") != lease:
+        raise ValueError("Qwen release receipt lease mismatch")
+    shared_fields = {
+        "status", "lease", "shared_server_retained", "server_termination", "reason",
+    }
+    if set(receipt) == shared_fields:
+        if (
+            receipt.get("status") != "released"
+            or receipt.get("shared_server_retained") is not True
+            or receipt.get("server_termination")
+            not in {"not_required_shared", "not_owned"}
+            or not isinstance(receipt.get("reason"), str)
+            or not receipt["reason"]
+        ):
+            raise ValueError("Qwen shared release receipt is not terminal")
+        return dict(receipt)
+    owned_fields = {
+        "status", "lease", "shared_server_retained", "server_termination", "release",
+        "after", "process_identity", "hybrid_descendant_cleanup",
+        "hybrid_process_scope_name", "hybrid_process_scope_acquisition",
+        "hybrid_process_scope_cleanup",
+    }
+    if set(receipt) != owned_fields:
+        raise ValueError("Qwen release receipt shape is invalid")
+    release = receipt.get("release")
+    if (
+        receipt.get("status") != "released"
+        or receipt.get("shared_server_retained") is not False
+        or receipt.get("server_termination") != "verified_exact_process_exited"
+        or receipt.get("process_identity") != lease.get("server_process_identity")
+        or not isinstance(release, dict)
+        or set(release) != {"status", "identity", "reason"}
+        or release.get("status") != "proven_absent"
+        or release.get("identity") is not None
+        or release.get("reason") not in {"no_such_process", "not_running"}
+        or not isinstance(receipt.get("after"), dict)
+        or not isinstance(receipt.get("hybrid_descendant_cleanup"), dict)
+        or receipt["hybrid_descendant_cleanup"].get("status") != "verified"
+        or not isinstance(receipt.get("hybrid_process_scope_name"), str)
+        or not receipt["hybrid_process_scope_name"]
+        or not isinstance(receipt.get("hybrid_process_scope_acquisition"), dict)
+        or not isinstance(receipt.get("hybrid_process_scope_cleanup"), dict)
+        or receipt["hybrid_process_scope_cleanup"].get("cleanup_status") != "verified"
+    ):
+        raise ValueError("Qwen owned release receipt is not terminal")
+    return dict(receipt)

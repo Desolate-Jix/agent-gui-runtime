@@ -885,7 +885,9 @@ def test_legacy_qwen_wire_response_normalizes_to_current_hybrid_qwen_bindings_v1
 
     from app.learn.recognition.uei.canonical import canonical_json_bytes
 
-    assert canonical_json_bytes(parsed) == canonical_json_bytes(current)
+    assert parsed["bindings"] == legacy_wire["bindings"]
+    assert parsed["ambiguity_sets"] == legacy_wire["ambiguity_sets"]
+    assert parsed["orphan_semantics"] == legacy_wire["orphan_semantics"]
     assert all("binding_status" not in binding for binding in parsed["bindings"])
 
 
@@ -910,6 +912,80 @@ def test_legacy_qwen_wire_rejects_nested_authority_alias_before_projection() -> 
     }
 
     with pytest.raises(ValueError, match="forbidden Qwen field"):
+        parse_qwen_candidate_bindings(
+            raw, inventory,
+            context_ref={"id": "hybrid-context/test", "content_sha256": "5" * 64},
+        )
+
+
+def test_legacy_qwen_projection_preserves_frozen_precompact_artifact_bytes() -> None:
+    from app.learn.hybrid.contracts import SEMANTIC_TARGET_IDENTITY_VERSION, validate_qwen_bindings
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from app.learn.recognition.uei.canonical import canonical_json_bytes
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture(candidate_count=2))
+    context_ref = {"id": "hybrid-context/test", "content_sha256": "5" * 64}
+    bindings = [
+        {
+            "candidate_id": candidate["candidate_id"],
+            "role": "legacy-control",
+            "label": "Apply now",
+            "description": "legacy explanation",
+            "semantic_confidence": 0.91,
+            "task_relevance": 0.23,
+            "relation": "primary_action",
+            "ambiguity": None,
+        }
+        for candidate in inventory["candidates"]
+    ]
+    orphan_semantics = [{
+        "semantic_id": "semantic/legacy-orphan",
+        "role": "legacy-label",
+        "label": "Unmatched label",
+        "description": "legacy orphan explanation",
+        "reason": "ORPHAN_SEMANTIC",
+    }]
+    ambiguity_sets = [{
+        "contract_version": "hybrid_semantic_ambiguity_set_v1",
+        "candidate_ids": sorted(binding["candidate_id"] for binding in bindings),
+    }]
+    raw = {
+        "bindings": bindings,
+        "ambiguity_sets": ambiguity_sets,
+        "orphan_semantics": orphan_semantics,
+    }
+    expected = validate_qwen_bindings({
+        "contract_version": "hybrid_qwen_bindings_v1",
+        "capture_identity": inventory["capture_identity"],
+        "context_ref": context_ref,
+        "semantic_target_identity_version": SEMANTIC_TARGET_IDENTITY_VERSION,
+        "bindings": bindings,
+        "ambiguity_sets": ambiguity_sets,
+        "orphan_semantics": orphan_semantics,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+        "final_submit_forbidden": True,
+        "real_action_requires_gate": True,
+        "authorization_scope": "display_and_review_only",
+    }, {key: value for key, value in inventory.items() if key != "content_sha256"})
+
+    actual = parse_qwen_candidate_bindings(raw, inventory, context_ref=context_ref)
+
+    assert canonical_json_bytes(actual) == canonical_json_bytes(expected)
+
+
+def test_qwen_rejects_excessive_nested_authority_without_recursion_error() -> None:
+    from app.learn.hybrid.qwen_binding import parse_qwen_candidate_bindings
+    from tests.test_learn_hybrid_contracts import inventory_fixture
+
+    inventory = _sealed_inventory(inventory_fixture())
+    nested: object = {"send": True}
+    for _ in range(1_500):
+        nested = {"nested": nested}
+    raw = {"bindings": nested}
+
+    with pytest.raises(ValueError, match="maximum JSON depth"):
         parse_qwen_candidate_bindings(
             raw, inventory,
             context_ref={"id": "hybrid-context/test", "content_sha256": "5" * 64},
