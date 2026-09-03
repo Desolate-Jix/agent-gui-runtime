@@ -1,0 +1,112 @@
+{
+  "contract_version": "simple_native_provider_smoke_v1",
+  "screens": [
+    {
+      "case_id": "case-001",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-001.png",
+      "sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+      "image_size": [
+        1280,
+        720
+      ],
+      "target_ids": [
+        "case-001/target-1",
+        "case-001/target-2",
+        "case-001/target-3",
+        "case-001/target-4",
+        "case-001/target-5"
+      ]
+    },
+    {
+      "case_id": "case-002",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-002.png",
+      "sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "target_ids": [
+        "case-002/target-1",
+        "case-002/target-2",
+        "case-002/target-3",
+        "case-002/target-4",
+        "case-002/target-5"
+      ]
+    },
+    {
+      "case_id": "case-003",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-003.png",
+      "sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+      "image_size": [
+        1280,
+        720
+      ],
+      "target_ids": [
+        "case-003/target-1",
+        "case-003/target-2",
+        "case-003/target-3",
+        "case-003/target-4",
+        "case-003/target-5"
+      ]
+    },
+    {
+      "case_id": "case-004",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-004.png",
+      "sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+      "image_size": [
+        1280,
+        720
+      ],
+      "target_ids": [
+        "case-004/target-1",
+        "case-004/target-2",
+        "case-004/target-3",
+        "case-004/target-4",
+        "case-004/target-5"
+      ]
+    },
+    {
+      "case_id": "case-005",
+      "path": "tests/fixtures/portfolio_hybrid_v1_1/corpus/regression/case-005.png",
+      "sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "target_ids": [
+        "case-005/target-1",
+        "case-005/target-2",
+        "case-005/target-3",
+        "case-005/target-4",
+        "case-005/target-5"
+      ]
+    }
+  ],
+  "provider": {
+    "provider_corpus_path": "tests/fixtures/portfolio_hybrid_v1_1/provider-corpus.v2.json",
+    "native_contract_versions": {
+      "omni": "omni_native_v1",
+      "qwen": "qwen_ordinal_v1",
+      "vista": "vista_bare_pair_v1"
+    },
+    "profile_ids": {
+      "omni": "omniparser",
+      "qwen": "qwen",
+      "vista": "vista"
+    }
+  },
+  "scorer_gold_path": "tests/fixtures/portfolio_hybrid_v1_1/gold.v1.json",
+  "limits": {
+    "timeout_seconds": 120,
+    "max_output_bytes": 1048576
+  },
+  "prompt_hashes": {
+    "omni": "0000000000000000000000000000000000000000000000000000000000000000",
+    "qwen": "1111111111111111111111111111111111111111111111111111111111111111",
+    "vista": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "report_metadata": {
+    "regression_diagnostic_only": true,
+    "promotion_eligible": false
+  }
+}
