@@ -1,0 +1,438 @@
+"""Transient, non-authorizing provider capability contracts."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from hashlib import sha256
+import math
+import re
+from threading import Event
+from typing import Protocol
+
+from app.learn.recognition.uei.canonical import canonical_json_bytes
+from app.learn.recognition.uei.contracts import UEIValidationError
+from app.learn.recognition.uei.provider_adapters import (
+    ProviderRunBudget,
+    RestrictedCaptureLease,
+)
+from app.learn.recognition.uei.provider_bundles import PROVIDER_CAPABILITIES
+
+
+AUTHORITY_SHAPED_KEYS = frozenset({
+    "approved_to_click", "execute", "final_submit", "send", "confirm", "payment",
+})
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_CAPTURE_COORDINATE_SPACE = "capture_pixel_xyxy"
+_BINDING_STATUSES = frozenset({"BOUND", "UNBOUND", "AMBIGUOUS", "CONFLICT"})
+_MAX_ID_LENGTH = 512
+_MAX_ITEM_TEXT_LENGTH = 4_096
+_MAX_ROLE_LENGTH = 64
+_MAX_LABEL_LENGTH = 256
+_MAX_STATE_COUNT = 64
+
+
+def _non_empty_string(value: object, *, name: str, maximum: int = _MAX_ID_LENGTH) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise UEIValidationError(f"provider_capability_invalid_{name}")
+    return value
+
+
+def _sha256_string(value: object, *, name: str) -> str:
+    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise UEIValidationError(f"provider_capability_invalid_{name}")
+    return value
+
+
+def _ref(value: object, *, name: str) -> dict[str, str]:
+    if not isinstance(value, dict) or set(value) != {"id", "content_sha256"}:
+        raise UEIValidationError(f"provider_capability_invalid_{name}_ref")
+    _non_empty_string(value["id"], name=f"{name}_id")
+    _sha256_string(value["content_sha256"], name=f"{name}_content_sha256")
+    return value
+
+
+def _same_ref(left: dict[str, str], right: dict[str, str], *, name: str) -> None:
+    if left != right:
+        raise UEIValidationError(f"provider_capability_{name}_mismatch")
+
+
+def _finite_confidence(value: object, *, name: str, optional: bool = False) -> float | int | None:
+    if value is None and optional:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 1:
+        raise UEIValidationError(f"provider_capability_invalid_{name}")
+    return value
+
+
+def _xyxy(value: object, *, name: str) -> tuple[int, int, int, int]:
+    if not isinstance(value, tuple) or len(value) != 4 or any(
+        isinstance(edge, bool) or not isinstance(edge, int) or edge < 0 for edge in value
+    ):
+        raise UEIValidationError(f"provider_capability_invalid_{name}")
+    x1, y1, x2, y2 = value
+    if not x1 < x2 or not y1 < y2:
+        raise UEIValidationError(f"provider_capability_invalid_{name}")
+    return value
+
+
+def _point(value: object, *, name: str) -> tuple[float, float]:
+    if not isinstance(value, tuple) or len(value) != 2 or any(
+        isinstance(axis, bool) or not isinstance(axis, (int, float)) or not math.isfinite(axis)
+        for axis in value
+    ):
+        raise UEIValidationError(f"provider_capability_invalid_{name}")
+    return value
+
+
+def _non_negative_int(value: object, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise UEIValidationError(f"provider_capability_invalid_{name}")
+    return value
+
+
+def _candidate_ids_from_inventory(value: object) -> tuple[str, ...]:
+    if not isinstance(value, dict) or not isinstance(value.get("candidates"), list):
+        raise UEIValidationError("provider_capability_invalid_omni_inventory")
+    ids: list[str] = []
+    for candidate in value["candidates"]:
+        if not isinstance(candidate, dict):
+            raise UEIValidationError("provider_capability_invalid_omni_inventory")
+        ids.append(_non_empty_string(candidate.get("candidate_id"), name="candidate_id"))
+    if len(set(ids)) != len(ids):
+        raise UEIValidationError("provider_capability_candidate_duplicate")
+    return tuple(ids)
+
+
+def reject_authority_shaped_payload(value: object) -> None:
+    """Reject nested provider data that attempts to carry execution authority."""
+    if isinstance(value, Mapping):
+        forbidden = sorted(set(value) & AUTHORITY_SHAPED_KEYS)
+        if forbidden:
+            raise UEIValidationError(
+                f"provider_capability_non_authorizing_{forbidden[0]}"
+            )
+        for child in value.values():
+            reject_authority_shaped_payload(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            reject_authority_shaped_payload(child)
+
+
+def effective_provider_budget(
+    caller: ProviderRunBudget, bundle: ProviderRunBudget
+) -> ProviderRunBudget:
+    """Return the strictest compatible caller and sealed-bundle resource budget."""
+    if not isinstance(caller, ProviderRunBudget) or not isinstance(bundle, ProviderRunBudget):
+        raise UEIValidationError("provider_capability_invalid_budget")
+    if caller.resource_group != bundle.resource_group:
+        raise UEIValidationError("provider_capability_resource_group_mismatch")
+    return ProviderRunBudget(
+        min(caller.timeout_ms, bundle.timeout_ms),
+        min(caller.max_output_bytes, bundle.max_output_bytes),
+        min(caller.max_element_count, bundle.max_element_count),
+        min(caller.max_string_length, bundle.max_string_length),
+        caller.resource_group,
+    )
+
+
+def deterministic_neutral_source_item_id(
+    *, bundle_ref: dict[str, str], source_index: int, native_fingerprint: str
+) -> str:
+    """Derive a provider-neutral stable source identity without native payload retention."""
+    reference = _ref(bundle_ref, name="bundle")
+    if isinstance(source_index, bool) or not isinstance(source_index, int) or source_index < 0:
+        raise UEIValidationError("provider_capability_invalid_source_index")
+    fingerprint = _sha256_string(native_fingerprint, name="native_fingerprint")
+    payload = {
+        "bundle_ref": reference,
+        "native_fingerprint": fingerprint,
+        "source_index": source_index,
+    }
+    return "source/" + sha256(canonical_json_bytes(payload)).hexdigest()
+
+
+@dataclass(frozen=True)
+class ProviderInvocationEnvelopeV1:
+    bundle_ref: dict[str, str]
+    capability: str
+    invocation_id: str
+    capture_lineage_ref: dict[str, str]
+    budget: ProviderRunBudget
+    resource_lease: dict[str, object] | None = None
+    cancellation_event: Event | None = None
+
+    def __post_init__(self) -> None:
+        _ref(self.bundle_ref, name="bundle")
+        if self.capability not in PROVIDER_CAPABILITIES:
+            raise UEIValidationError("provider_capability_invalid_capability")
+        _non_empty_string(self.invocation_id, name="invocation_id")
+        _ref(self.capture_lineage_ref, name="capture_lineage")
+        if not isinstance(self.budget, ProviderRunBudget):
+            raise UEIValidationError("provider_capability_invalid_budget")
+        if self.resource_lease is not None and not isinstance(self.resource_lease, dict):
+            raise UEIValidationError("provider_capability_invalid_resource_lease")
+        if self.cancellation_event is not None and not isinstance(self.cancellation_event, Event):
+            raise UEIValidationError("provider_capability_invalid_cancellation_event")
+
+
+@dataclass(frozen=True)
+class CandidateDiscoveryRequestV1:
+    envelope: ProviderInvocationEnvelopeV1
+    capture: RestrictedCaptureLease
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.envelope, ProviderInvocationEnvelopeV1):
+            raise UEIValidationError("provider_capability_invalid_envelope")
+        if self.envelope.capability != "candidate_discovery":
+            raise UEIValidationError("provider_capability_capability_mismatch")
+        if not isinstance(self.capture, RestrictedCaptureLease):
+            raise UEIValidationError("provider_capability_invalid_capture")
+        capture_lineage = _ref(self.capture.capture_lineage_ref, name="capture_lineage")
+        _same_ref(self.envelope.capture_lineage_ref, capture_lineage, name="lineage")
+        _ref(self.capture.artifact_ref, name="artifact")
+        _sha256_string(self.capture.artifact_sha256, name="artifact_sha256")
+        _non_empty_string(self.capture.capture_id, name="capture_id")
+        if (
+            not isinstance(self.capture.image_size, dict)
+            or set(self.capture.image_size) != {"width", "height"}
+            or any(isinstance(edge, bool) or not isinstance(edge, int) or edge <= 0 for edge in self.capture.image_size.values())
+        ):
+            raise UEIValidationError("provider_capability_invalid_capture")
+
+
+@dataclass(frozen=True)
+class CandidateDiscoveryItemV1:
+    source_item_id: str
+    kind: str
+    source_bbox: tuple[int, int, int, int] | None
+    source_coordinate_space: str
+    safe_text: str | None = None
+    safe_role: str | None = None
+    safe_states: tuple[str, ...] = ()
+    confidence: float | None = None
+
+    def __post_init__(self) -> None:
+        _non_empty_string(self.source_item_id, name="source_item_id")
+        _non_empty_string(self.kind, name="kind")
+        if self.source_bbox is not None:
+            _xyxy(self.source_bbox, name="source_bbox")
+        _non_empty_string(self.source_coordinate_space, name="source_coordinate_space", maximum=128)
+        for name, value, maximum in (
+            ("safe_text", self.safe_text, _MAX_ITEM_TEXT_LENGTH),
+            ("safe_role", self.safe_role, _MAX_ROLE_LENGTH),
+        ):
+            if value is not None:
+                _non_empty_string(value, name=name, maximum=maximum)
+        if not isinstance(self.safe_states, tuple) or len(self.safe_states) > _MAX_STATE_COUNT:
+            raise UEIValidationError("provider_capability_invalid_safe_states")
+        if len(set(self.safe_states)) != len(self.safe_states):
+            raise UEIValidationError("provider_capability_invalid_safe_states")
+        for state in self.safe_states:
+            _non_empty_string(state, name="safe_state", maximum=_MAX_ROLE_LENGTH)
+        _finite_confidence(self.confidence, name="confidence", optional=True)
+
+
+@dataclass(frozen=True)
+class CandidateDiscoveryResultV1:
+    bundle_ref: dict[str, str]
+    invocation_id: str
+    capture_lineage_ref: dict[str, str]
+    items: tuple[CandidateDiscoveryItemV1, ...]
+    duration_ms: int
+    resource_units: int
+
+    def __post_init__(self) -> None:
+        _ref(self.bundle_ref, name="bundle")
+        _non_empty_string(self.invocation_id, name="invocation_id")
+        _ref(self.capture_lineage_ref, name="capture_lineage")
+        if not isinstance(self.items, tuple) or any(not isinstance(item, CandidateDiscoveryItemV1) for item in self.items):
+            raise UEIValidationError("provider_capability_invalid_discovery_items")
+        ids = [item.source_item_id for item in self.items]
+        if len(set(ids)) != len(ids):
+            raise UEIValidationError("provider_capability_candidate_duplicate")
+        _non_negative_int(self.duration_ms, name="duration_ms")
+        _non_negative_int(self.resource_units, name="resource_units")
+
+
+@dataclass(frozen=True)
+class SemanticBindingRequestV1:
+    envelope: ProviderInvocationEnvelopeV1
+    ordered_candidate_ids: tuple[str, ...]
+    capture_bundle: dict[str, object]
+    omni_inventory: dict[str, object]
+    context_ref: dict[str, str]
+    screenshot_bytes: bytes
+    screenshot_media_type: str
+    screenshot_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.envelope, ProviderInvocationEnvelopeV1):
+            raise UEIValidationError("provider_capability_invalid_envelope")
+        if self.envelope.capability != "semantic_binding":
+            raise UEIValidationError("provider_capability_capability_mismatch")
+        if not isinstance(self.ordered_candidate_ids, tuple):
+            raise UEIValidationError("provider_capability_invalid_candidate_order")
+        supplied_ids = tuple(_non_empty_string(item, name="candidate_id") for item in self.ordered_candidate_ids)
+        if len(set(supplied_ids)) != len(supplied_ids):
+            raise UEIValidationError("provider_capability_candidate_duplicate")
+        if not isinstance(self.capture_bundle, dict) or not isinstance(self.omni_inventory, dict):
+            raise UEIValidationError("provider_capability_invalid_semantic_input")
+        capture_lineage = self.capture_bundle.get("capture_lineage_ref")
+        if capture_lineage is not None:
+            _same_ref(self.envelope.capture_lineage_ref, _ref(capture_lineage, name="capture_lineage"), name="lineage")
+        expected_ids = _candidate_ids_from_inventory(self.omni_inventory)
+        if supplied_ids != expected_ids:
+            raise UEIValidationError("provider_capability_candidate_order_mismatch")
+        _ref(self.context_ref, name="context")
+        if not isinstance(self.screenshot_bytes, bytes) or not self.screenshot_bytes:
+            raise UEIValidationError("provider_capability_invalid_screenshot")
+        if len(self.screenshot_bytes) > self.envelope.budget.max_output_bytes:
+            raise UEIValidationError("provider_capability_screenshot_budget_exceeded")
+        _non_empty_string(self.screenshot_media_type, name="screenshot_media_type", maximum=128)
+        declared_sha256 = _sha256_string(self.screenshot_sha256, name="screenshot_sha256")
+        if sha256(self.screenshot_bytes).hexdigest() != declared_sha256:
+            raise UEIValidationError("provider_capability_screenshot_sha256_mismatch")
+
+    def validate_result(self, result: SemanticBindingResultV1) -> SemanticBindingResultV1:
+        """Bind semantic output to the request's immutable closed candidate order."""
+        if not isinstance(result, SemanticBindingResultV1):
+            raise UEIValidationError("provider_capability_invalid_semantic_result")
+        _same_ref(self.envelope.bundle_ref, result.bundle_ref, name="bundle")
+        _same_ref(self.envelope.capture_lineage_ref, result.capture_lineage_ref, name="lineage")
+        if self.envelope.invocation_id != result.invocation_id:
+            raise UEIValidationError("provider_capability_invocation_mismatch")
+        actual_ids = tuple(binding.candidate_id for binding in result.bindings)
+        if actual_ids != self.ordered_candidate_ids:
+            raise UEIValidationError("provider_capability_candidate_order_mismatch")
+        return result
+
+
+@dataclass(frozen=True)
+class SemanticBindingItemV1:
+    candidate_id: str
+    role: str
+    label: str
+    binding_status: str
+    confidence: float
+
+    def __post_init__(self) -> None:
+        _non_empty_string(self.candidate_id, name="candidate_id")
+        _non_empty_string(self.role, name="role", maximum=_MAX_ROLE_LENGTH)
+        _non_empty_string(self.label, name="label", maximum=_MAX_LABEL_LENGTH)
+        if self.binding_status not in _BINDING_STATUSES:
+            raise UEIValidationError("provider_capability_invalid_binding_status")
+        _finite_confidence(self.confidence, name="confidence")
+
+
+@dataclass(frozen=True)
+class SemanticBindingResultV1:
+    bundle_ref: dict[str, str]
+    invocation_id: str
+    capture_lineage_ref: dict[str, str]
+    bindings: tuple[SemanticBindingItemV1, ...]
+    duration_ms: int
+    resource_units: int
+
+    def __post_init__(self) -> None:
+        _ref(self.bundle_ref, name="bundle")
+        _non_empty_string(self.invocation_id, name="invocation_id")
+        _ref(self.capture_lineage_ref, name="capture_lineage")
+        if not isinstance(self.bindings, tuple) or any(not isinstance(item, SemanticBindingItemV1) for item in self.bindings):
+            raise UEIValidationError("provider_capability_invalid_bindings")
+        candidate_ids = [item.candidate_id for item in self.bindings]
+        if len(set(candidate_ids)) != len(candidate_ids):
+            raise UEIValidationError("provider_capability_candidate_duplicate")
+        _non_negative_int(self.duration_ms, name="duration_ms")
+        _non_negative_int(self.resource_units, name="resource_units")
+
+
+@dataclass(frozen=True)
+class GroundingRefinementRequestV1:
+    envelope: ProviderInvocationEnvelopeV1
+    candidate_id: str
+    candidate_bbox: tuple[int, int, int, int]
+    permitted_roi: tuple[int, int, int, int]
+    provider_request: dict[str, object]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.envelope, ProviderInvocationEnvelopeV1):
+            raise UEIValidationError("provider_capability_invalid_envelope")
+        if self.envelope.capability != "grounding_refinement":
+            raise UEIValidationError("provider_capability_capability_mismatch")
+        _non_empty_string(self.candidate_id, name="candidate_id")
+        _xyxy(self.candidate_bbox, name="candidate_bbox")
+        _xyxy(self.permitted_roi, name="permitted_roi")
+        if not isinstance(self.provider_request, dict):
+            raise UEIValidationError("provider_capability_invalid_provider_request")
+
+    def validate_result(self, result: GroundingRefinementResultV1) -> GroundingRefinementResultV1:
+        """Bind a grounding result to this exact request and strict interior geometry."""
+        if not isinstance(result, GroundingRefinementResultV1):
+            raise UEIValidationError("provider_capability_invalid_grounding_result")
+        _same_ref(self.envelope.bundle_ref, result.bundle_ref, name="bundle")
+        _same_ref(self.envelope.capture_lineage_ref, result.capture_lineage_ref, name="lineage")
+        if self.envelope.invocation_id != result.invocation_id:
+            raise UEIValidationError("provider_capability_invocation_mismatch")
+        if self.candidate_id != result.candidate_id:
+            raise UEIValidationError("provider_capability_candidate_mismatch")
+        if result.point is not None:
+            if result.coordinate_space != _CAPTURE_COORDINATE_SPACE:
+                raise UEIValidationError("provider_capability_coordinate_space_mismatch")
+            x, y = result.point
+            for bbox in (self.candidate_bbox, self.permitted_roi):
+                x1, y1, x2, y2 = bbox
+                if not (x1 < x < x2 and y1 < y < y2):
+                    raise UEIValidationError("provider_capability_strict_interior_required")
+        return result
+
+
+@dataclass(frozen=True)
+class GroundingRefinementResultV1:
+    bundle_ref: dict[str, str]
+    invocation_id: str
+    capture_lineage_ref: dict[str, str]
+    candidate_id: str
+    status: str
+    point: tuple[float, float] | None
+    coordinate_space: str
+    confidence: float | None
+    evidence_refs: tuple[dict[str, str], ...]
+    duration_ms: int
+    resource_units: int
+
+    def __post_init__(self) -> None:
+        _ref(self.bundle_ref, name="bundle")
+        _non_empty_string(self.invocation_id, name="invocation_id")
+        _ref(self.capture_lineage_ref, name="capture_lineage")
+        _non_empty_string(self.candidate_id, name="candidate_id")
+        _non_empty_string(self.status, name="status", maximum=128)
+        if self.point is not None:
+            _point(self.point, name="point")
+        _non_empty_string(self.coordinate_space, name="coordinate_space", maximum=128)
+        _finite_confidence(self.confidence, name="confidence", optional=True)
+        if not isinstance(self.evidence_refs, tuple):
+            raise UEIValidationError("provider_capability_invalid_evidence_refs")
+        for evidence_ref in self.evidence_refs:
+            _ref(evidence_ref, name="evidence")
+        _non_negative_int(self.duration_ms, name="duration_ms")
+        _non_negative_int(self.resource_units, name="resource_units")
+
+
+class CandidateDiscoveryProvider(Protocol):
+    bundle_ref: dict[str, str]
+
+    def invoke(self, request: CandidateDiscoveryRequestV1) -> CandidateDiscoveryResultV1: ...
+
+
+class SemanticBindingProvider(Protocol):
+    bundle_ref: dict[str, str]
+
+    def invoke(self, request: SemanticBindingRequestV1) -> SemanticBindingResultV1: ...
+
+
+class GroundingRefinementProvider(Protocol):
+    bundle_ref: dict[str, str]
+
+    def invoke(self, request: GroundingRefinementRequestV1) -> GroundingRefinementResultV1: ...

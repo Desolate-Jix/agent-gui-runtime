@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+
+from app.learn.recognition.uei.contracts import UEIValidationError
+from app.learn.recognition.uei.provider_adapters import (
+    ProviderRunBudget,
+    RestrictedCaptureLease,
+)
+from app.learn.recognition.uei.provider_capabilities import (
+    AUTHORITY_SHAPED_KEYS,
+    CandidateDiscoveryItemV1,
+    CandidateDiscoveryRequestV1,
+    CandidateDiscoveryResultV1,
+    GroundingRefinementRequestV1,
+    GroundingRefinementResultV1,
+    ProviderInvocationEnvelopeV1,
+    SemanticBindingItemV1,
+    SemanticBindingRequestV1,
+    SemanticBindingResultV1,
+    deterministic_neutral_source_item_id,
+    effective_provider_budget,
+    reject_authority_shaped_payload,
+)
+
+
+BUNDLE_REF = {"id": "bundle/local.omni", "content_sha256": "1" * 64}
+LINEAGE_REF = {"id": "capture/test", "content_sha256": "2" * 64}
+ARTIFACT_REF = {"id": "artifact/capture", "content_sha256": "3" * 64}
+
+
+def budget() -> ProviderRunBudget:
+    return ProviderRunBudget(30_000, 65_536, 256, 4_096, "gpu_vision")
+
+
+def envelope(capability: str) -> ProviderInvocationEnvelopeV1:
+    return ProviderInvocationEnvelopeV1(
+        bundle_ref=dict(BUNDLE_REF),
+        capability=capability,
+        invocation_id="invocation/test",
+        capture_lineage_ref=dict(LINEAGE_REF),
+        budget=budget(),
+    )
+
+
+def capture() -> RestrictedCaptureLease:
+    return RestrictedCaptureLease(
+        request_ref={"id": "request/test", "content_sha256": "4" * 64},
+        capture_lineage_ref=dict(LINEAGE_REF),
+        artifact_ref=dict(ARTIFACT_REF),
+        capture_id="capture/test",
+        artifact_sha256="3" * 64,
+        image_size={"width": 100, "height": 100},
+        local_path=Path("capture.png"),
+    )
+
+
+def discovery_result_fixture() -> dict[str, object]:
+    return {
+        "bundle_ref": dict(BUNDLE_REF),
+        "invocation_id": "invocation/test",
+        "capture_lineage_ref": dict(LINEAGE_REF),
+        "items": [],
+    }
+
+
+def semantic_result_fixture() -> dict[str, object]:
+    return {
+        "bundle_ref": dict(BUNDLE_REF),
+        "invocation_id": "invocation/test",
+        "capture_lineage_ref": dict(LINEAGE_REF),
+        "bindings": [],
+    }
+
+
+def grounding_result_fixture() -> dict[str, object]:
+    return {
+        "bundle_ref": dict(BUNDLE_REF),
+        "invocation_id": "invocation/test",
+        "capture_lineage_ref": dict(LINEAGE_REF),
+        "candidate_id": "candidate/one",
+    }
+
+
+@pytest.mark.parametrize("factory", [
+    discovery_result_fixture,
+    semantic_result_fixture,
+    grounding_result_fixture,
+])
+@pytest.mark.parametrize("key", sorted(AUTHORITY_SHAPED_KEYS))
+def test_capability_results_recursively_reject_authority_shaped_keys(factory, key):
+    value = factory()
+    value["provider_payload"] = {"nested": [{key: True}]}
+    with pytest.raises(UEIValidationError, match="non_authorizing"):
+        reject_authority_shaped_payload(value)
+
+
+def test_budget_intersection_uses_the_strictest_limit_and_exact_resource_group():
+    caller = ProviderRunBudget(30_000, 65_536, 256, 4_096, "gpu_vision")
+    bundle = ProviderRunBudget(20_000, 32_768, 128, 2_048, "gpu_vision")
+    assert effective_provider_budget(caller, bundle) == ProviderRunBudget(
+        20_000, 32_768, 128, 2_048, "gpu_vision"
+    )
+
+
+def test_budget_intersection_rejects_resource_group_mismatch():
+    with pytest.raises(UEIValidationError, match="resource_group"):
+        effective_provider_budget(
+            ProviderRunBudget(30_000, 65_536, 256, 4_096, "gpu_vision"),
+            ProviderRunBudget(30_000, 65_536, 256, 4_096, "cpu_vision"),
+        )
+
+
+def test_neutral_source_id_is_stable_but_changes_on_bundle_item_or_fingerprint():
+    first = deterministic_neutral_source_item_id(
+        bundle_ref={"id": "bundle/local.omni", "content_sha256": "1" * 64},
+        source_index=3,
+        native_fingerprint="2" * 64,
+    )
+    assert first == deterministic_neutral_source_item_id(
+        bundle_ref={"id": "bundle/local.omni", "content_sha256": "1" * 64},
+        source_index=3,
+        native_fingerprint="2" * 64,
+    )
+    assert first != deterministic_neutral_source_item_id(
+        bundle_ref={"id": "bundle/local.omni", "content_sha256": "1" * 64},
+        source_index=4,
+        native_fingerprint="2" * 64,
+    )
+    assert first != deterministic_neutral_source_item_id(
+        bundle_ref={"id": "bundle/local.omni-v2", "content_sha256": "1" * 64},
+        source_index=3,
+        native_fingerprint="2" * 64,
+    )
+    assert first != deterministic_neutral_source_item_id(
+        bundle_ref={"id": "bundle/local.omni", "content_sha256": "1" * 64},
+        source_index=3,
+        native_fingerprint="3" * 64,
+    )
+
+
+@pytest.mark.parametrize("ordered_candidate_ids", [
+    ("candidate/one",),
+    ("candidate/one", "candidate/one"),
+    ("candidate/one", "candidate/unknown"),
+    ("candidate/two", "candidate/one"),
+])
+def test_semantic_request_rejects_non_closed_candidate_coverage_or_order(
+    ordered_candidate_ids: tuple[str, ...],
+):
+    with pytest.raises(UEIValidationError, match="candidate"):
+        SemanticBindingRequestV1(
+            envelope=envelope("semantic_binding"),
+            ordered_candidate_ids=ordered_candidate_ids,
+            capture_bundle={"capture_lineage_ref": dict(LINEAGE_REF)},
+            omni_inventory={
+                "candidates": [
+                    {"candidate_id": "candidate/one"},
+                    {"candidate_id": "candidate/two"},
+                ]
+            },
+            context_ref={"id": "context/test", "content_sha256": "5" * 64},
+            screenshot_bytes=b"screenshot",
+            screenshot_media_type="image/png",
+            screenshot_sha256=sha256(b"screenshot").hexdigest(),
+        )
+
+
+def _semantic_request() -> SemanticBindingRequestV1:
+    return SemanticBindingRequestV1(
+        envelope=envelope("semantic_binding"),
+        ordered_candidate_ids=("candidate/one", "candidate/two"),
+        capture_bundle={"capture_lineage_ref": dict(LINEAGE_REF)},
+        omni_inventory={
+            "candidates": [
+                {"candidate_id": "candidate/one"},
+                {"candidate_id": "candidate/two"},
+            ]
+        },
+        context_ref={"id": "context/test", "content_sha256": "5" * 64},
+        screenshot_bytes=b"screenshot",
+        screenshot_media_type="image/png",
+        screenshot_sha256=sha256(b"screenshot").hexdigest(),
+    )
+
+
+def _semantic_result(candidate_ids: tuple[str, ...]) -> SemanticBindingResultV1:
+    return SemanticBindingResultV1(
+        bundle_ref=dict(BUNDLE_REF),
+        invocation_id="invocation/test",
+        capture_lineage_ref=dict(LINEAGE_REF),
+        bindings=tuple(
+            SemanticBindingItemV1(
+                candidate_id=candidate_id,
+                role="site-specific-quick-apply-control",
+                label="Quick Apply",
+                binding_status="BOUND",
+                confidence=0.9,
+            )
+            for candidate_id in candidate_ids
+        ),
+        duration_ms=1,
+        resource_units=1,
+    )
+
+
+@pytest.mark.parametrize("candidate_ids", [
+    ("candidate/one",),
+    ("candidate/one", "candidate/one"),
+    ("candidate/one", "candidate/unknown"),
+    ("candidate/two", "candidate/one"),
+])
+def test_semantic_result_rejects_missing_duplicate_unknown_or_reordered_candidate_ids(
+    candidate_ids: tuple[str, ...],
+):
+    with pytest.raises(UEIValidationError, match="candidate"):
+        _semantic_request().validate_result(_semantic_result(candidate_ids))
+
+
+def test_semantic_item_keeps_open_non_empty_role_strings():
+    binding = SemanticBindingItemV1(
+        candidate_id="candidate/one",
+        role="site-specific-quick-apply-control",
+        label="Quick Apply",
+        binding_status="BOUND",
+        confidence=0.9,
+    )
+    assert binding.role == "site-specific-quick-apply-control"
+
+
+def _grounding_request(*, candidate_bbox=(10, 10, 20, 20), permitted_roi=(10, 10, 20, 20)):
+    return GroundingRefinementRequestV1(
+        envelope=envelope("grounding_refinement"),
+        candidate_id="candidate/one",
+        candidate_bbox=candidate_bbox,
+        permitted_roi=permitted_roi,
+        provider_request={"state": "BOUND"},
+    )
+
+
+def _grounding_result(point: tuple[float, float]) -> GroundingRefinementResultV1:
+    return GroundingRefinementResultV1(
+        bundle_ref=dict(BUNDLE_REF),
+        invocation_id="invocation/test",
+        capture_lineage_ref=dict(LINEAGE_REF),
+        candidate_id="candidate/one",
+        status="REFINED",
+        point=point,
+        coordinate_space="capture_pixel_xyxy",
+        confidence=0.9,
+        evidence_refs=(),
+        duration_ms=1,
+        resource_units=1,
+    )
+
+
+@pytest.mark.parametrize("point", [
+    (10, 15), (20, 15), (15, 10), (15, 20),
+    (10, 10), (10, 20), (20, 10), (20, 20),
+])
+def test_grounding_rejects_candidate_bbox_edges_and_corners(point):
+    with pytest.raises(UEIValidationError, match="strict_interior"):
+        _grounding_request(permitted_roi=(0, 0, 30, 30)).validate_result(
+            _grounding_result(point)
+        )
+
+
+@pytest.mark.parametrize("point", [
+    (12, 15), (18, 15), (15, 12), (15, 18),
+    (12, 12), (12, 18), (18, 12), (18, 18),
+])
+def test_grounding_rejects_permitted_roi_edges_and_corners(point):
+    with pytest.raises(UEIValidationError, match="strict_interior"):
+        _grounding_request(permitted_roi=(12, 12, 18, 18)).validate_result(
+            _grounding_result(point)
+        )
+
+
+def test_requests_and_results_bind_exact_capability_refs_and_lineage():
+    with pytest.raises(UEIValidationError, match="capability"):
+        CandidateDiscoveryRequestV1(envelope=envelope("semantic_binding"), capture=capture())
+    with pytest.raises(UEIValidationError, match="lineage"):
+        CandidateDiscoveryRequestV1(
+            envelope=envelope("candidate_discovery"),
+            capture=RestrictedCaptureLease(
+                **{**capture().__dict__, "capture_lineage_ref": {"id": "capture/other", "content_sha256": "2" * 64}}
+            ),
+        )
+    with pytest.raises(UEIValidationError, match="bundle"):
+        CandidateDiscoveryResultV1(
+            bundle_ref={"id": "bundle/other", "content_sha256": "1" * 64, "unexpected": True},
+            invocation_id="invocation/test",
+            capture_lineage_ref=dict(LINEAGE_REF),
+            items=(),
+            duration_ms=1,
+            resource_units=1,
+        )
