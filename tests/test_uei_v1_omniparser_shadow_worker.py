@@ -99,6 +99,37 @@ def test_worker_projects_boxes_into_the_exact_capture_coordinate_space(tmp_path:
     ]
 
 
+def test_worker_native_output_preserves_official_four_fields_before_pixel_rounding(tmp_path: Path, monkeypatch):
+    from scripts import run_uei_omniparser_shadow_worker as worker
+
+    item = {
+        "bbox": [0.123, 0.234, 0.567, 0.789],
+        "type": "icon",
+        "content": "Search",
+        "interactivity": True,
+        "source": "yolo",
+    }
+    _patch_runner(monkeypatch, outputs=[([item], 4.0)])
+    monkeypatch.setattr(worker, "_peak_resource_units", lambda: 0)
+
+    result = worker._run(
+        tmp_path / "capture.png",
+        {"width": 20, "height": 10},
+        native_output=True,
+    )
+
+    assert result == {
+        "items": [{
+            "bbox": [0.123, 0.234, 0.567, 0.789],
+            "type": "icon",
+            "content": "Search",
+            "interactivity": True,
+        }],
+        "duration_ms": 4,
+        "resource_units": 0,
+    }
+
+
 def test_worker_applies_review_candidate_quality_filter_before_uei_output(tmp_path: Path, monkeypatch):
     from scripts import run_uei_omniparser_shadow_worker as worker
 

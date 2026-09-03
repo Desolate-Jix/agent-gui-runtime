@@ -136,6 +136,37 @@ def test_fixed_worker_success_is_normalized_without_worker_identity_or_path(tmp_
     assert not calls[0]["output_path"].exists()
 
 
+def test_managed_native_invoke_uses_same_worker_lifecycle_without_normalizing_boxes(tmp_path: Path, monkeypatch):
+    from app.learn.recognition.uei.omniparser_shadow_adapter import OmniParserShadowAdapter
+
+    payload = {
+        "items": [{
+            "bbox": [0.123, 0.234, 0.567, 0.789],
+            "type": "icon",
+            "content": "Search",
+            "interactivity": True,
+        }],
+        "duration_ms": 2,
+        "resource_units": 1,
+    }
+    process = FakeProcess(payload=payload)
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        "app.learn.recognition.uei.omniparser_shadow_adapter.subprocess.Popen",
+        _fake_popen(process, calls),
+    )
+
+    output = OmniParserShadowAdapter(configuration=_config(tmp_path)).invoke_native(
+        capture=_capture(tmp_path),
+        budget=_budget(),
+        invocation_id="invocation/native-1",
+    )
+
+    assert output == {"items": payload["items"]}
+    assert "--native-output" in calls[0]["command"]
+    assert not calls[0]["output_path"].exists()
+
+
 def test_offline_environment_preserves_only_windows_program_roots(tmp_path: Path, monkeypatch) -> None:
     from app.learn.recognition.uei.omniparser_shadow_adapter import _offline_environment
 

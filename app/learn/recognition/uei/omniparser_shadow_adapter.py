@@ -220,6 +220,37 @@ class OmniParserShadowAdapter:
         self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
         invocation_id: str, cancellation_event: Event | None = None,
     ) -> NormalizedScreenParseOutput:
+        output = self._invoke_managed(
+            capture=capture,
+            budget=budget,
+            invocation_id=invocation_id,
+            cancellation_event=cancellation_event,
+            native_output=False,
+        )
+        if not isinstance(output, NormalizedScreenParseOutput):
+            raise OmniParserShadowAdapterError("runtime_worker_invalid")
+        return output
+
+    def invoke_native(
+        self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
+        invocation_id: str, cancellation_event: Event | None = None,
+    ) -> dict[str, object]:
+        output = self._invoke_managed(
+            capture=capture,
+            budget=budget,
+            invocation_id=invocation_id,
+            cancellation_event=cancellation_event,
+            native_output=True,
+        )
+        if not isinstance(output, dict):
+            raise OmniParserShadowAdapterError("runtime_worker_invalid")
+        return output
+
+    def _invoke_managed(
+        self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
+        invocation_id: str, cancellation_event: Event | None,
+        native_output: bool,
+    ) -> NormalizedScreenParseOutput | dict[str, object]:
         self._validate_preflight(capture=capture, budget=budget, invocation_id=invocation_id)
         if cancellation_event is not None and cancellation_event.is_set():
             raise OmniParserShadowAdapterError("runtime_cancelled")
@@ -269,6 +300,7 @@ class OmniParserShadowAdapter:
                 capture=capture,
                 budget=budget,
                 cancellation_event=cancellation_event,
+                native_output=native_output,
             )
         finally:
             cleanup_status = "verified"
@@ -309,7 +341,8 @@ class OmniParserShadowAdapter:
             raise OmniParserShadowAdapterError("runtime_capture_hash_mismatch")
 
     def _invoke_worker(self, *, capture: RestrictedCaptureLease, budget: ProviderRunBudget,
-                       cancellation_event: Event | None) -> NormalizedScreenParseOutput:
+                       cancellation_event: Event | None,
+                       native_output: bool = False) -> NormalizedScreenParseOutput | dict[str, object]:
         with tempfile.TemporaryDirectory(prefix="uei-omniparser-shadow-") as directory:
             exchange = Path(directory)
             input_path = exchange / "input.json"
@@ -330,6 +363,7 @@ class OmniParserShadowAdapter:
                     [str(self._configuration.interpreter), str(self._configuration.worker_script),
                      "--input-json", str(input_path), "--output-json", str(output_path)]
                     + (["--benchmark"] if self._benchmark_mode else [])
+                    + (["--native-output"] if native_output else [])
                 )
                 process_scope_name = os.environ.get(
                     "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
@@ -444,8 +478,16 @@ class OmniParserShadowAdapter:
                     raise OmniParserShadowAdapterError("runtime_worker_failed")
                 raw = _read_bounded(output_path, budget.max_output_bytes)
                 benchmark = _benchmark_metrics(raw) if self._benchmark_mode else None
-                output = _normalize_worker_output(raw=raw, capture=capture, budget=budget,
-                                                  allow_benchmark=self._benchmark_mode)
+                output = (
+                    _normalize_native_worker_output(raw=raw, budget=budget)
+                    if native_output
+                    else _normalize_worker_output(
+                        raw=raw,
+                        capture=capture,
+                        budget=budget,
+                        allow_benchmark=self._benchmark_mode,
+                    )
+                )
                 self.last_benchmark = benchmark
                 return output
             finally:
@@ -1339,6 +1381,43 @@ def _normalize_worker_output(
         raise OmniParserShadowAdapterError("runtime_worker_invalid")
     normalized = tuple(_normalize_item(item=item, capture=capture, budget=budget) for item in items)
     return NormalizedScreenParseOutput(items=normalized, duration_ms=duration_ms, resource_units=resource_units)
+
+
+def _normalize_native_worker_output(
+    *, raw: bytes, budget: ProviderRunBudget,
+) -> dict[str, object]:
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise OmniParserShadowAdapterError("runtime_worker_invalid") from error
+    if not isinstance(value, dict) or set(value) != {"items", "duration_ms", "resource_units"}:
+        raise OmniParserShadowAdapterError("runtime_worker_invalid")
+    items = value.get("items")
+    duration_ms, resource_units = value.get("duration_ms"), value.get("resource_units")
+    if (
+        not isinstance(items, list)
+        or len(items) > budget.max_element_count
+        or not isinstance(duration_ms, int)
+        or isinstance(duration_ms, bool)
+        or not 0 <= duration_ms <= 86400000
+        or not isinstance(resource_units, int)
+        or isinstance(resource_units, bool)
+        or not 0 <= resource_units <= 1048576
+    ):
+        raise OmniParserShadowAdapterError("runtime_worker_invalid")
+    try:
+        from app.learn.hybrid.simple_native_contracts import parse_omni_native_output
+
+        parse_omni_native_output({"items": items})
+    except ValueError as error:
+        raise OmniParserShadowAdapterError("runtime_worker_invalid") from error
+    if any(
+        len(item["content"]) > budget.max_string_length
+        or _contains_secret(item["content"])
+        for item in items
+    ):
+        raise OmniParserShadowAdapterError("runtime_output_limit")
+    return {"items": deepcopy(items)}
 
 
 def _benchmark_metrics(raw: bytes) -> dict[str, object]:

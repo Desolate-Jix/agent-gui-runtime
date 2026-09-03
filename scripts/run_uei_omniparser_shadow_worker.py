@@ -20,6 +20,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--input-json", required=True, type=Path)
     parser.add_argument("--output-json", required=True, type=Path)
     parser.add_argument("--benchmark", action="store_true")
+    parser.add_argument("--native-output", action="store_true")
     return parser.parse_args()
 
 
@@ -58,7 +59,13 @@ def project_omni_official_items(items: list[dict[str, object]]) -> dict[str, obj
         for item in items
     ]}
 
-def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = False) -> dict[str, object]:
+def _run(
+    input_path: Path,
+    image_size: dict[str, int],
+    *,
+    benchmark: bool = False,
+    native_output: bool = False,
+) -> dict[str, object]:
     from app.learn.recognition.omniparser_quality import filter_omniparser_candidates
     from scripts import run_omniparser_learn_smoke as runner
 
@@ -76,8 +83,16 @@ def _run(input_path: Path, image_size: dict[str, int], *, benchmark: bool = Fals
         items, _quality_summary = filter_omniparser_candidates(items, image_size=image_size)
     except ValueError as error:
         raise ValueError("worker_output_invalid") from error
-    normalized: list[dict[str, object]] = []
     official_items = project_omni_official_items(items)["items"]
+    if native_output:
+        if benchmark:
+            raise ValueError("worker_output_invalid")
+        return {
+            "items": official_items,
+            "duration_ms": int(round(duration_ms)),
+            "resource_units": _peak_resource_units(),
+        }
+    normalized: list[dict[str, object]] = []
     for index, item in enumerate(official_items):
         if not isinstance(item, dict):
             raise ValueError("worker_output_invalid")
@@ -140,7 +155,12 @@ def main() -> int:
     args = _arguments()
     try:
         input_path, image_size = _input(args.input_json)
-        output = _run(input_path, image_size, benchmark=args.benchmark)
+        output = _run(
+            input_path,
+            image_size,
+            benchmark=args.benchmark,
+            native_output=args.native_output,
+        )
         args.output_json.write_text(json.dumps(output, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         return 0
     except (OSError, ValueError, RuntimeError, ImportError):
