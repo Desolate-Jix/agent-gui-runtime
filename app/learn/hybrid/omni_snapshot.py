@@ -8,7 +8,7 @@ from typing import Mapping, Sequence
 from PIL import Image
 from app.learn.hybrid.simple_native_contracts import parse_omni_native_output
 from app.learn.hybrid.contracts import stable_candidate_id
-from app.learn.hybrid.simple_native_smoke import OmniNativeCaller, ProviderCase, _parse_provider_goals, _prepare_capture, _verify_capture_freshness, build_omni_evidence_from_native, canonical_omni_candidates_from_native
+from app.learn.hybrid.simple_native_smoke import OmniNativeCaller, ProviderCase, _parse_provider_goals, _prepare_capture, _verify_capture_freshness, canonical_omni_candidates_from_native
 from app.learn.recognition.uei.canonical import canonical_json_bytes, content_sha256
 _CASE_IDS=tuple(f"case-{i:03d}" for i in range(1,6))
 _IDENTITY_KEYS=frozenset({"provider_id","profile_id","model_revision","preprocessing_revision"})
@@ -94,6 +94,13 @@ def _capture(value:object,*,label:str)->dict[str,object]:
  result=deepcopy(dict(value)); _closed(result,{"capture_id","screenshot_sha256","image_size","capture_lineage_ref"},label=label); size=result["image_size"]
  if not isinstance(result["capture_id"],str) or not isinstance(result["screenshot_sha256"],str) or not _SHA.fullmatch(result["screenshot_sha256"]) or not isinstance(size,Mapping) or set(size)!={"width","height"} or any(isinstance(size[k],bool) or not isinstance(size[k],int) or size[k]<=0 for k in ("width","height")): raise ValueError(f"{label} is invalid")
  result["capture_lineage_ref"]=_ref(result["capture_lineage_ref"],label=f"{label} lineage"); return result
+def _trusted_provider_result_ref(*,provider_identity:Mapping[str,object],case_id:str,capture:Mapping[str,object],native_output:Mapping[str,object],native_output_file_sha256:str)->dict[str,str]:
+ identity=_identity(provider_identity); cap=_capture(capture,label="Omni snapshot provider result capture"); native=deepcopy(dict(native_output))
+ _closed(native,{"contract_version","case_id","raw_utf8","raw_output_sha256","artifact_is_authorization"},label="Omni snapshot provider result native output")
+ if case_id not in _CASE_IDS or native.get("contract_version")!="omni_snapshot_native_output_v1" or native.get("case_id")!=case_id or native.get("artifact_is_authorization") is not False or not isinstance(native.get("raw_utf8"),str) or _sha(native["raw_utf8"].encode("utf-8"))!=native.get("raw_output_sha256") or not isinstance(native_output_file_sha256,str) or not _SHA.fullmatch(native_output_file_sha256) or _sha(_canonical_bytes(native))!=native_output_file_sha256: raise ValueError("Omni snapshot trusted provider result identity is invalid")
+ basis={"contract_version":"omni_snapshot_provider_result_identity_v1","provider_identity":identity,"case_id":case_id,"capture":cap,"native_output":native,"native_output_file_sha256":native_output_file_sha256}
+ digest=_hash(basis)
+ return {"id":f"result/omni-snapshot/{digest}","content_sha256":digest}
 def _candidates(value:object,*,size:Mapping[str,object])->tuple[list[dict[str,object]],list[dict[str,object]]]:
  if not isinstance(value,list): raise ValueError("Omni snapshot candidates are invalid")
  w,h=size["width"],size["height"]; assert isinstance(w,int) and isinstance(h,int)
@@ -124,8 +131,9 @@ def create_omni_snapshot(*,cases:Sequence[ProviderCase],omni:OmniNativeCaller,ou
   for case in expected:
    _replace(journal,_journal(state="running",completed=completed,next_case=case.case_id,error=None,manifest_sha=None)); capture=_prepare_capture(case,stage); image=_verify_capture_freshness(capture,"Omni snapshot"); raw=omni(image); _verify_capture_freshness(capture,"Omni snapshot"); raw_text=raw if isinstance(raw,str) else _canonical_bytes(raw).decode("utf-8")
    native={"contract_version":"omni_snapshot_native_output_v1","case_id":case.case_id,"raw_utf8":raw_text,"raw_output_sha256":_sha(raw_text.encode("utf-8")),"artifact_is_authorization":False}; _forbidden(native,label="Omni native output"); native_name=f"{case.case_id}.native.json"; native_path=stage/native_name; _write(native_path,native); native_sha=_sha(native_path.read_bytes())
-   evidence=build_omni_evidence_from_native(case=case,capture=capture,parsed=parse_omni_native_output(raw),artifact_dir=stage); inventory=evidence.get("inventory")
-   if not isinstance(inventory,Mapping): raise ValueError("Omni canonical inventory is unavailable")
+   parsed=parse_omni_native_output(raw); cap=_capture({"capture_id":capture["capture_id"],"screenshot_sha256":capture["screenshot_sha256"],"image_size":deepcopy(capture["image_size"]),"capture_lineage_ref":deepcopy(capture["bundle"]["capture_lineage_ref"])},label="Omni snapshot capture")
+   provider_result_ref=_trusted_provider_result_ref(provider_identity=identity,case_id=case.case_id,capture=cap,native_output=native,native_output_file_sha256=native_sha)
+   inventory={"candidates":canonical_omni_candidates_from_native(parsed=parsed,image_size=case.image_size,provider_result_ref=provider_result_ref)}
    candidate_name=f"{case.case_id}.candidates.json"; payload=_payload(case=case,capture=capture,inventory=inventory,native_name=native_name,native_sha=native_sha,raw_sha=native["raw_output_sha256"]); _forbidden(payload,label="Omni candidate output"); candidate_path=stage/candidate_name; _write(candidate_path,payload); candidates=payload["candidates"]; assert isinstance(candidates,list); _,geometry=_candidates(candidates,size=payload["capture"]["image_size"]); ids=[x["candidate_id"] for x in candidates]
    records.append({"case_id":case.case_id,"screenshot_path":str(case.image_path.absolute()),"image_size":{"width":case.image_size[0],"height":case.image_size[1]},"capture_sha256":case.image_sha256,"capture_id":capture["capture_id"],"capture_lineage_sha256":_hash(capture["bundle"]["capture_lineage_ref"]),"goals":list(case.goals),"goals_sha256":_hash(list(case.goals)),"native_output_file":native_name,"native_output_file_sha256":native_sha,"native_output_sha256":native["raw_output_sha256"],"candidate_file":candidate_name,"candidate_file_sha256":_sha(candidate_path.read_bytes()),"canonical_inventory_sha256":payload["canonical_inventory_sha256"],"candidate_ids":ids,"candidate_order_sha256":_hash(ids),"candidate_geometry_sha256":_hash(geometry)}); completed.append(case.case_id)
   manifest={"contract_version":"omni_snapshot_v1","provider_identity":identity,"provider_identity_sha256":_hash(identity),"regression_only":True,"contains_holdout":False,"artifact_is_authorization":False,"screen_count":5,"target_count":25,"cases":records,"aggregate_snapshot_sha256":_aggregate(identity,records)}; _forbidden(manifest,label="Omni snapshot manifest"); manifest["content_sha256"]=_content(manifest); _write(stage/"manifest.json",manifest)
@@ -145,7 +153,7 @@ def _expected(record:Mapping[str,object],case:ProviderCase)->None:
  if not case.image_path.is_file() or _sha(case.image_path.read_bytes())!=case.image_sha256: raise ValueError("Omni snapshot expected capture sha256 mismatch")
  with Image.open(case.image_path) as image:
   if image.size!=case.image_size: raise ValueError("Omni snapshot expected capture geometry mismatch")
-def _verify_case(root:Path,record:Mapping[str,object])->dict[str,object]:
+def _verify_case(root:Path,record:Mapping[str,object],*,provider_identity:Mapping[str,object])->dict[str,object]:
  cid=record["case_id"]; assert isinstance(cid,str); native_name=f"{cid}.native.json"; candidate_name=f"{cid}.candidates.json"
  if record["native_output_file"]!=native_name: raise ValueError("Omni snapshot native filename mismatch")
  if record["candidate_file"]!=candidate_name: raise ValueError("Omni snapshot candidate filename mismatch")
@@ -162,13 +170,10 @@ def _verify_case(root:Path,record:Mapping[str,object])->dict[str,object]:
  cap=_capture(payload["capture"],label="Omni snapshot candidate capture")
  if cap["capture_id"]!=record["capture_id"] or cap["screenshot_sha256"]!=record["capture_sha256"] or cap["image_size"]!=record["image_size"] or _hash(cap["capture_lineage_ref"])!=record["capture_lineage_sha256"]: raise ValueError("Omni snapshot candidate capture mismatch")
  candidates,geometry=_candidates(payload["candidates"],size=cap["image_size"]); ids=[x["candidate_id"] for x in candidates]
- if candidates:
-  provider_refs={canonical_json_bytes(candidate["provider_result_ref"]) for candidate in candidates}
-  if len(provider_refs)!=1: raise ValueError("Omni snapshot provider result lineage mismatch")
-  rebuilt=canonical_omni_candidates_from_native(parsed=parsed_native,image_size=(cap["image_size"]["width"],cap["image_size"]["height"]),provider_result_ref=candidates[0]["provider_result_ref"])
-  if canonical_json_bytes(rebuilt)!=canonical_json_bytes(candidates): raise ValueError("Omni snapshot native candidate equality mismatch")
- elif parsed_native:
-  raise ValueError("Omni snapshot native candidate equality mismatch")
+ trusted_ref=_trusted_provider_result_ref(provider_identity=provider_identity,case_id=cid,capture=cap,native_output=native,native_output_file_sha256=record["native_output_file_sha256"])
+ if any(candidate["provider_result_ref"]!=trusted_ref for candidate in candidates): raise ValueError("Omni snapshot provider result lineage mismatch")
+ rebuilt=canonical_omni_candidates_from_native(parsed=parsed_native,image_size=(cap["image_size"]["width"],cap["image_size"]["height"]),provider_result_ref=trusted_ref)
+ if canonical_json_bytes(rebuilt)!=canonical_json_bytes(candidates): raise ValueError("Omni snapshot native candidate equality mismatch")
  if ids!=record["candidate_ids"] or _hash(ids)!=record["candidate_order_sha256"] or _hash(geometry)!=record["candidate_geometry_sha256"]: raise ValueError("Omni snapshot candidate order or geometry mismatch")
  if _inventory(cid,cap,candidates)!=payload["canonical_inventory_sha256"] or payload["canonical_inventory_sha256"]!=record["canonical_inventory_sha256"]: raise ValueError("Omni snapshot canonical inventory mismatch")
  return {"case_id":cid,"capture":cap,"candidates":deepcopy(candidates),"candidate_file":str(candidate_path)}
@@ -193,5 +198,5 @@ def load_verified_omni_snapshot(path:Path,*,expected_cases:Sequence[ProviderCase
  verified=[]
  for record,case in zip(records,expected,strict=True):
   if not isinstance(record,Mapping): raise ValueError("Omni snapshot case record is invalid")
-  _expected(record,case); verified.append(_verify_case(root,record))
+  _expected(record,case); verified.append(_verify_case(root,record,provider_identity=identity))
  return {"contract_version":"omni_snapshot_v1","provider_identity":deepcopy(identity),"snapshot_sha256":manifest["aggregate_snapshot_sha256"],"screen_count":5,"target_count":25,"cases":verified,"regression_only":True,"contains_holdout":False,"artifact_is_authorization":False}

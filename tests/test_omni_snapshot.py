@@ -468,3 +468,36 @@ def test_loader_rejects_resealed_candidates_not_exactly_rebuilt_from_native(
         load_verified_omni_snapshot(
             manifest_path, expected_cases=cases, expected_provider_identity=_identity()
         )
+
+
+def test_loader_rejects_fully_resealed_uniform_provider_result_ref_forgery(
+    tmp_path: Path,
+) -> None:
+    """Candidate sidecars cannot choose the trusted Omni provider-result lineage."""
+    from app.learn.hybrid.contracts import stable_candidate_id
+    from app.learn.recognition.uei.canonical import content_sha256
+    from app.learn.hybrid.omni_snapshot import load_verified_omni_snapshot
+
+    manifest_path, cases = _two_candidate_snapshot(tmp_path)
+    manifest = _read_json(manifest_path)
+    record = manifest["cases"][0]
+    assert isinstance(record, dict)
+    candidate_path = manifest_path.parent / str(record["candidate_file"])
+    payload = _read_json(candidate_path)
+    candidates = payload["candidates"]
+    assert isinstance(candidates, list)
+    forged_ref = {"id": "result/attacker-resealed", "content_sha256": "a" * 64}
+    for candidate in candidates:
+        candidate["provider_result_ref"] = deepcopy(forged_ref)
+        candidate["provenance"]["provider_result_ref"] = deepcopy(forged_ref)
+        candidate["provenance"]["content_sha256"] = content_sha256(candidate["provenance"])
+        candidate["candidate_id"] = stable_candidate_id(
+            provider_result_ref=forged_ref, source_item_id=candidate["source_item_id"],
+        )
+    _write_canonical(candidate_path, payload)
+    _reseal_candidate_sidecar(manifest_path, manifest)
+
+    with pytest.raises(ValueError, match="provider result lineage"):
+        load_verified_omni_snapshot(
+            manifest_path, expected_cases=cases, expected_provider_identity=_identity()
+        )
