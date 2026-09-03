@@ -350,3 +350,50 @@ def test_malformed_incumbent_unbound_is_schema_invalid(tmp_path: Path) -> None:
     arm = type(arm)("incumbent", "qwen3_vl_8b_q4_k_m", arm.call, arm.adapt, lambda: _clean("qwen3_vl_8b_q4_k_m"))
     artifact = _run(tmp_path, arm=arm)
     assert artifact.metrics["binder"]["schema_invalid"] == 25
+
+
+def test_binder_capture_drift_propagates_after_cleanup_without_more_calls(tmp_path: Path) -> None:
+    manifest, cases, _ = _snapshot(tmp_path)
+    calls: list[int] = []
+    cleanup: list[str] = []
+    vista_calls: list[str] = []
+
+    def drift(_image: Path, _request: object) -> object:
+        calls.append(1)
+        cases[0].image_path.write_bytes(b"capture-drift")
+        return {"point": [0.2, 0.375]}
+
+    arm = _arm(call=drift, adapt=_native_adapter, cleanup=lambda: cleanup.append("cleanup") or _clean())
+    with pytest.raises(ValueError, match="capture"):
+        _run(tmp_path, arm=arm, manifest=manifest, cases=cases, vista=lambda _image, target: vista_calls.append(target) or "[500,500]")
+    assert calls == [1] and cleanup == ["cleanup"] and vista_calls == []
+    assert not (tmp_path / "arm" / "provider-diagnostic.json").exists()
+
+
+def test_vista_capture_drift_and_roi_tampering_fail_the_arm(tmp_path: Path) -> None:
+    manifest, cases, _ = _snapshot(tmp_path)
+    arm = _arm(call=lambda _image, _request: {"point": [0.2, 0.375]}, adapt=_native_adapter)
+
+    def drift(_image: Path, _target: str) -> str:
+        cases[0].image_path.write_bytes(b"capture-drift")
+        return "[500,500]"
+
+    with pytest.raises(ValueError, match="capture"):
+        _run(tmp_path, arm=arm, manifest=manifest, cases=cases, vista=drift)
+    assert not (tmp_path / "arm" / "provider-diagnostic.json").exists()
+
+    manifest, cases, _ = _snapshot(tmp_path / "roi")
+    arm = _arm(call=lambda _image, _request: {"point": [0.2, 0.375]}, adapt=_native_adapter)
+    with pytest.raises(ValueError, match="ROI"):
+        _run(tmp_path / "roi", arm=arm, manifest=manifest, cases=cases, vista=lambda image, _target: image.unlink() or "[500,500]")
+
+
+def test_forged_native_unbound_against_removed_candidate_is_schema_invalid(tmp_path: Path) -> None:
+    def forged(raw: object, goal_index: int, context: dict[str, object]) -> dict[str, object]:
+        context["candidates"].clear()
+        return _native_adapter(raw, goal_index, context)
+
+    arm = _arm(call=lambda _image, _request: {"point": [0.2, 0.375]}, adapt=forged)
+    artifact = _run(tmp_path, arm=arm)
+    assert artifact.metrics["binder"]["schema_invalid"] == 25
+    assert artifact.metrics["abstained"] == 25

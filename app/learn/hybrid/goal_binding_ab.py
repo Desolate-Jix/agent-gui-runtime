@@ -16,6 +16,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from PIL import Image
+
 from app.learn.hybrid.goal_binding_provider import (
     NativePointProposal,
     map_native_point_to_candidate,
@@ -328,28 +330,28 @@ def _validated_binding(binding: object, *, goal_index: int, arm: GoalBindingArm,
             or candidates[index].get("active") is not True
         ):
             raise ValueError("adapter bound candidate is not a legal frozen candidate")
-        if result["binding_basis"] == "native_point":
-            point = result["canonical_capture_pixel_point"]
-            if not isinstance(point, list) or len(point) != 2:
-                raise ValueError("adapter native point is invalid")
-            recomputed = map_native_point_to_candidate(
-                proposal=NativePointProposal(
-                    goal_index=goal_index,
-                    point=(point[0], point[1]),  # type: ignore[arg-type]
-                    coordinate_space="capture_pixels",
-                    confidence=result["confidence"],  # type: ignore[arg-type]
-                    status="OK",
-                    failure_reason=None,
-                ),
-                image_size=context["image_size"],  # type: ignore[arg-type]
-                candidates=context["candidates"],  # type: ignore[arg-type]
-                provider_id=arm.provider_id,
-                capture_ref=context["capture_ref"],  # type: ignore[arg-type]
-                native_output_ref=context["native_output_ref"],  # type: ignore[arg-type]
-                omni_snapshot_ref=context["omni_snapshot_ref"],  # type: ignore[arg-type]
-            )
-            if recomputed != result:
-                raise ValueError("adapter native bound result differs from authoritative frozen mapping")
+    if result["binding_basis"] == "native_point" and result["canonical_capture_pixel_point"] is not None:
+        point = result["canonical_capture_pixel_point"]
+        if not isinstance(point, list) or len(point) != 2:
+            raise ValueError("adapter native point is invalid")
+        recomputed = map_native_point_to_candidate(
+            proposal=NativePointProposal(
+                goal_index=goal_index,
+                point=(point[0], point[1]),  # type: ignore[arg-type]
+                coordinate_space="capture_pixels",
+                confidence=result["confidence"],  # type: ignore[arg-type]
+                status="OK",
+                failure_reason=None,
+            ),
+            image_size=context["image_size"],  # type: ignore[arg-type]
+            candidates=context["candidates"],  # type: ignore[arg-type]
+            provider_id=arm.provider_id,
+            capture_ref=context["capture_ref"],  # type: ignore[arg-type]
+            native_output_ref=context["native_output_ref"],  # type: ignore[arg-type]
+            omni_snapshot_ref=context["omni_snapshot_ref"],  # type: ignore[arg-type]
+        )
+        if recomputed != result:
+            raise ValueError("adapter native result differs from authoritative frozen mapping")
     return result
 
 
@@ -371,6 +373,27 @@ def _cleanup(arm: GoalBindingArm) -> dict[str, object]:
     return result
 
 
+def _verify_vista_crop(crop: Mapping[str, object]) -> None:
+    path = Path(str(crop.get("crop_path") or ""))
+    expected_sha = crop.get("crop_sha256")
+    size = crop.get("crop_size")
+    if (
+        not path.is_file()
+        or not isinstance(expected_sha, str)
+        or not isinstance(size, Mapping)
+        or isinstance(size.get("width"), bool)
+        or not isinstance(size.get("width"), int)
+        or isinstance(size.get("height"), bool)
+        or not isinstance(size.get("height"), int)
+    ):
+        raise ValueError("VISTA ROI crop is unavailable")
+    if sha256(path.read_bytes()).hexdigest() != expected_sha:
+        raise ValueError("VISTA ROI crop sha256 mismatch")
+    with Image.open(path) as image:
+        if image.size != (size["width"], size["height"]):
+            raise ValueError("VISTA ROI crop dimensions changed")
+
+
 def _vista_outcome(
     *, binding: Mapping[str, object], goal: Mapping[str, object], capture: Mapping[str, object], candidate: Mapping[str, object] | None,
     vista: VistaNativeCaller, artifact_dir: Path, metrics: dict[str, object], snapshot_ref: Mapping[str, str],
@@ -387,24 +410,36 @@ def _vista_outcome(
     assert isinstance(binder_metrics, dict)
     binder_metrics["attempted"] = int(binder_metrics["attempted"]) + 1
     try:
+        # 截图与裁剪完整性属于运行时不变量，不是提供者输出。
         _verify_capture_freshness(capture, "VISTA")
         crop = _persist_vista_roi_crop(capture=capture, candidate=candidate, artifact_dir=artifact_dir)
+        _verify_vista_crop(crop)
         roi = tuple(crop["roi_xyxy"])
-        raw = vista(Path(crop["crop_path"]), f"{goal['semantic_role']}: {goal['semantic_label']}")
+        try:
+            raw = vista(Path(crop["crop_path"]), f"{goal['semantic_role']}: {goal['semantic_label']}")
+        except TimeoutError as exc:
+            binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
+            metrics["abstained"] = int(metrics["abstained"]) + 1
+            return {**base, "status": "abstained", "reason": "vista_timeout", "raw": raw, "parse_error": str(exc), "raw_sha256": _hash(raw), "roi_crop": crop}
+        except OSError as exc:
+            binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
+            metrics["abstained"] = int(metrics["abstained"]) + 1
+            return {**base, "status": "abstained", "reason": "vista_provider_failed", "raw": raw, "parse_error": str(exc), "raw_sha256": _hash(raw), "roi_crop": crop}
         _verify_capture_freshness(capture, "VISTA")
-        point = restore_vista_point_to_capture(parse_vista_normalized_point(raw), roi_xyxy=roi)
+        _verify_vista_crop(crop)
+        try:
+            normalized = parse_vista_normalized_point(raw)
+            point = restore_vista_point_to_capture(normalized, roi_xyxy=roi)
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+            binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
+            metrics["abstained"] = int(metrics["abstained"]) + 1
+            return {**base, "status": "abstained", "reason": "vista_schema_invalid", "raw": raw, "parse_error": str(exc), "raw_sha256": _hash(raw), "roi_crop": crop}
         if not (roi[0] < point[0] < roi[2] and roi[1] < point[1] < roi[3]):
-            raise ValueError("restored VISTA point is outside strict candidate interior")
+            binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
+            metrics["abstained"] = int(metrics["abstained"]) + 1
+            return {**base, "status": "abstained", "reason": "vista_schema_invalid", "raw": raw, "parse_error": "restored VISTA point is outside strict candidate interior", "raw_sha256": _hash(raw), "roi_crop": crop}
         binder_metrics["schema_valid"] = int(binder_metrics["schema_valid"]) + 1
-        return {**base, "status": "selected", "raw": raw, "parsed": list(parse_vista_normalized_point(raw)), "raw_sha256": _hash(raw), "capture_point": list(point), "roi_xyxy": list(roi), "roi_crop": crop}
-    except TimeoutError as exc:
-        binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
-        metrics["abstained"] = int(metrics["abstained"]) + 1
-        return {**base, "status": "abstained", "reason": "vista_timeout", "raw": raw, "parse_error": str(exc), "raw_sha256": _hash(raw), **({"roi_crop": crop} if crop is not None else {})}
-    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-        binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
-        metrics["abstained"] = int(metrics["abstained"]) + 1
-        return {**base, "status": "abstained", "reason": "vista_schema_invalid", "raw": raw, "parse_error": str(exc), "raw_sha256": _hash(raw), **({"roi_crop": crop} if crop is not None else {})}
+        return {**base, "status": "selected", "raw": raw, "parsed": list(normalized), "raw_sha256": _hash(raw), "capture_point": list(point), "roi_xyxy": list(roi), "roi_crop": crop}
     finally:
         binder_metrics["latencies"].append(round((perf_counter() - started) * 1000, 3))
         binder_metrics["raw_output_bytes"] = int(binder_metrics["raw_output_bytes"]) + len(raw.encode("utf-8"))
@@ -468,10 +503,8 @@ def run_goal_binding_arm(
                     "artifact_is_authorization": False, "execute_binding": False, "goal": deepcopy(goal),
                     "image_size": list(case.image_size), "candidates": deepcopy(candidates), "omni_snapshot_ref": deepcopy(snapshot_ref),
                 }
-                started = perf_counter()
                 binder_metrics = metrics["binder"]
                 assert isinstance(binder_metrics, dict)
-                binder_metrics["attempted"] = int(binder_metrics["attempted"]) + 1
                 parsed_evidence: list[dict[str, object]] = []
 
                 def record_native_parsed(value: object) -> None:
@@ -479,38 +512,45 @@ def run_goal_binding_arm(
                         raise ValueError("native parsed evidence is invalid")
                     parsed_evidence.append(deepcopy(dict(value)))
 
+                _verify_capture_freshness(capture, "GoalBindingProvider")
+                binder_metrics["attempted"] = int(binder_metrics["attempted"]) + 1
+                started = perf_counter()
                 try:
-                    _verify_capture_freshness(capture, "GoalBindingProvider")
-                    raw = arm.call(case.image_path, request)
-                    _verify_capture_freshness(capture, "GoalBindingProvider")
-                    raw_text = _raw_text(raw)
-                    native_ref["sha256"] = _text_hash(raw_text)
-                    adapter_context = deepcopy(context)
-                    adapter_context["record_native_parsed"] = record_native_parsed
-                    binding = _validated_binding(arm.adapt(raw, goal_index, adapter_context), goal_index=goal_index, arm=arm, context=context)
-                    if binding["status"] == "PROVIDER_FAILURE":
-                        reason = binding["reason"]
-                        if reason == "provider_timeout":
-                            binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
-                        else:
-                            binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
+                    try:
+                        raw = arm.call(case.image_path, request)
+                    except TimeoutError as exc:
+                        error = str(exc)
+                        binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="provider_timeout")
+                        binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
+                    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                        error = str(exc)
+                        binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="malformed_native_output")
+                        binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
                     else:
-                        binder_metrics["schema_valid"] = int(binder_metrics["schema_valid"]) + 1
-                except TimeoutError as exc:
-                    error = str(exc)
-                    raw_text = _raw_text(raw)
-                    native_ref["sha256"] = _text_hash(raw_text)
-                    binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="provider_timeout")
-                    binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
-                except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-                    error = str(exc)
-                    raw_text = _raw_text(raw)
-                    native_ref["sha256"] = _text_hash(raw_text)
-                    binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="malformed_native_output")
-                    binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
+                        # 此验证必须位于解析和适配失败处理之外。
+                        _verify_capture_freshness(capture, "GoalBindingProvider")
+                        try:
+                            adapter_context = deepcopy(context)
+                            adapter_context["record_native_parsed"] = record_native_parsed
+                            binding = _validated_binding(arm.adapt(raw, goal_index, adapter_context), goal_index=goal_index, arm=arm, context=context)
+                        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                            error = str(exc)
+                            binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="malformed_native_output")
+                            binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
+                        else:
+                            if binding["status"] == "PROVIDER_FAILURE":
+                                reason = binding["reason"]
+                                if reason == "provider_timeout":
+                                    binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
+                                else:
+                                    binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
+                            else:
+                                binder_metrics["schema_valid"] = int(binder_metrics["schema_valid"]) + 1
                 finally:
+                    raw_text = _raw_text(raw)
+                    native_ref["sha256"] = _text_hash(raw_text)
                     binder_metrics["latencies"].append(round((perf_counter() - started) * 1000, 3))
-                    binder_metrics["raw_output_bytes"] = int(binder_metrics["raw_output_bytes"]) + len(_raw_text(raw).encode("utf-8"))
+                    binder_metrics["raw_output_bytes"] = int(binder_metrics["raw_output_bytes"]) + len(raw_text.encode("utf-8"))
                 raw_text = _raw_text(raw)
                 selected_candidate = None
                 candidate = None
@@ -535,7 +575,7 @@ def run_goal_binding_arm(
             })
     finally:
         cleanup_receipt = _cleanup(arm)
-    # A verified binder cleanup is a hard precondition for all VISTA dispatch.
+    # 已验证的绑定器清理是任何 VISTA 调度的硬前提。
     for state in states:
         trace = state["trace"]
         assert isinstance(trace, list)
