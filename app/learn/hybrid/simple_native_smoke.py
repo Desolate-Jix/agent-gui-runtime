@@ -27,6 +27,7 @@ class SimpleNativeSlots:
     omni: OmniNativeCaller
     qwen: QwenNativeCaller
     vista: VistaNativeCaller
+    cleanup: Callable[[], Mapping[str, object]] | None = None
 
 @dataclass(frozen=True)
 class ProviderCase:
@@ -130,7 +131,7 @@ def run_simple_native_regression_diagnostic(*, cases: Sequence[ProviderCase], sl
         records.append({"case_id": case.case_id, "runtime_request_sha256": _hash(case.runtime_request), "trace": trace})
     for slot in ("omni", "qwen", "vista"): metrics[slot] = _finish(metrics[slot])
     artifact_dir.mkdir(parents=True, exist_ok=True); path = artifact_dir / "provider-diagnostic.json"
-    observed_cleanup = dict(cleanup_receipt) if cleanup_receipt is not None else {"verified": False, "reason": "runner received no lifecycle cleanup observation"}
+    observed_cleanup = (dict(cleanup_receipt) if cleanup_receipt is not None else (dict(slots.cleanup()) if slots.cleanup is not None else {"verified": False, "reason": "runner received no lifecycle cleanup observation"}))
     payload = {"contract_version": "simple_native_provider_diagnostic_v1", "regression_diagnostic_only": True, "promotion_eligible": False, "screen_count": 5, "target_count": 25, "metrics": metrics, "cases": records, "cleanup_receipt": observed_cleanup, "action_candidates": [], "artifact_is_authorization": False, "execute_binding": False}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return ProviderDiagnosticArtifact(path=path, cases=tuple(records), metrics=metrics, screen_count=5, target_count=25)

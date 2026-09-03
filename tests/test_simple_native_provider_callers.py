@@ -13,7 +13,7 @@ def test_qwen_actual_caller_sends_projection_not_full_runtime_request(tmp_path: 
 
 def test_qwen_actual_response_is_expanded_before_existing_parser() -> None:
     from app.learn.hybrid.simple_native_contracts import expand_qwen_model_response
-    runtime={"screenshot":{"image_size":{"width":10,"height":10}},"candidates":[{"candidate_id":"candidate/a","bbox_original":[1,1,2,2],"active":True}]}
+    runtime={"contract_version":"hybrid_qwen_binding_request_v1", "screenshot":{"image_size":{"width":10,"height":10}},"candidates":[{"candidate_id":"candidate/a","bbox_original":[1,1,2,2],"active":True}]}
     assert expand_qwen_model_response({"bindings":[{"i":0,"role":"button","label":"x","status":"BOUND","confidence":1}]},projection={"image_size":[10,10],"candidates":[{"i":0,"box":[1,1,2,2],"active":True}]},runtime_request=runtime)["bindings"][0]["candidate_id"] == "candidate/a"
 
 

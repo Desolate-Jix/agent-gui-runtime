@@ -29,16 +29,26 @@ def project_omni_official_items(items: Sequence[Mapping[str, object]]) -> dict[s
     return {'items':[{'bbox':item.get('bbox'),'type':item.get('type'),'content':item.get('content'),'interactivity':item.get('interactivity')} for item in items]}
 
 def make_actual_simple_native_slots(*, config: Mapping[str, object], lifecycle: object, transport: HTTPTransport) -> SimpleNativeSlots:
-    """Create callable closures only; lifecycle startup is intentionally outside construction."""
+    """Create closures only; the first invocation proves exclusive ownership before transport."""
     endpoints=config.get('endpoints') if isinstance(config.get('endpoints'),Mapping) else {}
+    started = False
+    def ensure_started() -> None:
+        nonlocal started
+        if started: return
+        start = getattr(lifecycle, 'start_exclusive', None) or getattr(lifecycle, 'start', None)
+        if not callable(start): raise ValueError('actual lifecycle must provide exclusive start')
+        result = start()
+        if result is False: raise RuntimeError('actual lifecycle did not prove exclusive ownership')
+        started = True
     def omni(image: Path) -> object:
+        ensure_started()
         response=transport.post(url=str(endpoints.get('omni','omni')),payload={'image_path':str(image)},timeout=120.0)
         return _response_value(response)
     def qwen(image: Path, projection: Mapping[str, object]) -> object:
-        return call_qwen_projected_binding(image_path=image,projection=projection,transport=transport)
+        ensure_started(); return call_qwen_projected_binding(image_path=image,projection=projection,transport=transport)
     def vista(image: Path, target: str) -> str:
-        return call_vista_bare_point(roi_path=image,target_text=target,transport=transport)
-    return SimpleNativeSlots(omni=omni,qwen=qwen,vista=vista)
+        ensure_started(); return call_vista_bare_point(roi_path=image,target_text=target,transport=transport)
+    return SimpleNativeSlots(omni=omni,qwen=qwen,vista=vista,cleanup=lambda: cancel_owned_processes(lifecycle))
 
 def verify_cleanup_receipt(receipt: Mapping[str, object]) -> bool:
     return receipt.get('verified') is True and receipt.get('owned_processes') == []

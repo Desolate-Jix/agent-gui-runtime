@@ -6,7 +6,7 @@ from pathlib import Path
 
 def _cases() -> list[object]:
     from app.learn.hybrid.simple_native_smoke import ProviderCase
-    return [ProviderCase(case_id=f"case-{index:03d}", image_path=Path(f"case-{index:03d}.png"), image_size=(100, 100), targets=tuple(f"target-{index}-{item}" for item in range(5)), runtime_request={"screenshot": {"image_size": {"width": 100, "height": 100}}, "candidates": [{"candidate_id": f"candidate/{index}-{item}", "bbox_original": [10, 10, 20, 20], "active": True} for item in range(5)]}) for index in range(1, 6)]
+    return [ProviderCase(case_id=f"case-{index:03d}", image_path=Path(f"case-{index:03d}.png"), image_size=(100, 100), targets=tuple(f"target-{index}-{item}" for item in range(5)), runtime_request={"contract_version":"hybrid_qwen_binding_request_v1", "screenshot": {"image_size": {"width": 100, "height": 100}}, "candidates": [{"candidate_id": f"candidate/{index}-{item}", "bbox_original": [10, 10, 20, 20], "active": True} for item in range(5)]}) for index in range(1, 6)]
 
 
 def _slots():
