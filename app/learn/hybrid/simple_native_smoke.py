@@ -28,7 +28,7 @@ from app.learn.hybrid.simple_native_contracts import (
     parse_vista_normalized_point,
     restore_vista_point_to_capture,
 )
-from app.learn.recognition.uei.canonical import seal_immutable
+from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
 from app.learn.recognition.uei.store import UEIObjectStore
 
 
@@ -296,7 +296,7 @@ def _omni_safe_items(parsed: Sequence[OmniNativeItem], *, image_size: tuple[int,
             "kind": item.type if item.type in safe_kinds else "element",
             "safe_text": item.content or None,
             "safe_role": item.type,
-            "safe_states": ["interactive"] if item.interactivity else [],
+            "safe_states": ["interactive"] if item.interactivity else ["inactive"],
             "source_bbox": list(item.bbox),
             "capture_bbox": _normalized_capture_bbox(item, image_size=image_size),
             "source_coordinate_space": "image_normalized_xyxy",
@@ -362,6 +362,62 @@ def _eligible_bindings(bindings: Mapping[str, object], inventory: Mapping[str, o
     return result
 
 
+def _persist_vista_roi_crop(
+    *, capture: Mapping[str, object], candidate: Mapping[str, object], artifact_dir: Path
+) -> dict[str, object]:
+    capture_path = Path(str(capture.get("capture_path") or ""))
+    capture_sha = capture.get("screenshot_sha256")
+    capture_id = capture.get("capture_id")
+    image_size = capture.get("image_size")
+    candidate_id = candidate.get("candidate_id")
+    bbox = candidate.get("bbox_original")
+    if not capture_path.is_file() or not isinstance(capture_sha, str):
+        raise ValueError("VISTA capture artifact is unavailable")
+    if sha256(capture_path.read_bytes()).hexdigest() != capture_sha:
+        raise ValueError("VISTA capture sha256 mismatch")
+    if (
+        not isinstance(image_size, Mapping)
+        or isinstance(image_size.get("width"), bool)
+        or not isinstance(image_size.get("width"), int)
+        or isinstance(image_size.get("height"), bool)
+        or not isinstance(image_size.get("height"), int)
+    ):
+        raise ValueError("VISTA capture dimensions are invalid")
+    width, height = image_size["width"], image_size["height"]
+    if (
+        not isinstance(candidate_id, str)
+        or not isinstance(bbox, list)
+        or len(bbox) != 4
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in bbox)
+        or not (0 <= bbox[0] < bbox[2] <= width and 0 <= bbox[1] < bbox[3] <= height)
+    ):
+        raise ValueError("VISTA candidate ROI is not an integer in-capture bbox")
+    crop_path = artifact_dir / "vista-roi" / f"{_hash({'capture_id': capture_id, 'candidate_id': candidate_id, 'bbox': bbox})}.png"
+    crop_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(capture_path) as opened:
+        if opened.size != (width, height):
+            raise ValueError("VISTA capture dimensions changed")
+        crop = opened.convert("RGB").crop(tuple(bbox))
+        crop.save(crop_path)
+    crop_bytes = crop_path.read_bytes()
+    crop_width, crop_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    with Image.open(crop_path) as persisted:
+        if persisted.size != (crop_width, crop_height):
+            raise ValueError("VISTA persisted ROI dimensions mismatch")
+    return {
+        "contract_version": "simple_native_vista_roi_v1",
+        "capture_id": capture_id,
+        "capture_sha256": capture_sha,
+        "candidate_id": candidate_id,
+        "roi_xyxy": list(bbox),
+        "source_path": str(capture_path),
+        "source_sha256": capture_sha,
+        "crop_path": str(crop_path),
+        "crop_sha256": sha256(crop_bytes).hexdigest(),
+        "crop_size": {"width": crop_width, "height": crop_height},
+    }
+
+
 def _record_failure(
     *, state: dict[str, Any], slot: str, raw: object, error: BaseException, error_class: str
 ) -> None:
@@ -420,7 +476,9 @@ def run_simple_native_regression_diagnostic(
             state["trace"].append({
                 "slot": "omni",
                 "raw": _raw_text(raw),
-                "parsed_native": [asdict(item) for item in parsed],
+                "parsed_native": [
+                    {**asdict(item), "bbox": list(item.bbox)} for item in parsed
+                ],
                 **evidence,
                 "parent_capture_id": capture["capture_id"],
                 "raw_sha256": _hash(raw),
@@ -483,18 +541,42 @@ def run_simple_native_regression_diagnostic(
         if not isinstance(inventory, Mapping) or not isinstance(bindings, Mapping):
             continue
         capture = state["capture"]
-        for binding, candidate in _eligible_bindings(bindings, inventory):
+        eligible = _eligible_bindings(bindings, inventory)
+        eligible_ids = {binding["candidate_id"] for binding, _candidate in eligible}
+        parsed_bindings = bindings.get("bindings")
+        if isinstance(parsed_bindings, list):
+            for binding in parsed_bindings:
+                if isinstance(binding, Mapping) and binding.get("candidate_id") not in eligible_ids:
+                    metrics["abstained"] += 1
+                    state["trace"].append({
+                        "slot": "vista",
+                        "status": "abstained",
+                        "reason": "candidate_not_uniquely_bound_active_eligible",
+                        "semantic_role": binding.get("role"),
+                        "semantic_label": binding.get("label"),
+                        "candidate_id": binding.get("candidate_id"),
+                        "parent_capture_id": capture["capture_id"],
+                    })
+        for binding, candidate in eligible:
             if invalid_streak["vista"] >= 2:
+                metrics["abstained"] += 1
+                state["trace"].append({
+                    "slot": "vista",
+                    "status": "abstained",
+                    "reason": "vista_schema_circuit_open",
+                    "semantic_role": binding["role"],
+                    "semantic_label": binding["label"],
+                    "candidate_id": binding["candidate_id"],
+                    "parent_capture_id": capture["capture_id"],
+                })
                 continue
             metrics["vista"]["attempted"] += 1
-            started, raw = perf_counter(), ""
+            started, raw, roi_crop = perf_counter(), "", None
             try:
-                bbox = candidate.get("bbox_original")
-                if not isinstance(bbox, list) or len(bbox) != 4 or any(isinstance(value, bool) or not isinstance(value, int) for value in bbox):
-                    raise ValueError("grounding candidate geometry is unavailable")
-                roi = tuple(bbox)
+                roi_crop = _persist_vista_roi_crop(capture=capture, candidate=candidate, artifact_dir=artifact_dir)
+                roi = tuple(roi_crop["roi_xyxy"])
                 target = f"{binding['role']}: {binding['label']}"
-                raw = slots.vista(Path(capture["capture_path"]), target)
+                raw = slots.vista(Path(roi_crop["crop_path"]), target)
                 normalized = parse_vista_normalized_point(raw)
                 point = restore_vista_point_to_capture(normalized, roi_xyxy=roi)
                 if not (roi[0] < point[0] < roi[2] and roi[1] < point[1] < roi[3]):
@@ -506,18 +588,25 @@ def run_simple_native_regression_diagnostic(
                     "capture_point": list(point), "roi_xyxy": list(roi),
                     "semantic_role": binding["role"], "semantic_label": binding["label"],
                     "candidate_id": binding["candidate_id"], "parent_capture_id": capture["capture_id"],
+                    "roi_crop": roi_crop,
                     "raw_sha256": _hash(raw),
                 })
             except TimeoutError as exc:
                 metrics["vista"]["timeout"] += 1
                 invalid_streak["vista"] += 1
+                metrics["abstained"] += 1
                 _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="timeout")
                 state["trace"][-1].update({"semantic_role": binding["role"], "semantic_label": binding["label"], "candidate_id": binding["candidate_id"]})
+                if roi_crop is not None:
+                    state["trace"][-1]["roi_crop"] = roi_crop
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                 metrics["vista"]["schema_invalid"] += 1
                 invalid_streak["vista"] += 1
+                metrics["abstained"] += 1
                 _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="schema")
                 state["trace"][-1].update({"semantic_role": binding["role"], "semantic_label": binding["label"], "candidate_id": binding["candidate_id"]})
+                if roi_crop is not None:
+                    state["trace"][-1]["roi_crop"] = roi_crop
             metrics["vista"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
             metrics["vista"]["raw_output_bytes"] += len(raw.encode("utf-8"))
 
@@ -534,7 +623,7 @@ def run_simple_native_regression_diagnostic(
         else dict(slots.cleanup()) if slots.cleanup is not None
         else {"verified": False, "reason": "runner received no lifecycle cleanup observation"}
     )
-    payload = {
+    payload = seal_immutable({
         "contract_version": "simple_native_provider_diagnostic_v2",
         "regression_diagnostic_only": True,
         "promotion_eligible": False,
@@ -546,7 +635,7 @@ def run_simple_native_regression_diagnostic(
         "action_candidates": [],
         "artifact_is_authorization": False,
         "execute_binding": False,
-    }
+    })
     path = artifact_dir / "provider-diagnostic.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return ProviderDiagnosticArtifact(path=path, cases=tuple(records), metrics=metrics, screen_count=5, target_count=25)
@@ -558,6 +647,16 @@ def score_simple_native_regression(
     """The only Gold-reading boundary; the provider artifact must already exist."""
     if not provider_artifact.path.is_file():
         raise ValueError("provider artifact must be finalized before scoring")
+    provider_payload = json.loads(provider_artifact.path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(provider_payload, Mapping)
+        or provider_payload.get("contract_version") != "simple_native_provider_diagnostic_v2"
+        or provider_payload.get("content_sha256") != content_sha256(dict(provider_payload))
+        or provider_payload.get("screen_count") != 5
+        or provider_payload.get("target_count") != 25
+        or not isinstance(provider_payload.get("cases"), list)
+    ):
+        raise ValueError("provider artifact is not a finalized sealed diagnostic")
     gold = json.loads(gold_path.read_text(encoding="utf-8"))
     targets = gold.get("targets") if isinstance(gold, Mapping) else None
     if not isinstance(targets, list):
@@ -567,23 +666,59 @@ def score_simple_native_regression(
         if isinstance(target, Mapping) and target.get("partition") == "regression" and isinstance(target.get("screen_id"), str):
             gold_by_screen.setdefault(target["screen_id"], []).append(target)
     correct = wrong = abstained = 0
-    for case in provider_artifact.cases:
+    for case in provider_payload["cases"]:
+        if not isinstance(case, Mapping):
+            raise ValueError("provider artifact case is invalid")
         screen = case.get("case_id")
         expected = gold_by_screen.get(screen) if isinstance(screen, str) else None
         if not expected:
             raise ValueError("provider artifact case has no regression Gold join")
         observed = [entry for entry in case.get("trace", []) if isinstance(entry, Mapping) and entry.get("slot") == "vista"]
-        for index, target in enumerate(expected):
-            entry = observed[index] if index < len(observed) else None
-            point = entry.get("capture_point") if isinstance(entry, Mapping) else None
-            bbox = target.get("bbox")
-            if not isinstance(point, list) or len(point) != 2:
+        capture = case.get("capture") if isinstance(case.get("capture"), Mapping) else {}
+        for target in expected:
+            role, label = target.get("role"), target.get("label")
+            if not isinstance(role, str) or not isinstance(label, str):
+                raise ValueError("Gold semantic identity is invalid")
+            matches = [
+                entry for entry in observed
+                if entry.get("semantic_role") == role
+                and entry.get("semantic_label") == label
+                and "capture_point" in entry
+            ]
+            if len(matches) != 1:
                 abstained += 1
-            elif isinstance(bbox, list) and len(bbox) == 4 and bbox[0] < point[0] < bbox[2] and bbox[1] < point[1] < bbox[3]:
+                continue
+            entry = matches[0]
+            point = entry.get("capture_point")
+            bbox = target.get("bbox")
+            roi = entry.get("roi_xyxy")
+            crop = entry.get("roi_crop")
+            if (
+                not isinstance(point, list)
+                or len(point) != 2
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in point)
+                or not isinstance(roi, list)
+                or len(roi) != 4
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in roi)
+                or not (roi[0] < point[0] < roi[2] and roi[1] < point[1] < roi[3])
+                or not isinstance(crop, Mapping)
+                or crop.get("capture_id") != capture.get("capture_id")
+                or crop.get("capture_sha256") != capture.get("screenshot_sha256")
+                or crop.get("candidate_id") != entry.get("candidate_id")
+                or crop.get("roi_xyxy") != roi
+            ):
+                abstained += 1
+            elif (
+                not isinstance(bbox, list)
+                or len(bbox) != 4
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in bbox)
+            ):
+                raise ValueError("Gold target bbox is invalid")
+            elif bbox[0] < point[0] < bbox[2] and bbox[1] < point[1] < bbox[3]:
                 correct += 1
             else:
                 wrong += 1
     return RegressionDiagnosticReport(
         sha256(provider_artifact.path.read_bytes()).hexdigest(), True, False,
-        provider_artifact.target_count, correct, wrong, abstained,
+        int(provider_payload["target_count"]), correct, wrong, abstained,
     )
