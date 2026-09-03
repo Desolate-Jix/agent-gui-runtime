@@ -69,7 +69,7 @@ def test_qwen_projection_wire_is_compact_bounded_and_marks_each_serial_body_comp
     requests: list[dict[str, object]] = []
     lease = {"lease_id": "same-lease"}
     response_payload = {
-        "choices": [{"message": {"content": json.dumps({"bindings": [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}]})}}]
+        "choices": [{"message": {"content": json.dumps([{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}])}}]
     }
 
     class Response:
@@ -102,7 +102,7 @@ def test_qwen_projection_wire_is_compact_bounded_and_marks_each_serial_body_comp
             screenshot_sha256=sha256(image).hexdigest(),
             model_lease=lease,
             timeout_seconds=2,
-        ) == {"bindings": [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}]}
+        ) == [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}]
 
     assert len(requests) == 5
     for body in requests:
@@ -254,7 +254,9 @@ def test_qwen_goal_binding_schema_accepts_only_goal_binding_fields() -> None:
         "candidates": [{"candidate_index": 0, "bbox": [10, 10, 20, 20], "active": True}],
     }
     schema = model_server._qwen_model_projection_response_schema(projection)
-    item = schema["properties"]["bindings"]["prefixItems"][0]
-    assert item["required"] == ["goal_index", "candidate_index", "status", "confidence"]
-    assert item["properties"]["status"]["enum"] == ["BOUND", "UNBOUND"]
-    assert item["properties"]["candidate_index"] == {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 0}, {"type": "null"}]}
+    item = schema["prefixItems"][0]
+    assert schema["type"] == "array"
+    assert item["oneOf"][0]["properties"]["status"] == {"const": "BOUND"}
+    assert item["oneOf"][0]["properties"]["candidate_index"] == {"type": "integer", "minimum": 0, "maximum": 0}
+    assert item["oneOf"][1]["properties"]["status"] == {"const": "UNBOUND"}
+    assert item["oneOf"][1]["properties"]["candidate_index"] == {"type": "null"}

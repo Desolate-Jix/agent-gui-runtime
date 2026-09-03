@@ -11,7 +11,7 @@ def test_qwen_actual_caller_sends_projection_not_full_runtime_request(tmp_path: 
     from app.learn.hybrid.simple_native_callers import call_qwen_projected_binding
     seen=[]
     class Transport:
-        def post(self, *, url, payload, timeout): seen.append(payload); return {"bindings": []}
+        def post(self, *, url, payload, timeout): seen.append(payload); return []
     call_qwen_projected_binding(image_path=tmp_path/'image.png', projection={"image_size":[1,1],"goals":[],"candidates":[]}, transport=Transport())
     assert "candidate_id" not in str(seen[0]) and seen[0]["projection"]["candidates"] == []
 
@@ -20,7 +20,7 @@ def test_qwen_actual_response_is_expanded_with_adapter_side_semantics() -> None:
     from app.learn.hybrid.simple_native_contracts import expand_qwen_goal_binding_response
     runtime={"contract_version":"simple_native_qwen_goal_binding_request_v1", "screenshot":{"image_size":{"width":10,"height":10}},"goals":[{"goal_index":0,"role":"button","label":"x"}],"candidates":[{"candidate_id":"candidate/a","bbox_original":[1,1,2,2],"active":True}]}
     projection={"image_size":[10,10],"goals":[{"goal_index":0,"role":"button","label":"x"}],"candidates":[{"candidate_index":0,"bbox":[1,1,2,2],"active":True}]}
-    assert expand_qwen_goal_binding_response({"bindings":[{"goal_index":0,"candidate_index":0,"status":"BOUND","confidence":1}]},projection=projection,runtime_request=runtime)["bindings"][0]["candidate_id"] == "candidate/a"
+    assert expand_qwen_goal_binding_response([{"goal_index":0,"candidate_index":0,"status":"BOUND","confidence":1}],projection=projection,runtime_request=runtime)["bindings"][0]["candidate_id"] == "candidate/a"
 
 
 def test_vista_actual_caller_sends_no_generic_json_system_prompt_or_response_format(tmp_path: Path) -> None:
@@ -98,7 +98,7 @@ def test_actual_slots_are_lazy_provider_batched_and_reuse_qwen_and_vista_leases(
         build_omni_adapter=lambda: events.append(("omni_adapter",)) or Omni(),
         load_omni_cleanup=lambda invocation_id: cleanup_by_invocation[invocation_id],
         acquire_qwen=lambda **kwargs: events.append(("qwen_acquire", kwargs["scope_name"])) or qwen_lease,
-        run_qwen=lambda **kwargs: events.append(("qwen_run", kwargs["model_lease"])) or {"bindings": []},
+        run_qwen=lambda **kwargs: events.append(("qwen_run", kwargs["model_lease"])) or [],
         release_qwen=lambda lease, reason: events.append(("qwen_release", lease, reason)) or {
             "status": "released",
             "shared_server_retained": False,
@@ -142,7 +142,7 @@ def test_actual_slots_are_lazy_provider_batched_and_reuse_qwen_and_vista_leases(
         assert slots.omni(image) == {"items": []}
     assert slots.release_provider("omni")["verified"] is True
     for _ in range(5):
-        assert slots.qwen(image, {"image_size": [20, 10], "candidates": []}) == {"bindings": []}
+        assert slots.qwen(image, {"image_size": [20, 10], "goals": [], "candidates": []}) == []
     assert slots.release_provider("qwen")["verified"] is True
     for _ in range(3):
         assert slots.vista(image, "button: Open") == "[500,500]"

@@ -37,7 +37,7 @@ def _goal_response(projection: dict[str, object], *, bound_goal_indexes: set[int
     candidates = projection["candidates"]
     assert isinstance(goals, list) and isinstance(candidates, list)
     bound = bound_goal_indexes if bound_goal_indexes is not None else {0}
-    return {"bindings": [
+    return [
         {
             "goal_index": goal["goal_index"],
             "candidate_index": goal["goal_index"] if goal["goal_index"] in bound and goal["goal_index"] < len(candidates) else None,
@@ -45,7 +45,7 @@ def _goal_response(projection: dict[str, object], *, bound_goal_indexes: set[int
             "confidence": 0.8,
         }
         for goal in goals
-    ]}
+    ]
 
 
 def test_runner_seals_omni_geometry_then_uses_authoritative_qwen_parser(
@@ -108,7 +108,7 @@ def test_runner_seals_omni_geometry_then_uses_authoritative_qwen_parser(
     }
 
 
-def test_one_omni_item_cannot_consume_five_qwen_bindings(tmp_path: Path) -> None:
+def test_one_omni_item_can_bind_five_distinct_goals(tmp_path: Path) -> None:
     from app.learn.hybrid.simple_native_smoke import (
         SimpleNativeSlots,
         run_simple_native_regression_diagnostic,
@@ -126,10 +126,10 @@ def test_one_omni_item_cannot_consume_five_qwen_bindings(tmp_path: Path) -> None
                 }
             ]
         },
-        qwen=lambda _image, projection: {"bindings": [
+        qwen=lambda _image, projection: [
             {"goal_index": goal["goal_index"], "candidate_index": 0, "status": "BOUND", "confidence": 0.9}
             for goal in projection["goals"]
-        ]},
+        ],
         vista=lambda image, _target: vista_calls.append(image) or "[500,500]",
     )
 
@@ -139,8 +139,8 @@ def test_one_omni_item_cannot_consume_five_qwen_bindings(tmp_path: Path) -> None
     qwen = next(
         entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "qwen"
     )
-    assert "duplicated" in qwen["parse_error"]
-    assert vista_calls == []
+    assert "parse_error" not in qwen
+    assert len(vista_calls) == 25
 
 
 def test_vista_receives_persisted_candidate_crop_with_capture_lineage(

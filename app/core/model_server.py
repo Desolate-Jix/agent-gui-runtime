@@ -645,7 +645,7 @@ def run_qwen_projection_model(
     screenshot_sha256: str,
     model_lease: dict[str, Any],
     timeout_seconds: float = 120.0,
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
     """Send the closed simple-native per-goal projection under an exact lease."""
     compact = deepcopy(dict(projection)) if isinstance(projection, Mapping) else None
     if not isinstance(compact, dict) or set(compact) != {"image_size", "goals", "candidates"}:
@@ -694,7 +694,7 @@ def run_qwen_projection_model(
     image_url = "data:" + screenshot_media_type + ";base64," + base64.b64encode(screenshot_bytes).decode("ascii")
     prompt = (
         "For every fixed goal exactly once in order, bind one existing candidate index or abstain. "
-        "Return only the closed bindings JSON with goal_index,candidate_index,status,confidence; "
+        "Return only the bare JSON array with goal_index,candidate_index,status,confidence; "
         "BOUND requires an existing candidate_index and UNBOUND requires null. Projection: "
         + json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     )
@@ -703,11 +703,11 @@ def run_qwen_projection_model(
         "temperature": 0.0,
         "max_tokens": 1536,
         "response_format": {
-            "type": "json_object",
+            "type": "json_schema",
             "schema": _qwen_model_projection_response_schema(compact),
         },
         "messages": [
-            {"role": "system", "content": "Return one compact closed JSON object only."},
+            {"role": "system", "content": "Return one compact closed JSON array only."},
             {
                 "role": "user",
                 "content": [
@@ -747,8 +747,8 @@ def run_qwen_projection_model(
     if not isinstance(content, str):
         raise ValueError("Qwen projection response has no JSON message content")
     parsed = json.loads(content)
-    if not isinstance(parsed, dict) or set(parsed) != {"bindings"}:
-        raise ValueError("Qwen projection response is not closed JSON")
+    if not isinstance(parsed, list):
+        raise ValueError("Qwen projection response is not a bare JSON array")
     return parsed
 
 
@@ -5366,7 +5366,7 @@ def _model_id(payload: dict[str, Any]) -> str | None:
 
 
 def _qwen_model_projection_response_schema(projection: Mapping[str, Any]) -> dict[str, Any]:
-    """Build the exact per-goal simple-native binder response schema."""
+    """Build the exact bare-array per-goal binder response schema."""
     goals = projection.get("goals")
     candidates = projection.get("candidates")
     if not isinstance(goals, list) or not isinstance(candidates, list):
@@ -5378,33 +5378,37 @@ def _qwen_model_projection_response_schema(projection: Mapping[str, Any]) -> dic
         if not isinstance(candidate, Mapping) or candidate.get("candidate_index") != index:
             raise ValueError("Qwen model projection candidate ordinal is invalid")
     fields = ["goal_index", "candidate_index", "status", "confidence"]
-    candidate_index = {"anyOf": [
-        {"type": "integer", "minimum": 0, "maximum": len(candidates) - 1},
-        {"type": "null"},
-    ]} if candidates else {"type": "null"}
     return {
-        "type": "object",
-        "properties": {
-            "bindings": {
-                "type": "array",
-                "prefixItems": [
+        "type": "array",
+        "prefixItems": [
+            {
+                "oneOf": [
                     {
                         "type": "object",
                         "properties": {
                             "goal_index": {"const": index},
-                            "candidate_index": candidate_index,
-                            "status": {"enum": ["BOUND", "UNBOUND"]},
+                            "candidate_index": {"type": "integer", "minimum": 0, "maximum": len(candidates) - 1},
+                            "status": {"const": "BOUND"},
                             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                         },
                         "required": fields,
                         "additionalProperties": False,
-                    }
-                    for index in range(len(goals))
-                ],
-                "minItems": len(goals),
-                "maxItems": len(goals),
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "goal_index": {"const": index},
+                            "candidate_index": {"type": "null"},
+                            "status": {"const": "UNBOUND"},
+                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                        },
+                        "required": fields,
+                        "additionalProperties": False,
+                    },
+                ]
             }
-        },
-        "required": ["bindings"],
-        "additionalProperties": False,
+            for index in range(len(goals))
+        ],
+        "minItems": len(goals),
+        "maxItems": len(goals),
     }

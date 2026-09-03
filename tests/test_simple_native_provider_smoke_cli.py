@@ -96,12 +96,10 @@ def test_cli_replay_abstains_when_qwen_cardinality_disagrees_with_omni(tmp_path:
     replay = tmp_path / "replay"
     replay.mkdir()
     omni = {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "x", "interactivity": True}]}
-    incompatible = {
-        "bindings": [
-            {"goal_index": index, "candidate_index": 0, "status": "BOUND", "confidence": 1}
-            for index in range(5)
-        ]
-    }
+    incompatible = [
+        {"goal_index": index, "candidate_index": 0, "status": "BOUND", "confidence": 1}
+        for index in range(4)
+    ]
     (replay / "omni.jsonl").write_text("\n".join(json.dumps(omni) for _ in range(5)) + "\n", encoding="utf-8")
     (replay / "qwen.jsonl").write_text("\n".join(json.dumps(incompatible) for _ in range(5)) + "\n", encoding="utf-8")
     (replay / "vista.jsonl").write_text("[500,500]\n", encoding="utf-8")

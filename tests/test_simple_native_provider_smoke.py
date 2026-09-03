@@ -50,7 +50,7 @@ def _goal_response(projection: dict[str, object], *, bound_goal_indexes: set[int
     candidates = projection["candidates"]
     assert isinstance(goals, list) and isinstance(candidates, list)
     bound = bound_goal_indexes if bound_goal_indexes is not None else {0}
-    return {"bindings": [
+    return [
         {
             "goal_index": goal["goal_index"],
             "candidate_index": goal["goal_index"] if goal["goal_index"] in bound and goal["goal_index"] < len(candidates) else None,
@@ -58,7 +58,7 @@ def _goal_response(projection: dict[str, object], *, bound_goal_indexes: set[int
             "confidence": 0.9,
         }
         for goal in goals
-    ]}
+    ]
 
 
 def _slots():
@@ -290,10 +290,10 @@ def test_inactive_goal_bound_candidate_abstains_before_vista(tmp_path: Path) -> 
     vista_calls: list[str] = []
     slots = SimpleNativeSlots(
         omni=lambda _image: {"items": [{"bbox": [0, 0, 1, 1], "type": "text", "content": "target", "interactivity": False}]},
-        qwen=lambda _image, projection: {"bindings": [
+        qwen=lambda _image, projection: [
             {"goal_index": goal["goal_index"], "candidate_index": 0 if goal["goal_index"] == 0 else None, "status": "BOUND" if goal["goal_index"] == 0 else "UNBOUND", "confidence": 1}
             for goal in projection["goals"]
-        ]},
+        ],
         vista=lambda _image, target: vista_calls.append(target) or "[500,500]",
     )
     artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")

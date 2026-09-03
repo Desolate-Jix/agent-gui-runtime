@@ -198,13 +198,12 @@ def expand_qwen_goal_binding_response(
     goals, candidates, _ = _runtime_goal_binding_request(runtime_request)
     if not isinstance(projection, Mapping) or projection != build_qwen_goal_binding_projection(runtime_request):
         raise ValueError("Qwen goal-binding projection does not match full runtime request")
-    if not isinstance(raw, Mapping) or set(raw) != {"bindings"} or not isinstance(raw["bindings"], list):
-        raise ValueError("Qwen goal-binding response is not closed")
-    if len(raw["bindings"]) != len(goals):
+    if not isinstance(raw, list):
+        raise ValueError("Qwen goal-binding response is not a bare array")
+    if len(raw) != len(goals):
         raise ValueError("Qwen goal-binding coverage is incomplete")
     expanded: list[dict[str, object]] = []
-    seen_candidates: set[int] = set()
-    for index, binding in enumerate(raw["bindings"]):
+    for index, binding in enumerate(raw):
         if not isinstance(binding, Mapping) or set(binding) != {"goal_index", "candidate_index", "status", "confidence"}:
             raise ValueError("Qwen goal-binding item is not closed")
         goal_index, candidate_index, status = binding["goal_index"], binding["candidate_index"], binding["status"]
@@ -215,9 +214,6 @@ def expand_qwen_goal_binding_response(
         if status == "BOUND":
             if isinstance(candidate_index, bool) or not isinstance(candidate_index, int) or not 0 <= candidate_index < len(candidates):
                 raise ValueError("Qwen bound candidate_index is invalid")
-            if candidate_index in seen_candidates:
-                raise ValueError("Qwen goal-binding candidate is duplicated")
-            seen_candidates.add(candidate_index)
             candidate_id: str | None = str(candidates[candidate_index]["candidate_id"])
         else:
             if candidate_index is not None:

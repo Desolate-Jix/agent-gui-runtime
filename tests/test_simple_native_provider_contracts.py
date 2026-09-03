@@ -131,10 +131,10 @@ def test_goal_binding_expansion_derives_semantics_and_restores_stable_candidate_
 
     request = _goal_binding_request()
     result = expand_qwen_goal_binding_response(
-        {"bindings": [
+        [
             {"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 0.9},
             {"goal_index": 1, "candidate_index": None, "status": "UNBOUND", "confidence": 0.1},
-        ]},
+        ],
         projection=build_qwen_goal_binding_projection(request),
         runtime_request=request,
     )
@@ -163,7 +163,27 @@ def test_goal_binding_expansion_fails_closed_on_non_closed_or_invalid_bindings(b
     request = _goal_binding_request()
     with pytest.raises(ValueError):
         expand_qwen_goal_binding_response(
-            {"bindings": bindings},
+            bindings,
             projection=build_qwen_goal_binding_projection(request),
             runtime_request=request,
         )
+
+
+def test_goal_binding_expansion_accepts_bare_array_and_reused_candidate() -> None:
+    from app.learn.hybrid.simple_native_contracts import (
+        build_qwen_goal_binding_projection,
+        expand_qwen_goal_binding_response,
+    )
+
+    request = _goal_binding_request()
+    result = expand_qwen_goal_binding_response(
+        [
+            {"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 0.9},
+            {"goal_index": 1, "candidate_index": 0, "status": "BOUND", "confidence": 0.8},
+        ],
+        projection=build_qwen_goal_binding_projection(request),
+        runtime_request=request,
+    )
+    assert [binding["candidate_id"] for binding in result["bindings"]] == [
+        "candidate/one", "candidate/one"
+    ]
