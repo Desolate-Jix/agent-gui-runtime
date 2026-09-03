@@ -89,12 +89,12 @@ def _validate_profile(profile: Mapping[str, object]) -> dict[str, object]:
         raise ValueError("profile artifact manifest is invalid")
     result["artifact_manifest"] = {"status": status, "relative_path": _relative(manifest.get("relative_path"), "profile artifact manifest path"), "sha256": digest}
     runtime = profile.get("runtime")
-    if not isinstance(runtime, Mapping) or set(runtime) != {"kind", "isolated_runtime_path", "sha256", "worker"}:
+    if not isinstance(runtime, Mapping) or set(runtime) != {"kind", "isolated_runtime_path", "sha256", "worker", "entrypoint"}:
         raise ValueError("profile runtime is not closed")
     runtime_hash = runtime.get("sha256")
     if runtime_hash != _NOT_ACQUIRED and not _is_sha256(runtime_hash):
         raise ValueError("profile runtime hash is invalid")
-    result["runtime"] = {"kind": _text(runtime.get("kind"), "profile runtime kind", 64), "isolated_runtime_path": _relative(runtime.get("isolated_runtime_path"), "profile isolated runtime path"), "sha256": runtime_hash, "worker": _relative(runtime.get("worker"), "profile worker")}
+    result["runtime"] = {"kind": _text(runtime.get("kind"), "profile runtime kind", 64), "isolated_runtime_path": _relative(runtime.get("isolated_runtime_path"), "profile isolated runtime path"), "sha256": runtime_hash, "worker": _relative(runtime.get("worker"), "profile worker"), "entrypoint": _text(runtime.get("entrypoint"), "profile runtime entrypoint", 160)}
     native = profile.get("native_output")
     if not isinstance(native, Mapping) or set(native) != {"kind", "raw_format"}:
         raise ValueError("profile native output is not closed")
@@ -119,10 +119,10 @@ def _validate_profile(profile: Mapping[str, object]) -> dict[str, object]:
     result.update({"artifact_is_authorization": False, "execute_binding_enabled": False, "final_submit_forbidden": True})
     native_kind = result["native_output"]["kind"]  # type: ignore[index]
     role_set = set(roles)
-    if native_kind == "gguf_bare_point_pair_v1" and role_set != {"model", "mmproj", "runtime"}:
-        raise ValueError("GGUF profiles require model, mmproj, and runtime artifacts")
-    if native_kind != "gguf_bare_point_pair_v1" and "model" not in role_set:
-        raise ValueError("goal-binding profile requires a model artifact")
+    if native_kind == "gguf_bare_point_pair_v1" and not {"model", "mmproj", "runtime", "source", "preprocessing"} <= role_set:
+        raise ValueError("GGUF profiles require model, mmproj, runtime, source, and preprocessing artifacts")
+    if native_kind != "gguf_bare_point_pair_v1" and not {"model", "runtime", "source", "preprocessing"} <= role_set:
+        raise ValueError("goal-binding profile requires model, runtime, source, and preprocessing artifacts")
     if native_kind == "gui_actor_topk_points_v1" and result["model_id"] != "microsoft/GUI-Actor-3B-Qwen2.5-VL":
         raise ValueError("GUI-Actor model identity is invalid")
     if native_kind == "phi_ground_any_v1" and result["coordinate_space"] != "padded_canvas_0_10000":
@@ -247,45 +247,62 @@ def _invoke_provider_worker(*, profile: Mapping[str, object], artifact_dir: Path
     """Run one worker only after a verified profile selects its isolated runtime."""
     runtime = profile["runtime"]
     assert isinstance(runtime, Mapping)
-    runtime_python = _safe_under(artifact_dir, str(runtime["isolated_runtime_path"])) / "Scripts" / "python.exe"
+    runtime_artifact = next(item for item in profile["artifacts"] if isinstance(item, Mapping) and item["role"] == "runtime")
+    runtime_python = _safe_under(artifact_dir, str(runtime_artifact["relative_path"]))
     worker = Path(__file__).resolve().parents[3] / str(runtime["worker"])
     if not runtime_python.is_file() or not worker.is_file():
         raise OSError("provider-isolated runtime is unavailable")
     from app.learn.hybrid.windows_process_scope import WindowsProcessScope, benchmark_worker_scope_name_v1, observe_process_scope_cleanup, spawn_process_in_scope
-    payload = {"image_path": str(image_path.resolve()), "goal": goal, "profile": deepcopy(dict(profile))}
-    body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    digest = _sha256(body)
-    scope_name = benchmark_worker_scope_name_v1(authority_kind="test_only", run_id=digest, stage="goal_binding", operation_id=str(profile["provider_id"]), worker_id=str(profile["profile_id"]), payload_sha256=digest, execution_nonce=_sha256((digest + goal).encode("utf-8"))[:32])
-    work = artifact_dir / "goal-binding-native-traces" / digest
+    image_bytes = image_path.read_bytes()
+    from PIL import Image
+    with Image.open(image_path) as image: width, height = image.size
+    seed = _sha256(image_bytes + goal.encode("utf-8"))
+    work = artifact_dir / "goal-binding-native-traces" / seed
     work.mkdir(parents=True, exist_ok=False)
-    request, stdout, stderr = work / "request.json", work / "stdout.json", work / "stderr.txt"
+    screenshot = (work / "screenshot").with_suffix(image_path.suffix)
+    screenshot.write_bytes(image_bytes)
+    identity_path, request, stdout, stderr = work / "parent-identity.json", work / "request.json", work / "stdout.json", work / "stderr.txt"
+    payload = {"image_path": str(screenshot), "goal": goal, "profile": deepcopy(dict(profile)), "screenshot": {"sha256": _sha256(image_bytes), "width": width, "height": height, "capture_id": f"capture/{_sha256(image_bytes)}"}, "parent_identity_path": str(identity_path)}
+    body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     request.write_bytes(body)
+    scope_name = benchmark_worker_scope_name_v1(authority_kind="test_only", run_id=seed, stage="goal_binding", operation_id=str(profile["provider_id"]), worker_id=str(profile["profile_id"]), payload_sha256=_sha256(body), execution_nonce=_sha256((seed + goal).encode("utf-8"))[:32])
     scope = WindowsProcessScope(scope_name, create=True)
+    observation: Mapping[str, object] | None = None
+    identity: dict[str, int] | None = None
     try:
-        process = spawn_process_in_scope([str(runtime_python), str(worker), "--execute", "--request-json", str(request)], scope_name=scope_name, cwd=artifact_dir, stdout=stdout, stderr=stderr)
-        identity = exact_process_identity(process.process_identity)
-        try:
-            process.wait(timeout=float(profile["timeout_seconds"]))
-        finally:
-            process.close()
+        def before_resume(value: Mapping[str, object]) -> None:
+            nonlocal identity
+            identity = exact_process_identity(value)
+            identity_path.write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
+        with stdout.open("wb") as output_handle, stderr.open("wb") as error_handle:
+            process = spawn_process_in_scope([str(runtime_python), str(worker), "--execute", "--request-json", str(request)], scope_name=scope_name, cwd=artifact_dir, stdout=output_handle, stderr=error_handle, before_resume=before_resume)
+            try:
+                code = process.wait(timeout=float(profile["timeout_seconds"]))
+            except Exception as exc:
+                process.kill()
+                if type(exc).__name__ == "TimeoutExpired": raise TimeoutError("goal-binding provider worker timed out") from exc
+                raise
+            finally:
+                process.close()
+            if code != 0: raise OSError(stderr.read_text(encoding="utf-8", errors="replace")[:4096] or "provider worker exited nonzero")
     finally:
         scope.close()
-    observation = observe_process_scope_cleanup(scope_name, terminate=True, stable_zero_observations=3)
-    if observation.get("cleanup_status") != "verified" or observation.get("member_identities_after") != [] or observation.get("active_listeners_after") != []:
+        observation = observe_process_scope_cleanup(scope_name, terminate=True, stable_zero_observations=3)
+    if observation.get("cleanup_status") != "verified" or observation.get("member_identities_after") != [] or observation.get("active_listeners_after") != [] or observation.get("lease_files_after", []) != []:
         raise RuntimeError("provider worker cleanup has residue")
-    if not stdout.is_file() or stdout.stat().st_size > int(profile["max_output_bytes"]):
+    if identity is None or not stdout.is_file() or stdout.stat().st_size > int(profile["max_output_bytes"]):
         raise ValueError("provider worker output is unavailable or exceeds profile bound")
     try:
         envelope = json.loads(stdout.read_text(encoding="utf-8"), object_pairs_hook=_closed_object)
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("provider worker output is invalid") from exc
-    expected = {"contract_version", "profile_identity", "raw_native_output", "parsed_native", "resource_metrics", "worker_process_identity"}
+    expected = {"contract_version", "profile_identity", "raw_native_output", "raw_native_output_sha256", "parsed_native", "resource_metrics", "worker_process_identity", "request_lineage"}
     runtime = profile["runtime"]
     preprocessing = profile["preprocessing"]
     native = profile["native_output"]
     assert isinstance(runtime, Mapping) and isinstance(preprocessing, Mapping) and isinstance(native, Mapping)
     identity_fields = {"profile_id": profile["profile_id"], "preprocessing_sha256": preprocessing["sha256"], "runtime_sha256": runtime["sha256"], "native_output_kind": native["kind"]}
-    if not isinstance(envelope, Mapping) or set(envelope) != expected or envelope.get("contract_version") != "goal_binding_native_trace_v1" or envelope.get("profile_identity") != identity_fields or exact_process_identity(envelope["worker_process_identity"]) != identity:
+    if not isinstance(envelope, Mapping) or set(envelope) != expected or envelope.get("contract_version") != "goal_binding_native_trace_v1" or envelope.get("profile_identity") != identity_fields or envelope.get("raw_native_output_sha256") != _sha256(str(envelope.get("raw_native_output", "")).encode("utf-8")) or exact_process_identity(envelope["worker_process_identity"]) != identity:
         raise ValueError("provider worker envelope is invalid")
     return deepcopy(dict(envelope))
 
@@ -307,7 +324,7 @@ def make_goal_binding_arm(*, profile: Mapping[str, object], artifact_dir: Path) 
         except RuntimeError:
             state["blocked"] = True
             raise
-        return deepcopy(envelope["parsed_native"] if envelope["parsed_native"] is not None else envelope["raw_native_output"])
+        return deepcopy(envelope)
     def cleanup() -> Mapping[str, object]:
         receipt = verified_no_process_cleanup_receipt(str(sealed["provider_id"]))
         if state["blocked"]:

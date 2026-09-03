@@ -28,14 +28,14 @@ def test_ui_venus_parses_one_official_point_and_rejects_extra_points() -> None:
     from app.learn.hybrid.goal_binding_native_adapters import parse_ui_venus_point
 
     profile = _profile("ui_venus_1_5_2b_f16", "ui_venus_point_v1")
-    proposal = parse_ui_venus_point({"point": [250, 375]}, goal_index=0, profile=profile)
+    proposal = parse_ui_venus_point([250, 375], goal_index=0, profile=profile)
 
     assert proposal.point == (250.0, 375.0)
     assert proposal.coordinate_space == "normalized_0_1000"
     assert proposal.confidence is None
     assert proposal.status == "OK"
     assert parse_ui_venus_point(
-        {"point": [250, 375], "points": [[1, 2]]}, goal_index=0, profile=profile
+        [250, 375, 1], goal_index=0, profile=profile
     ).status == "PROVIDER_FAILURE"
 
 
@@ -44,7 +44,7 @@ def test_ui_venus_allows_only_the_official_optional_action_text() -> None:
 
     profile = _profile("ui_venus_1_5_2b_f16", "ui_venus_point_v1")
     proposal = parse_ui_venus_point(
-        {"point": [250, 375], "action": "click"}, goal_index=0, profile=profile
+        [250, 375], goal_index=0, profile=profile
     )
 
     assert proposal.status == "OK"
@@ -217,7 +217,7 @@ def test_all_native_parsers_preserve_raw_utf8_without_reasoning_fields() -> None
     )
 
     cases = (
-        (parse_ui_venus_point, '{"point":[250,375]}', _profile("ui", "ui_venus_point_v1")),
+        (parse_ui_venus_point, "[250,375]", _profile("ui", "ui_venus_point_v1")),
         (parse_gui_actor_top1, '{"topk_points":[[0.25,0.375],"后续原始项"]}', _profile("gui", "gui_actor_topk_points_v1", "normalized_0_1")),
         (parse_phi_ground_any, '{"point":[250,375]}', _profile("phi", "phi_ground_any_v1", output_mode="point")),
         (parse_gguf_grounding, "[250,375]", _profile("gguf", "gguf_bare_point_pair_v1")),

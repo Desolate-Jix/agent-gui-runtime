@@ -11,7 +11,7 @@ PROFILE_DIR = ROOT / "configs" / "model_profiles"
 PROFILE_NAMES = (
     "goal_binding_qwen_incumbent.json",
     "goal_binding_ui_venus_1_5_2b_f16.json",
-    "learn_mode_gui_actor_3b.json",
+    "goal_binding_gui_actor_3b_bf16.json",
     "goal_binding_phi_ground_any_bf16.json",
     "goal_binding_ui_venus_2_9b_q6_k.json",
     "goal_binding_groundnext_7b_q6_k.json",
@@ -49,7 +49,7 @@ def test_profiles_are_closed_non_authorizing_and_use_exact_model_ids() -> None:
         for profile in (load_goal_binding_profile(PROFILE_DIR / name) for name in PROFILE_NAMES)
     }
     assert profiles["goal_binding_ui_venus_1_5_2b_f16"]["model_id"] == "inclusionAI/UI-Venus-1.5-2B"
-    assert profiles["learn_mode_gui_actor_3b"]["model_id"] == "microsoft/GUI-Actor-3B-Qwen2.5-VL"
+    assert profiles["goal_binding_gui_actor_3b_bf16"]["model_id"] == "microsoft/GUI-Actor-3B-Qwen2.5-VL"
     assert profiles["goal_binding_phi_ground_any_bf16"]["model_id"] == "microsoft/Phi-Ground-Any"
     for profile in profiles.values():
         assert profile["artifact_is_authorization"] is False
@@ -152,3 +152,20 @@ def test_probe_uses_no_gold_holdout_or_candidate_mapping(tmp_path: Path) -> None
     profile = load_goal_binding_profile(PROFILE_DIR / "goal_binding_ui_venus_1_5_2b_f16.json")
     with pytest.raises(ValueError, match="not acquired|artifact"):
         probe_goal_binding_profile(profile=profile, image_path=image)
+
+
+def test_worker_dispatches_provider_after_pinned_runtime_is_available(monkeypatch, tmp_path: Path) -> None:
+    worker = _worker_module()
+    image = tmp_path / "screen.png"
+    image.write_bytes(b"screen")
+    identity = tmp_path / "identity.json"
+    identity.write_text('{"pid":42,"create_time_ns":99}', encoding="utf-8")
+    profile = {"profile_id": "ui", "provider_id": "ui_venus_1_5_2b_f16", "runtime": {"kind": "transformers", "sha256": "not_acquired"}, "preprocessing": {"identity": "x", "sha256": "not_acquired"}, "native_output": {"kind": "ui_venus_point_v1"}}
+    monkeypatch.setattr(worker, "_dispatch_provider", lambda **kwargs: "[250,375]", raising=False)
+    result = worker._run_provider_once({"image_path": str(image), "goal": "button: Open", "profile": profile, "screenshot": {"sha256": __import__("hashlib").sha256(image.read_bytes()).hexdigest(), "width": 1, "height": 1, "capture_id": "capture/test"}, "parent_identity_path": str(identity)})
+    assert result["raw_native_output"] == "[250,375]"
+
+def test_learn_mode_gui_actor_profile_remains_legacy_learn_schema() -> None:
+    profile = json.loads((PROFILE_DIR / "learn_mode_gui_actor_3b.json").read_text(encoding="utf-8"))
+    assert profile["mode_scope"] == "learn_only"
+    assert profile["output_contract"] == "action_region_verification_v1"

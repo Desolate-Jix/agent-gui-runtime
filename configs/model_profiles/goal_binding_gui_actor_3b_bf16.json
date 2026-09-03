@@ -1,0 +1,64 @@
+{
+  "contract_version": "goal_binding_model_profile_v1",
+  "profile_id": "goal_binding_gui_actor_3b_bf16",
+  "arm_id": "goal_binding_gui_actor_3b_bf16",
+  "provider_id": "gui_actor_3b_bf16",
+  "model_id": "microsoft/GUI-Actor-3B-Qwen2.5-VL",
+  "repository_id": "microsoft/GUI-Actor-3B-Qwen2.5-VL",
+  "upstream_revision": "5fb97348752cb3d50be9709f47d9ae6c99725949",
+  "artifacts": [
+    {
+      "role": "model",
+      "relative_path": "artifacts/gui_actor_3b_bf16/not_acquired/model.safetensors",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    },
+    {
+      "role": "runtime",
+      "relative_path": "artifacts/gui_actor_3b_bf16/not_acquired/python.exe",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    },
+    {
+      "role": "source",
+      "relative_path": "artifacts/gui_actor_3b_bf16/not_acquired/official-source.lock",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    },
+    {
+      "role": "preprocessing",
+      "relative_path": "artifacts/gui_actor_3b_bf16/not_acquired/preprocessing.lock",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    }
+  ],
+  "artifact_manifest": {
+    "status": "not_acquired",
+    "relative_path": "manifests/gui_actor_3b_bf16.json",
+    "sha256": "not_acquired"
+  },
+  "runtime": {
+    "kind": "gui_actor_official_runtime",
+    "isolated_runtime_path": "artifacts/gui_actor_3b_bf16/not_acquired/python.exe",
+    "sha256": "not_acquired",
+    "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
+    "entrypoint": "gui_actor.inference:run_goal_binding"
+  },
+  "dtype_or_quantization": "bf16",
+  "native_output": {
+    "kind": "gui_actor_topk_points_v1",
+    "raw_format": "utf8_native"
+  },
+  "coordinate_space": "normalized_0_1",
+  "preprocessing": {
+    "identity": "gui_actor_official_pointer_head_v1",
+    "source_revision": "microsoft/GUI-Actor@d98d1bbd01862f9112114b83b032f492c365a173",
+    "sha256": "not_acquired"
+  },
+  "max_output_bytes": 16384,
+  "timeout_seconds": 120,
+  "license": "MIT",
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true
+}

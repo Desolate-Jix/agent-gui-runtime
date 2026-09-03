@@ -175,24 +175,16 @@ def _ok(*, goal_index: int, point: tuple[float, float], coordinate_space: str) -
 def parse_ui_venus_point(
     raw: object, *, goal_index: int, profile: Mapping[str, object]
 ) -> NativePointProposal:
-    """只读取 UI-Venus 的 sealed point；可选 action 仅作文本验证。"""
+    """Accept exactly UI-Venus's one bare point or its explicit [-1,-1] abstention."""
     goal_index = _require_goal_index(goal_index)
     coordinate_space, image_size = _require_profile(profile, native_shape="ui_venus_point_v1")
     try:
         value = _structured_raw(raw)
-        if not isinstance(value, Mapping) or set(value) not in ({"point"}, {"point", "action"}):
-            raise ValueError("UI-Venus output is not a single point")
-        if "action" in value and (
-            not isinstance(value["action"], str)
-            or not value["action"].strip()
-            or len(value["action"]) > 256
-        ):
-            raise ValueError("UI-Venus action text is invalid")
-        return _ok(
-            goal_index=goal_index,
-            point=_pair(value["point"], field="UI-Venus point", coordinate_space=coordinate_space, image_size=image_size),
-            coordinate_space=coordinate_space,
-        )
+        if not isinstance(value, list) or len(value) != 2:
+            raise ValueError("UI-Venus output is not one bare point")
+        if value == [-1, -1]:
+            return _failure(goal_index=goal_index, coordinate_space=coordinate_space)
+        return _ok(goal_index=goal_index, point=_pair(value, field="UI-Venus point", coordinate_space=coordinate_space, image_size=image_size), coordinate_space=coordinate_space)
     except (ValueError, json.JSONDecodeError, TypeError):
         return _failure(goal_index=goal_index, coordinate_space=coordinate_space)
 

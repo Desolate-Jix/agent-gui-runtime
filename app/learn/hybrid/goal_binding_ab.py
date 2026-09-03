@@ -76,6 +76,15 @@ def _raw_text(value: object) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
+def _native_envelope(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping) or value.get("contract_version") != "goal_binding_native_trace_v1":
+        return None
+    required = {"contract_version", "profile_identity", "raw_native_output", "raw_native_output_sha256", "parsed_native", "resource_metrics", "worker_process_identity", "request_lineage"}
+    if set(value) != required or not isinstance(value.get("raw_native_output"), str) or _text_hash(value["raw_native_output"]) != value.get("raw_native_output_sha256"):
+        raise ValueError("provider native trace envelope is invalid")
+    return deepcopy(dict(value))
+
+
 def _metric() -> dict[str, object]:
     return {"attempted": 0, "schema_valid": 0, "schema_invalid": 0, "timeout": 0, "latencies": [], "raw_output_bytes": 0}
 
@@ -487,6 +496,8 @@ def run_goal_binding_arm(
             trace: list[dict[str, object]] = []
             for goal_index, goal in enumerate(goals):
                 raw: object = ""
+                native_raw = ""
+                native_envelope: dict[str, object] | None = None
                 error: str | None = None
                 native_ref = {"id": f"native-output/{arm.arm_id}/{case.case_id}/{goal_index}", "sha256": "0" * 64}
                 context: dict[str, object] = {
@@ -517,21 +528,28 @@ def run_goal_binding_arm(
                 started = perf_counter()
                 try:
                     try:
-                        raw = arm.call(case.image_path, request)
+                        called = arm.call(case.image_path, request)
+                        native_envelope = _native_envelope(called)
+                        if native_envelope is not None:
+                            native_raw = str(native_envelope["raw_native_output"])
+                            raw = native_envelope["parsed_native"] if native_envelope["parsed_native"] is not None else native_raw
+                        else:
+                            raw = called
+                            native_raw = _raw_text(raw)
                     except TimeoutError as exc:
                         error = str(exc)
-                        raw_text = _raw_text(raw)
+                        raw_text = native_raw
                         native_ref["sha256"] = _text_hash(raw_text)
                         binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="provider_timeout")
                         binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
                     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                         error = str(exc)
-                        raw_text = _raw_text(raw)
+                        raw_text = native_raw
                         native_ref["sha256"] = _text_hash(raw_text)
                         binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="malformed_native_output")
                         binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
                     else:
-                        raw_text = _raw_text(raw)
+                        raw_text = native_raw
                         native_ref["sha256"] = _text_hash(raw_text)
                         # 此验证必须位于解析和适配失败处理之外。
                         _verify_capture_freshness(capture, "GoalBindingProvider")
@@ -553,10 +571,10 @@ def run_goal_binding_arm(
                             else:
                                 binder_metrics["schema_valid"] = int(binder_metrics["schema_valid"]) + 1
                 finally:
-                    raw_text = _raw_text(raw)
+                    raw_text = native_raw
                     binder_metrics["latencies"].append(round((perf_counter() - started) * 1000, 3))
                     binder_metrics["raw_output_bytes"] = int(binder_metrics["raw_output_bytes"]) + len(raw_text.encode("utf-8"))
-                raw_text = _raw_text(raw)
+                raw_text = native_raw
                 selected_candidate = None
                 candidate = None
                 if binding["status"] == "BOUND":
@@ -568,6 +586,7 @@ def run_goal_binding_arm(
                     )
                 trace.append({
                     "slot": "binder", **deepcopy(goal), "native_raw": raw_text, "native_raw_sha256": native_ref["sha256"],
+                    "native_envelope": native_envelope, "native_envelope_sha256": _hash(native_envelope) if native_envelope is not None else None,
                     "native_parsed": parsed_evidence[0] if parsed_evidence else None,
                     "native_parsed_sha256": _hash(parsed_evidence[0]) if parsed_evidence else None,
                     "canonical_binding": binding, "canonical_binding_sha256": _hash(binding),

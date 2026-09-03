@@ -24,6 +24,18 @@
       "relative_path": "artifacts/groundnext_7b_q6_k/not_acquired/llama-server.exe",
       "sha256": "not_acquired",
       "bytes": "not_acquired"
+    },
+    {
+      "role": "source",
+      "relative_path": "artifacts/groundnext_7b_q6_k/not_acquired/official-source.lock",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    },
+    {
+      "role": "preprocessing",
+      "relative_path": "artifacts/groundnext_7b_q6_k/not_acquired/preprocessing.lock",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
     }
   ],
   "artifact_manifest": {
@@ -33,9 +45,10 @@
   },
   "runtime": {
     "kind": "llama_cpp",
-    "isolated_runtime_path": "runtimes/groundnext_7b_q6_k",
+    "isolated_runtime_path": "artifacts/groundnext_7b_q6_k/not_acquired/llama-server.exe",
     "sha256": "not_acquired",
-    "worker": "scripts/model_servers/goal_binding_transformers_worker.py"
+    "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
+    "entrypoint": "llama_cpp.inference:run_goal_binding"
   },
   "dtype_or_quantization": "Q6_K",
   "native_output": {

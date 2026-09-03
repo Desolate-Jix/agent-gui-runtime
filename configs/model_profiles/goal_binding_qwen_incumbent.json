@@ -18,6 +18,18 @@
       "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/llama-server.exe",
       "sha256": "not_acquired",
       "bytes": "not_acquired"
+    },
+    {
+      "role": "source",
+      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/official-source.lock",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    },
+    {
+      "role": "preprocessing",
+      "relative_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/preprocessing.lock",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
     }
   ],
   "artifact_manifest": {
@@ -27,9 +39,10 @@
   },
   "runtime": {
     "kind": "llama_cpp",
-    "isolated_runtime_path": "runtimes/qwen3_vl_8b_q4_k_m",
+    "isolated_runtime_path": "artifacts/qwen3_vl_8b_q4_k_m/not_acquired/llama-server.exe",
     "sha256": "not_acquired",
-    "worker": "scripts/model_servers/goal_binding_transformers_worker.py"
+    "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
+    "entrypoint": "qwen_incumbent.inference:run_goal_binding"
   },
   "dtype_or_quantization": "Q4_K_M",
   "native_output": {
