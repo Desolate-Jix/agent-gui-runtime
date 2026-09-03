@@ -45,9 +45,25 @@ def _verified_cleanup(provider: str, **changes: object) -> dict[str, object]:
     return receipt
 
 
+def _goal_response(projection: dict[str, object], *, bound_goal_indexes: set[int] | None = None) -> dict[str, object]:
+    goals = projection["goals"]
+    candidates = projection["candidates"]
+    assert isinstance(goals, list) and isinstance(candidates, list)
+    bound = bound_goal_indexes if bound_goal_indexes is not None else {0}
+    return {"bindings": [
+        {
+            "goal_index": goal["goal_index"],
+            "candidate_index": goal["goal_index"] if goal["goal_index"] in bound and goal["goal_index"] < len(candidates) else None,
+            "status": "BOUND" if goal["goal_index"] in bound and goal["goal_index"] < len(candidates) else "UNBOUND",
+            "confidence": 0.9,
+        }
+        for goal in goals
+    ]}
+
+
 def _slots():
     from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots
-    return SimpleNativeSlots(omni=lambda image: {"items": [{"bbox": [0, 0, 1, 1], "type": "text", "content": "搜索", "interactivity": True}]}, qwen=lambda image, projection: {"bindings": [{"i": item["i"], "role": "button", "label": "目标", "status": "BOUND", "confidence": .9} for item in projection["candidates"]]}, vista=lambda image, target: "[500, 500]")
+    return SimpleNativeSlots(omni=lambda image: {"items": [{"bbox": [0, 0, 1, 1], "type": "text", "content": "搜索", "interactivity": True}]}, qwen=lambda image, projection: _goal_response(projection), vista=lambda image, target: "[500, 500]")
 
 
 def test_offline_runner_processes_exactly_five_regression_screens_and_25_targets(tmp_path: Path) -> None:
@@ -59,7 +75,7 @@ def test_offline_runner_processes_exactly_five_regression_screens_and_25_targets
 def test_each_native_slot_can_be_replaced_independently(tmp_path: Path) -> None:
     from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
     calls = {"omni": 0, "qwen": 0, "vista": 0}
-    slots = SimpleNativeSlots(omni=lambda _: calls.__setitem__("omni", calls["omni"] + 1) or {"items": []}, qwen=lambda _, projection: calls.__setitem__("qwen", calls["qwen"] + 1) or {"bindings": [{"i": value["i"], "role": "button", "label": "x", "status": "BOUND", "confidence": 1} for value in projection["candidates"]]}, vista=lambda _, __: calls.__setitem__("vista", calls["vista"] + 1) or "[0,0]")
+    slots = SimpleNativeSlots(omni=lambda _: calls.__setitem__("omni", calls["omni"] + 1) or {"items": []}, qwen=lambda _, projection: calls.__setitem__("qwen", calls["qwen"] + 1) or _goal_response(projection), vista=lambda _, __: calls.__setitem__("vista", calls["vista"] + 1) or "[0,0]")
     run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
     assert calls == {"omni": 5, "qwen": 5, "vista": 0}
 
@@ -67,7 +83,7 @@ def test_each_native_slot_can_be_replaced_independently(tmp_path: Path) -> None:
 def test_provider_runner_never_receives_gold_or_scorer_private_fields(tmp_path: Path) -> None:
     from app.learn.hybrid.simple_native_smoke import run_simple_native_regression_diagnostic
     seen: list[object] = []
-    slots = _slots(); slots = type(slots)(omni=slots.omni, qwen=lambda image, projection: seen.append(projection) or {"bindings": [{"i": item["i"], "role": "button", "label": "x", "status": "BOUND", "confidence": 1} for item in projection["candidates"]]}, vista=slots.vista)
+    slots = _slots(); slots = type(slots)(omni=slots.omni, qwen=lambda image, projection: seen.append(projection) or _goal_response(projection), vista=slots.vista)
     run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
     assert all("gold" not in json.dumps(value).lower() for value in seen)
 
@@ -77,7 +93,7 @@ def test_qwen_runner_preserves_full_runtime_request_but_sends_projection(tmp_pat
     seen=[]; slots=_slots(); original_qwen=slots.qwen; slots=type(slots)(omni=slots.omni, qwen=lambda _, projection: seen.append(projection) or original_qwen(_, projection), vista=slots.vista)
     artifact=run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
     qwen = next(entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "qwen")
-    assert set(seen[0]) == {"image_size", "candidates"} and qwen["runtime_request_sha256"]
+    assert set(seen[0]) == {"image_size", "goals", "candidates"} and qwen["runtime_request_sha256"]
 
 
 def test_vista_runs_only_for_uniquely_bound_grounding_eligible_targets(tmp_path: Path) -> None:
@@ -118,7 +134,7 @@ def test_provider_batches_release_before_the_next_provider_acquires(tmp_path: Pa
     events: list[str] = []
     slots = SimpleNativeSlots(
         omni=lambda _image: events.append("omni") or {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "x", "interactivity": True}]},
-        qwen=lambda _image, projection: events.append("qwen") or {"bindings": [{"i": item["i"], "role": "button", "label": "\u76ee\u6807", "status": "BOUND", "confidence": 1} for item in projection["candidates"]]},
+        qwen=lambda _image, projection: events.append("qwen") or _goal_response(projection),
         vista=lambda _image, _target: events.append("vista") or "[500,500]",
         release_provider=lambda provider: events.append(f"release:{provider}") or _verified_cleanup(provider),
     )
@@ -258,7 +274,7 @@ def test_vista_base_exception_releases_once(tmp_path: Path) -> None:
 
     slots = SimpleNativeSlots(
         omni=lambda _image: events.append("omni") or {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "\u76ee\u6807", "interactivity": True}]},
-        qwen=lambda _image, projection: events.append("qwen") or {"bindings": [{"i": item["i"], "role": "button", "label": "\u76ee\u6807", "status": "BOUND", "confidence": 1} for item in projection["candidates"]]},
+        qwen=lambda _image, projection: events.append("qwen") or _goal_response(projection),
         vista=abort_vista,
         release_provider=lambda provider: events.append(f"release:{provider}") or _verified_cleanup(provider),
     )
@@ -266,3 +282,22 @@ def test_vista_base_exception_releases_once(tmp_path: Path) -> None:
     with pytest.raises(ProviderAbort, match="vista aborted"):
         run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
     assert events == ["omni"] * 5 + ["release:omni"] + ["qwen"] * 5 + ["release:qwen", "vista", "release:vista"]
+
+
+def test_inactive_goal_bound_candidate_abstains_before_vista(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    vista_calls: list[str] = []
+    slots = SimpleNativeSlots(
+        omni=lambda _image: {"items": [{"bbox": [0, 0, 1, 1], "type": "text", "content": "target", "interactivity": False}]},
+        qwen=lambda _image, projection: {"bindings": [
+            {"goal_index": goal["goal_index"], "candidate_index": 0 if goal["goal_index"] == 0 else None, "status": "BOUND" if goal["goal_index"] == 0 else "UNBOUND", "confidence": 1}
+            for goal in projection["goals"]
+        ]},
+        vista=lambda _image, target: vista_calls.append(target) or "[500,500]",
+    )
+    artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+
+    assert vista_calls == []
+    outcomes = [entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "vista"]
+    assert outcomes[0]["reason"] == "goal_bound_candidate_inactive"

@@ -132,6 +132,75 @@ def build_qwen_binding_request(
     return seal_immutable(request)
 
 
+def build_simple_native_goal_binding_request(
+    capture_bundle: Mapping[str, Any],
+    omni_inventory: Mapping[str, Any],
+    goals: list[Mapping[str, object]],
+) -> dict[str, Any]:
+    """Build the simple-native per-goal binder request without changing hybrid v1."""
+    if not isinstance(capture_bundle, Mapping):
+        raise ValueError("capture_bundle must be an object")
+    bundle = deepcopy(dict(capture_bundle))
+    inventory = _validated_inventory(omni_inventory)
+    capture_identity = validate_capture_identity(bundle.get("capture_identity"))
+    if capture_identity != inventory["capture_identity"]:
+        raise ValueError("Qwen request capture identity mismatch")
+    context = _sealed_context(bundle.get("context"), capture_identity)
+    fixed_goals = _validated_simple_native_goals(goals)
+    return seal_immutable({
+        "contract_version": "simple_native_qwen_goal_binding_request_v1",
+        "capture_identity": capture_identity,
+        "screenshot": {
+            "artifact_ref": deepcopy(capture_identity["artifact_ref"]),
+            "screenshot_sha256": capture_identity["screenshot_sha256"],
+            "image_size": deepcopy(capture_identity["image_size"]),
+            "coordinate_space": "capture_pixel_xyxy",
+        },
+        "goals": fixed_goals,
+        "candidates": [
+            {
+                "candidate_id": candidate["candidate_id"],
+                "bbox_original": deepcopy(candidate["bbox_original"]),
+                "coordinate_space": candidate["coordinate_space"],
+                "active": candidate["active"],
+                "inactive_reason": candidate["inactive_reason"],
+            }
+            for candidate in inventory["candidates"]
+        ],
+        "ocr_uia_context": context,
+        "context_ref": deepcopy(bundle.get("context_ref")),
+        "semantic_target_identity_version": SEMANTIC_TARGET_IDENTITY_VERSION,
+    })
+
+
+def _validated_simple_native_goals(goals: object) -> list[dict[str, object]]:
+    if not isinstance(goals, list) or not goals:
+        raise ValueError("simple-native goals are required")
+    result: list[dict[str, object]] = []
+    for index, goal in enumerate(goals):
+        if not isinstance(goal, Mapping) or set(goal) != {
+            "goal_id", "goal_text", "semantic_role", "semantic_label"
+        }:
+            raise ValueError("simple-native goal is invalid")
+        goal_id, goal_text = goal["goal_id"], goal["goal_text"]
+        role, label = goal["semantic_role"], goal["semantic_label"]
+        if (
+            not isinstance(goal_id, str)
+            or not goal_id
+            or not isinstance(goal_text, str)
+            or not goal_text
+            or not isinstance(role, str)
+            or not role.strip()
+            or len(role) > _MAX_WIRE_ROLE_CHARS
+            or not isinstance(label, str)
+            or not label.strip()
+            or len(label) > _MAX_WIRE_LABEL_CHARS
+        ):
+            raise ValueError("simple-native goal is invalid")
+        result.append({"goal_index": index, "role": role, "label": label})
+    return result
+
+
 def parse_qwen_candidate_bindings(
     raw: Mapping[str, Any],
     omni_inventory: Mapping[str, Any],

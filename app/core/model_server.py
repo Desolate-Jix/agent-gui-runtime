@@ -646,30 +646,41 @@ def run_qwen_projection_model(
     model_lease: dict[str, Any],
     timeout_seconds: float = 120.0,
 ) -> dict[str, Any]:
-    """使用精确租约发送不含 runtime ID 的短 ordinal 请求。"""
+    """Send the closed simple-native per-goal projection under an exact lease."""
     compact = deepcopy(dict(projection)) if isinstance(projection, Mapping) else None
-    if not isinstance(compact, dict) or set(compact) != {"image_size", "candidates"}:
+    if not isinstance(compact, dict) or set(compact) != {"image_size", "goals", "candidates"}:
         raise ValueError("Qwen model projection is not closed")
-    image_size, candidates = compact["image_size"], compact["candidates"]
+    image_size, goals, candidates = compact["image_size"], compact["goals"], compact["candidates"]
     if (
         not isinstance(image_size, list)
         or len(image_size) != 2
-        or any(
-            isinstance(value, bool) or not isinstance(value, int) or value <= 0
-            for value in image_size
-        )
+        or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in image_size)
+        or not isinstance(goals, list)
         or not isinstance(candidates, list)
     ):
-        raise ValueError("Qwen model projection image or candidates are invalid")
+        raise ValueError("Qwen model projection image, goals, or candidates are invalid")
+    for index, goal in enumerate(goals):
+        if (
+            not isinstance(goal, dict)
+            or set(goal) != {"goal_index", "role", "label"}
+            or isinstance(goal.get("goal_index"), bool)
+            or goal.get("goal_index") != index
+            or not isinstance(goal.get("role"), str)
+            or not goal["role"].strip()
+            or not isinstance(goal.get("label"), str)
+            or not goal["label"].strip()
+        ):
+            raise ValueError("Qwen model projection goal is invalid")
     for index, candidate in enumerate(candidates):
         if (
             not isinstance(candidate, dict)
-            or set(candidate) != {"i", "box", "active"}
-            or candidate.get("i") != index
+            or set(candidate) != {"candidate_index", "bbox", "active"}
+            or isinstance(candidate.get("candidate_index"), bool)
+            or candidate.get("candidate_index") != index
             or not isinstance(candidate.get("active"), bool)
-            or not isinstance(candidate.get("box"), list)
-            or len(candidate["box"]) != 4
-            or any(isinstance(edge, bool) or not isinstance(edge, int) for edge in candidate["box"])
+            or not isinstance(candidate.get("bbox"), list)
+            or len(candidate["bbox"]) != 4
+            or any(isinstance(edge, bool) or not isinstance(edge, int) for edge in candidate["bbox"])
         ):
             raise ValueError("Qwen model projection candidate is invalid")
     if not isinstance(screenshot_bytes, bytes) or not screenshot_bytes:
@@ -682,8 +693,9 @@ def run_qwen_projection_model(
     endpoint = str(profile.get("endpoint") or "").strip() or model_base_url(profile) + "/chat/completions"
     image_url = "data:" + screenshot_media_type + ";base64," + base64.b64encode(screenshot_bytes).decode("ascii")
     prompt = (
-        "Bind every ordinal candidate exactly once in order. Return only the closed bindings JSON. "
-        "Projection: "
+        "For every fixed goal exactly once in order, bind one existing candidate index or abstain. "
+        "Return only the closed bindings JSON with goal_index,candidate_index,status,confidence; "
+        "BOUND requires an existing candidate_index and UNBOUND requires null. Projection: "
         + json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     )
     body_payload = {
@@ -5354,15 +5366,45 @@ def _model_id(payload: dict[str, Any]) -> str | None:
 
 
 def _qwen_model_projection_response_schema(projection: Mapping[str, Any]) -> dict[str, Any]:
-    """为短 ordinal projection 构造独立 schema，不替换完整 runtime schema。"""
+    """Build the exact per-goal simple-native binder response schema."""
+    goals = projection.get("goals")
     candidates = projection.get("candidates")
-    if not isinstance(candidates, list):
-        raise ValueError("Qwen model projection candidates must be a list")
-    ordinals = []
-    for candidate in candidates:
-        ordinal = candidate.get("i") if isinstance(candidate, Mapping) else None
-        if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal != len(ordinals):
-            raise ValueError("Qwen model projection ordinal is invalid")
-        ordinals.append(ordinal)
-    fields = ["i", "role", "label", "status", "confidence"]
-    return {"type": "object", "properties": {"bindings": {"type": "array", "prefixItems": [{"type": "object", "properties": {"i": {"const": i}, "role": {"type": "string", "minLength": 1, "maxLength": 64}, "label": {"type": "string", "minLength": 1, "maxLength": 256}, "status": {"enum": ["BOUND", "UNBOUND", "AMBIGUOUS", "CONFLICT"]}, "confidence": {"type": "number", "minimum": 0, "maximum": 1}}, "required": fields, "additionalProperties": False} for i in ordinals], "minItems": len(ordinals), "maxItems": len(ordinals)}}, "required": ["bindings"], "additionalProperties": False}
+    if not isinstance(goals, list) or not isinstance(candidates, list):
+        raise ValueError("Qwen model projection goals or candidates must be lists")
+    for index, goal in enumerate(goals):
+        if not isinstance(goal, Mapping) or goal.get("goal_index") != index:
+            raise ValueError("Qwen model projection goal ordinal is invalid")
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, Mapping) or candidate.get("candidate_index") != index:
+            raise ValueError("Qwen model projection candidate ordinal is invalid")
+    fields = ["goal_index", "candidate_index", "status", "confidence"]
+    candidate_index = {"anyOf": [
+        {"type": "integer", "minimum": 0, "maximum": len(candidates) - 1},
+        {"type": "null"},
+    ]} if candidates else {"type": "null"}
+    return {
+        "type": "object",
+        "properties": {
+            "bindings": {
+                "type": "array",
+                "prefixItems": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "goal_index": {"const": index},
+                            "candidate_index": candidate_index,
+                            "status": {"enum": ["BOUND", "UNBOUND"]},
+                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                        },
+                        "required": fields,
+                        "additionalProperties": False,
+                    }
+                    for index in range(len(goals))
+                ],
+                "minItems": len(goals),
+                "maxItems": len(goals),
+            }
+        },
+        "required": ["bindings"],
+        "additionalProperties": False,
+    }

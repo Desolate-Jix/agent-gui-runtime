@@ -86,7 +86,7 @@
     "provider_corpus_path": "tests/fixtures/portfolio_hybrid_v1_1/provider-corpus.v2.json",
     "native_contract_versions": {
       "omni": "omni_native_v1",
-      "qwen": "qwen_ordinal_v1",
+      "qwen": "qwen_goal_candidate_binder_v1",
       "vista": "vista_bare_pair_v1"
     },
     "profile_ids": {
@@ -102,7 +102,7 @@
   },
   "prompt_hashes": {
     "omni": "a9bc49ddbfd28a49e52beb4efce7519abadffe058bd6fa8adc53a5618ef44cc6",
-    "qwen": "522a6020470a56ffbedb62773ba7586a45f893b0df0559d6222b766f9253630e",
+    "qwen": "b3d0fc78d9b50242244abe7ee36c8a0bc214fcc72e0913f6df2ca02a0b994591",
     "vista": "5e55758f551537d6bca277b6f07a0db1448f6e6f419f3a06e2e463b0a382c4c5"
   },
   "report_metadata": {

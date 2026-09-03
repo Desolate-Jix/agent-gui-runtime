@@ -90,3 +90,80 @@ def test_native_contracts_preserve_utf8_text() -> None:
 
     assert parse_omni_native_output({"items": [{"bbox": [0, 0, 1, 1], "type": "文本", "content": "申请职位", "interactivity": False}]})[0].content == "申请职位"
     assert parse_vista_normalized_point("[1, 2]") == (1.0, 2.0)
+
+
+def _goal_binding_request() -> dict[str, object]:
+    return {
+        "contract_version": "simple_native_qwen_goal_binding_request_v1",
+        "screenshot": {"image_size": {"width": 1280, "height": 720}},
+        "goals": [
+            {"goal_index": 0, "role": "button", "label": "Open"},
+            {"goal_index": 1, "role": "button", "label": "Cancel"},
+        ],
+        "candidates": [
+            {"candidate_id": "candidate/one", "bbox_original": [1, 2, 30, 40], "active": True},
+            {"candidate_id": "candidate/two", "bbox_original": [50, 60, 80, 90], "active": False},
+        ],
+    }
+
+
+def test_goal_binding_projection_contains_fixed_goals_and_omni_ordinals_only() -> None:
+    from app.learn.hybrid.simple_native_contracts import build_qwen_goal_binding_projection
+
+    assert build_qwen_goal_binding_projection(_goal_binding_request()) == {
+        "image_size": [1280, 720],
+        "goals": [
+            {"goal_index": 0, "role": "button", "label": "Open"},
+            {"goal_index": 1, "role": "button", "label": "Cancel"},
+        ],
+        "candidates": [
+            {"candidate_index": 0, "bbox": [1, 2, 30, 40], "active": True},
+            {"candidate_index": 1, "bbox": [50, 60, 80, 90], "active": False},
+        ],
+    }
+
+
+def test_goal_binding_expansion_derives_semantics_and_restores_stable_candidate_ids() -> None:
+    from app.learn.hybrid.simple_native_contracts import (
+        build_qwen_goal_binding_projection,
+        expand_qwen_goal_binding_response,
+    )
+
+    request = _goal_binding_request()
+    result = expand_qwen_goal_binding_response(
+        {"bindings": [
+            {"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 0.9},
+            {"goal_index": 1, "candidate_index": None, "status": "UNBOUND", "confidence": 0.1},
+        ]},
+        projection=build_qwen_goal_binding_projection(request),
+        runtime_request=request,
+    )
+    assert result == {"bindings": [
+        {"goal_index": 0, "candidate_id": "candidate/one", "role": "button", "label": "Open", "status": "BOUND", "confidence": 0.9},
+        {"goal_index": 1, "candidate_id": None, "role": "button", "label": "Cancel", "status": "UNBOUND", "confidence": 0.1},
+    ]}
+
+
+@pytest.mark.parametrize("bindings", [
+    [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}],
+    [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}, {"goal_index": 0, "candidate_index": None, "status": "UNBOUND", "confidence": 1}],
+    [{"goal_index": 1, "candidate_index": None, "status": "UNBOUND", "confidence": 1}, {"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}],
+    [{"goal_index": 0, "candidate_index": 9, "status": "BOUND", "confidence": 1}, {"goal_index": 1, "candidate_index": None, "status": "UNBOUND", "confidence": 1}],
+    [{"goal_index": 0, "candidate_index": None, "status": "BOUND", "confidence": 1}, {"goal_index": 1, "candidate_index": 0, "status": "UNBOUND", "confidence": 1}],
+    [{"goal_index": 0, "candidate_index": False, "status": "BOUND", "confidence": 1}, {"goal_index": 1, "candidate_index": None, "status": "UNBOUND", "confidence": 1}],
+    [{"goal_index": 0, "candidate_index": 0, "status": "AMBIGUOUS", "confidence": 1}, {"goal_index": 1, "candidate_index": None, "status": "UNBOUND", "confidence": 1}],
+    [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1, "role": "bad"}, {"goal_index": 1, "candidate_index": None, "status": "UNBOUND", "confidence": 1}],
+])
+def test_goal_binding_expansion_fails_closed_on_non_closed_or_invalid_bindings(bindings: list[dict[str, object]]) -> None:
+    from app.learn.hybrid.simple_native_contracts import (
+        build_qwen_goal_binding_projection,
+        expand_qwen_goal_binding_response,
+    )
+
+    request = _goal_binding_request()
+    with pytest.raises(ValueError):
+        expand_qwen_goal_binding_response(
+            {"bindings": bindings},
+            projection=build_qwen_goal_binding_projection(request),
+            runtime_request=request,
+        )

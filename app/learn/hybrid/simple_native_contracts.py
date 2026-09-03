@@ -123,6 +123,118 @@ def expand_qwen_model_response(raw: object, *, projection: Mapping[str, object],
     return {"bindings": expanded}
 
 
+
+def _runtime_goal_binding_request(
+    runtime_request: Mapping[str, object],
+) -> tuple[list[Mapping[str, object]], list[Mapping[str, object]], tuple[int, int]]:
+    if not isinstance(runtime_request, Mapping):
+        raise ValueError("Qwen goal-binding runtime request must be an object")
+    if runtime_request.get("contract_version") != "simple_native_qwen_goal_binding_request_v1":
+        raise ValueError("Qwen goal-binding request contract is invalid")
+    screenshot, goals, candidates = (
+        runtime_request.get("screenshot"),
+        runtime_request.get("goals"),
+        runtime_request.get("candidates"),
+    )
+    if not isinstance(screenshot, Mapping) or not isinstance(screenshot.get("image_size"), Mapping):
+        raise ValueError("Qwen goal-binding image_size is invalid")
+    size = screenshot["image_size"]
+    width, height = size.get("width"), size.get("height")
+    if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in (width, height)):
+        raise ValueError("Qwen goal-binding image_size is invalid")
+    if not isinstance(goals, list) or not isinstance(candidates, list):
+        raise ValueError("Qwen goal-binding goals or candidates are invalid")
+    normalized_goals: list[Mapping[str, object]] = []
+    for index, goal in enumerate(goals):
+        if (
+            not isinstance(goal, Mapping)
+            or set(goal) != {"goal_index", "role", "label"}
+            or isinstance(goal.get("goal_index"), bool)
+            or goal.get("goal_index") != index
+            or not isinstance(goal.get("role"), str)
+            or not goal["role"].strip()
+            or len(goal["role"]) > 64
+            or not isinstance(goal.get("label"), str)
+            or not goal["label"].strip()
+            or len(goal["label"]) > 256
+        ):
+            raise ValueError("Qwen goal-binding goal is invalid")
+        normalized_goals.append(goal)
+    normalized_candidates: list[Mapping[str, object]] = []
+    seen_ids: set[str] = set()
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, Mapping):
+            raise ValueError(f"Qwen goal-binding candidate[{index}] is invalid")
+        candidate_id, box, active = candidate.get("candidate_id"), candidate.get("bbox_original"), candidate.get("active")
+        if not isinstance(candidate_id, str) or not candidate_id.startswith("candidate/") or candidate_id in seen_ids:
+            raise ValueError("Qwen goal-binding candidate identity is invalid")
+        if not isinstance(box, (list, tuple)) or len(box) != 4 or not isinstance(active, bool):
+            raise ValueError("Qwen goal-binding candidate geometry is invalid")
+        values = tuple(_number(point, field="Qwen goal-binding candidate geometry", low=0.0, high=float(max(width, height))) for point in box)
+        if not values[0] < values[2] <= width or not values[1] < values[3] <= height:
+            raise ValueError("Qwen goal-binding candidate geometry is invalid")
+        seen_ids.add(candidate_id)
+        normalized_candidates.append(candidate)
+    return normalized_goals, normalized_candidates, (width, height)
+
+
+def build_qwen_goal_binding_projection(runtime_request: Mapping[str, object]) -> dict[str, object]:
+    """Project fixed semantic goals and Omni geometry without runtime identities."""
+    goals, candidates, size = _runtime_goal_binding_request(runtime_request)
+    return {
+        "image_size": [size[0], size[1]],
+        "goals": [deepcopy(dict(goal)) for goal in goals],
+        "candidates": [
+            {"candidate_index": index, "bbox": list(candidate["bbox_original"]), "active": candidate["active"]}
+            for index, candidate in enumerate(candidates)
+        ],
+    }
+
+
+def expand_qwen_goal_binding_response(
+    raw: object, *, projection: Mapping[str, object], runtime_request: Mapping[str, object]
+) -> dict[str, object]:
+    """Fail closed while restoring stable candidate IDs and deterministic goal semantics."""
+    goals, candidates, _ = _runtime_goal_binding_request(runtime_request)
+    if not isinstance(projection, Mapping) or projection != build_qwen_goal_binding_projection(runtime_request):
+        raise ValueError("Qwen goal-binding projection does not match full runtime request")
+    if not isinstance(raw, Mapping) or set(raw) != {"bindings"} or not isinstance(raw["bindings"], list):
+        raise ValueError("Qwen goal-binding response is not closed")
+    if len(raw["bindings"]) != len(goals):
+        raise ValueError("Qwen goal-binding coverage is incomplete")
+    expanded: list[dict[str, object]] = []
+    seen_candidates: set[int] = set()
+    for index, binding in enumerate(raw["bindings"]):
+        if not isinstance(binding, Mapping) or set(binding) != {"goal_index", "candidate_index", "status", "confidence"}:
+            raise ValueError("Qwen goal-binding item is not closed")
+        goal_index, candidate_index, status = binding["goal_index"], binding["candidate_index"], binding["status"]
+        if isinstance(goal_index, bool) or not isinstance(goal_index, int) or goal_index != index:
+            raise ValueError("Qwen goal-binding order or coverage is invalid")
+        if not isinstance(status, str) or status not in {"BOUND", "UNBOUND"}:
+            raise ValueError("Qwen goal-binding status is invalid")
+        if status == "BOUND":
+            if isinstance(candidate_index, bool) or not isinstance(candidate_index, int) or not 0 <= candidate_index < len(candidates):
+                raise ValueError("Qwen bound candidate_index is invalid")
+            if candidate_index in seen_candidates:
+                raise ValueError("Qwen goal-binding candidate is duplicated")
+            seen_candidates.add(candidate_index)
+            candidate_id: str | None = str(candidates[candidate_index]["candidate_id"])
+        else:
+            if candidate_index is not None:
+                raise ValueError("Qwen unbound candidate_index must be null")
+            candidate_id = None
+        confidence = _number(binding["confidence"], field="Qwen goal-binding confidence", low=0.0, high=1.0)
+        goal = goals[goal_index]
+        expanded.append({
+            "goal_index": goal_index,
+            "candidate_id": candidate_id,
+            "role": goal["role"],
+            "label": goal["label"],
+            "status": status,
+            "confidence": confidence,
+        })
+    return {"bindings": expanded}
+
 def parse_vista_normalized_point(raw_text: str) -> tuple[float, float]:
     """只接受 VISTA 的 bare `[x,y]` 文本，禁止 JSON envelope/prose。"""
     if not isinstance(raw_text, str):

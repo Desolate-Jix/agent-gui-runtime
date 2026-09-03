@@ -21,11 +21,11 @@ from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 from PIL import Image
 
 from app.learn.hybrid.omni_candidates import build_omni_candidate_ledger, omni_inventory_from_ledger
-from app.learn.hybrid.qwen_binding import build_qwen_binding_request, parse_qwen_candidate_bindings
+from app.learn.hybrid.qwen_binding import build_simple_native_goal_binding_request
 from app.learn.hybrid.simple_native_contracts import (
     OmniNativeItem,
-    build_qwen_model_projection,
-    expand_qwen_model_response,
+    build_qwen_goal_binding_projection,
+    expand_qwen_goal_binding_response,
     parse_omni_native_output,
     parse_vista_normalized_point,
     restore_vista_point_to_capture,
@@ -651,12 +651,15 @@ def run_simple_native_regression_diagnostic(
             started, raw, runtime_request, projection = perf_counter(), "", None, None
             try:
                 capture_path = _verify_capture_freshness(capture, "Qwen")
-                runtime_request = build_qwen_binding_request(capture["bundle"], inventory)
-                projection = build_qwen_model_projection(runtime_request)
+                runtime_request = build_simple_native_goal_binding_request(
+                    capture["bundle"], inventory, state["goals"]
+                )
+                projection = build_qwen_goal_binding_projection(runtime_request)
                 raw = slots.qwen(capture_path, projection)
                 _verify_capture_freshness(capture, "Qwen")
-                expanded = expand_qwen_model_response(raw, projection=projection, runtime_request=runtime_request)
-                parsed = parse_qwen_candidate_bindings(expanded, inventory, context_ref=runtime_request["context_ref"])
+                parsed = expand_qwen_goal_binding_response(
+                    raw, projection=projection, runtime_request=runtime_request
+                )
                 state["bindings"] = parsed
                 metrics["qwen"]["schema_valid"] += 1
                 invalid_streak["qwen"] = 0
@@ -667,7 +670,7 @@ def run_simple_native_regression_diagnostic(
                     "wire_input": projection,
                     "wire_input_sha256": _hash(projection),
                     "raw": _raw_text(raw),
-                    "expanded": expanded,
+                    "expanded": parsed,
                     "parsed": parsed,
                     "parent_capture_id": capture["capture_id"],
                     "parent_inventory_sha256": inventory["content_sha256"],
@@ -692,19 +695,19 @@ def run_simple_native_regression_diagnostic(
         for state in states:
             inventory, bindings = state["inventory"], state["bindings"]
             capture = state["capture"]
-            eligible = (
-                _eligible_bindings(bindings, inventory)
-                if isinstance(inventory, Mapping) and isinstance(bindings, Mapping)
-                else []
+            candidates = (
+                {candidate.get("candidate_id"): candidate for candidate in inventory.get("candidates", []) if isinstance(candidate, Mapping)}
+                if isinstance(inventory, Mapping) else {}
             )
-            for goal in state["goals"]:
-                matches = [
-                    (binding, candidate)
-                    for binding, candidate in eligible
-                    if binding.get("role") == goal["semantic_role"]
-                    and binding.get("label") == goal["semantic_label"]
-                ]
-                if len(matches) != 1:
+            bound_by_goal = (
+                {binding.get("goal_index"): binding for binding in bindings.get("bindings", []) if isinstance(binding, Mapping)}
+                if isinstance(bindings, Mapping) else {}
+            )
+            for goal_index, goal in enumerate(state["goals"]):
+                binding = bound_by_goal.get(goal_index)
+                candidate_id = binding.get("candidate_id") if isinstance(binding, Mapping) else None
+                candidate = candidates.get(candidate_id) if isinstance(candidate_id, str) else None
+                if not isinstance(binding, Mapping) or binding.get("status") != "BOUND" or not isinstance(candidate, Mapping):
                     metrics["abstained"] += 1
                     _record_goal_abstention(
                         state=state,
@@ -716,14 +719,16 @@ def run_simple_native_regression_diagnostic(
                         ),
                     )
                     continue
-                binding, candidate = matches[0]
+                if candidate.get("active") is not True:
+                    metrics["abstained"] += 1
+                    _record_goal_abstention(
+                        state=state, goal=goal, reason="goal_bound_candidate_inactive", candidate_id=candidate_id
+                    )
+                    continue
                 if invalid_streak["vista"] >= 2:
                     metrics["abstained"] += 1
                     _record_goal_abstention(
-                        state=state,
-                        goal=goal,
-                        reason="vista_schema_circuit_open",
-                        candidate_id=binding["candidate_id"],
+                        state=state, goal=goal, reason="vista_schema_circuit_open", candidate_id=candidate_id
                     )
                     continue
                 metrics["vista"]["attempted"] += 1
@@ -745,7 +750,7 @@ def run_simple_native_regression_diagnostic(
                         "slot": "vista", "status": "selected", "raw": raw, "parsed": list(normalized),
                         "capture_point": list(point), "roi_xyxy": list(roi),
                         **deepcopy(dict(goal)),
-                        "candidate_id": binding["candidate_id"], "parent_capture_id": capture["capture_id"],
+                        "candidate_id": candidate_id, "parent_capture_id": capture["capture_id"],
                         "roi_crop": roi_crop,
                         "raw_sha256": _hash(raw),
                     })
@@ -754,7 +759,7 @@ def run_simple_native_regression_diagnostic(
                     invalid_streak["vista"] += 1
                     metrics["abstained"] += 1
                     _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="timeout")
-                    state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": binding["candidate_id"]})
+                    state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": candidate_id})
                     if roi_crop is not None:
                         state["trace"][-1]["roi_crop"] = roi_crop
                 except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -762,7 +767,7 @@ def run_simple_native_regression_diagnostic(
                     invalid_streak["vista"] += 1
                     metrics["abstained"] += 1
                     _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="schema")
-                    state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": binding["candidate_id"]})
+                    state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": candidate_id})
                     if roi_crop is not None:
                         state["trace"][-1]["roi_crop"] = roi_crop
                 metrics["vista"]["latencies"].append(round((perf_counter() - started) * 1000, 3))

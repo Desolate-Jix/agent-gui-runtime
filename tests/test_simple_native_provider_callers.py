@@ -12,14 +12,15 @@ def test_qwen_actual_caller_sends_projection_not_full_runtime_request(tmp_path: 
     seen=[]
     class Transport:
         def post(self, *, url, payload, timeout): seen.append(payload); return {"bindings": []}
-    call_qwen_projected_binding(image_path=tmp_path/'image.png', projection={"image_size":[1,1],"candidates":[]}, transport=Transport())
+    call_qwen_projected_binding(image_path=tmp_path/'image.png', projection={"image_size":[1,1],"goals":[],"candidates":[]}, transport=Transport())
     assert "candidate_id" not in str(seen[0]) and seen[0]["projection"]["candidates"] == []
 
 
-def test_qwen_actual_response_is_expanded_before_existing_parser() -> None:
-    from app.learn.hybrid.simple_native_contracts import expand_qwen_model_response
-    runtime={"contract_version":"hybrid_qwen_binding_request_v1", "screenshot":{"image_size":{"width":10,"height":10}},"candidates":[{"candidate_id":"candidate/a","bbox_original":[1,1,2,2],"active":True}]}
-    assert expand_qwen_model_response({"bindings":[{"i":0,"role":"button","label":"x","status":"BOUND","confidence":1}]},projection={"image_size":[10,10],"candidates":[{"i":0,"box":[1,1,2,2],"active":True}]},runtime_request=runtime)["bindings"][0]["candidate_id"] == "candidate/a"
+def test_qwen_actual_response_is_expanded_with_adapter_side_semantics() -> None:
+    from app.learn.hybrid.simple_native_contracts import expand_qwen_goal_binding_response
+    runtime={"contract_version":"simple_native_qwen_goal_binding_request_v1", "screenshot":{"image_size":{"width":10,"height":10}},"goals":[{"goal_index":0,"role":"button","label":"x"}],"candidates":[{"candidate_id":"candidate/a","bbox_original":[1,1,2,2],"active":True}]}
+    projection={"image_size":[10,10],"goals":[{"goal_index":0,"role":"button","label":"x"}],"candidates":[{"candidate_index":0,"bbox":[1,1,2,2],"active":True}]}
+    assert expand_qwen_goal_binding_response({"bindings":[{"goal_index":0,"candidate_index":0,"status":"BOUND","confidence":1}]},projection=projection,runtime_request=runtime)["bindings"][0]["candidate_id"] == "candidate/a"
 
 
 def test_vista_actual_caller_sends_no_generic_json_system_prompt_or_response_format(tmp_path: Path) -> None:

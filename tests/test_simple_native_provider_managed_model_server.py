@@ -11,7 +11,8 @@ import pytest
 def _qwen_projection() -> dict[str, object]:
     return {
         "image_size": [100, 80],
-        "candidates": [{"i": 0, "box": [10, 10, 20, 20], "active": True}],
+        "goals": [{"goal_index": 0, "role": "button", "label": "Open"}],
+        "candidates": [{"candidate_index": 0, "bbox": [10, 10, 20, 20], "active": True}],
     }
 
 
@@ -68,7 +69,7 @@ def test_qwen_projection_wire_is_compact_bounded_and_marks_each_serial_body_comp
     requests: list[dict[str, object]] = []
     lease = {"lease_id": "same-lease"}
     response_payload = {
-        "choices": [{"message": {"content": json.dumps({"bindings": [{"i": 0, "role": "button", "label": "Open", "status": "BOUND", "confidence": 1}]})}}]
+        "choices": [{"message": {"content": json.dumps({"bindings": [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}]})}}]
     }
 
     class Response:
@@ -101,7 +102,7 @@ def test_qwen_projection_wire_is_compact_bounded_and_marks_each_serial_body_comp
             screenshot_sha256=sha256(image).hexdigest(),
             model_lease=lease,
             timeout_seconds=2,
-        ) == {"bindings": [{"i": 0, "role": "button", "label": "Open", "status": "BOUND", "confidence": 1}]}
+        ) == {"bindings": [{"goal_index": 0, "candidate_index": 0, "status": "BOUND", "confidence": 1}]}
 
     assert len(requests) == 5
     for body in requests:
@@ -242,3 +243,18 @@ def test_vista_exact_lease_rejects_mutated_profile_before_process_or_wire(monkey
 
     with pytest.raises(ValueError, match="installed configuration"):
         model_server._profile_for_hybrid_vista_model_lease(lease)
+
+
+def test_qwen_goal_binding_schema_accepts_only_goal_binding_fields() -> None:
+    from app.core import model_server
+
+    projection = {
+        "image_size": [100, 80],
+        "goals": [{"goal_index": 0, "role": "button", "label": "Open"}],
+        "candidates": [{"candidate_index": 0, "bbox": [10, 10, 20, 20], "active": True}],
+    }
+    schema = model_server._qwen_model_projection_response_schema(projection)
+    item = schema["properties"]["bindings"]["prefixItems"][0]
+    assert item["required"] == ["goal_index", "candidate_index", "status", "confidence"]
+    assert item["properties"]["status"]["enum"] == ["BOUND", "UNBOUND"]
+    assert item["properties"]["candidate_index"] == {"anyOf": [{"type": "integer", "minimum": 0, "maximum": 0}, {"type": "null"}]}

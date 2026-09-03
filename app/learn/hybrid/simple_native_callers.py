@@ -48,7 +48,7 @@ def call_qwen_projected_binding(
     payload = {
         "projection": dict(projection),
         "image_path": str(image_path),
-        "instruction": "Return closed ordinal bindings only.",
+        "instruction": "Return closed per-goal bindings only.",
     }
     return _response_value(transport.post(url="qwen", payload=payload, timeout=120.0))
 

@@ -32,6 +32,22 @@ def _cases(tmp_path: Path) -> list[object]:
     return result
 
 
+def _goal_response(projection: dict[str, object], *, bound_goal_indexes: set[int] | None = None) -> dict[str, object]:
+    goals = projection["goals"]
+    candidates = projection["candidates"]
+    assert isinstance(goals, list) and isinstance(candidates, list)
+    bound = bound_goal_indexes if bound_goal_indexes is not None else {0}
+    return {"bindings": [
+        {
+            "goal_index": goal["goal_index"],
+            "candidate_index": goal["goal_index"] if goal["goal_index"] in bound and goal["goal_index"] < len(candidates) else None,
+            "status": "BOUND" if goal["goal_index"] in bound and goal["goal_index"] < len(candidates) else "UNBOUND",
+            "confidence": 0.8,
+        }
+        for goal in goals
+    ]}
+
+
 def test_runner_seals_omni_geometry_then_uses_authoritative_qwen_parser(
     tmp_path: Path,
 ) -> None:
@@ -44,18 +60,7 @@ def test_runner_seals_omni_geometry_then_uses_authoritative_qwen_parser(
 
     def qwen(_image: Path, projection: dict[str, object]) -> object:
         projections.append(projection)
-        return {
-            "bindings": [
-                {
-                    "i": candidate["i"],
-                    "role": "button",
-                    "label": "replay",
-                    "status": "BOUND",
-                    "confidence": 0.8,
-                }
-                for candidate in projection["candidates"]
-            ]
-        }
+        return _goal_response(projection)
 
     slots = SimpleNativeSlots(
         omni=lambda _image: {
@@ -81,13 +86,13 @@ def test_runner_seals_omni_geometry_then_uses_authoritative_qwen_parser(
     qwen_trace = next(entry for entry in first["trace"] if entry["slot"] == "qwen")
 
     assert projections[0]["candidates"] == [
-        {"i": 0, "box": [10, 20, 30, 40], "active": True}
+        {"candidate_index": 0, "bbox": [10, 20, 30, 40], "active": True}
     ]
     assert omni["provider_result"]["items"][0]["capture_bbox"] == [10, 20, 30, 40]
     assert omni["inventory"]["contract_version"] == "hybrid_omni_inventory_v1"
-    assert qwen_trace["runtime_request"]["contract_version"] == "hybrid_qwen_binding_request_v1"
+    assert qwen_trace["runtime_request"]["contract_version"] == "simple_native_qwen_goal_binding_request_v1"
     assert qwen_trace["wire_input"] == projections[0]
-    assert qwen_trace["parsed"]["contract_version"] == "hybrid_qwen_bindings_v1"
+    assert qwen_trace["parsed"]["bindings"][0]["candidate_id"].startswith("candidate/")
     assert qwen_trace["runtime_request_sha256"] == sha256(
         json.dumps(
             qwen_trace["runtime_request"],
@@ -121,18 +126,10 @@ def test_one_omni_item_cannot_consume_five_qwen_bindings(tmp_path: Path) -> None
                 }
             ]
         },
-        qwen=lambda _image, _projection: {
-            "bindings": [
-                {
-                    "i": index,
-                    "role": "button",
-                    "label": "invented",
-                    "status": "BOUND",
-                    "confidence": 0.9,
-                }
-                for index in range(5)
-            ]
-        },
+        qwen=lambda _image, projection: {"bindings": [
+            {"goal_index": goal["goal_index"], "candidate_index": 0, "status": "BOUND", "confidence": 0.9}
+            for goal in projection["goals"]
+        ]},
         vista=lambda image, _target: vista_calls.append(image) or "[500,500]",
     )
 
@@ -142,7 +139,7 @@ def test_one_omni_item_cannot_consume_five_qwen_bindings(tmp_path: Path) -> None
     qwen = next(
         entry for entry in artifact.cases[0]["trace"] if entry["slot"] == "qwen"
     )
-    assert "ordinal" in qwen["parse_error"]
+    assert "duplicated" in qwen["parse_error"]
     assert vista_calls == []
 
 
@@ -165,9 +162,7 @@ def test_vista_receives_persisted_candidate_crop_with_capture_lineage(
         omni=lambda _image: {
             "items": [{"bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "replay", "interactivity": True}]
         },
-        qwen=lambda _image, projection: {
-            "bindings": [{"i": item["i"], "role": "button", "label": "replay", "status": "BOUND", "confidence": 0.8} for item in projection["candidates"]]
-        },
+        qwen=lambda _image, projection: _goal_response(projection),
         vista=vista,
     )
 
@@ -200,9 +195,7 @@ def test_vista_bad_capture_sha_and_boundary_point_abstain_without_correction(
 
     def qwen(image: Path, projection: dict[str, object]) -> object:
         image.write_bytes(b"tampered-after-capture")
-        return {
-            "bindings": [{"i": item["i"], "role": "button", "label": "replay", "status": "BOUND", "confidence": 0.8} for item in projection["candidates"]]
-        }
+        return _goal_response(projection)
 
     slots = SimpleNativeSlots(
         omni=lambda _image: {
@@ -257,19 +250,14 @@ def test_vista_outcomes_are_goal_bounded_with_extra_and_duplicate_candidates(tmp
                 for index, label in enumerate(labels, start=1)
             ]
         },
-        qwen=lambda _image, projection: {
-            "bindings": [
-                {"i": item["i"], "role": "button", "label": labels[item["i"]], "status": "BOUND", "confidence": 1}
-                for item in projection["candidates"]
-            ]
-        },
+        qwen=lambda _image, projection: _goal_response(projection, bound_goal_indexes={0, 1, 2, 3, 4}),
         vista=lambda _image, target: vista_calls.append(target) or "[500,500]",
     )
 
     artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "artifacts")
 
-    assert len(vista_calls) == 15
-    assert artifact.metrics["vista"]["attempted"] == 15
+    assert len(vista_calls) == 25
+    assert artifact.metrics["vista"]["attempted"] == 25
     for case in artifact.cases:
         outcomes = [entry for entry in case["trace"] if entry.get("slot") == "vista"]
         assert len(outcomes) == 5
@@ -289,10 +277,7 @@ def test_vista_rejects_inactive_and_ambiguous_candidates_before_dispatch(
             {"bbox": [0.3, 0.3, 0.4, 0.4], "type": "text", "content": "b", "interactivity": True},
             {"bbox": [0.5, 0.5, 0.6, 0.6], "type": "text", "content": "c", "interactivity": True},
         ]},
-        qwen=lambda _image, projection: {"bindings": [
-            {"i": item["i"], "role": "button", "label": "inactive" if item["i"] == 0 else "duplicate", "status": "BOUND", "confidence": 0.8}
-            for item in projection["candidates"]
-        ]},
+        qwen=lambda _image, projection: _goal_response(projection),
         vista=lambda image, _target: vista_calls.append(image) or "[500,500]",
     )
 
@@ -310,7 +295,7 @@ def test_scorer_joins_finalized_trace_by_exact_role_and_label(tmp_path: Path) ->
 
     slots = SimpleNativeSlots(
         omni=lambda _image: {"items": [{"bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "replay", "interactivity": True}]},
-        qwen=lambda _image, projection: {"bindings": [{"i": item["i"], "role": "button", "label": "replay", "status": "BOUND", "confidence": 0.8} for item in projection["candidates"]]},
+        qwen=lambda _image, projection: _goal_response(projection),
         vista=lambda _image, _target: "[500,500]",
     )
     artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "artifacts")
@@ -355,7 +340,7 @@ def test_vista_strict_boundary_point_is_not_clipped_or_scored(tmp_path: Path) ->
 
     slots = SimpleNativeSlots(
         omni=lambda _image: {"items": [{"bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "replay", "interactivity": True}]},
-        qwen=lambda _image, projection: {"bindings": [{"i": item["i"], "role": "button", "label": "replay", "status": "BOUND", "confidence": 0.8} for item in projection["candidates"]]},
+        qwen=lambda _image, projection: _goal_response(projection),
         vista=lambda _image, _target: "[0,0]",
     )
     artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "artifacts")
@@ -370,7 +355,7 @@ def test_scorer_rejects_duplicate_outcomes_and_unsealed_tampering(tmp_path: Path
 
     slots = SimpleNativeSlots(
         omni=lambda _image: {"items": [{"bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "replay", "interactivity": True}]},
-        qwen=lambda _image, projection: {"bindings": [{"i": item["i"], "role": "button", "label": "replay", "status": "BOUND", "confidence": 0.8} for item in projection["candidates"]]},
+        qwen=lambda _image, projection: _goal_response(projection),
         vista=lambda _image, _target: "[500,500]",
     )
     artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "artifacts")
@@ -406,7 +391,7 @@ def test_scorer_rejects_self_sealed_extra_case_or_thirty_outcomes_before_gold(tm
 
     slots = SimpleNativeSlots(
         omni=lambda _image: {"items": [{"bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "replay", "interactivity": True}]},
-        qwen=lambda _image, projection: {"bindings": [{"i": item["i"], "role": "button", "label": "replay", "status": "BOUND", "confidence": 0.8} for item in projection["candidates"]]},
+        qwen=lambda _image, projection: _goal_response(projection),
         vista=lambda _image, _target: "[500,500]",
     )
     artifact = run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "artifacts")

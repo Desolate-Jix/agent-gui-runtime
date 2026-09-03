@@ -98,7 +98,7 @@ def test_cli_replay_abstains_when_qwen_cardinality_disagrees_with_omni(tmp_path:
     omni = {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "x", "interactivity": True}]}
     incompatible = {
         "bindings": [
-            {"i": index, "role": "button", "label": "x", "status": "BOUND", "confidence": 1}
+            {"goal_index": index, "candidate_index": 0, "status": "BOUND", "confidence": 1}
             for index in range(5)
         ]
     }

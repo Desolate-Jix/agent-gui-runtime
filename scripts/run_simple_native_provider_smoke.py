@@ -10,7 +10,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-PROMPTS = {'omni': 'Return official Omni items only.', 'qwen': 'Return closed ordinal bindings only.', 'vista': 'Return only [x,y] normalized to 0..1000.'}
+PROMPTS = {'omni': 'Return official Omni items only.', 'qwen': 'Return closed per-goal bindings only.', 'vista': 'Return only [x,y] normalized to 0..1000.'}
 
 def _arguments() -> argparse.Namespace:
     parser=argparse.ArgumentParser()
