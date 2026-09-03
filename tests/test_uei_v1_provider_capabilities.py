@@ -15,6 +15,11 @@ from app.learn.recognition.uei.provider_adapters import (
     ProviderRunBudget,
     RestrictedCaptureLease,
 )
+from app.learn.recognition.uei.provider_bundles import (
+    TrustedProviderBundleRegistry,
+    provider_bundle_ref,
+    seal_provider_bundle_descriptor_v1,
+)
 from app.learn.recognition.uei.provider_capabilities import (
     AUTHORITY_SHAPED_KEYS,
     CandidateDiscoveryItemV1,
@@ -664,14 +669,16 @@ def _invocation_request(
     *,
     cancellation_event: Event | None = None,
     resource_lease: dict[str, object] | None = None,
+    bundle_ref: dict[str, str] | None = None,
+    invocation_budget: ProviderRunBudget | None = None,
 ) -> CandidateDiscoveryRequestV1:
     return CandidateDiscoveryRequestV1(
         envelope=ProviderInvocationEnvelopeV1(
-            bundle_ref=dict(BUNDLE_REF),
+            bundle_ref=dict(BUNDLE_REF if bundle_ref is None else bundle_ref),
             capability="candidate_discovery",
             invocation_id="invocation/capability-envelope",
             capture_lineage_ref=dict(LINEAGE_REF),
-            budget=budget(),
+            budget=budget() if invocation_budget is None else invocation_budget,
             resource_lease=resource_lease,
             cancellation_event=cancellation_event,
         ),
@@ -679,10 +686,35 @@ def _invocation_request(
     )
 
 
+def _sealed_invocation_descriptor(
+    *, capability: str = "candidate_discovery", provider_id: str = "provider/local.omni"
+) -> dict[str, object]:
+    return seal_provider_bundle_descriptor_v1({
+        "contract_version": "provider_bundle_descriptor_v1",
+        "bundle_id": "bundle/local.invocation",
+        "bundle_revision": "test-v1",
+        "capability": capability,
+        "provider_id": provider_id,
+        "profile_id": "profile/managed",
+        "model_id": "model/test",
+        "model_revision": "test-v1",
+        "prompt_spec_sha256": "1" * 64,
+        "prompt_renderer_sha256": "2" * 64,
+        "native_parser_sha256": "3" * 64,
+        "adapter_sha256": "4" * 64,
+        "preprocessing_sha256": "5" * 64,
+        "transport_sha256": "6" * 64,
+        "coordinate_convention": "capture_pixel_xyxy",
+        "decoding_config_sha256": "7" * 64,
+        "artifact_sha256s": ["8" * 64],
+        "resource_budget": budget().__dict__,
+    })
+
+
 def _validate_fake_cleanup(receipt: dict[str, object]) -> CapabilityCleanupOutcomeV1:
     if receipt.get("status") != "released":
         return CapabilityCleanupOutcomeV1("indeterminate", receipt)
-    return CapabilityCleanupOutcomeV1(str(receipt["cleanup_status"]), receipt)
+    return CapabilityCleanupOutcomeV1("clean", receipt)
 
 
 def run_fake_invocation(
@@ -700,11 +732,26 @@ def run_fake_invocation(
     cancellation_event = Event()
     if cancel_stage == "before_acquire":
         cancellation_event.set()
+    trusted_adapter = _InvocationAdapter()
+    selected_adapter = trusted_adapter if adapter is None else adapter
+    descriptor = _sealed_invocation_descriptor(
+        provider_id="provider/local.qwen3" if getattr(selected_adapter, "requires_managed_resource", False) else "provider/local.omni"
+    )
+    registry = TrustedProviderBundleRegistry([(descriptor, trusted_adapter)])
+    selected_lease = resource_lease if resource_lease is not None else {
+        "contract_version": "managed_qwen_model_lease_v1",
+        "lease_id": "lease/test", "owner_request_id": "owner/test",
+        "profile_id": "profile/managed", "incarnation_id": "incarnation/current",
+        "server_base_url": "http://127.0.0.1:18080",
+        "server_model_id": "model/test",
+        "profile_sha256": "a" * 64,
+        "server_process_identity": {"pid": 1, "create_time_ns": 1},
+    }
     request = _invocation_request(
         cancellation_event=cancellation_event,
-        resource_lease=resource_lease,
+        resource_lease=selected_lease,
+        bundle_ref=provider_bundle_ref(descriptor),
     )
-    selected_adapter = adapter or _InvocationAdapter()
 
     def fake_invoke(_: CandidateDiscoveryRequestV1) -> dict[str, int]:
         transitions.extend(("acquire", "invoke"))
@@ -712,16 +759,15 @@ def run_fake_invocation(
             cancellation_event.set()
         if provider_failure:
             raise RuntimeError("provider transport failed")
-        return {"duration_ms": duration_ms, "output_bytes": output_bytes}
+        return {
+            "duration_ms": duration_ms,
+            "resource_units": 1,
+            "payload": "x" * output_bytes,
+        }
 
     def validate_result(
         result: dict[str, int], run_budget: ProviderRunBudget
     ) -> dict[str, int]:
-        if (
-            result["duration_ms"] > run_budget.timeout_ms
-            or result["output_bytes"] > run_budget.max_output_bytes
-        ):
-            raise UEIValidationError("provider_capability_result_budget_exceeded")
         if cancel_stage == "before_promote":
             cancellation_event.set()
         if not cancellation_event.is_set():
@@ -730,10 +776,17 @@ def run_fake_invocation(
 
     def fake_cleanup() -> dict[str, object]:
         transitions.append("cleanup")
-        return {"status": "released", "cleanup_status": cleanup_status}
+        return {
+            "status": "released" if cleanup_status == "clean" else cleanup_status,
+            "lease": selected_lease,
+            "shared_server_retained": True,
+            "server_termination": "not_required_shared",
+            "reason": "capability_test",
+        }
 
     outcome = invoke_with_capability_envelope(
         request=request,
+        registry=registry,
         adapter=selected_adapter,
         invoke=fake_invoke,
         validate_result=validate_result,
@@ -749,7 +802,7 @@ def test_cancellation_fails_closed_and_cleanup_is_exactly_once(cancel_stage):
     calls: list[str] = []
     result = run_fake_invocation(cancel_stage=cancel_stage, calls=calls)
     assert result.failure.reason == "cancelled"
-    assert calls.count("cleanup") == (0 if cancel_stage == "before_acquire" else 1)
+    assert calls.count("cleanup") == 1
     assert "promote" not in calls
 
 
@@ -770,22 +823,26 @@ def test_cleanup_ambiguity_overrides_success_and_fails_closed():
     result = run_fake_invocation(cleanup_status="indeterminate")
     assert result.failure.reason == "cleanup_ambiguous"
     assert result.promoted is False
+    failed = run_fake_invocation(provider_failure=True, cleanup_status="pending")
+    assert failed.failure.reason == "provider_failed"
+    assert failed.failure.stage == "invocation"
+    assert failed.failure.cleanup_status == "indeterminate"
 
 
 def test_structured_cleanup_receipt_is_preserved_on_success_and_failure():
     success = run_fake_invocation(cleanup_status="clean")
     assert success.cleanup.status == "clean"
-    assert success.cleanup.receipt["status"] == "released"
+    assert success.cleanup.receipt["legacy_receipt"]["status"] == "released"
     failed = run_fake_invocation(provider_failure=True, cleanup_status="clean")
     assert failed.failure.reason == "provider_failed"
-    assert failed.cleanup.receipt["status"] == "released"
+    assert failed.cleanup.receipt["legacy_receipt"]["status"] == "released"
 
 
 @pytest.mark.parametrize(
     ("adapter", "reason"),
     [
-        (_InvocationAdapter(bundle_ref={"id": "bundle/unknown", "content_sha256": "f" * 64}), "unknown_bundle"),
-        (_InvocationAdapter(capability="semantic_binding"), "capability_mismatch"),
+        (_InvocationAdapter(bundle_ref={"id": "bundle/unknown", "content_sha256": "f" * 64}), "untrusted_adapter"),
+        (_InvocationAdapter(capability="semantic_binding"), "untrusted_adapter"),
     ],
 )
 def test_unknown_bundle_or_capability_mismatch_fail_before_invocation(adapter, reason):
@@ -794,13 +851,13 @@ def test_unknown_bundle_or_capability_mismatch_fail_before_invocation(adapter, r
     assert result.failure.reason == reason
     assert "acquire" not in calls
     assert "invoke" not in calls
-    assert "cleanup" not in calls
+    assert calls.count("cleanup") == 1
 
 
 @pytest.mark.parametrize(
     ("resource_lease", "adapter"),
     [
-        (None, _InvocationAdapter(requires_managed_resource=True)),
+        ({}, _InvocationAdapter(requires_managed_resource=True)),
         (
             {"profile_id": "profile/wrong", "incarnation_id": "incarnation/current"},
             _InvocationAdapter(requires_managed_resource=True),
@@ -831,35 +888,15 @@ def test_managed_resource_envelope_failures_precede_transport_dispatch(resource_
 
 
 def test_qwen_shaped_cleanup_receipt_is_preserved_byte_for_byte():
-    calls: list[str] = []
-    receipt = {
-        "contract_version": "qwen_model_release_v1",
-        "status": "released",
-        "cleanup_status": "clean",
-        "lease": {"lease_id": "lease/exact", "incarnation_id": "incarnation/current"},
-        "shared_server_retained": False,
+    outcome = run_fake_invocation(cleanup_status="clean")
+    legacy = outcome.cleanup.receipt["legacy_receipt"]
+    assert legacy["status"] == "released"
+    assert legacy["lease"] == outcome.cleanup.receipt["resource_lease"]
+    assert set(legacy["lease"]) == {
+        "contract_version", "lease_id", "owner_request_id", "profile_id",
+        "incarnation_id", "server_base_url", "server_model_id", "profile_sha256",
+        "server_process_identity",
     }
-    request = _invocation_request()
-
-    def fake_invoke(_: CandidateDiscoveryRequestV1) -> dict[str, int]:
-        calls.extend(("acquire", "invoke"))
-        return {"duration_ms": 1, "output_bytes": 1}
-
-    def validate_result(result: dict[str, int], _: ProviderRunBudget) -> dict[str, int]:
-        calls.append("promote")
-        return result
-
-    def fake_cleanup() -> dict[str, object]:
-        calls.append("cleanup")
-        return receipt
-
-    outcome = invoke_with_capability_envelope(
-        request=request,
-        adapter=_InvocationAdapter(),
-        invoke=fake_invoke,
-        validate_result=validate_result,
-        cleanup=fake_cleanup,
-        validate_cleanup=_validate_fake_cleanup,
-    )
-    assert outcome.failure is None
-    assert outcome.cleanup.receipt is receipt
+    assert legacy["server_termination"] == "not_required_shared"
+    with pytest.raises(TypeError):
+        outcome.cleanup.receipt["status"] = "mutated"

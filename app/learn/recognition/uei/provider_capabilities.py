@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from hashlib import sha256
 import math
 import re
 from threading import Event
+from time import monotonic_ns
 from typing import Callable, Generic, Protocol, TypeVar
 
 from app.learn.hybrid.contracts import validate_capture_identity, validate_omni_inventory
@@ -20,6 +21,11 @@ from app.learn.recognition.uei.provider_adapters import (
     RestrictedCaptureLease,
 )
 from app.learn.recognition.uei.provider_bundles import PROVIDER_CAPABILITIES
+from app.learn.recognition.uei.provider_bundles import (
+    TrustedProviderBundleRegistry,
+    provider_bundle_ref,
+    validate_provider_bundle_descriptor_v1,
+)
 
 
 AUTHORITY_SHAPED_KEYS = frozenset({
@@ -305,6 +311,9 @@ class CapabilityInvocationFailure:
     reason: str
     retryable: bool
     cleanup_status: str
+    duration_ms: int = 0
+    resource_units: int = 0
+    output_item_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -315,155 +324,202 @@ class CapabilityInvocationOutcome(Generic[TResult]):
     promoted: bool
 
 
-def _invocation_envelope_failure(
-    *, request: object, adapter: object, cleanup: Callable[[], dict[str, object]] | None
-) -> str | None:
+def _trusted_bundle_descriptor(
+    *, request: object, adapter: object, registry: TrustedProviderBundleRegistry
+) -> tuple[dict[str, object] | None, str | None]:
     envelope = getattr(request, "envelope", None)
     if not isinstance(envelope, ProviderInvocationEnvelopeV1):
-        return "invalid_envelope"
-    if not isinstance(envelope.budget, ProviderRunBudget):
-        return "invalid_budget"
-    adapter_bundle_ref = getattr(adapter, "bundle_ref", None)
-    if not isinstance(adapter_bundle_ref, Mapping) or dict(adapter_bundle_ref) != dict(envelope.bundle_ref):
-        return "unknown_bundle"
-    adapter_capability = getattr(adapter, "capability", None)
-    descriptor = getattr(adapter, "descriptor", None)
-    if adapter_capability is None and isinstance(descriptor, Mapping):
-        adapter_capability = descriptor.get("capability")
-    if adapter_capability is not None and adapter_capability != envelope.capability:
-        return "capability_mismatch"
-    if envelope.resource_lease is not None and cleanup is None:
-        return "resource_cleanup_required"
-    if not bool(getattr(adapter, "requires_managed_resource", False)):
-        return None
-    lease = envelope.resource_lease
-    if not isinstance(lease, Mapping):
-        return "resource_lease_required"
-    if not isinstance(descriptor, Mapping):
-        return "managed_descriptor_invalid"
-    descriptor_bundle_ref = descriptor.get("bundle_ref")
-    if descriptor_bundle_ref is None and {
-        "bundle_id", "content_sha256"
-    }.issubset(descriptor):
-        descriptor_bundle_ref = {
-            "id": descriptor["bundle_id"],
-            "content_sha256": descriptor["content_sha256"],
-        }
+        return None, "invalid_envelope"
+    try:
+        resolved = registry.resolve(
+            capability=envelope.capability, bundle_ref=dict(envelope.bundle_ref)
+        )
+        descriptor = validate_provider_bundle_descriptor_v1(resolved.descriptor)
+    except (AttributeError, UEIValidationError):
+        return None, "unknown_bundle"
+    if resolved.adapter is not adapter:
+        return None, "untrusted_adapter"
+    if provider_bundle_ref(descriptor) != dict(envelope.bundle_ref):
+        return None, "unknown_bundle"
+    return descriptor, None
+
+
+def _managed_transport_required(descriptor: Mapping[str, object]) -> bool:
+    provider_id = descriptor.get("provider_id")
+    return isinstance(provider_id, str) and ("qwen" in provider_id or "vista" in provider_id)
+
+
+def _json_value(value: object) -> object:
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_value(asdict(value))
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_value(child) for child in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise UEIValidationError("provider_capability_result_not_serializable")
+
+
+def _result_field(result: object, name: str, default: object = None) -> object:
+    if isinstance(result, Mapping):
+        return result.get(name, default)
+    return getattr(result, name, default)
+
+
+def _string_lengths(value: object) -> list[int]:
+    if isinstance(value, str):
+        return [len(value)]
+    if isinstance(value, Mapping):
+        return [length for child in value.values() for length in _string_lengths(child)]
+    if isinstance(value, (list, tuple)):
+        return [length for child in value for length in _string_lengths(child)]
+    return []
+
+
+def _enforce_result_budget(result: object, budget: ProviderRunBudget) -> None:
+    payload = _json_value(result)
+    if len(canonical_json_bytes(payload)) > budget.max_output_bytes:
+        raise UEIValidationError("provider_capability_output_bytes_exceeded")
+    duration_ms = _result_field(result, "duration_ms", 0)
+    resource_units = _result_field(result, "resource_units", 0)
     if (
-        not isinstance(descriptor_bundle_ref, Mapping)
-        or dict(descriptor_bundle_ref) != dict(envelope.bundle_ref)
+        isinstance(duration_ms, bool) or not isinstance(duration_ms, int) or duration_ms < 0
+        or isinstance(resource_units, bool) or not isinstance(resource_units, int) or resource_units < 0
+        or duration_ms > budget.timeout_ms or resource_units > budget.max_element_count
     ):
-        return "unknown_bundle"
-    profile_id = descriptor.get("profile_id")
-    if not isinstance(profile_id, str) or lease.get("profile_id") != profile_id:
-        return "resource_lease_profile_mismatch"
-    expected_incarnation = getattr(adapter, "incarnation_id", None)
-    if expected_incarnation is None:
-        expected_incarnation = descriptor.get("incarnation_id")
-    if (
-        not isinstance(expected_incarnation, str)
-        or not expected_incarnation
-        or lease.get("incarnation_id") != expected_incarnation
-    ):
-        return "resource_lease_stale"
-    return None
+        raise UEIValidationError("provider_capability_result_budget_exceeded")
+    items = _result_field(result, "items", _result_field(result, "bindings", ()))
+    if not isinstance(items, (list, tuple)) or len(items) > budget.max_element_count:
+        raise UEIValidationError("provider_capability_output_items_exceeded")
+    if any(length > budget.max_string_length for length in _string_lengths(payload)):
+        raise UEIValidationError("provider_capability_output_string_exceeded")
 
 
 def _cleanup_outcome(
-    *, cleanup: Callable[[], dict[str, object]] | None,
-    acquired: bool,
-    validate_cleanup: Callable[[dict[str, object]], CapabilityCleanupOutcomeV1],
+    *, cleanup: Callable[[], dict[str, object]] | None, acquired_lease: Mapping[str, object] | None,
+    envelope: ProviderInvocationEnvelopeV1, validate_cleanup: Callable[[dict[str, object]], CapabilityCleanupOutcomeV1],
 ) -> CapabilityCleanupOutcomeV1:
-    if not acquired or cleanup is None:
+    if acquired_lease is None:
         return CapabilityCleanupOutcomeV1("not_required", None)
-    try:
-        receipt = cleanup()
-        validated = validate_cleanup(receipt)
-    except Exception:
-        return CapabilityCleanupOutcomeV1("indeterminate", None)
-    if not isinstance(validated, CapabilityCleanupOutcomeV1):
-        return CapabilityCleanupOutcomeV1("indeterminate", receipt)
-    return CapabilityCleanupOutcomeV1(validated.status, receipt)
+    legacy_receipt: dict[str, object] | None = None
+    status = "indeterminate"
+    if cleanup is not None:
+        try:
+            candidate = cleanup()
+            if isinstance(candidate, dict):
+                legacy_receipt = candidate
+                validate_cleanup(candidate)
+                if (
+                    candidate.get("status") == "released"
+                    and canonical_json_bytes(candidate.get("lease")) == canonical_json_bytes(acquired_lease)
+                ):
+                    status = "clean"
+        except Exception:
+            status = "indeterminate"
+    owner = acquired_lease.get("owner_request_id")
+    receipt = _freeze({
+        "contract_version": "capability_cleanup_receipt_v1",
+        "status": status,
+        "invocation_id": envelope.invocation_id,
+        "bundle_ref": dict(envelope.bundle_ref),
+        "cleanup_owner": owner if isinstance(owner, str) and owner else envelope.invocation_id,
+        "resource_lease": dict(acquired_lease),
+        "legacy_receipt": legacy_receipt,
+    })
+    return CapabilityCleanupOutcomeV1(status, receipt)
 
 
 def invoke_with_capability_envelope(
-    *,
-    request: TRequest,
-    adapter: object,
+    *, request: TRequest, registry: TrustedProviderBundleRegistry, adapter: object,
     invoke: Callable[[TRequest], TResult],
     validate_result: Callable[[TResult, ProviderRunBudget], TResult],
     cleanup: Callable[[], dict[str, object]] | None,
     validate_cleanup: Callable[[dict[str, object]], CapabilityCleanupOutcomeV1],
 ) -> CapabilityInvocationOutcome[TResult]:
     """执行一次受限 provider 调用；不持久化、不重试、不授予权限。"""
+    envelope = getattr(request, "envelope", None)
+    acquired_lease = envelope.resource_lease if isinstance(envelope, ProviderInvocationEnvelopeV1) and envelope.resource_lease is not None else None
     failure: CapabilityInvocationFailure | None = None
     result: TResult | None = None
     promoted = False
-    acquired = False
     terminal_cleanup = CapabilityCleanupOutcomeV1("not_required", None)
     try:
-        envelope = getattr(request, "envelope", None)
-        validation_failure = _invocation_envelope_failure(
-            request=request, adapter=adapter, cleanup=cleanup
+        descriptor, resolution_failure = _trusted_bundle_descriptor(
+            request=request, adapter=adapter, registry=registry
         )
-        if validation_failure is not None:
-            failure = CapabilityInvocationFailure(
-                "validation", validation_failure, False, "not_required"
-            )
-        elif envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
-            failure = CapabilityInvocationFailure("cancellation", "cancelled", False, "not_required")
+        if resolution_failure is not None:
+            failure = CapabilityInvocationFailure("validation", resolution_failure, False, "not_required")
+        elif not isinstance(envelope, ProviderInvocationEnvelopeV1):
+            failure = CapabilityInvocationFailure("validation", "invalid_envelope", False, "not_required")
         else:
+            sealed_budget = ProviderRunBudget(**descriptor["resource_budget"])
             try:
-                acquired = True
-                raw_result = invoke(request)
-            except AdapterFailure as error:
-                failure = CapabilityInvocationFailure(
-                    "invocation", error.reason_class, error.retryable, "not_required"
-                )
-            except Exception:
-                failure = CapabilityInvocationFailure(
-                    "invocation", "provider_failed", False, "not_required"
-                )
+                effective_budget = effective_provider_budget(envelope.budget, sealed_budget)
+            except UEIValidationError:
+                failure = CapabilityInvocationFailure("validation", "invalid_budget", False, "not_required")
             else:
-                if envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
-                    failure = CapabilityInvocationFailure(
-                        "cancellation", "cancelled", False, "not_required"
-                    )
-                else:
+                if _managed_transport_required(descriptor):
+                    lease = acquired_lease
+                    if not isinstance(lease, Mapping):
+                        failure = CapabilityInvocationFailure("validation", "resource_lease_required", False, "not_required")
+                    elif lease.get("profile_id") != descriptor["profile_id"] or not lease.get("incarnation_id"):
+                        failure = CapabilityInvocationFailure("validation", "resource_lease_mismatch", False, "not_required")
+                if failure is None and envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
+                    failure = CapabilityInvocationFailure("cancellation", "cancelled", False, "not_required")
+                if failure is None:
+                    started = monotonic_ns()
                     try:
-                        validated_result = validate_result(raw_result, envelope.budget)
-                    except Exception:
+                        raw_result = invoke(request)
+                    except AdapterFailure as error:
                         failure = CapabilityInvocationFailure(
-                            "validation", "result_validation_failed", False, "not_required"
+                            "invocation", error.reason_class, error.retryable, "not_required",
+                            error.duration_ms, error.resource_units, error.output_item_count,
                         )
+                    except Exception:
+                        failure = CapabilityInvocationFailure("invocation", "provider_failed", False, "not_required")
                     else:
-                        if envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
-                            failure = CapabilityInvocationFailure(
-                                "cancellation", "cancelled", False, "not_required"
-                            )
+                        elapsed_ms = (monotonic_ns() - started) // 1_000_000
+                        try:
+                            _enforce_result_budget(raw_result, effective_budget)
+                            if elapsed_ms > effective_budget.timeout_ms:
+                                raise UEIValidationError("provider_capability_cooperative_deadline_exceeded")
+                            if envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
+                                raise UEIValidationError("provider_capability_cancelled")
+                            validated = validate_result(raw_result, effective_budget)
+                            _enforce_result_budget(validated, effective_budget)
+                        except UEIValidationError as error:
+                            reason = "cancelled" if str(error) == "provider_capability_cancelled" else "result_validation_failed"
+                            failure = CapabilityInvocationFailure("cancellation" if reason == "cancelled" else "validation", reason, False, "not_required")
+                        except Exception:
+                            failure = CapabilityInvocationFailure("validation", "result_validation_failed", False, "not_required")
                         else:
-                            result = validated_result
-                            promoted = True
+                            if envelope.cancellation_event is not None and envelope.cancellation_event.is_set():
+                                failure = CapabilityInvocationFailure("cancellation", "cancelled", False, "not_required")
+                            else:
+                                result = validated
+                                promoted = True
     finally:
         terminal_cleanup = _cleanup_outcome(
-            cleanup=cleanup, acquired=acquired, validate_cleanup=validate_cleanup
-        )
+            cleanup=cleanup, acquired_lease=acquired_lease, envelope=envelope,
+            validate_cleanup=validate_cleanup,
+        ) if isinstance(envelope, ProviderInvocationEnvelopeV1) else CapabilityCleanupOutcomeV1("not_required", None)
     if terminal_cleanup.status not in _TERMINAL_CLEANUP_STATUSES:
-        return CapabilityInvocationOutcome(
-            result=None,
-            failure=CapabilityInvocationFailure(
-                "cleanup", "cleanup_ambiguous", False, terminal_cleanup.status
-            ),
-            cleanup=terminal_cleanup,
-            promoted=False,
-        )
-    if failure is not None:
+        if failure is None:
+            failure = CapabilityInvocationFailure("cleanup", "cleanup_ambiguous", False, terminal_cleanup.status)
+        else:
+            failure = CapabilityInvocationFailure(
+                failure.stage, failure.reason, failure.retryable, terminal_cleanup.status,
+                failure.duration_ms, failure.resource_units, failure.output_item_count,
+            )
+        result = None
+        promoted = False
+    elif failure is not None:
         failure = CapabilityInvocationFailure(
-            failure.stage, failure.reason, failure.retryable, terminal_cleanup.status
+            failure.stage, failure.reason, failure.retryable, terminal_cleanup.status,
+            failure.duration_ms, failure.resource_units, failure.output_item_count,
         )
-    return CapabilityInvocationOutcome(
-        result=result, failure=failure, cleanup=terminal_cleanup, promoted=promoted
-    )
+    return CapabilityInvocationOutcome(result=result, failure=failure, cleanup=terminal_cleanup, promoted=promoted)
 
 
 @dataclass(frozen=True)
