@@ -274,6 +274,19 @@ Automatic provider selection, remote execution, raw-coordinate Agent authority, 
 
 ## Simple-native provider smoke (Phase A)
 
+### Replaceable semantic binder experiment — in progress
+
+`provider-native output → thin adapter → GoalBindingProvider` lets each model
+use its own supported response format while keeping one canonical binding
+contract. The comparison reuses one frozen Omni candidate snapshot and the
+unchanged VISTA refinement contract across the same five screens / 25 targets.
+Provider sessions, raw output retention and cleanup-to-score joins have offline
+regressions; **new live A/B accuracy results and a winning replacement are still
+pending**. These tests grant no GUI execution authority and never use unique
+holdout. New test artifacts are bounded by a **30 GiB** external storage cap;
+existing incumbent assets remain read-only. See the
+[acquisition boundary](docs/GOAL_BINDING_MODEL_ACQUISITION.md).
+
 `python scripts/run_simple_native_provider_smoke.py` defaults to offline `preflight`: it validates only `case-001` through `case-005`, never starts a model, and performs no action. `replay` uses injected native-shape fixtures and writes a regression-only, non-promotable 25-target diagnostic. It copies each public regression image byte-for-byte into the artifact directory, seals a capture bundle with explicitly empty/unavailable OCR and UIA observations, and derives every candidate bbox from Omni output.
 
 The three protocols remain independent: Omni emits only `{bbox,type,content,interactivity}`; Qwen keeps the complete runtime request locally while the model sees fixed goals and ordinal candidates `{candidate_index,bbox,active}`, then returns only a bare top-level JSON array of `{goal_index,candidate_index,status,confidence}` objects. `BOUND` must name one existing candidate index; `UNBOUND` must use `null`. The adapter deterministically restores role/label from the fixed goal and stable candidate IDs from the sealed Omni inventory; malformed, duplicate goal indices, reordered, out-of-range, or inactive bindings fail closed or abstain before VISTA; multiple fixed goals may bind the same existing candidate. VISTA receives a newly persisted candidate crop and returns only bare normalized `[x,y]`. Runtime IDs, capture lineage, crop hashes, coordinate transforms, metrics, and review-only fields are adapter-owned. Capture SHA and dimensions are revalidated around every provider call. VISTA is bounded by the 25 strictly parsed provider goals: each goal produces exactly one selected or abstained outcome, and only an active per-goal `BOUND` candidate may dispatch it. Provider phases are batched `Omni -> cleanup -> Qwen -> cleanup -> VISTA -> cleanup`; every begun phase releases exactly once in a `finally` path, including unexpected provider exceptions. Cleanup uses a closed observation with no remaining owned/provider/helper/descendant process, listener, or lease evidence, and a later phase cannot continue unless it is verified clean; simultaneous provider and cleanup failures remain explicitly chained. The scorer validates the five ordered cases and 25 outcomes before it alone opens Gold, while the regression report records the sealed provider-artifact SHA-256.

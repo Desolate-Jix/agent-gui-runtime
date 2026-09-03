@@ -272,6 +272,16 @@ Automatic provider selection、remote execution、raw-coordinate Agent authority
 
 ## Simple-native provider smoke（Phase A）
 
+### 可替换语义绑定模型实验——进行中
+
+`provider-native output → thin adapter → GoalBindingProvider` 允许不同模型
+使用各自支持的原生输出格式，再通过薄适配器进入统一绑定协议。比较固定使用
+同一份 Omni 候选快照、不变的 VISTA 精定位协议，以及相同的五屏 / 25 个目标。
+持久化模型会话、原始输出保留、清理回执到评分的接缝已有离线回归测试；
+**新一轮真实 A/B 准确率及替换胜出者仍待验证**。实验不授予 GUI 执行权限，
+不使用 unique holdout。新增模型测试工件受外部存储 **30 GiB** 上限约束，
+原有 incumbent 资产保持只读。参见[模型获取边界](docs/GOAL_BINDING_MODEL_ACQUISITION.md)。
+
 `python scripts/run_simple_native_provider_smoke.py` 默认进入离线 `preflight`：只校验 `case-001` 至 `case-005`，绝不启动模型，也不执行任何动作。`replay` 使用可注入的原生形状 fixture，写入仅回归诊断、不可 promotion 的 25-target 报告。它把每张公开 regression 图片逐字节复制到 artifact 目录，封存带有明确 empty/unavailable OCR 与 UIA 观测的 capture bundle；所有 candidate bbox 只来自 Omni 输出。
 
 三个协议保持独立：Omni 只输出 `{bbox,type,content,interactivity}`；Qwen 在本地保留完整 runtime request，模型只看固定 goal 与 ordinal candidates `{candidate_index,bbox,active}`，且只返回由 `{goal_index,candidate_index,status,confidence}` 对象组成的 bare top-level JSON array。`BOUND` 必须指定现有 candidate index；`UNBOUND` 必须使用 `null`。adapter 从固定 goal 确定性恢复 role/label，并从封存的 Omni inventory 恢复 stable candidate ID；畸形、重复 goal index、重排、越界或 inactive binding 均 fail closed，或在 VISTA 前 abstain；多个固定 goal 可以绑定同一现有 candidate。VISTA 接收新持久化的 candidate crop，且只返回 bare normalized `[x,y]`。runtime ID、capture lineage、crop hash、坐标变换、metrics 和 review-only 字段均由 adapter 持有。每次 provider 调用前后都重新验证 capture SHA 与尺寸。VISTA 受 25 个严格解析的 provider goal 限定：每个 goal 恰好产生一个 selected 或 abstained outcome，且只有 active 的 per-goal `BOUND` candidate 可以 dispatch。provider 阶段固定批处理为 `Omni -> cleanup -> Qwen -> cleanup -> VISTA -> cleanup`；每个已开始阶段都在 `finally` 路径中恰好 release 一次，包括 provider 抛出意外异常时。cleanup 使用封闭 observation，owned/provider/helper/descendant process、listener 与 lease 均须为空，未验证 clean 时不得进入下一阶段；provider 与 cleanup 同时失败时保留显式 exception chain。scorer 先验证五个有序 case 和 25 个 outcome，然后才打开 Gold；regression report 同时记录封存 provider artifact 的 SHA-256。
