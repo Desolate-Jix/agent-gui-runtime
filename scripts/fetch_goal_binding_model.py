@@ -23,6 +23,7 @@ from app.learn.hybrid.model_test_storage import (
     remove_huggingface_local_metadata,
 )
 from app.learn.hybrid.model_test_storage import _immutable_revision, _safe_component
+from app.learn.hybrid import model_test_storage as _storage
 
 
 def _digest(path: Path) -> str:
@@ -64,19 +65,82 @@ def _quota_reservation(root: Path):
     _reject_reparse_root(root)
     root.mkdir(parents=True, exist_ok=True)
     lock = root / ".goal-binding-quota.lock"
+    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR)
+    locked = False
     try:
-        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as exc:
-        raise RuntimeError("another model acquisition holds the root quota reservation") from exc
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write("reserved\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        if os.name == "nt":
+            import msvcrt
+
+            if os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"0")
+                os.fsync(descriptor)
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise RuntimeError("another model acquisition holds the root quota reservation") from exc
+            locked = True
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as exc:
+                raise RuntimeError("another model acquisition holds the root quota reservation") from exc
+            locked = True
         yield
     finally:
-        if lock.exists():
-            lock.unlink()
+        if locked:
+            if os.name == "nt":
+                import msvcrt
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def _transaction_marker(*, provider_id: str, repo_id: str, revision: str) -> dict[str, str]:
+    return {"contract_version": "goal_binding_model_download_transaction_v1", "provider_id": provider_id, "repo_id": repo_id, "revision": revision}
+
+
+def _recover_or_create_staging(*, root: Path, provider_id: str, repo_id: str, revision: str) -> Path:
+    staging = root / "staging" / provider_id / revision
+    marker = staging / ".goal-binding-transaction.json"
+    expected_marker = _transaction_marker(provider_id=provider_id, repo_id=repo_id, revision=revision)
+    if staging.exists():
+        _storage._guard(root, staging)
+        _storage._guard(root, marker)
+        try:
+            actual_marker = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("abandoned staging has no valid transaction marker") from exc
+        if actual_marker != expected_marker:
+            raise ValueError("abandoned staging transaction marker does not match the requested artifact")
+        cleanup_failed_staging(root=root, staging_path=staging)
+    staging = _storage._guarded_directory(root, "staging", provider_id, revision)
+    _storage._atomic_json(staging / ".goal-binding-transaction.json", expected_marker)
+    return staging
+
+
+def _configure_xet(root: Path) -> Path:
+    xet_cache = root / ".cache" / "huggingface" / "xet"
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    os.environ["HF_XET_CACHE"] = str(xet_cache)
+    return xet_cache
+
+
+def _pin_imported_hub_xet(module: object, xet_cache: Path) -> None:
+    """Override constants too when a host imported huggingface_hub before this script."""
+    constants = getattr(module, "constants", None)
+    if constants is not None:
+        if hasattr(constants, "HF_HUB_DISABLE_XET"):
+            setattr(constants, "HF_HUB_DISABLE_XET", True)
+        if hasattr(constants, "HF_XET_CACHE"):
+            setattr(constants, "HF_XET_CACHE", str(xet_cache))
 
 
 def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
@@ -87,8 +151,13 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
     if not isinstance(provider_id, str) or not isinstance(repo_id, str) or not isinstance(requested, list) or not requested or any(not isinstance(name, str) or not name or Path(name).is_absolute() or ".." in Path(name).parts for name in requested):
         raise ValueError("profile artifact declaration is invalid")
     _safe_component(provider_id, name="provider_id")
+    root = _storage._require_model_test_root(Path(root))
+    _reject_reparse_root(root)
+    xet_cache = _configure_xet(root)
     try:
-        from huggingface_hub import HfApi, hf_hub_download
+        import huggingface_hub
+        _pin_imported_hub_xet(huggingface_hub, xet_cache)
+        HfApi, hf_hub_download = huggingface_hub.HfApi, huggingface_hub.hf_hub_download
     except ImportError as exc:
         raise RuntimeError("huggingface_hub is required only for an explicit fetch") from exc
     api = HfApi(endpoint="https://huggingface.co")
@@ -117,12 +186,10 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
         if not isinstance(oid, str) or len(oid) != 64 or any(char not in "0123456789abcdef" for char in oid):
             raise ValueError(f"Hugging Face SHA-256 is unavailable for {name}")
         expected_hashes[name] = oid
-    root = Path(root)
     with _quota_reservation(root):
+        _storage._guarded_directory(root, ".cache", "huggingface", "xet")
         assert_download_fits(root=root, remote_bytes=sum(expected.values()))
-        staging = root / "staging" / provider_id / revision
-        if staging.exists():
-            raise ValueError("provider-specific staging already exists")
+        staging = _recover_or_create_staging(root=root, provider_id=provider_id, repo_id=repo_id, revision=revision)
         try:
             for name in requested:
                 downloaded = Path(hf_hub_download(repo_id=repo_id, filename=name, revision=revision, local_dir=staging, endpoint="https://huggingface.co"))
@@ -133,6 +200,8 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
                 if target.stat().st_size != expected[name] or (name in expected_hashes and _digest(target) != expected_hashes[name]):
                     raise ValueError(f"download verification failed for {name}")
             remove_huggingface_local_metadata(root=root, staging_path=staging)
+            marker = staging / ".goal-binding-transaction.json"
+            marker.unlink()
             return materialize_downloaded_artifact(root=root, provider_id=provider_id, repo_id=repo_id, revision=revision, staging_path=staging, expected_files=expected, expected_sha256=expected_hashes)
         except BaseException:
             if staging.exists():

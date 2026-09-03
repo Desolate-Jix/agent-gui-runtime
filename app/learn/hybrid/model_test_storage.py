@@ -19,6 +19,17 @@ _RESERVED_TOP_LEVEL = frozenset({"manifests", "reports", "staging"})
 _REGISTRY_NAME = "artifact-registry.json"
 
 
+def _normalized_absolute(path: Path) -> str:
+    return os.path.normcase(os.path.normpath(os.path.abspath(str(path))))
+
+
+def _require_model_test_root(root: Path) -> Path:
+    candidate = Path(root)
+    if _normalized_absolute(candidate) != _normalized_absolute(MODEL_TEST_ROOT):
+        raise ValueError("model-test write operations are pinned to E:\\模型测试")
+    return candidate
+
+
 def _is_reparse(path: Path) -> bool:
     try:
         mode = path.lstat().st_mode
@@ -166,6 +177,36 @@ def _logical_files(root: Path) -> list[Path]:
     return result
 
 
+def _prevalidate_cleanup_tree(root: Path, subtree: Path) -> None:
+    """Reject the complete deletion set before unlinking any member."""
+    root_resolved, resolved_subtree = _guard(root, subtree)
+    identities: set[tuple[object, ...]] = set()
+    normalized: set[str] = set()
+    for directory, dirs, files in os.walk(resolved_subtree, followlinks=False):
+        current = Path(directory)
+        for candidate in [current, *(current / name for name in [*dirs, *files])]:
+            _guard(root_resolved, candidate)
+            info = candidate.lstat()
+            if _is_reparse(candidate):
+                raise ValueError("cleanup target contains a symlink or reparse point")
+            if candidate != current and candidate.name in dirs:
+                if not stat.S_ISDIR(info.st_mode):
+                    raise ValueError("cleanup target contains an invalid directory")
+                continue
+            if candidate == current:
+                if not stat.S_ISDIR(info.st_mode):
+                    raise ValueError("cleanup target is not a directory")
+                continue
+            if not stat.S_ISREG(info.st_mode) or getattr(info, "st_nlink", 1) != 1:
+                raise ValueError("cleanup target contains a non-unique regular file")
+            normal = os.path.normcase(os.path.normpath(str(candidate)))
+            identity = (info.st_dev, info.st_ino) if info.st_ino else (normal,)
+            if normal in normalized or identity in identities:
+                raise ValueError("cleanup target has duplicate file identity")
+            normalized.add(normal)
+            identities.add(identity)
+
+
 def inventory_storage(root: Path = MODEL_TEST_ROOT) -> dict[str, object]:
     """Return logical bytes without creating the storage root or opening a network client."""
     root = Path(root)
@@ -213,7 +254,7 @@ def register_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, 
     _immutable_revision(revision)
     if not isinstance(repo_id, str) or not repo_id.strip() or not isinstance(files, Sequence) or isinstance(files, (str, bytes)) or not files:
         raise ValueError("artifact registration is invalid")
-    root = Path(root)
+    root = _require_model_test_root(Path(root))
     root.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, object]] = []
     seen: set[str] = set()
@@ -286,7 +327,7 @@ def _load_manifest(root: Path, manifest_path: Path) -> tuple[dict[str, object], 
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("artifact registry is unavailable") from exc
     key = resolved_manifest.relative_to(root_resolved).as_posix()
-    if not isinstance(registry, Mapping) or not isinstance(registry.get("manifests"), Mapping) or registry["manifests"].get(key) != sha256(resolved_manifest.read_bytes()).hexdigest():
+    if not isinstance(registry, Mapping) or set(registry) != {"contract_version", "manifests"} or registry.get("contract_version") != "model_test_artifact_registry_v1" or not isinstance(registry.get("manifests"), Mapping) or any(not isinstance(item_key, str) or not isinstance(item_digest, str) or len(item_digest) != 64 or any(char not in "0123456789abcdef" for char in item_digest) for item_key, item_digest in registry["manifests"].items()) or registry["manifests"].get(key) != sha256(resolved_manifest.read_bytes()).hexdigest():
         raise ValueError("manifest does not match durable registration")
     if not isinstance(payload.get("files"), list) or not payload["files"]:
         raise ValueError("manifest files are invalid")
@@ -294,7 +335,7 @@ def _load_manifest(root: Path, manifest_path: Path) -> tuple[dict[str, object], 
 
 
 def delete_registered_artifact(*, root: Path, manifest_path: Path) -> dict[str, object]:
-    payload, root_resolved, resolved_manifest = _load_manifest(Path(root), Path(manifest_path))
+    payload, root_resolved, resolved_manifest = _load_manifest(_require_model_test_root(Path(root)), Path(manifest_path))
     reports = _guarded_directory(root_resolved, "reports")
     journal = reports / f"{payload['provider_id']}-{payload['revision']}-deletion-pending.json"
     if journal.exists():
@@ -355,10 +396,11 @@ def delete_registered_artifact(*, root: Path, manifest_path: Path) -> dict[str, 
 
 
 def cleanup_failed_staging(*, root: Path, staging_path: Path) -> None:
-    root_resolved, staging = _guard(Path(root), Path(staging_path))
+    root_resolved, staging = _guard(_require_model_test_root(Path(root)), Path(staging_path))
     relative = staging.relative_to(root_resolved)
     if not relative.parts or relative.parts[0] != "staging":
         raise ValueError("staging target is outside the guarded staging directory")
+    _prevalidate_cleanup_tree(root_resolved, staging)
     for path in sorted(_logical_files(staging), key=lambda item: len(item.parts), reverse=True):
         _guard(root_resolved, path)
         if path.is_file():
@@ -371,11 +413,12 @@ def cleanup_failed_staging(*, root: Path, staging_path: Path) -> None:
 
 def remove_huggingface_local_metadata(*, root: Path, staging_path: Path) -> None:
     """Remove only Hugging Face local-dir metadata after it was charged to quota."""
-    root_resolved, staging = _guard(Path(root), Path(staging_path))
+    root_resolved, staging = _guard(_require_model_test_root(Path(root)), Path(staging_path))
     metadata = staging / ".cache" / "huggingface"
     if not metadata.exists():
         return
     _guard(root_resolved, metadata)
+    _prevalidate_cleanup_tree(root_resolved, metadata)
     for path in sorted(_logical_files(metadata), key=lambda item: len(item.parts), reverse=True):
         _guard(root_resolved, path)
         if path.is_file():
@@ -392,7 +435,7 @@ def remove_huggingface_local_metadata(*, root: Path, staging_path: Path) -> None
 def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, revision: str, staging_path: Path, expected_files: Mapping[str, int], expected_sha256: Mapping[str, str]) -> Path:
     _safe_component(provider_id, name="provider_id")
     _immutable_revision(revision)
-    root = Path(root)
+    root = _require_model_test_root(Path(root))
     root_resolved, staging = _guard(root, Path(staging_path))
     if staging.relative_to(root_resolved).parts[:2] != ("staging", provider_id):
         raise ValueError("staging target is outside provider-specific staging")

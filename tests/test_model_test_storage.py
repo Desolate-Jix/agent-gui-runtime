@@ -11,6 +11,13 @@ from pathlib import Path
 import pytest
 
 
+
+@pytest.fixture(autouse=True)
+def _pin_storage_root_to_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.learn.hybrid.model_test_storage as storage
+
+    monkeypatch.setattr(storage, "MODEL_TEST_ROOT", tmp_path)
+
 def _write(path: Path, data: bytes) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -110,10 +117,12 @@ def test_no_storage_operation_touches_incumbent_d_drive_paths(tmp_path: Path) ->
         register_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/model", revision="a" * 40, files=[Path(r"D:\incumbent\model.bin")])
 
 
-def test_chinese_storage_root_round_trips_as_utf8(tmp_path: Path) -> None:
+def test_chinese_storage_root_round_trips_as_utf8(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.learn.hybrid.model_test_storage import register_downloaded_artifact
 
     root = tmp_path / "\u6a21\u578b\u6d4b\u8bd5"
+    import app.learn.hybrid.model_test_storage as storage
+    monkeypatch.setattr(storage, "MODEL_TEST_ROOT", root)
     weight = _write(root / "artifacts" / "provider-a" / ("a" * 40) / "模型.bin", b"model")
     manifest = register_downloaded_artifact(root=root, provider_id="provider-a", repo_id="org/model", revision="a" * 40, files=[weight])
     assert "模型" in manifest.read_text(encoding="utf-8")
@@ -246,7 +255,9 @@ def test_quota_reservation_rejects_contention_and_cleans_lock(tmp_path: Path) ->
         with pytest.raises(RuntimeError, match="another model acquisition"):
             with _quota_reservation(tmp_path):
                 pass
-    assert not (tmp_path / ".goal-binding-quota.lock").exists()
+    assert (tmp_path / ".goal-binding-quota.lock").exists()
+    with _quota_reservation(tmp_path):
+        pass
 
 
 def test_quota_reservation_rejects_reparse_root_before_lock(tmp_path: Path) -> None:
@@ -406,3 +417,143 @@ def test_inventory_and_help_are_network_free_and_utf8_under_redirect(tmp_path: P
     assert json.loads(decoded)["root"] == str(root) and "\u6a21\u578b\u6d4b\u8bd5" in json.loads(decoded)["root"]
     help_result = subprocess.run([sys.executable, "scripts/fetch_goal_binding_model.py", "--help"], cwd=Path(__file__).parents[1], capture_output=True, text=True, env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=True)
     assert "bounded" in help_result.stdout
+
+
+
+def test_public_destructive_storage_operations_reject_wrong_root_without_side_effect(tmp_path: Path) -> None:
+    import app.learn.hybrid.model_test_storage as storage
+
+    revision = "a" * 40
+    wrong_root = tmp_path / "wrong-root"
+    seed = _write(tmp_path / "seed.bin", b"seed")
+    staging = tmp_path / "staging" / "provider-a" / revision
+    operations = [
+        lambda: storage.register_downloaded_artifact(root=wrong_root, provider_id="provider-a", repo_id="org/model", revision=revision, files=[seed]),
+        lambda: storage.delete_registered_artifact(root=wrong_root, manifest_path=tmp_path / "manifest.json"),
+        lambda: storage.cleanup_failed_staging(root=wrong_root, staging_path=staging),
+        lambda: storage.remove_huggingface_local_metadata(root=wrong_root, staging_path=staging),
+        lambda: storage.materialize_downloaded_artifact(root=wrong_root, provider_id="provider-a", repo_id="org/model", revision=revision, staging_path=staging, expected_files={"model.bin": 1}, expected_sha256={"model.bin": "a" * 64}),
+    ]
+    for operation in operations:
+        with pytest.raises(ValueError, match="pinned"):
+            operation()
+    assert not wrong_root.exists()
+
+
+@pytest.mark.parametrize("registry_payload", [
+    {"contract_version": "wrong", "manifests": {}},
+    {"contract_version": "model_test_artifact_registry_v1", "manifests": {}, "extra": True},
+])
+def test_delete_rejects_registry_version_or_schema_corruption(tmp_path: Path, registry_payload: dict[str, object]) -> None:
+    from app.learn.hybrid.model_test_storage import delete_registered_artifact, register_downloaded_artifact
+
+    revision = "a" * 40
+    weight = _write(tmp_path / "artifacts" / "provider-a" / revision / "model.bin", b"model")
+    manifest = register_downloaded_artifact(root=tmp_path, provider_id="provider-a", repo_id="org/model", revision=revision, files=[weight])
+    registry = tmp_path / "reports" / "artifact-registry.json"
+    registry.write_text(json.dumps(registry_payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="durable registration"):
+        delete_registered_artifact(root=tmp_path, manifest_path=manifest)
+    assert weight.exists()
+
+
+def test_staging_and_huggingface_metadata_prevalidate_hardlinks(tmp_path: Path) -> None:
+    from app.learn.hybrid.model_test_storage import cleanup_failed_staging, remove_huggingface_local_metadata
+
+    revision = "a" * 40
+    staging = _write(tmp_path / "staging" / "provider-a" / revision / "partial.bin", b"partial").parent
+    alias = staging / "alias.bin"
+    try:
+        os.link(staging / "partial.bin", alias)
+    except OSError:
+        pytest.skip("hard links unavailable")
+    with pytest.raises(ValueError, match="non-unique"):
+        cleanup_failed_staging(root=tmp_path, staging_path=staging)
+    assert (staging / "partial.bin").exists() and alias.exists()
+
+    metadata = _write(staging / ".cache" / "huggingface" / "metadata", b"metadata")
+    metadata_alias = metadata.parent / "metadata-alias"
+    os.link(metadata, metadata_alias)
+    with pytest.raises(ValueError, match="non-unique"):
+        remove_huggingface_local_metadata(root=tmp_path, staging_path=staging)
+    assert metadata.exists() and metadata_alias.exists()
+
+
+def test_fetch_recovers_exact_marked_staging_before_download(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.fetch_goal_binding_model as fetch
+
+    revision = "a" * 40
+    payload = b"model"
+    staging = tmp_path / "staging" / "provider-a" / revision
+    marker = fetch._transaction_marker(provider_id="provider-a", repo_id="org/model", revision=revision)
+    _write(staging / ".goal-binding-transaction.json", json.dumps(marker).encode("utf-8"))
+    _write(staging / "old.bin", b"old")
+
+    class FakeApi:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+        def model_info(self, *args: object, **kwargs: object) -> object:
+            return SimpleNamespace(sha=revision, siblings=[SimpleNamespace(rfilename="model.bin", size=len(payload), lfs={"sha256": sha256(payload).hexdigest()})])
+
+    def fake_download(**kwargs: object) -> str:
+        target = Path(str(kwargs["local_dir"])) / str(kwargs["filename"])
+        assert json.loads((target.parent / ".goal-binding-transaction.json").read_text(encoding="utf-8")) == marker
+        _write(target, payload)
+        return str(target)
+
+    monkeypatch.setattr(fetch, "MODEL_TEST_ROOT", tmp_path)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(HfApi=FakeApi, hf_hub_download=fake_download))
+    manifest = fetch.fetch_profile(profile={"provider_id": "provider-a", "repo_id": "org/model", "artifact_files": ["model.bin"]}, root=tmp_path)
+    assert manifest.exists() and not (tmp_path / "artifacts" / "provider-a" / revision / "old.bin").exists()
+
+
+def test_fetch_refuses_mismatched_abandoned_staging_without_download(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.fetch_goal_binding_model as fetch
+
+    revision = "a" * 40
+    marker = fetch._transaction_marker(provider_id="provider-a", repo_id="wrong/model", revision=revision)
+    staging = tmp_path / "staging" / "provider-a" / revision
+    _write(staging / ".goal-binding-transaction.json", json.dumps(marker).encode("utf-8"))
+    calls = {"download": 0}
+
+    class FakeApi:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+        def model_info(self, *args: object, **kwargs: object) -> object:
+            return SimpleNamespace(sha=revision, siblings=[SimpleNamespace(rfilename="model.bin", size=1, lfs={"sha256": "a" * 64})])
+
+    def fake_download(**kwargs: object) -> str:
+        calls["download"] += 1
+        raise AssertionError("must not download through mismatched staging")
+
+    monkeypatch.setattr(fetch, "MODEL_TEST_ROOT", tmp_path)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(HfApi=FakeApi, hf_hub_download=fake_download))
+    with pytest.raises(ValueError, match="marker"):
+        fetch.fetch_profile(profile={"provider_id": "provider-a", "repo_id": "org/model", "artifact_files": ["model.bin"]}, root=tmp_path)
+    assert calls["download"] == 0 and staging.exists()
+
+
+def test_fetch_pins_xet_before_hub_import_and_overrides_stale_constants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.fetch_goal_binding_model as fetch
+
+    revision = "a" * 40
+    payload = b"model"
+    constants = SimpleNamespace(HF_HUB_DISABLE_XET=False, HF_XET_CACHE=r"D:\\outside-xet")
+
+    class FakeApi:
+        def __init__(self, **kwargs: object) -> None:
+            assert os.environ["HF_HUB_DISABLE_XET"] == "1"
+            assert Path(os.environ["HF_XET_CACHE"]).is_relative_to(tmp_path)
+        def model_info(self, *args: object, **kwargs: object) -> object:
+            return SimpleNamespace(sha=revision, siblings=[SimpleNamespace(rfilename="model.bin", size=len(payload), lfs={"sha256": sha256(payload).hexdigest()})])
+
+    def fake_download(**kwargs: object) -> str:
+        target = _write(Path(str(kwargs["local_dir"])) / str(kwargs["filename"]), payload)
+        return str(target)
+
+    hub = SimpleNamespace(HfApi=FakeApi, hf_hub_download=fake_download, constants=constants)
+    monkeypatch.setattr(fetch, "MODEL_TEST_ROOT", tmp_path)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    fetch.fetch_profile(profile={"provider_id": "provider-a", "repo_id": "org/model", "artifact_files": ["model.bin"]}, root=tmp_path)
+    expected = tmp_path / ".cache" / "huggingface" / "xet"
+    assert constants.HF_HUB_DISABLE_XET is True and constants.HF_XET_CACHE == str(expected) and expected.is_dir()
