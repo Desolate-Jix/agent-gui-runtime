@@ -326,22 +326,22 @@ class CapabilityInvocationOutcome(Generic[TResult]):
 
 def _trusted_bundle_descriptor(
     *, request: object, adapter: object, registry: TrustedProviderBundleRegistry
-) -> tuple[dict[str, object] | None, str | None]:
+) -> tuple[dict[str, object] | None, object | None, str | None]:
     envelope = getattr(request, "envelope", None)
     if not isinstance(envelope, ProviderInvocationEnvelopeV1):
-        return None, "invalid_envelope"
+        return None, None, "invalid_envelope"
     try:
         resolved = registry.resolve(
             capability=envelope.capability, bundle_ref=dict(envelope.bundle_ref)
         )
         descriptor = validate_provider_bundle_descriptor_v1(resolved.descriptor)
     except (AttributeError, UEIValidationError):
-        return None, "unknown_bundle"
+        return None, None, "unknown_bundle"
     if resolved.adapter is not adapter:
-        return None, "untrusted_adapter"
+        return descriptor, resolved.adapter, "untrusted_adapter"
     if provider_bundle_ref(descriptor) != dict(envelope.bundle_ref):
-        return None, "unknown_bundle"
-    return descriptor, None
+        return None, None, "unknown_bundle"
+    return descriptor, resolved.adapter, None
 
 
 def _json_value(value: object) -> object:
@@ -446,7 +446,7 @@ def invoke_with_capability_envelope(
     promoted = False
     terminal_cleanup = CapabilityCleanupOutcomeV1("not_required", None)
     try:
-        descriptor, resolution_failure = _trusted_bundle_descriptor(
+        descriptor, trusted_adapter, resolution_failure = _trusted_bundle_descriptor(
             request=request, adapter=adapter, registry=registry
         )
         if resolution_failure is not None:
@@ -512,7 +512,7 @@ def invoke_with_capability_envelope(
     finally:
         terminal_cleanup = _cleanup_outcome(
             cleanup=cleanup, acquired_lease=acquired_lease, envelope=envelope,
-            adapter=adapter,
+            adapter=trusted_adapter if 'trusted_adapter' in locals() else None,
         ) if isinstance(envelope, ProviderInvocationEnvelopeV1) else CapabilityCleanupOutcomeV1("not_required", None)
     if terminal_cleanup.status not in _TERMINAL_CLEANUP_STATUSES:
         if failure is None:
