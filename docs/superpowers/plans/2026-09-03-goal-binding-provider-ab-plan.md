@@ -797,3 +797,7 @@ git commit -m "docs(benchmark): publish binder regression findings"
 ```
 
 Then STOP. Do not run unique holdout, do not push, and report all commit hashes/messages, tests, model artifact identities, storage before/after bytes, deleted weights, per-arm binder/end-to-end metrics, winner/none decision, limitations, and cleanup proof.
+
+## Task 7 session repair checkpoint (2026-09-04)
+
+Persistent arm mailbox, exact launcher/worker Job identities, native trace v2 and explicit attempted/unattempted provider failures are now covered by real scoped subprocess tests with a tiny offline fake loader. Cleanup uses the existing Job and lease primitives; WDDM GPU baseline identities are distinguished from new owners, and N/A is not measured zero. Legacy per-call mocked supervision tests were replaced by actual mailbox/Job regression tests. Official provider load-once wrappers and managed incumbent raw join remain the next slice; no real model or matrix success is claimed. All checked-in not_acquired profiles remain non-runnable.

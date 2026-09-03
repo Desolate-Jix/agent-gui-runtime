@@ -9,6 +9,11 @@ import math
 from pathlib import Path
 import socket
 import sys
+import os
+import time
+import subprocess
+import csv
+from uuid import uuid4
 from typing import Any
 
 from app.learn.hybrid.goal_binding_ab import GoalBindingArm, adapt_incumbent_candidate_index, make_native_point_adapter
@@ -21,6 +26,8 @@ _FIELDS = frozenset({"contract_version", "profile_id", "arm_id", "provider_id", 
 _CLEANUP_FIELDS = frozenset({"contract_version", "provider", "verified", "cleanup_status", "owned_processes", "provider_processes_after", "helper_processes_after", "orphan_descendant_pids", "active_listeners_after", "lease_files_after"})
 _MODEL_TEST_ROOT = MODEL_TEST_ROOT
 _MAX_REQUEST_BYTES = 1024 * 1024
+_MAX_SCREENSHOT_BYTES = 32 * 1024 * 1024
+_MAX_SCREENSHOT_PIXELS = 32 * 1024 * 1024
 
 
 def _closed_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -275,64 +282,10 @@ def _reserve_loopback_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _observe_gpu_cleanup(owned_pids: set[int]) -> dict[str, object]:
-    from app.core.gpu_resources import _gpu_snapshot
-
-    snapshot = _gpu_snapshot()
-    processes = snapshot.get("compute_processes") if isinstance(snapshot, Mapping) else None
-    if snapshot.get("available") is not True or not isinstance(processes, list):
-        return {
-            "status": "unavailable",
-            "reason": snapshot.get("reason") if isinstance(snapshot, Mapping) else "invalid_gpu_observation",
-            "owners_after": [],
-        }
-    owners = [deepcopy(item) for item in processes if isinstance(item, Mapping) and item.get("pid") in owned_pids]
-    return {"status": "verified", "reason": None, "owners_after": owners}
 
 
-class _ProviderWorkerFailure(RuntimeError):
-    def __init__(self, message: str, *, cleanup_evidence: Mapping[str, object]) -> None:
-        super().__init__(message)
-        self.cleanup_evidence = deepcopy(dict(cleanup_evidence))
 
 
-def _call_cleanup_evidence(
-    *, identity: Mapping[str, object] | None, observation: Mapping[str, object],
-    gpu: Mapping[str, object], scope_name: str, error: str | None,
-    stdout_bytes: int, stderr_bytes: int,
-) -> dict[str, object]:
-    provider_after = list(observation.get("member_identities_after") or [])
-    orphan_pids = list(observation.get("member_pids_after") or [])
-    listeners = list(observation.get("active_listeners_after") or [])
-    leases = [str(observation["pid_file_after"])] if observation.get("pid_file_after") else []
-    gpu_owners = list(gpu.get("owners_after") or [])
-    verified = (
-        identity is not None
-        and observation.get("cleanup_status") == "verified"
-        and gpu.get("status") == "verified"
-        and not provider_after
-        and not orphan_pids
-        and not listeners
-        and not leases
-        and not gpu_owners
-    )
-    return {
-        "contract_version": "goal_binding_provider_call_cleanup_v1",
-        "verified": verified,
-        "worker_process_identity": deepcopy(dict(identity)) if identity is not None else None,
-        "job_scope_name": scope_name,
-        "process_scope_cleanup": deepcopy(dict(observation)),
-        "provider_processes_after": provider_after,
-        "helper_processes_after": [],
-        "orphan_descendant_pids": orphan_pids,
-        "active_listeners_after": listeners,
-        "lease_files_after": leases,
-        "gpu_observation": deepcopy(dict(gpu)),
-        "gpu_owners_after": gpu_owners,
-        "worker_stdout_bytes": stdout_bytes,
-        "worker_stderr_bytes": stderr_bytes,
-        "failure": error,
-    }
 
 
 def _resource_metrics_are_closed(value: object, *, request_bytes: int, timeout_seconds: int) -> bool:
@@ -366,11 +319,13 @@ def native_adapter_for_profile(profile: Mapping[str, object]) -> Callable[..., o
     return result
 
 
-def _adapter_profile(profile: Mapping[str, object]) -> dict[str, object]:
+def _adapter_profile(profile: Mapping[str, object], *, image_size: tuple[int, int] | None = None) -> dict[str, object]:
     native = profile["native_output"]
     assert isinstance(native, Mapping)
     if native["kind"] == "phi_ground_any_v1":
-        return {"contract_version": "goal_binding_native_profile_v1", "provider_id": profile["provider_id"], "native_shape": "phi_ground_any_v1", "coordinate_space": "capture_pixels", "image_size": [1680, 1008], "output_mode": "point"}
+        if image_size is None:
+            raise ValueError("Phi adapter requires actual capture dimensions")
+        return {"contract_version": "goal_binding_native_profile_v1", "provider_id": profile["provider_id"], "native_shape": "phi_ground_any_v1", "coordinate_space": "capture_pixels", "image_size": list(image_size), "output_mode": "point"}
     return {"contract_version": "goal_binding_native_profile_v1", "provider_id": profile["provider_id"], "native_shape": native["kind"], "coordinate_space": profile["coordinate_space"]}
 
 
@@ -388,225 +343,267 @@ def _reject_provider_input(request: Mapping[str, object]) -> None:
         raise ValueError("goal-binding provider request contains forbidden authority or evaluation data")
 
 
-def _invoke_provider_worker(
-    *, profile: Mapping[str, object], artifact_dir: Path, image_path: Path, goal: str,
-    incumbent_request: Mapping[str, object] | None = None,
-    incumbent_projection: Mapping[str, object] | None = None,
-) -> dict[str, object]:
-    """Run one worker only after a verified profile selects its isolated runtime."""
-    runtime = profile["runtime"]
-    assert isinstance(runtime, Mapping)
-    runtime_artifact = next(item for item in profile["artifacts"] if isinstance(item, Mapping) and item["role"] == "runtime")
-    runtime_executable = _safe_under(artifact_dir, str(runtime_artifact["relative_path"]))
-    worker = Path(__file__).resolve().parents[3] / str(runtime["worker"])
-    provider_runtime = worker.with_name("goal_binding_provider_runtimes.py")
-    if not runtime_executable.is_file() or not worker.is_file() or not provider_runtime.is_file():
-        raise OSError("provider-isolated runtime is unavailable")
-    runtime_kind = str(runtime.get("kind") or "")
-    worker_python = Path(sys.executable).resolve() if runtime_kind == "llama_cpp" else runtime_executable
-    if not worker_python.is_file():
-        raise OSError("provider worker Python is unavailable")
-    from app.learn.hybrid.windows_process_scope import WindowsProcessScope, benchmark_worker_scope_name_v1, observe_process_scope_cleanup, spawn_process_in_scope
-    image_bytes = image_path.read_bytes()
-    from PIL import Image
-    with Image.open(image_path) as image: width, height = image.size
-    seed = _sha256(image_bytes + goal.encode("utf-8"))
-    work = artifact_dir / "goal-binding-native-traces" / seed
-    work.mkdir(parents=True, exist_ok=False)
-    screenshot = (work / "screenshot").with_suffix(image_path.suffix)
-    screenshot.write_bytes(image_bytes)
-    identity_path, request, stdout, stderr = work / "parent-identity.json", work / "request.json", work / "stdout.json", work / "stderr.txt"
-    listener_port = _reserve_loopback_port() if runtime_kind == "llama_cpp" else None
-    payload: dict[str, object] = {
-        "image_path": str(screenshot), "goal": goal, "profile": deepcopy(dict(profile)),
-        "screenshot": {"sha256": _sha256(image_bytes), "width": width, "height": height, "capture_id": f"capture/{_sha256(image_bytes)}"},
-        "parent_identity_path": str(identity_path), "artifact_root": str(artifact_dir.resolve()),
-        "code_identity": {
-            "worker_sha256": _sha256_file(worker),
-            "provider_runtime_sha256": _sha256_file(provider_runtime),
-            "worker_python_sha256": _sha256_file(worker_python),
-        },
-    }
-    if listener_port is not None:
-        payload["listener_port"] = listener_port
-    if incumbent_request is not None or incumbent_projection is not None:
-        if runtime_kind != "llama_cpp" or incumbent_request is None or incumbent_projection is None:
-            raise ValueError("incumbent request exception is invalid for this provider")
-        payload["incumbent_request"] = deepcopy(dict(incumbent_request))
-        payload["incumbent_projection"] = deepcopy(dict(incumbent_projection))
-    body = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    if len(body) > _MAX_REQUEST_BYTES:
-        raise ValueError("provider worker request exceeds the 1 MiB bound")
-    request.write_bytes(body)
-    scope_name = benchmark_worker_scope_name_v1(authority_kind="test_only", run_id=seed, stage="goal_binding", operation_id=str(profile["provider_id"]), worker_id=str(profile["profile_id"]), payload_sha256=_sha256(body), execution_nonce=_sha256((seed + goal).encode("utf-8"))[:32])
-    scope = WindowsProcessScope(scope_name, create=True)
-    observation: Mapping[str, object] | None = None
-    identity: dict[str, int] | None = None
-    failure: BaseException | None = None
+
+
+def _worker_python(profile: Mapping[str, object], artifact_dir: Path) -> Path:
+    if profile["runtime"]["kind"] == "llama_cpp":
+        return Path(sys.executable).resolve()
+    artifact = next(item for item in profile["artifacts"] if item["role"] == "runtime")
+    return _safe_under(artifact_dir, artifact["relative_path"])
+
+
+def _gpu_ownership_snapshot() -> dict[str, object]:
+    from app.learn.hybrid.windows_process_scope import _identity_for_pid
     try:
-        def before_resume(value: Mapping[str, object]) -> None:
-            nonlocal identity
-            identity = exact_process_identity(value)
-            identity_path.write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
-        with stdout.open("wb") as output_handle, stderr.open("wb") as error_handle:
-            process = spawn_process_in_scope([str(worker_python), str(worker), "--execute", "--request-json", str(request)], scope_name=scope_name, cwd=artifact_dir, stdout=output_handle, stderr=error_handle, before_resume=before_resume)
-            try:
-                code = process.wait(timeout=float(profile["timeout_seconds"]))
-            except BaseException as exc:
-                process.kill()
-                if type(exc).__name__ == "TimeoutExpired": raise TimeoutError("goal-binding provider worker timed out") from exc
-                raise
-            finally:
-                process.close()
-            if code != 0: raise OSError(stderr.read_text(encoding="utf-8", errors="strict")[:4096] or "provider worker exited nonzero")
-    except BaseException as exc:
-        failure = exc
-    finally:
-        scope.close()
-        observation = observe_process_scope_cleanup(
-            scope_name, terminate=True,
-            listener_ports=([listener_port] if listener_port is not None else []),
-            stable_zero_observations=3,
-        )
-    owned_pids = {identity["pid"]} if identity is not None else set()
-    for item in observation.get("observed_member_pids_before") or []:
-        if isinstance(item, int):
-            owned_pids.add(item)
-    if stdout.exists() and stdout.stat().st_size <= int(profile["max_output_bytes"]):
+        result = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_gpu_memory", "--format=csv,noheader,nounits"], capture_output=True, timeout=10, check=True)
+        raw = result.stdout.decode("utf-8", errors="strict")
+        owners = []
+        for row in csv.reader(raw.splitlines()):
+            if len(row) != 2:
+                raise ValueError("GPU ownership observation shape is invalid")
+            identity = _identity_for_pid(int(row[0].strip()))
+            memory = row[1].strip()
+            owners.append({**identity, "used_memory_mib": int(memory) if memory.isdigit() else None})
+        return {"status": "verified", "owners": owners, "raw": raw}
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        return {"status": "unavailable", "owners": [], "reason": str(exc)}
+
+
+def _resource_preflight(profile: Mapping[str, object]) -> Mapping[str, object]:
+    from app.core.gpu_resources import build_model_resource_preflight, _known_model_pids
+    if _known_model_pids():
+        raise RuntimeError("benchmark/model GPU residue exists before provider arm")
+    return build_model_resource_preflight(dict(profile))
+
+
+class GoalBindingProviderSession:
+    """每个 arm 延迟创建一个有界邮箱与精确进程域。"""
+
+    def __init__(self, profile: Mapping[str, object], artifact_dir: Path, run_root: Path | None = None):
+        self.profile, self.artifact_dir = deepcopy(dict(profile)), artifact_dir.resolve()
+        self.session_id = uuid4().hex
+        self.run_root = (run_root or (self.artifact_dir / "goal-binding-native-traces" / uuid4().hex)).resolve()
+        arm_component = _sha256(str(profile["arm_id"]).encode("utf-8"))[:24]
+        self.root = self.run_root / "arms" / arm_component / "native-session" / self.session_id
+        self.lease_path = self.artifact_dir / "goal-binding-leases" / "gpu_vision.lock"
+        self.scope = self.process = self.lease = None
+        self.identity = None
+        self.launcher_identity = None
+        self.sequence = 0
+        self.failure = None
+        self.blocked = False
+        self.receipt = None
+        self.config = None
+        self.baseline = None
+        self.port = None
+
+    def _open(self):
+        from app.learn.hybrid.windows_process_scope import WindowsProcessScope, benchmark_worker_scope_name_v1, spawn_process_in_scope
+        from app.learn.recognition.uei.omniparser_shadow_adapter import ProcessResourceLeaseManager
+        from scripts.model_servers.goal_binding_transformers_worker import write_json
+        _verified(self.profile, self.artifact_dir)
+        self.baseline = _gpu_ownership_snapshot()
+        preflight = _resource_preflight(self.profile)
+        if self.baseline.get("status") != "verified" or preflight.get("status") != "ready" or preflight.get("model_launch_allowed") is not True:
+            raise RuntimeError("provider GPU/resource preflight is unavailable or contended")
+        self.lease = ProcessResourceLeaseManager(root=self.lease_path.parent)("gpu_vision")
+        if self.lease is None:
+            raise RuntimeError("provider GPU lease unavailable or stale")
+        self.root.mkdir(parents=True, exist_ok=False)
+        for name in ("requests", "responses", "raw"):
+            (self.root / name).mkdir()
+        worker = Path(__file__).resolve().parents[3] / self.profile["runtime"]["worker"]
+        python = _worker_python(self.profile, self.artifact_dir)
+        code = {"worker_sha256": _sha256_file(worker), "provider_runtime_sha256": _sha256_file(worker.with_name("goal_binding_provider_runtimes.py")), "worker_python_sha256": _sha256_file(python)}
+        self.port = _reserve_loopback_port() if self.profile["runtime"]["kind"] == "llama_cpp" else None
+        profile_hash = _sha256(json.dumps(self.profile, sort_keys=True).encode("utf-8"))
+        name = benchmark_worker_scope_name_v1(authority_kind="test_only", run_id=self.run_root.name, stage="goal_binding", operation_id=str(self.profile["arm_id"]), worker_id=str(self.profile["profile_id"]), payload_sha256=profile_hash, execution_nonce=self.session_id)
+        self.config = {"contract_version": "goal_binding_provider_session_v1", "session_id": self.session_id, "run_id": self.run_root.name, "arm_id": self.profile["arm_id"], "session_root": str(self.root), "scope_name": name, "profile": self.profile, "artifact_root": str(self.artifact_dir), "code_identity": code, "listener_port": self.port}
+        write_json(self.root / "session.json", self.config)
+        self.config_sha = _sha256_file(self.root / "session.json")
+        self.scope = WindowsProcessScope(name, create=True)
+        def before_resume(identity):
+            self.launcher_identity = exact_process_identity(identity)
+            self.identity = self.launcher_identity
+            write_json(self.root / "parent-identity.json", self.launcher_identity)
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME=name)
+        with (self.root / "worker.stdout.bin").open("xb") as stdout, (self.root / "worker.stderr.bin").open("xb") as stderr:
+            self.process = spawn_process_in_scope([str(python), str(worker), "--execute", "--session-json", str(self.root / "session.json")], scope_name=name, cwd=self.artifact_dir, stdout=stdout, stderr=stderr, env=env, before_resume=before_resume)
+        ready = self._wait(self.root / "ready.json")
+        from app.learn.hybrid.windows_process_scope import _identity_for_pid
+        import psutil
+        worker_identity = exact_process_identity(ready["worker_process_identity"])
+        if set(ready) != {"session_sha256", "worker_process_identity", "launcher_process_identity", "failure"} or ready["session_sha256"] != self.config_sha or ready["launcher_process_identity"] != self.launcher_identity or _identity_for_pid(worker_identity["pid"]) != worker_identity or worker_identity["pid"] not in self.scope.pids() or (worker_identity != self.launcher_identity and self.launcher_identity["pid"] not in {process.pid for process in psutil.Process(worker_identity["pid"]).parents()}):
+            raise RuntimeError("provider readiness identity mismatch")
+        self.identity = worker_identity
+        self.failure = ready["failure"]
+
+    def _wait(self, path: Path):
+        from scripts.model_servers.goal_binding_transformers_worker import read_json
+        deadline = time.monotonic() + self.profile["timeout_seconds"]
+        while True:
+            for folder in (self.root, self.root / "responses", self.root / "raw"):
+                for log in folder.iterdir():
+                    if log.is_file() and (log.suffix in {".bin", ".utf8"} or folder.name == "responses") and log.stat().st_size > self.profile["max_output_bytes"]:
+                        raise RuntimeError("provider live output exceeds byte bound")
+            if (self.root / "fatal.json").exists():
+                raise RuntimeError("provider mailbox integrity failure: " + str(read_json(self.root / "fatal.json")))
+            if path.exists():
+                return read_json(path, self.profile["max_output_bytes"])
+            if self.process.poll() is not None:
+                raise RuntimeError("provider worker exited without a bound response")
+            if time.monotonic() >= deadline:
+                raise TimeoutError("provider session call timed out")
+            time.sleep(0.01)
+
+    def call(self, image_path: Path, request: Mapping[str, object]) -> object:
+        from scripts.model_servers.goal_binding_transformers_worker import atomic_write, write_json, provider_failure, failure_envelope
+        from app.learn.hybrid.goal_binding_ab import _native_envelope
+        if self.blocked:
+            raise RuntimeError("provider session is blocked by infrastructure integrity")
+        if self.receipt is not None and self.failure is None:
+            raise RuntimeError("provider session is already closed")
+        if self.sequence >= 25:
+            raise ValueError("provider arm exceeds 25 bounded requests")
+        _reject_provider_input(request)
+        if set(request) - {"contract_version", "goal", "incumbent_runtime_request", "incumbent_projection"}:
+            raise ValueError("provider arm request is not closed")
+        incumbent = self.profile["provider_id"] == "qwen3_vl_8b_q4_k_m"
+        if not incumbent and any(key in request for key in ("incumbent_runtime_request", "incumbent_projection")):
+            raise ValueError("challenger provider input contains candidate data")
+        goal = _short_goal(request)
+        if image_path.stat().st_size > _MAX_SCREENSHOT_BYTES:
+            raise ValueError("provider screenshot byte bound exceeded")
+        image_bytes = image_path.read_bytes()
+        from PIL import Image
+        with Image.open(image_path) as image:
+            width, height = image.size
+            if width * height > _MAX_SCREENSHOT_PIXELS:
+                raise ValueError("provider screenshot pixel bound exceeded")
+            image.verify()
+        self.sequence += 1
+        attempted = False
         try:
-            preliminary = json.loads(stdout.read_text(encoding="utf-8"), object_pairs_hook=_closed_object)
-            lineage = preliminary.get("request_lineage") if isinstance(preliminary, Mapping) else None
-            child_cleanup = lineage.get("child_cleanup") if isinstance(lineage, Mapping) else None
-            child_pid = child_cleanup.get("child_pid") if isinstance(child_cleanup, Mapping) else None
-            if isinstance(child_pid, int) and not isinstance(child_pid, bool) and child_pid > 0:
-                owned_pids.add(child_pid)
-        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
-            pass
-    gpu = _observe_gpu_cleanup(owned_pids)
-    cleanup_evidence = _call_cleanup_evidence(
-        identity=identity, observation=observation, gpu=gpu, scope_name=scope_name,
-        error=str(failure) if failure is not None else None,
-        stdout_bytes=stdout.stat().st_size if stdout.exists() else 0,
-        stderr_bytes=stderr.stat().st_size if stderr.exists() else 0,
-    )
-    cleanup_path = work / "cleanup.json"
-    cleanup_bytes = json.dumps(cleanup_evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    cleanup_path.write_bytes(cleanup_bytes)
-    cleanup_ref = {"id": f"cleanup/{seed}", "sha256": _sha256(cleanup_bytes)}
-    if failure is not None:
-        raise _ProviderWorkerFailure(str(failure), cleanup_evidence=cleanup_evidence) from failure
-    if cleanup_evidence["verified"] is not True:
-        raise _ProviderWorkerFailure("provider worker cleanup has unresolved process, listener, lease, or GPU evidence", cleanup_evidence=cleanup_evidence)
-    if (
-        identity is None
-        or not stdout.is_file()
-        or stdout.stat().st_size > int(profile["max_output_bytes"])
-        or stderr.stat().st_size > int(profile["max_output_bytes"])
-    ):
-        raise _ProviderWorkerFailure("provider worker output is unavailable or exceeds profile bound", cleanup_evidence=cleanup_evidence)
-    try:
-        envelope = json.loads(stdout.read_text(encoding="utf-8"), object_pairs_hook=_closed_object)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise _ProviderWorkerFailure("provider worker output is invalid", cleanup_evidence=cleanup_evidence) from exc
-    expected = {"contract_version", "profile_identity", "raw_native_output", "raw_native_output_sha256", "parsed_native", "resource_metrics", "worker_process_identity", "request_lineage"}
-    runtime = profile["runtime"]
-    preprocessing = profile["preprocessing"]
-    native = profile["native_output"]
-    assert isinstance(runtime, Mapping) and isinstance(preprocessing, Mapping) and isinstance(native, Mapping)
-    identity_fields = {"profile_id": profile["profile_id"], "preprocessing_sha256": preprocessing["sha256"], "runtime_sha256": runtime["sha256"], "native_output_kind": native["kind"]}
-    metrics = envelope.get("resource_metrics") if isinstance(envelope, Mapping) else None
-    lineage = envelope.get("request_lineage") if isinstance(envelope, Mapping) else None
-    child_cleanup = lineage.get("child_cleanup") if isinstance(lineage, Mapping) else None
-    child_valid = child_cleanup is None
-    if runtime_kind == "llama_cpp":
-        child_valid = (
-            isinstance(child_cleanup, Mapping)
-            and child_cleanup.get("status") == "verified"
-            and isinstance(child_cleanup.get("child_pid"), int)
-            and child_cleanup.get("listener") == {"host": "127.0.0.1", "port": listener_port}
-            and child_cleanup.get("termination") in {"terminated", "killed", "exited"}
-        )
-    if not isinstance(envelope, Mapping) or set(envelope) != expected or envelope.get("contract_version") != "goal_binding_native_trace_v1" or envelope.get("profile_identity") != identity_fields or not isinstance(envelope.get("raw_native_output"), str) or envelope.get("raw_native_output_sha256") != _sha256(envelope["raw_native_output"].encode("utf-8")) or exact_process_identity(envelope["worker_process_identity"]) != identity or not isinstance(lineage, Mapping) or lineage.get("screenshot_sha256") != payload["screenshot"]["sha256"] or lineage.get("capture_id") != payload["screenshot"]["capture_id"] or lineage.get("screenshot_dimensions") != [width, height] or lineage.get("code_identity") != payload["code_identity"] or not _resource_metrics_are_closed(metrics, request_bytes=len(body), timeout_seconds=int(profile["timeout_seconds"])) or not child_valid:
-        raise _ProviderWorkerFailure("provider worker envelope is invalid", cleanup_evidence=cleanup_evidence)
-    closed = deepcopy(dict(envelope))
-    closed["cleanup_evidence"] = cleanup_evidence
-    closed["cleanup_ref"] = cleanup_ref
-    return closed
+            if self.config is None:
+                self._open()
+            payload = {"image_path": str(self.root / "requests" / f"{self.sequence:06d}.png"), "goal": goal, "profile": self.profile, "screenshot": {"sha256": _sha256(image_bytes), "width": width, "height": height, "capture_id": "capture/" + _sha256(image_bytes)}, "parent_identity_path": str(self.root / "worker-identity.json"), "artifact_root": str(self.artifact_dir), "code_identity": self.config["code_identity"], "listener_port": self.port}
+            if incumbent:
+                payload.update(incumbent_request=request["incumbent_runtime_request"], incumbent_projection=request["incumbent_projection"])
+            if self.failure:
+                failure = dict(self.failure)
+                failure.update(kind=("provider_unavailable_after_" if self.sequence > 1 else "") + failure["kind"], attempted=False)
+                envelope = failure_envelope(payload, failure, identity=self.identity, request_bytes=0)
+            else:
+                atomic_write(Path(payload["image_path"]), image_bytes)
+                body = json.dumps({"session_sha256": self.config_sha, "sequence": self.sequence, "payload": payload}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                if len(body) > _MAX_REQUEST_BYTES:
+                    raise ValueError("provider request byte bound exceeded")
+                atomic_write(self.root / "requests" / f"{self.sequence:06d}.json", body)
+                attempted = True
+                envelope = self._wait(self.root / "responses" / f"{self.sequence:06d}.json")
+                if _native_envelope(envelope) is None or envelope["worker_process_identity"] != self.identity or envelope["profile_identity"]["profile_id"] != self.profile["profile_id"]:
+                    raise RuntimeError("provider envelope process/profile mismatch")
+                lineage = envelope["request_lineage"]
+                if lineage.get("session_id") != self.session_id or lineage.get("sequence") != self.sequence or lineage.get("session_sha256") != self.config_sha or lineage.get("screenshot_sha256") != payload["screenshot"]["sha256"] or lineage.get("screenshot_dimensions") != [width, height] or lineage.get("code_identity") != self.config["code_identity"]:
+                    raise RuntimeError("provider envelope capture/session mismatch")
+                raw = self.root / "raw" / f"{self.sequence:06d}.utf8"
+                if raw.read_bytes() != envelope["raw_native_output"].encode("utf-8"):
+                    raise RuntimeError("provider raw mailbox mismatch")
+                if envelope.get("failure") and envelope["failure"]["terminal"]:
+                    self.failure = envelope["failure"]
+            if self.failure:
+                if not self.cleanup()["verified"]:
+                    raise RuntimeError("provider failure cleanup could not be verified")
+            envelope["request_lineage"].update(session_id=self.session_id, sequence=self.sequence, session_sha256=self.config_sha)
+            self._persist_outcome(envelope)
+            return envelope
+        except TimeoutError as exc:
+            self.failure = provider_failure(exc, attempted=attempted)
+            if not self.cleanup()["verified"]:
+                self.blocked = True
+                raise RuntimeError("provider timeout cleanup could not be verified") from exc
+            payload = {"profile": self.profile, "screenshot": {"sha256": _sha256(image_bytes), "width": width, "height": height, "capture_id": "capture/" + _sha256(image_bytes)}, "code_identity": self.config["code_identity"]}
+            envelope = failure_envelope(payload, self.failure, identity=self.identity, request_bytes=0)
+            envelope["request_lineage"].update(session_id=self.session_id, sequence=self.sequence, session_sha256=self.config_sha)
+            self._persist_outcome(envelope)
+            return envelope
+        except BaseException:
+            self.blocked = True
+            self.cleanup()
+            raise
+
+    def _persist_outcome(self, envelope):
+        from scripts.model_servers.goal_binding_transformers_worker import atomic_write, write_json
+        raw = self.root / "raw" / f"{self.sequence:06d}.utf8"
+        response = self.root / "responses" / f"{self.sequence:06d}.json"
+        if not raw.exists():
+            atomic_write(raw, envelope["raw_native_output"].encode("utf-8"))
+        if not response.exists():
+            write_json(response, envelope)
+
+    def cleanup(self) -> Mapping[str, object]:
+        from app.learn.hybrid.windows_process_scope import observe_process_scope_cleanup
+        from scripts.model_servers.goal_binding_transformers_worker import write_json
+        if self.receipt is not None:
+            return deepcopy(self.receipt)
+        observation = {"cleanup_status": "not_started"}
+        cleanup_errors = []
+        if self.process is not None:
+            if not (self.root / "stop.json").exists():
+                write_json(self.root / "stop.json", {"session_sha256": self.config_sha})
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+        if self.scope is not None:
+            self.scope.close()
+            observation = observe_process_scope_cleanup(self.config["scope_name"], terminate=True, listener_ports=[self.port] if self.port else [], stable_zero_observations=3)
+        exit_code = None
+        if self.process is not None:
+            exit_code = self.process.poll()
+            self.process.close()
+        if self.lease is not None:
+            try:
+                self.lease.release()
+            except RuntimeError as exc:
+                cleanup_errors.append(str(exc))
+        samples = []
+        baseline_ids = {(owner["pid"], owner["create_time_ns"]) for owner in (self.baseline or {}).get("owners", [])}
+        for _ in range(3):
+            sample = _gpu_ownership_snapshot()
+            sample = deepcopy(sample)
+            sample["new_owners"] = [owner for owner in sample.get("owners", []) if (owner["pid"], owner["create_time_ns"]) not in baseline_ids]
+            samples.append(sample)
+            time.sleep(0.02)
+        gpu_owners = [owner for sample in samples for owner in sample["new_owners"]]
+        leases = [str(self.lease_path)] if self.lease_path.exists() else []
+        verified = self.identity is not None and not self.blocked and observation.get("cleanup_status") == "verified" and all(sample.get("status") == "verified" for sample in samples) and not gpu_owners and not leases and not cleanup_errors and exit_code is not None
+        evidence = {"verified": verified, "scope": observation, "baseline": self.baseline, "gpu_samples": samples, "worker_process_identity": self.identity, "exit_code": exit_code, "request_count": self.sequence, "errors": cleanup_errors, "session_id": self.session_id, "logs": {name: {"sha256": _sha256_file(self.root / name), "bytes": (self.root / name).stat().st_size} for name in ("worker.stdout.bin", "worker.stderr.bin") if (self.root / name).exists()}}
+        self.receipt = {"contract_version": "simple_native_provider_cleanup_v1", "provider": self.profile["provider_id"], "verified": verified, "cleanup_status": "verified" if verified else "failed", "owned_processes": gpu_owners, "provider_processes_after": observation.get("member_identities_after", []), "helper_processes_after": [], "orphan_descendant_pids": observation.get("member_pids_after", []), "active_listeners_after": observation.get("active_listeners_after", []), "lease_files_after": leases, "cleanup_observations": [evidence]}
+        if self.root.exists():
+            write_json(self.root / "cleanup.json", self.receipt)
+        return deepcopy(self.receipt)
 
 
-def make_goal_binding_arm(*, profile: Mapping[str, object], artifact_dir: Path) -> GoalBindingArm:
+def make_goal_binding_arm(*, profile: Mapping[str, object], artifact_dir: Path, run_root: Path | None = None) -> GoalBindingArm:
     sealed = _verified(profile, Path(artifact_dir))
     native = sealed["native_output"]
     assert isinstance(native, Mapping)
-    adapt = adapt_incumbent_candidate_index if native["kind"] == "qwen_goal_binding_array_v1" else make_native_point_adapter(native_adapter_for_profile(sealed), _adapter_profile(sealed))
-    state: dict[str, object] = {"blocked": False, "cleanup_observations": []}
-    def call(image_path: Path, request: Mapping[str, object]) -> object:
-        if state["blocked"]:
-            raise RuntimeError("goal-binding provider is blocked by unresolved cleanup residue")
-        if not isinstance(image_path, Path) or not image_path.is_file() or not isinstance(request, Mapping):
-            raise ValueError("goal-binding request is invalid")
-        _reject_provider_input(request)
-        try:
-            incumbent_request = request.get("incumbent_runtime_request")
-            incumbent_projection = request.get("incumbent_projection")
-            if sealed["provider_id"] == "qwen3_vl_8b_q4_k_m":
-                if not isinstance(incumbent_request, Mapping) or not isinstance(incumbent_projection, Mapping):
-                    raise ValueError("incumbent frozen request and projection are required")
-            elif incumbent_request is not None or incumbent_projection is not None or "candidates" in request:
-                raise ValueError("challenger provider input contains candidate data")
-            envelope = _invoke_provider_worker(
-                profile=sealed, artifact_dir=Path(artifact_dir), image_path=image_path,
-                goal=_short_goal(request),
-                incumbent_request=incumbent_request if isinstance(incumbent_request, Mapping) else None,
-                incumbent_projection=incumbent_projection if isinstance(incumbent_projection, Mapping) else None,
-            )
-            observations = state["cleanup_observations"]
-            assert isinstance(observations, list)
-            cleanup_evidence = envelope.get("cleanup_evidence")
-            if not isinstance(cleanup_evidence, Mapping):
-                raise RuntimeError("provider call omitted actual cleanup evidence")
-            observations.append(deepcopy(dict(cleanup_evidence)))
-        except BaseException as exc:
-            state["blocked"] = True
-            evidence = getattr(exc, "cleanup_evidence", None)
-            observations = state["cleanup_observations"]
-            assert isinstance(observations, list)
-            if isinstance(evidence, Mapping):
-                observations.append(deepcopy(dict(evidence)))
-            raise
-        return deepcopy(envelope)
-    def cleanup() -> Mapping[str, object]:
-        observations = state["cleanup_observations"]
-        assert isinstance(observations, list)
-        provider_after = [item for evidence in observations if isinstance(evidence, Mapping) for item in evidence.get("provider_processes_after", [])]
-        helper_after = [item for evidence in observations if isinstance(evidence, Mapping) for item in evidence.get("helper_processes_after", [])]
-        orphan_pids = [item for evidence in observations if isinstance(evidence, Mapping) for item in evidence.get("orphan_descendant_pids", [])]
-        listeners = [item for evidence in observations if isinstance(evidence, Mapping) for item in evidence.get("active_listeners_after", [])]
-        leases = [item for evidence in observations if isinstance(evidence, Mapping) for item in evidence.get("lease_files_after", [])]
-        gpu_owners = [item for evidence in observations if isinstance(evidence, Mapping) for item in evidence.get("gpu_owners_after", [])]
-        verified = bool(observations) and state["blocked"] is False and all(
-            isinstance(item, Mapping) and item.get("verified") is True for item in observations
-        ) and not any((provider_after, helper_after, orphan_pids, listeners, leases, gpu_owners))
-        return {
-            "contract_version": "simple_native_provider_cleanup_v1",
-            "provider": str(sealed["provider_id"]),
-            "verified": verified,
-            "cleanup_status": "verified" if verified else "failed",
-            "owned_processes": [*provider_after, *helper_after, *gpu_owners],
-            "provider_processes_after": provider_after,
-            "helper_processes_after": helper_after,
-            "orphan_descendant_pids": orphan_pids,
-            "active_listeners_after": listeners,
-            "lease_files_after": leases,
-            "cleanup_observations": deepcopy(observations),
-        }
-    return GoalBindingArm(arm_id=str(sealed["arm_id"]), provider_id=str(sealed["provider_id"]), call=call, adapt=adapt, cleanup=cleanup)
-
+    def adapt(raw: object, goal_index: int, context: Mapping[str, object]) -> Mapping[str, object]:
+        if native["kind"] == "qwen_goal_binding_array_v1":
+            return adapt_incumbent_candidate_index(raw, goal_index, context)
+        adapter = make_native_point_adapter(native_adapter_for_profile(sealed), _adapter_profile(sealed, image_size=context["image_size"]))
+        return adapter(raw, goal_index, context)
+    session = GoalBindingProviderSession(sealed, Path(artifact_dir), run_root)
+    return GoalBindingArm(arm_id=str(sealed["arm_id"]), provider_id=str(sealed["provider_id"]), call=session.call, adapt=adapt, cleanup=session.cleanup)
 
 def probe_goal_binding_profile(
     *, profile: Mapping[str, object], image_path: Path,
     artifact_dir: Path | None = None,
 ) -> dict[str, object]:
     arm = make_goal_binding_arm(profile=profile, artifact_dir=artifact_dir or _MODEL_TEST_ROOT)
-    raw = arm.call(image_path, {"goal": "button: Open"})
-    return {"contract_version": "goal_binding_profile_probe_v1", "provider_id": arm.provider_id, "raw_native_output": raw, "artifact_is_authorization": False, "contains_holdout": False, "candidate_mapping": None, "cleanup": arm.cleanup()}
+    try:
+        raw = arm.call(image_path, {"goal": "button: Open"})
+    finally:
+        cleanup = arm.cleanup()
+    return {"contract_version": "goal_binding_profile_probe_v1", "provider_id": arm.provider_id, "raw_native_output": raw, "artifact_is_authorization": False, "contains_holdout": False, "candidate_mapping": None, "cleanup": cleanup}

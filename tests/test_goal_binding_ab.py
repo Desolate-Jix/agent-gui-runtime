@@ -139,6 +139,39 @@ def test_malformed_native_output_is_provider_failure_not_fallback(tmp_path: Path
     assert vista_calls == []
 
 
+def test_call_integrity_error_aborts_after_cleanup(tmp_path: Path) -> None:
+    cleaned = []
+    def broken(*args):
+        raise ValueError("mailbox identity mismatch")
+    arm = _arm(call=broken, adapt=_native_adapter, cleanup=lambda: cleaned.append(True) or _clean())
+    with pytest.raises(ValueError, match="mailbox identity"):
+        _run(tmp_path, arm=arm)
+    assert cleaned == [True]
+
+
+def test_v2_provider_unavailable_is_not_actual_inference(tmp_path: Path) -> None:
+    from scripts.model_servers.goal_binding_transformers_worker import native_trace_envelope
+    count = 0
+    def call(image, request):
+        nonlocal count
+        count += 1
+        envelope = native_trace_envelope(
+            profile_identity={"profile_id": "x", "runtime_sha256": "a" * 64, "preprocessing_sha256": "b" * 64, "native_output_kind": "ui_venus_point_v1"},
+            raw_native_output="", parsed_native=None, worker_process_identity={"pid": 42, "create_time_ns": 99},
+            resource_metrics={"latency_ms": 0, "peak_vram_bytes": None, "peak_vram_status": "unavailable", "generation_tokens": None, "request_bytes": 0, "provider_stdout_bytes": 0, "provider_stderr_bytes": 0, "timeout_seconds": 5},
+            request_lineage={"screenshot_sha256": sha256(image.read_bytes()).hexdigest(), "screenshot_dimensions": [100, 80]},
+        )
+        envelope.update(contract_version="goal_binding_native_trace_v2", outcome="provider_failure", failure={"kind": "provider_timeout" if count == 1 else "provider_unavailable_after_provider_timeout", "message": "timeout", "attempted": count == 1, "terminal": True})
+        return envelope
+    artifact = _run(tmp_path, arm=_arm(call=call, adapt=_native_adapter))
+    trace = [entry for case in artifact.cases for entry in case["trace"] if entry["slot"] == "binder"]
+    assert len(trace) == 25
+    assert trace[0]["inference_attempted"] is True
+    assert all(entry["inference_attempted"] is False for entry in trace[1:])
+    assert trace[-1]["canonical_binding"]["reason"] == "provider_unavailable"
+    assert trace[-1]["native_envelope"]["failure"]["kind"] == "provider_unavailable_after_provider_timeout"
+
+
 @pytest.mark.parametrize("items,point", [
     ([{"bbox": [0.1, 0.25, 0.3, 0.5], "type": "text", "content": "target", "interactivity": True}], [0.9, 0.9]),
     ([
@@ -307,7 +340,6 @@ def test_runner_hashes_the_exact_persisted_native_raw_and_parsed_values(tmp_path
 @pytest.mark.parametrize("call", [
     lambda _image, _request: "malformed",
     lambda _image, _request: (_ for _ in ()).throw(TimeoutError("timeout")),
-    lambda _image, _request: (_ for _ in ()).throw(ValueError("provider failure")),
 ])
 def test_canonical_native_ref_matches_persisted_raw_on_all_failure_paths(tmp_path: Path, call) -> None:
     arm = _arm(call=call, adapt=_native_adapter)

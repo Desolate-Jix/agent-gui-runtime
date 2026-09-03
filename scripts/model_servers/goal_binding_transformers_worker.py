@@ -158,7 +158,7 @@ def _verify_code_identity(value: object) -> dict[str, str]:
     return observed
 
 
-def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | None = None) -> dict[str, object]:
+def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | None = None, dispatcher: Callable[..., object] | None = None) -> dict[str, object]:
     allowed = {
         "image_path", "goal", "profile", "screenshot", "parent_identity_path",
         "incumbent_projection", "incumbent_request", "artifact_root", "listener_port",
@@ -201,7 +201,7 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
         "worker_python_sha256": _sha_file(Path(sys.executable)),
     }
     started = time.perf_counter()
-    dispatched = _dispatch_provider(
+    dispatched = (dispatcher or _dispatch_provider)(
         profile=profile, image_path=path, goal=goal, artifact_root=artifact_root,
         incumbent_projection=payload.get("incumbent_projection"),
         incumbent_request=payload.get("incumbent_request"),
@@ -227,14 +227,13 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
     else:
         raw, dispatcher_parsed = dispatched, None
     kind = _native_kind_for_provider(str(profile.get("provider_id") or ""))
-    if kind == "ui_venus_point_v1": parsed, raw_text = _parse_ui_venus(raw), _parse_ui_venus(raw)
-    elif kind == "phi_ground_any_v1":
-        width, height = screenshot.get("width"), screenshot.get("height")
-        if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0: raise ValueError("worker screenshot dimensions are invalid")
-        raw_text, parsed = str(raw), _parse_phi(raw, width=width, height=height)
-    else:
-        raw_text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
-        parsed = dispatcher_parsed if dispatcher_parsed is not None else raw
+    raw_text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+    failure = None
+    try:
+        parsed = _project_native(kind, raw_text, screenshot=screenshot)
+    except (ValueError, TypeError) as exc:
+        parsed = None
+        failure = {"kind": "malformed_native_output", "message": str(exc), "attempted": True, "terminal": False}
     timeout = profile.get("timeout_seconds", 0)
     if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 0:
         raise ValueError("worker timeout identity is invalid")
@@ -255,17 +254,172 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
         "code_identity": verified_code,
         "child_cleanup": child_cleanup,
     }
-    return native_trace_envelope(
+    envelope = native_trace_envelope(
         profile_identity=_identity(profile), raw_native_output=raw_text,
         parsed_native=parsed, resource_metrics=metrics,
         worker_process_identity=identity, request_lineage=lineage,
     )
+    envelope.update(contract_version="goal_binding_native_trace_v2", outcome="provider_failure" if failure else "native_output", failure=failure)
+    return envelope
+
+
+def _reject_constant(value: str) -> None:
+    raise ValueError("native JSON contains a non-finite number")
+
+
+def _project_native(kind: str, raw: str, *, screenshot: Mapping[str, object]) -> object:
+    if kind == "ui_venus_point_v1":
+        return _parse_ui_venus(raw)
+    if kind == "phi_ground_any_v1":
+        return _parse_phi(raw, width=int(screenshot["width"]), height=int(screenshot["height"]))
+    if kind in {"gui_actor_topk_points_v1", "qwen_goal_binding_array_v1"}:
+        value = json.loads(raw, object_pairs_hook=_closed_object, parse_constant=_reject_constant)
+        if kind == "qwen_goal_binding_array_v1":
+            if not isinstance(value, list):
+                raise ValueError("incumbent native output must be a bare JSON array")
+            return value
+        if not isinstance(value, Mapping) or not isinstance(value.get("topk_points"), list):
+            raise ValueError("GUI-Actor native output must contain topk_points")
+        return {"topk_points": value["topk_points"]}
+    return raw
+
+
+def atomic_write(path: Path, body: bytes) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    if path.exists() or temporary.exists():
+        raise ValueError("mailbox path already exists")
+    with temporary.open("xb") as stream:
+        stream.write(body)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def write_json(path: Path, value: object) -> None:
+    atomic_write(path, json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+
+
+def read_json(path: Path, maximum: int = 1024 * 1024) -> object:
+    if path.stat().st_size > maximum:
+        raise ValueError("mailbox JSON exceeds byte bound")
+    return json.loads(path.read_bytes().decode("utf-8"), object_pairs_hook=_closed_object, parse_constant=_reject_constant)
+
+
+def provider_failure(exc: Exception, *, attempted: bool) -> dict[str, object]:
+    if isinstance(exc, TimeoutError):
+        kind = "provider_timeout"
+    elif isinstance(exc, ImportError):
+        kind = "provider_dependency_failure"
+    elif "out of memory" in str(exc).casefold() or isinstance(exc, MemoryError):
+        kind = "provider_oom"
+    else:
+        kind = "provider_runtime_failure"
+    return {"kind": kind, "message": str(exc)[:4096], "attempted": attempted, "terminal": True}
+
+
+def failure_envelope(payload: Mapping[str, object], failure: Mapping[str, object], *, identity: Mapping[str, object], request_bytes: int) -> dict[str, object]:
+    screenshot, profile = payload["screenshot"], payload["profile"]
+    envelope = native_trace_envelope(
+        profile_identity=_identity(profile), raw_native_output="", parsed_native=None,
+        worker_process_identity=identity,
+        resource_metrics={"latency_ms": 0, "peak_vram_bytes": None, "peak_vram_status": "unavailable", "generation_tokens": None, "request_bytes": request_bytes, "provider_stdout_bytes": 0, "provider_stderr_bytes": 0, "timeout_seconds": profile["timeout_seconds"]},
+        request_lineage={"screenshot_sha256": screenshot["sha256"], "screenshot_dimensions": [screenshot["width"], screenshot["height"]], "capture_id": screenshot["capture_id"], "code_identity": payload["code_identity"], "child_cleanup": None},
+    )
+    envelope.update(contract_version="goal_binding_native_trace_v2", outcome="provider_failure", failure=dict(failure))
+    return envelope
+
+
+def _open_session(config: Mapping[str, object]) -> object:
+    profile = config["profile"]
+    module_name, _ = profile["runtime"]["entrypoint"].split(":", 1)
+    module = importlib.import_module(module_name)
+    return module.open_session(profile=profile, artifact_root=Path(config["artifact_root"]), session_root=Path(config["session_root"]), scope_name=config["scope_name"], listener_port=config["listener_port"])
+
+
+def serve_session(config_path: Path) -> None:
+    root = config_path.resolve().parent
+    config = read_json(config_path)
+    required = {"contract_version", "session_id", "run_id", "arm_id", "session_root", "scope_name", "profile", "artifact_root", "code_identity", "listener_port"}
+    if not isinstance(config, Mapping) or set(config) != required or config["contract_version"] != "goal_binding_provider_session_v1" or Path(config["session_root"]).resolve() != root:
+        raise ValueError("worker session identity is invalid")
+    identity = read_json(root / "parent-identity.json")
+    from app.learn.hybrid.windows_process_scope import _identity_for_pid, WindowsProcessScope
+    observed_identity = _identity_for_pid(os.getpid())
+    import psutil
+    ancestors = {process.pid for process in psutil.Process().parents()}
+    if identity != _identity_for_pid(identity["pid"]) or (identity != observed_identity and identity["pid"] not in ancestors):
+        raise ValueError("worker launcher identity/ancestry mismatch")
+    launcher_identity, identity = identity, observed_identity
+    scope = WindowsProcessScope(config["scope_name"], create=False)
+    try:
+        if not {os.getpid(), launcher_identity["pid"]} <= set(scope.pids()):
+            raise ValueError("worker is outside its exact Job")
+    finally:
+        scope.close()
+    _verify_code_identity(config["code_identity"])
+    write_json(root / "worker-identity.json", identity)
+    digest = _sha_file(config_path)
+    runtime = None
+    failure = None
+    try:
+        try:
+            runtime = _open_session(config)
+        except (ImportError, OSError, RuntimeError, ValueError, MemoryError) as exc:
+            from scripts.model_servers.goal_binding_provider_runtimes import ProviderIntegrityError
+            if isinstance(exc, ProviderIntegrityError):
+                raise
+            failure = provider_failure(exc, attempted=False)
+        write_json(root / "ready.json", {"session_sha256": digest, "worker_process_identity": identity, "launcher_process_identity": launcher_identity, "failure": failure})
+        while failure is not None and not (root / "stop.json").exists():
+            time.sleep(0.01)
+        sequence = 1
+        while sequence <= 25 and not (root / "stop.json").exists() and failure is None:
+            path = root / "requests" / f"{sequence:06d}.json"
+            if not path.exists():
+                time.sleep(0.01)
+                continue
+            request = read_json(path)
+            if not isinstance(request, Mapping) or set(request) != {"session_sha256", "sequence", "payload"} or request["session_sha256"] != digest or request["sequence"] != sequence:
+                raise ValueError("worker mailbox request identity mismatch")
+            payload = request["payload"]
+            if not isinstance(payload, Mapping) or payload.get("profile") != config["profile"] or payload.get("code_identity") != config["code_identity"] or payload.get("artifact_root") != config["artifact_root"] or Path(payload.get("parent_identity_path", "")).resolve() != root / "worker-identity.json" or Path(payload.get("image_path", "")).resolve() != root / "requests" / f"{sequence:06d}.png":
+                raise ValueError("worker mailbox payload identity mismatch")
+            def invoke(**kwargs):
+                nonlocal failure
+                try:
+                    return runtime(**kwargs)
+                except (ImportError, OSError, RuntimeError, ValueError, MemoryError) as exc:
+                    from scripts.model_servers.goal_binding_provider_runtimes import ProviderIntegrityError
+                    if isinstance(exc, ProviderIntegrityError):
+                        raise
+                    failure = provider_failure(exc, attempted=True)
+                    return ""
+            envelope = _run_provider_once(payload, request_bytes=path.stat().st_size, dispatcher=invoke)
+            if failure:
+                envelope = failure_envelope(payload, failure, identity=identity, request_bytes=path.stat().st_size)
+            envelope["request_lineage"].update(session_id=config["session_id"], sequence=sequence, session_sha256=digest)
+            atomic_write(root / "raw" / f"{sequence:06d}.utf8", envelope["raw_native_output"].encode("utf-8"))
+            write_json(root / "responses" / f"{sequence:06d}.json", envelope)
+            sequence += 1
+    except (OSError, ValueError, RuntimeError) as exc:
+        write_json(root / "fatal.json", {"session_sha256": digest, "error": str(exc)[:4096]})
+        raise
+    finally:
+        cleanup = runtime.close() if runtime is not None else {"status": "not_loaded"}
+        write_json(root / "stopped.json", {"session_sha256": digest, "worker_process_identity": identity, "runtime_cleanup": cleanup})
 
 
 def main(argv: list[str] | None = None) -> int:
     parser=argparse.ArgumentParser(description="Run one bounded goal-binding provider request.")
     parser.add_argument("--execute", action="store_true"); parser.add_argument("--request-json", type=Path)
+    parser.add_argument("--session-json", type=Path)
     args=parser.parse_args(argv)
+    if args.execute and args.session_json is not None:
+        repository_root = str(Path(__file__).resolve().parents[2])
+        if repository_root not in sys.path:
+            sys.path.insert(0, repository_root)
+        serve_session(args.session_json)
+        return 0
     if not args.execute or args.request_json is None: parser.error("--execute and --request-json are required")
     try:
         request_raw = args.request_json.read_bytes()

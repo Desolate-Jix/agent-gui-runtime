@@ -34,6 +34,10 @@ GGUF_GROUNDING_PROMPT = (
 )
 
 
+class ProviderIntegrityError(RuntimeError):
+    """提供者传输身份或工件完整性不可验证。"""
+
+
 def _sha_file(path: Path) -> str:
     digest = sha256()
     with path.open("rb") as stream:

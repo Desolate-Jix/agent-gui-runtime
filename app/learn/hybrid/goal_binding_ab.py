@@ -77,9 +77,17 @@ def _raw_text(value: object) -> str:
 
 
 def _native_envelope(value: object) -> dict[str, object] | None:
-    if not isinstance(value, Mapping) or value.get("contract_version") != "goal_binding_native_trace_v1":
+    if not isinstance(value, Mapping) or value.get("contract_version") not in {"goal_binding_native_trace_v1", "goal_binding_native_trace_v2"}:
         return None
     required = {"contract_version", "profile_identity", "raw_native_output", "raw_native_output_sha256", "parsed_native", "resource_metrics", "worker_process_identity", "request_lineage"}
+    if value.get("contract_version") == "goal_binding_native_trace_v2":
+        required |= {"outcome", "failure"}
+        failure = value.get("failure")
+        if value.get("outcome") == "provider_failure":
+            if not isinstance(failure, Mapping) or set(failure) != {"kind", "message", "attempted", "terminal"} or not isinstance(failure["kind"], str) or not failure["kind"] or not isinstance(failure["message"], str) or not isinstance(failure["attempted"], bool) or not isinstance(failure["terminal"], bool) or value.get("parsed_native") is not None:
+                raise ValueError("provider failure envelope is invalid")
+        elif value.get("outcome") != "native_output" or failure is not None:
+            raise ValueError("provider native outcome is invalid")
     extended = required | {"cleanup_evidence", "cleanup_ref"}
     if set(value) not in (required, extended) or not isinstance(value.get("raw_native_output"), str) or _text_hash(value["raw_native_output"]) != value.get("raw_native_output_sha256"):
         raise ValueError("provider native trace envelope is invalid")
@@ -522,6 +530,7 @@ def run_goal_binding_arm(
                 raw: object = ""
                 native_raw = ""
                 native_envelope: dict[str, object] | None = None
+                inference_attempted = True
                 error: str | None = None
                 native_ref = {"id": f"native-output/{arm.arm_id}/{case.case_id}/{goal_index}", "sha256": "0" * 64}
                 context: dict[str, object] = {
@@ -557,6 +566,10 @@ def run_goal_binding_arm(
                         called = arm.call(case.image_path, request)
                         native_envelope = _native_envelope(called)
                         if native_envelope is not None:
+                            if native_envelope["contract_version"] == "goal_binding_native_trace_v2":
+                                lineage = native_envelope["request_lineage"]
+                                if not isinstance(lineage, Mapping) or lineage.get("screenshot_sha256") != case.image_sha256 or lineage.get("screenshot_dimensions") != list(case.image_size):
+                                    raise ValueError("provider envelope capture lineage mismatch")
                             native_raw = str(native_envelope["raw_native_output"])
                             raw = native_envelope["parsed_native"] if native_envelope["parsed_native"] is not None else native_raw
                         else:
@@ -568,12 +581,6 @@ def run_goal_binding_arm(
                         native_ref["sha256"] = _text_hash(raw_text)
                         binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="provider_timeout")
                         binder_metrics["timeout"] = int(binder_metrics["timeout"]) + 1
-                    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-                        error = str(exc)
-                        raw_text = native_raw
-                        native_ref["sha256"] = _text_hash(raw_text)
-                        binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="malformed_native_output")
-                        binder_metrics["schema_invalid"] = int(binder_metrics["schema_invalid"]) + 1
                     else:
                         raw_text = native_raw
                         native_ref["sha256"] = _text_hash(raw_text)
@@ -582,7 +589,16 @@ def run_goal_binding_arm(
                         try:
                             adapter_context = deepcopy(context)
                             adapter_context["record_native_parsed"] = record_native_parsed
-                            binding = _validated_binding(arm.adapt(raw, goal_index, adapter_context), goal_index=goal_index, arm=arm, context=context)
+                            failure = native_envelope.get("failure") if native_envelope else None
+                            if isinstance(failure, Mapping):
+                                inference_attempted = failure["attempted"]
+                                if not inference_attempted:
+                                    binder_metrics["attempted"] = int(binder_metrics["attempted"]) - 1
+                                error = failure["message"]
+                                reason = "provider_unavailable" if not inference_attempted else (failure["kind"] if failure["kind"] in {"provider_timeout", "malformed_native_output"} else "provider_call_failed")
+                                binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason=reason)
+                            else:
+                                binding = _validated_binding(arm.adapt(raw, goal_index, adapter_context), goal_index=goal_index, arm=arm, context=context)
                         except (ValueError, TypeError, json.JSONDecodeError) as exc:
                             error = str(exc)
                             binding = _provider_failure(goal_index=goal_index, provider_id=arm.provider_id, context=context, reason="malformed_native_output")
@@ -616,6 +632,7 @@ def run_goal_binding_arm(
                     "native_parsed": parsed_evidence[0] if parsed_evidence else None,
                     "native_parsed_sha256": _hash(parsed_evidence[0]) if parsed_evidence else None,
                     "canonical_binding": binding, "canonical_binding_sha256": _hash(binding),
+                    "inference_attempted": inference_attempted,
                     "selected_candidate": selected_candidate, "native_error": error,
                     "native_error_sha256": _text_hash(error) if error is not None else None,
                     "parent_capture_id": capture["capture_id"], "parent_omni_snapshot_ref": deepcopy(snapshot_ref),
