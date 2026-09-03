@@ -69,9 +69,13 @@ def _cases(config: dict[str, object]):
         selected_ids=[item.get("case_id") for item in selected]
         if selected_ids != screen["target_ids"] or len(selected) != 5 or len(set(selected_ids)) != 5:
             raise ValueError("provider corpus target identity mismatch")
-        # Runtime candidates are intentionally not invented from corpus. Replay/actual must
-        # provide evidence through the native Omni result before Qwen may be called.
-        result.append(ProviderCase(case_id=screen["case_id"], image_path=ROOT/screen["path"], image_size=(width,height), targets=tuple(str(item["case_id"]) for item in selected), runtime_request={"contract_version":"hybrid_qwen_binding_request_v1","screenshot":{"image_size":{"width":width,"height":height}},"candidates":[{"candidate_id":f"candidate/{screen['case_id']}/{i}","bbox_original":[10+i*10,10,19+i*10,20],"active":True} for i in range(5)]}))
+        result.append(ProviderCase(
+            case_id=str(screen["case_id"]),
+            image_path=ROOT / str(screen["path"]),
+            image_size=(width, height),
+            image_sha256=str(screen["sha256"]),
+            goals=tuple(str(item["goal"]) for item in selected),
+        ))
     return result
 
 def _replay_slots(replay_dir: Path):
