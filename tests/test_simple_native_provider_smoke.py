@@ -190,3 +190,79 @@ def test_provider_goal_parser_rejects_non_frozen_grammar_before_dispatch(tmp_pat
 
     with pytest.raises(ValueError, match="closed grammar"):
         run_simple_native_regression_diagnostic(cases=cases, slots=_slots(), artifact_dir=tmp_path / "out")
+
+
+def test_omni_runtime_error_releases_once_and_never_advances_to_qwen(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    events: list[str] = []
+    slots = SimpleNativeSlots(
+        omni=lambda _image: events.append("omni") or (_ for _ in ()).throw(RuntimeError("omni crashed")),
+        qwen=lambda _image, _projection: events.append("qwen") or {"bindings": []},
+        vista=lambda _image, _target: events.append("vista") or "[500,500]",
+        release_provider=lambda provider: events.append(f"release:{provider}") or _verified_cleanup(provider),
+    )
+
+    with pytest.raises(RuntimeError, match="omni crashed"):
+        run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+    assert events == ["omni", "release:omni"]
+
+
+def test_qwen_runtime_error_releases_once_and_never_advances_to_vista(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    events: list[str] = []
+    slots = SimpleNativeSlots(
+        omni=lambda _image: events.append("omni") or {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "\u76ee\u6807", "interactivity": True}]},
+        qwen=lambda _image, _projection: events.append("qwen") or (_ for _ in ()).throw(RuntimeError("qwen crashed")),
+        vista=lambda _image, _target: events.append("vista") or "[500,500]",
+        release_provider=lambda provider: events.append(f"release:{provider}") or _verified_cleanup(provider),
+    )
+
+    with pytest.raises(RuntimeError, match="qwen crashed"):
+        run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+    assert events == ["omni"] * 5 + ["release:omni", "qwen", "release:qwen"]
+
+
+def test_cleanup_failure_is_chained_from_unexpected_provider_error(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    releases: list[str] = []
+    slots = SimpleNativeSlots(
+        omni=lambda _image: (_ for _ in ()).throw(RuntimeError("omni crashed")),
+        qwen=lambda _image, _projection: {"bindings": []},
+        vista=lambda _image, _target: "[500,500]",
+        release_provider=lambda provider: releases.append(provider) or _verified_cleanup(
+            provider, cleanup_status="failed", owned_processes=[4242]
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup observation is not clean") as raised:
+        run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+    assert releases == ["omni"]
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert str(raised.value.__cause__) == "omni crashed"
+
+
+def test_vista_base_exception_releases_once(tmp_path: Path) -> None:
+    from app.learn.hybrid.simple_native_smoke import SimpleNativeSlots, run_simple_native_regression_diagnostic
+
+    class ProviderAbort(BaseException):
+        pass
+
+    events: list[str] = []
+
+    def abort_vista(_image: Path, _target: str) -> str:
+        events.append("vista")
+        raise ProviderAbort("vista aborted")
+
+    slots = SimpleNativeSlots(
+        omni=lambda _image: events.append("omni") or {"items": [{"bbox": [0.1, 0.1, 0.2, 0.2], "type": "text", "content": "\u76ee\u6807", "interactivity": True}]},
+        qwen=lambda _image, projection: events.append("qwen") or {"bindings": [{"i": item["i"], "role": "button", "label": "\u76ee\u6807", "status": "BOUND", "confidence": 1} for item in projection["candidates"]]},
+        vista=abort_vista,
+        release_provider=lambda provider: events.append(f"release:{provider}") or _verified_cleanup(provider),
+    )
+
+    with pytest.raises(ProviderAbort, match="vista aborted"):
+        run_simple_native_regression_diagnostic(cases=_cases(tmp_path), slots=slots, artifact_dir=tmp_path / "out")
+    assert events == ["omni"] * 5 + ["release:omni"] + ["qwen"] * 5 + ["release:qwen", "vista", "release:vista"]

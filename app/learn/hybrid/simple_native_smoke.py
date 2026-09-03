@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from hashlib import sha256
@@ -15,7 +16,7 @@ import shutil
 from statistics import median
 import sys
 from time import perf_counter
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence
 
 from PIL import Image
 
@@ -552,6 +553,25 @@ def _observe_provider_cleanup(slots: SimpleNativeSlots, provider: str) -> dict[s
     return observed
 
 
+@contextmanager
+def _provider_phase(
+    *, slots: SimpleNativeSlots, provider: str, observations: list[dict[str, object]]
+) -> Iterator[None]:
+    provider_error: BaseException | None = None
+    try:
+        yield
+    except BaseException as exc:
+        provider_error = exc
+        raise
+    finally:
+        try:
+            observations.append(_observe_provider_cleanup(slots, provider))
+        except BaseException as cleanup_error:
+            if provider_error is not None:
+                raise cleanup_error from provider_error
+            raise
+
+
 def run_simple_native_regression_diagnostic(
     *,
     cases: Sequence[ProviderCase],
@@ -584,169 +604,169 @@ def run_simple_native_regression_diagnostic(
         })
 
     # 模型阶段按提供者批处理，避免逐屏切换 GPU 所有权。
-    for state in states:
-        if invalid_streak["omni"] >= 2:
-            continue
-        case, capture = state["case"], state["capture"]
-        metrics["omni"]["attempted"] += 1
-        started, raw = perf_counter(), ""
-        try:
-            capture_path = _verify_capture_freshness(capture, "Omni")
-            raw = slots.omni(capture_path)
-            _verify_capture_freshness(capture, "Omni")
-            parsed = parse_omni_native_output(raw)
-            evidence = _build_omni_evidence(case=case, capture=capture, parsed=parsed, artifact_dir=artifact_dir)
-            state["inventory"] = evidence["inventory"]
-            metrics["omni"]["schema_valid"] += 1
-            invalid_streak["omni"] = 0
-            state["trace"].append({
-                "slot": "omni",
-                "raw": _raw_text(raw),
-                "parsed_native": [
-                    {**asdict(item), "bbox": list(item.bbox)} for item in parsed
-                ],
-                **evidence,
-                "parent_capture_id": capture["capture_id"],
-                "raw_sha256": _hash(raw),
-            })
-        except TimeoutError as exc:
-            metrics["omni"]["timeout"] += 1
-            invalid_streak["omni"] += 1
-            _record_failure(state=state, slot="omni", raw=raw, error=exc, error_class="timeout")
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            metrics["omni"]["schema_invalid"] += 1
-            invalid_streak["omni"] += 1
-            _record_failure(state=state, slot="omni", raw=raw, error=exc, error_class="schema")
-        metrics["omni"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
-        metrics["omni"]["raw_output_bytes"] += len(state["trace"][-1].get("raw", "").encode("utf-8"))
-    provider_phase_cleanup.append(_observe_provider_cleanup(slots, "omni"))
-
-    for state in states:
-        inventory = state["inventory"]
-        if inventory is None or invalid_streak["qwen"] >= 2:
-            continue
-        capture = state["capture"]
-        metrics["qwen"]["attempted"] += 1
-        started, raw, runtime_request, projection = perf_counter(), "", None, None
-        try:
-            capture_path = _verify_capture_freshness(capture, "Qwen")
-            runtime_request = build_qwen_binding_request(capture["bundle"], inventory)
-            projection = build_qwen_model_projection(runtime_request)
-            raw = slots.qwen(capture_path, projection)
-            _verify_capture_freshness(capture, "Qwen")
-            expanded = expand_qwen_model_response(raw, projection=projection, runtime_request=runtime_request)
-            parsed = parse_qwen_candidate_bindings(expanded, inventory, context_ref=runtime_request["context_ref"])
-            state["bindings"] = parsed
-            metrics["qwen"]["schema_valid"] += 1
-            invalid_streak["qwen"] = 0
-            state["trace"].append({
-                "slot": "qwen",
-                "runtime_request": runtime_request,
-                "runtime_request_sha256": _hash(runtime_request),
-                "wire_input": projection,
-                "wire_input_sha256": _hash(projection),
-                "raw": _raw_text(raw),
-                "expanded": expanded,
-                "parsed": parsed,
-                "parent_capture_id": capture["capture_id"],
-                "parent_inventory_sha256": inventory["content_sha256"],
-                "raw_sha256": _hash(raw),
-            })
-        except TimeoutError as exc:
-            metrics["qwen"]["timeout"] += 1
-            invalid_streak["qwen"] += 1
-            _record_failure(state=state, slot="qwen", raw=raw, error=exc, error_class="timeout")
-            if runtime_request is not None and projection is not None:
-                state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            metrics["qwen"]["schema_invalid"] += 1
-            invalid_streak["qwen"] += 1
-            _record_failure(state=state, slot="qwen", raw=raw, error=exc, error_class="schema")
-            if runtime_request is not None and projection is not None:
-                state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
-        metrics["qwen"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
-        metrics["qwen"]["raw_output_bytes"] += len(state["trace"][-1].get("raw", "").encode("utf-8"))
-    provider_phase_cleanup.append(_observe_provider_cleanup(slots, "qwen"))
-
-    for state in states:
-        inventory, bindings = state["inventory"], state["bindings"]
-        capture = state["capture"]
-        eligible = (
-            _eligible_bindings(bindings, inventory)
-            if isinstance(inventory, Mapping) and isinstance(bindings, Mapping)
-            else []
-        )
-        for goal in state["goals"]:
-            matches = [
-                (binding, candidate)
-                for binding, candidate in eligible
-                if binding.get("role") == goal["semantic_role"]
-                and binding.get("label") == goal["semantic_label"]
-            ]
-            if len(matches) != 1:
-                metrics["abstained"] += 1
-                _record_goal_abstention(
-                    state=state,
-                    goal=goal,
-                    reason=(
-                        "provider_evidence_unavailable"
-                        if not isinstance(inventory, Mapping) or not isinstance(bindings, Mapping)
-                        else "goal_binding_not_unique_active_eligible"
-                    ),
-                )
+    with _provider_phase(slots=slots, provider="omni", observations=provider_phase_cleanup):
+        for state in states:
+            if invalid_streak["omni"] >= 2:
                 continue
-            binding, candidate = matches[0]
-            if invalid_streak["vista"] >= 2:
-                metrics["abstained"] += 1
-                _record_goal_abstention(
-                    state=state,
-                    goal=goal,
-                    reason="vista_schema_circuit_open",
-                    candidate_id=binding["candidate_id"],
-                )
-                continue
-            metrics["vista"]["attempted"] += 1
-            started, raw, roi_crop = perf_counter(), "", None
+            case, capture = state["case"], state["capture"]
+            metrics["omni"]["attempted"] += 1
+            started, raw = perf_counter(), ""
             try:
-                _verify_capture_freshness(capture, "VISTA")
-                roi_crop = _persist_vista_roi_crop(capture=capture, candidate=candidate, artifact_dir=artifact_dir)
-                roi = tuple(roi_crop["roi_xyxy"])
-                target = f"{binding['role']}: {binding['label']}"
-                raw = slots.vista(Path(roi_crop["crop_path"]), target)
-                _verify_capture_freshness(capture, "VISTA")
-                normalized = parse_vista_normalized_point(raw)
-                point = restore_vista_point_to_capture(normalized, roi_xyxy=roi)
-                if not (roi[0] < point[0] < roi[2] and roi[1] < point[1] < roi[3]):
-                    raise ValueError("restored VISTA point is outside strict candidate interior")
-                metrics["vista"]["schema_valid"] += 1
-                invalid_streak["vista"] = 0
+                capture_path = _verify_capture_freshness(capture, "Omni")
+                raw = slots.omni(capture_path)
+                _verify_capture_freshness(capture, "Omni")
+                parsed = parse_omni_native_output(raw)
+                evidence = _build_omni_evidence(case=case, capture=capture, parsed=parsed, artifact_dir=artifact_dir)
+                state["inventory"] = evidence["inventory"]
+                metrics["omni"]["schema_valid"] += 1
+                invalid_streak["omni"] = 0
                 state["trace"].append({
-                    "slot": "vista", "status": "selected", "raw": raw, "parsed": list(normalized),
-                    "capture_point": list(point), "roi_xyxy": list(roi),
-                    **deepcopy(dict(goal)),
-                    "candidate_id": binding["candidate_id"], "parent_capture_id": capture["capture_id"],
-                    "roi_crop": roi_crop,
+                    "slot": "omni",
+                    "raw": _raw_text(raw),
+                    "parsed_native": [
+                        {**asdict(item), "bbox": list(item.bbox)} for item in parsed
+                    ],
+                    **evidence,
+                    "parent_capture_id": capture["capture_id"],
                     "raw_sha256": _hash(raw),
                 })
             except TimeoutError as exc:
-                metrics["vista"]["timeout"] += 1
-                invalid_streak["vista"] += 1
-                metrics["abstained"] += 1
-                _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="timeout")
-                state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": binding["candidate_id"]})
-                if roi_crop is not None:
-                    state["trace"][-1]["roi_crop"] = roi_crop
+                metrics["omni"]["timeout"] += 1
+                invalid_streak["omni"] += 1
+                _record_failure(state=state, slot="omni", raw=raw, error=exc, error_class="timeout")
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-                metrics["vista"]["schema_invalid"] += 1
-                invalid_streak["vista"] += 1
-                metrics["abstained"] += 1
-                _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="schema")
-                state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": binding["candidate_id"]})
-                if roi_crop is not None:
-                    state["trace"][-1]["roi_crop"] = roi_crop
-            metrics["vista"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
-            metrics["vista"]["raw_output_bytes"] += len(raw.encode("utf-8"))
-    provider_phase_cleanup.append(_observe_provider_cleanup(slots, "vista"))
+                metrics["omni"]["schema_invalid"] += 1
+                invalid_streak["omni"] += 1
+                _record_failure(state=state, slot="omni", raw=raw, error=exc, error_class="schema")
+            metrics["omni"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
+            metrics["omni"]["raw_output_bytes"] += len(state["trace"][-1].get("raw", "").encode("utf-8"))
+
+    with _provider_phase(slots=slots, provider="qwen", observations=provider_phase_cleanup):
+        for state in states:
+            inventory = state["inventory"]
+            if inventory is None or invalid_streak["qwen"] >= 2:
+                continue
+            capture = state["capture"]
+            metrics["qwen"]["attempted"] += 1
+            started, raw, runtime_request, projection = perf_counter(), "", None, None
+            try:
+                capture_path = _verify_capture_freshness(capture, "Qwen")
+                runtime_request = build_qwen_binding_request(capture["bundle"], inventory)
+                projection = build_qwen_model_projection(runtime_request)
+                raw = slots.qwen(capture_path, projection)
+                _verify_capture_freshness(capture, "Qwen")
+                expanded = expand_qwen_model_response(raw, projection=projection, runtime_request=runtime_request)
+                parsed = parse_qwen_candidate_bindings(expanded, inventory, context_ref=runtime_request["context_ref"])
+                state["bindings"] = parsed
+                metrics["qwen"]["schema_valid"] += 1
+                invalid_streak["qwen"] = 0
+                state["trace"].append({
+                    "slot": "qwen",
+                    "runtime_request": runtime_request,
+                    "runtime_request_sha256": _hash(runtime_request),
+                    "wire_input": projection,
+                    "wire_input_sha256": _hash(projection),
+                    "raw": _raw_text(raw),
+                    "expanded": expanded,
+                    "parsed": parsed,
+                    "parent_capture_id": capture["capture_id"],
+                    "parent_inventory_sha256": inventory["content_sha256"],
+                    "raw_sha256": _hash(raw),
+                })
+            except TimeoutError as exc:
+                metrics["qwen"]["timeout"] += 1
+                invalid_streak["qwen"] += 1
+                _record_failure(state=state, slot="qwen", raw=raw, error=exc, error_class="timeout")
+                if runtime_request is not None and projection is not None:
+                    state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
+            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                metrics["qwen"]["schema_invalid"] += 1
+                invalid_streak["qwen"] += 1
+                _record_failure(state=state, slot="qwen", raw=raw, error=exc, error_class="schema")
+                if runtime_request is not None and projection is not None:
+                    state["trace"][-1].update({"runtime_request_sha256": _hash(runtime_request), "wire_input": projection})
+            metrics["qwen"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
+            metrics["qwen"]["raw_output_bytes"] += len(state["trace"][-1].get("raw", "").encode("utf-8"))
+
+    with _provider_phase(slots=slots, provider="vista", observations=provider_phase_cleanup):
+        for state in states:
+            inventory, bindings = state["inventory"], state["bindings"]
+            capture = state["capture"]
+            eligible = (
+                _eligible_bindings(bindings, inventory)
+                if isinstance(inventory, Mapping) and isinstance(bindings, Mapping)
+                else []
+            )
+            for goal in state["goals"]:
+                matches = [
+                    (binding, candidate)
+                    for binding, candidate in eligible
+                    if binding.get("role") == goal["semantic_role"]
+                    and binding.get("label") == goal["semantic_label"]
+                ]
+                if len(matches) != 1:
+                    metrics["abstained"] += 1
+                    _record_goal_abstention(
+                        state=state,
+                        goal=goal,
+                        reason=(
+                            "provider_evidence_unavailable"
+                            if not isinstance(inventory, Mapping) or not isinstance(bindings, Mapping)
+                            else "goal_binding_not_unique_active_eligible"
+                        ),
+                    )
+                    continue
+                binding, candidate = matches[0]
+                if invalid_streak["vista"] >= 2:
+                    metrics["abstained"] += 1
+                    _record_goal_abstention(
+                        state=state,
+                        goal=goal,
+                        reason="vista_schema_circuit_open",
+                        candidate_id=binding["candidate_id"],
+                    )
+                    continue
+                metrics["vista"]["attempted"] += 1
+                started, raw, roi_crop = perf_counter(), "", None
+                try:
+                    _verify_capture_freshness(capture, "VISTA")
+                    roi_crop = _persist_vista_roi_crop(capture=capture, candidate=candidate, artifact_dir=artifact_dir)
+                    roi = tuple(roi_crop["roi_xyxy"])
+                    target = f"{binding['role']}: {binding['label']}"
+                    raw = slots.vista(Path(roi_crop["crop_path"]), target)
+                    _verify_capture_freshness(capture, "VISTA")
+                    normalized = parse_vista_normalized_point(raw)
+                    point = restore_vista_point_to_capture(normalized, roi_xyxy=roi)
+                    if not (roi[0] < point[0] < roi[2] and roi[1] < point[1] < roi[3]):
+                        raise ValueError("restored VISTA point is outside strict candidate interior")
+                    metrics["vista"]["schema_valid"] += 1
+                    invalid_streak["vista"] = 0
+                    state["trace"].append({
+                        "slot": "vista", "status": "selected", "raw": raw, "parsed": list(normalized),
+                        "capture_point": list(point), "roi_xyxy": list(roi),
+                        **deepcopy(dict(goal)),
+                        "candidate_id": binding["candidate_id"], "parent_capture_id": capture["capture_id"],
+                        "roi_crop": roi_crop,
+                        "raw_sha256": _hash(raw),
+                    })
+                except TimeoutError as exc:
+                    metrics["vista"]["timeout"] += 1
+                    invalid_streak["vista"] += 1
+                    metrics["abstained"] += 1
+                    _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="timeout")
+                    state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": binding["candidate_id"]})
+                    if roi_crop is not None:
+                        state["trace"][-1]["roi_crop"] = roi_crop
+                except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                    metrics["vista"]["schema_invalid"] += 1
+                    invalid_streak["vista"] += 1
+                    metrics["abstained"] += 1
+                    _record_failure(state=state, slot="vista", raw=raw, error=exc, error_class="schema")
+                    state["trace"][-1].update({"status": "abstained", **deepcopy(dict(goal)), "candidate_id": binding["candidate_id"]})
+                    if roi_crop is not None:
+                        state["trace"][-1]["roi_crop"] = roi_crop
+                metrics["vista"]["latencies"].append(round((perf_counter() - started) * 1000, 3))
+                metrics["vista"]["raw_output_bytes"] += len(raw.encode("utf-8"))
 
     records = [{
         "case_id": state["case"].case_id,
