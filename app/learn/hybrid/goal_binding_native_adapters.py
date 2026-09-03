@@ -1,4 +1,8 @@
-"""Strict, non-authorizing adapters for sealed provider-native grounding output."""
+"""封闭的 provider 原生落点解析器，不授予任何执行权限。
+
+原始 UTF-8 输出由 Task 7 的 ``goal_binding_model_callers.py`` 留存为调用 trace；
+本模块按 Task 2 合同只产生 ``NativePointProposal``，绝不伪造 trace 字段。
+"""
 
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ from app.learn.hybrid.goal_binding_provider import NativePointProposal
 
 
 _PROFILE_VERSION = "goal_binding_native_profile_v1"
+_MAX_GOAL_INDEX = 1_000_000
 _COORDINATE_SPACES = frozenset(
     {"normalized_0_1", "normalized_0_1000", "capture_pixels"}
 )
@@ -19,7 +24,11 @@ _BASE_PROFILE_FIELDS = frozenset(
 
 
 def _require_goal_index(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= _MAX_GOAL_INDEX
+    ):
         raise ValueError("native goal_index is invalid")
     return value
 
@@ -123,11 +132,23 @@ def _bbox_center(
     y2 = _number(value[3], field="Phi-Ground bbox y2", high=y_high)
     if not x1 < x2 or not y1 < y2:
         raise ValueError("Phi-Ground bbox is degenerate")
-    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+    center = (x1 + (x2 - x1) / 2.0, y1 + (y2 - y1) / 2.0)
+    if not all(math.isfinite(part) for part in center):
+        raise ValueError("Phi-Ground bbox center is invalid")
+    return center
+
+
+def _closed_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("native text has duplicate object keys")
+        value[key] = item
+    return value
 
 
 def _parse_text(raw: str) -> object:
-    decoder = json.JSONDecoder()
+    decoder = json.JSONDecoder(object_pairs_hook=_closed_object)
     value, end = decoder.raw_decode(raw.lstrip())
     if raw.lstrip()[end:].strip():
         raise ValueError("native text has trailing prose")
@@ -154,13 +175,19 @@ def _ok(*, goal_index: int, point: tuple[float, float], coordinate_space: str) -
 def parse_ui_venus_point(
     raw: object, *, goal_index: int, profile: Mapping[str, object]
 ) -> NativePointProposal:
-    """Parse exactly one sealed UI-Venus point; ignore native action text entirely."""
+    """只读取 UI-Venus 的 sealed point；可选 action 仅作文本验证。"""
     goal_index = _require_goal_index(goal_index)
     coordinate_space, image_size = _require_profile(profile, native_shape="ui_venus_point_v1")
     try:
         value = _structured_raw(raw)
-        if not isinstance(value, Mapping) or set(value) != {"point"}:
+        if not isinstance(value, Mapping) or set(value) not in ({"point"}, {"point", "action"}):
             raise ValueError("UI-Venus output is not a single point")
+        if "action" in value and (
+            not isinstance(value["action"], str)
+            or not value["action"].strip()
+            or len(value["action"]) > 256
+        ):
+            raise ValueError("UI-Venus action text is invalid")
         return _ok(
             goal_index=goal_index,
             point=_pair(value["point"], field="UI-Venus point", coordinate_space=coordinate_space, image_size=image_size),
@@ -173,7 +200,7 @@ def parse_ui_venus_point(
 def parse_gui_actor_top1(
     raw: object, *, goal_index: int, profile: Mapping[str, object]
 ) -> NativePointProposal:
-    """Use GUI-Actor's first top-k point only; later items remain raw evidence."""
+    """只使用 GUI-Actor 的 ``topk_points[0]``；后续项保留给调用 trace。"""
     goal_index = _require_goal_index(goal_index)
     coordinate_space, image_size = _require_profile(profile, native_shape="gui_actor_topk_points_v1")
     try:
@@ -202,7 +229,7 @@ def parse_gui_actor_top1(
 def parse_phi_ground_any(
     raw: object, *, goal_index: int, profile: Mapping[str, object]
 ) -> NativePointProposal:
-    """Parse only the point or bbox mode sealed for Phi-Ground-Any."""
+    """只解析 Phi-Ground-Any profile sealed 的 point 或 bbox 模式。"""
     goal_index = _require_goal_index(goal_index)
     coordinate_space, image_size = _require_profile(
         profile, native_shape="phi_ground_any_v1", extra_fields=frozenset({"output_mode"})
@@ -227,7 +254,7 @@ def parse_phi_ground_any(
 def parse_gguf_grounding(
     raw: object, *, goal_index: int, profile: Mapping[str, object]
 ) -> NativePointProposal:
-    """Accept only the sealed GGUF bare JSON coordinate-pair short form."""
+    """只接受 sealed GGUF bare JSON 坐标对短格式。"""
     goal_index = _require_goal_index(goal_index)
     coordinate_space, image_size = _require_profile(profile, native_shape="gguf_bare_point_pair_v1")
     try:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import fields
+import math
 
 import pytest
 
@@ -36,6 +37,52 @@ def test_ui_venus_parses_one_official_point_and_rejects_extra_points() -> None:
     assert parse_ui_venus_point(
         {"point": [250, 375], "points": [[1, 2]]}, goal_index=0, profile=profile
     ).status == "PROVIDER_FAILURE"
+
+
+def test_ui_venus_allows_only_the_official_optional_action_text() -> None:
+    from app.learn.hybrid.goal_binding_native_adapters import parse_ui_venus_point
+
+    profile = _profile("ui_venus_1_5_2b_f16", "ui_venus_point_v1")
+    proposal = parse_ui_venus_point(
+        {"point": [250, 375], "action": "click"}, goal_index=0, profile=profile
+    )
+
+    assert proposal.status == "OK"
+    assert proposal.point == (250.0, 375.0)
+    for action in ("", "   ", 1, True, None):
+        assert parse_ui_venus_point(
+            {"point": [250, 375], "action": action}, goal_index=0, profile=profile
+        ).status == "PROVIDER_FAILURE"
+    assert parse_ui_venus_point(
+        {"point": [250, 375], "action": "click", "reasoning": "no"},
+        goal_index=0,
+        profile=profile,
+    ).status == "PROVIDER_FAILURE"
+
+
+def test_textual_ui_venus_rejects_duplicate_object_keys() -> None:
+    from app.learn.hybrid.goal_binding_native_adapters import parse_ui_venus_point
+
+    proposal = parse_ui_venus_point(
+        '{"point":[250,375],"point":[500,500]}',
+        goal_index=0,
+        profile=_profile("ui", "ui_venus_point_v1"),
+    )
+
+    assert proposal.status == "PROVIDER_FAILURE"
+    assert proposal.point is None
+
+
+@pytest.mark.parametrize("goal_index", [False, -1, 1_000_001, 10**100])
+def test_native_goal_index_has_a_fixed_safe_upper_bound(goal_index: object) -> None:
+    from app.learn.hybrid.goal_binding_native_adapters import parse_ui_venus_point
+
+    with pytest.raises(ValueError, match="goal_index"):
+        parse_ui_venus_point(
+            {"point": [250, 375]},
+            goal_index=goal_index,  # type: ignore[arg-type]
+            profile=_profile("ui", "ui_venus_point_v1"),
+        )
 
 
 def test_gui_actor_uses_topk_points_zero_only() -> None:
@@ -104,6 +151,37 @@ def test_phi_bbox_center_rejects_degenerate_or_out_of_range_box() -> None:
         proposal = parse_phi_ground_any({"bbox": bbox}, goal_index=0, profile=profile)
         assert proposal.status == "PROVIDER_FAILURE"
         assert proposal.point is None
+
+
+def test_phi_huge_finite_bbox_never_emits_a_nonfinite_center() -> None:
+    from app.learn.hybrid.goal_binding_native_adapters import parse_phi_ground_any
+
+    profile = _profile(
+        "phi", "phi_ground_any_v1", "capture_pixels", output_mode="bbox"
+    )
+    profile["image_size"] = [int(1.7e308), int(1.7e308)]
+    proposal = parse_phi_ground_any(
+        {"bbox": [1.0e308, 1.0e308, 1.7e308, 1.7e308]},
+        goal_index=0,
+        profile=profile,
+    )
+
+    assert proposal.status != "OK" or (
+        proposal.point is not None and all(math.isfinite(value) for value in proposal.point)
+    )
+
+
+@pytest.mark.parametrize("coordinate", [True, float("nan"), float("inf")])
+def test_phi_bbox_rejects_boolean_nan_and_infinite_coordinates(coordinate: object) -> None:
+    from app.learn.hybrid.goal_binding_native_adapters import parse_phi_ground_any
+
+    proposal = parse_phi_ground_any(
+        {"bbox": [coordinate, 0.1, 0.4, 0.6]},
+        goal_index=0,
+        profile=_profile("phi", "phi_ground_any_v1", "normalized_0_1", output_mode="bbox"),
+    )
+
+    assert proposal.status == "PROVIDER_FAILURE"
 
 
 def test_gguf_parser_accepts_only_the_profile_native_short_form() -> None:
