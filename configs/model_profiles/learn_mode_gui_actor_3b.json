@@ -1,30 +1,51 @@
 {
+  "contract_version": "goal_binding_model_profile_v1",
   "profile_id": "learn_mode_gui_actor_3b",
-  "label": "Learn Mode GUI-Actor 3B candidate",
-  "mode_scope": "learn_only",
-  "role": [
-    "learn_recognition_candidate",
-    "action_region_grounding"
+  "arm_id": "goal_binding_gui_actor_3b_bf16",
+  "provider_id": "gui_actor_3b_bf16",
+  "model_id": "microsoft/GUI-Actor-3B-Qwen2.5-VL",
+  "repository_id": "microsoft/GUI-Actor-3B-Qwen2.5-VL",
+  "upstream_revision": "5fb97348752cb3d50be9709f47d9ae6c99725949",
+  "artifacts": [
+    {
+      "role": "model",
+      "relative_path": "artifacts/gui_actor_3b_bf16/not_acquired/model.safetensors",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    },
+    {
+      "role": "runtime",
+      "relative_path": "artifacts/gui_actor_3b_bf16/not_acquired/python.exe",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
+    }
   ],
-  "intended_pipeline_stage": "grounding_verifier",
-  "provider_mode": "metadata_only",
-  "model_family": "GUI-Actor",
-  "model_id": "microsoft/GUI-Actor-3B",
-  "max_parameters_b": 3.0,
-  "experiment_priority": 5,
-  "input_contract": "roi_crop_plus_target_referring_expression",
-  "output_contract": "action_region_verification_v1",
-  "coordinate_output": "region_or_point_requires_validator",
-  "parser_role": "none",
-  "grounding_role": "action_region_verifier",
-  "recommended_use": "Coordinate-free action-region proposal/verifier experiment for difficult ROI grounding cases.",
-  "candidate_source_url": "https://github.com/microsoft/GUI-Actor",
-  "download_status": "not_downloaded",
-  "model_path": "",
-  "launchable": false,
+  "artifact_manifest": {
+    "status": "not_acquired",
+    "relative_path": "manifests/gui_actor_3b_bf16.json",
+    "sha256": "not_acquired"
+  },
+  "runtime": {
+    "kind": "gui_actor_official_runtime",
+    "isolated_runtime_path": "runtimes/gui_actor_3b_bf16",
+    "sha256": "not_acquired",
+    "worker": "scripts/model_servers/goal_binding_transformers_worker.py"
+  },
+  "dtype_or_quantization": "bf16",
+  "native_output": {
+    "kind": "gui_actor_topk_points_v1",
+    "raw_format": "utf8_native"
+  },
+  "coordinate_space": "normalized_0_1",
+  "preprocessing": {
+    "identity": "gui_actor_official_pointer_head_v1",
+    "source_revision": "microsoft/GUI-Actor@d98d1bbd01862f9112114b83b032f492c365a173",
+    "sha256": "not_acquired"
+  },
+  "max_output_bytes": 16384,
+  "timeout_seconds": 120,
+  "license": "MIT",
   "artifact_is_authorization": false,
   "execute_binding_enabled": false,
-  "real_action_requires_gate": true,
-  "final_submit_forbidden": true,
-  "notes": "Metadata-only Learn Mode candidate. Exact artifact/model id must be verified before download."
+  "final_submit_forbidden": true
 }
