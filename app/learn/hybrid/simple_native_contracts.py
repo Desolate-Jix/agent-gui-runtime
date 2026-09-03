@@ -10,6 +10,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.learn.recognition.uei.canonical import content_sha256
+from app.learn.hybrid.goal_binding_native_adapters import (
+    parse_gui_actor_top1,
+    parse_phi_ground_any,
+    parse_ui_venus_point,
+)
 
 
 @dataclass(frozen=True)
@@ -246,37 +251,6 @@ _NATIVE_POINT_SPACES = {
 }
 
 
-def _native_pair(value: object, *, field: str) -> tuple[float, float]:
-    if not isinstance(value, (list, tuple)) or len(value) != 2:
-        raise ValueError(f"{field} must be a pair")
-    return (
-        _number(value[0], field=field, low=0.0, high=float("inf")),
-        _number(value[1], field=field, low=0.0, high=float("inf")),
-    )
-
-
-def _native_bbox_center(
-    bbox: object, *, coordinate_space: str, image_size: tuple[int, int]
-) -> tuple[float, float]:
-    if not isinstance(bbox, (list, tuple)) or len(bbox) != 4:
-        raise ValueError("Phi-Ground bbox must contain four coordinates")
-    if coordinate_space == "normalized_0_1":
-        x_high, y_high = 1.0, 1.0
-    elif coordinate_space == "normalized_0_1000":
-        x_high, y_high = 1000.0, 1000.0
-    elif coordinate_space == "capture_pixels":
-        x_high, y_high = float(image_size[0]), float(image_size[1])
-    else:
-        raise ValueError("native coordinate_space is unsupported")
-    x1 = _number(bbox[0], field="Phi-Ground bbox x", low=0.0, high=x_high)
-    y1 = _number(bbox[1], field="Phi-Ground bbox y", low=0.0, high=y_high)
-    x2 = _number(bbox[2], field="Phi-Ground bbox x", low=0.0, high=x_high)
-    y2 = _number(bbox[3], field="Phi-Ground bbox y", low=0.0, high=y_high)
-    if not x1 < x2 or not y1 < y2:
-        raise ValueError("Phi-Ground bbox is invalid")
-    return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
-
-
 def _native_grounding_point(
     raw: object,
     *,
@@ -284,26 +258,39 @@ def _native_grounding_point(
     coordinate_space: str,
     image_size: tuple[int, int],
 ) -> tuple[float, float]:
-    if not isinstance(raw, Mapping):
-        raise ValueError("native grounding output must be an object")
+    profile: dict[str, object] = {
+        "contract_version": "goal_binding_native_profile_v1",
+        "provider_id": provider_format,
+        "coordinate_space": coordinate_space,
+    }
+    if coordinate_space == "capture_pixels":
+        profile["image_size"] = [image_size[0], image_size[1]]
     if provider_format == "ui_venus_point":
-        if set(raw) != {"point"}:
-            raise ValueError("UI-Venus native output is not closed")
-        return _native_pair(raw["point"], field="UI-Venus point")
-    if provider_format == "gui_actor_topk_points":
-        if set(raw) != {"topk_points"} or not isinstance(raw["topk_points"], list) or not raw["topk_points"]:
-            raise ValueError("GUI-Actor native output is not a non-empty closed top-k list")
-        # 公平基准固定只使用第一项；后续命中也不能挽救 top-1 失败。
-        return _native_pair(raw["topk_points"][0], field="GUI-Actor topk_points[0]")
-    if provider_format == "phi_ground_point_or_bbox":
-        if set(raw) == {"point"}:
-            return _native_pair(raw["point"], field="Phi-Ground point")
-        if set(raw) != {"bbox"}:
-            raise ValueError("Phi-Ground native output must contain exactly one point or bbox")
-        return _native_bbox_center(
-            raw["bbox"], coordinate_space=coordinate_space, image_size=image_size
+        proposal = parse_ui_venus_point(
+            raw, goal_index=0, profile={**profile, "native_shape": "ui_venus_point_v1"}
         )
-    raise AssertionError("provider format allowlist and parser are inconsistent")
+    elif provider_format == "gui_actor_topk_points":
+        proposal = parse_gui_actor_top1(
+            raw,
+            goal_index=0,
+            profile={**profile, "native_shape": "gui_actor_topk_points_v1"},
+        )
+    elif provider_format == "phi_ground_point_or_bbox":
+        mode = "point" if isinstance(raw, Mapping) and set(raw) == {"point"} else "bbox"
+        proposal = parse_phi_ground_any(
+            raw,
+            goal_index=0,
+            profile={
+                **profile,
+                "native_shape": "phi_ground_any_v1",
+                "output_mode": mode,
+            },
+        )
+    else:
+        raise AssertionError("provider format allowlist and parser are inconsistent")
+    if proposal.status != "OK" or proposal.point is None:
+        raise ValueError("native grounding output is invalid")
+    return proposal.point
 
 
 def _capture_point(

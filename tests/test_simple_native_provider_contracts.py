@@ -529,3 +529,45 @@ def test_native_grounding_rejects_unknown_provider_format_explicitly() -> None:
             goal_index=0,
             confidence=0.5,
         )
+
+
+def test_native_grounding_compatibility_entry_delegates_ui_venus_parsing(monkeypatch) -> None:
+    from app.learn.hybrid import simple_native_contracts as contracts
+    from app.learn.hybrid.goal_binding_provider import NativePointProposal
+
+    request = _native_point_request()
+    seen: list[dict[str, object]] = []
+
+    def parse(raw: object, *, goal_index: int, profile: dict[str, object]) -> NativePointProposal:
+        assert raw == {"point": [25, 30]}
+        assert goal_index == 0
+        seen.append(profile)
+        return NativePointProposal(
+            goal_index=goal_index,
+            point=(25.0, 30.0),
+            coordinate_space="capture_pixels",
+            confidence=None,
+            status="OK",
+            failure_reason=None,
+        )
+
+    monkeypatch.setattr(contracts, "parse_ui_venus_point", parse)
+    result = contracts.bind_native_grounding_output(
+        {"point": [25, 30]},
+        provider_format="ui_venus_point",
+        coordinate_space="capture_pixels",
+        source_image_size=(100, 80),
+        runtime_request=request,
+        source_capture_identity=_native_source_capture_identity(request),
+        goal_index=0,
+        confidence=0.8,
+    )
+
+    assert result["status"] == "BOUND"
+    assert seen == [{
+        "contract_version": "goal_binding_native_profile_v1",
+        "provider_id": "ui_venus_point",
+        "native_shape": "ui_venus_point_v1",
+        "coordinate_space": "capture_pixels",
+        "image_size": [100, 80],
+    }]
