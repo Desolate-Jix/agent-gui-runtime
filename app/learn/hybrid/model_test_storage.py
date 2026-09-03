@@ -1,0 +1,252 @@
+"""Fail-closed storage and deletion boundary for disposable model-test artifacts."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import stat
+
+
+MODEL_TEST_ROOT = Path(r"E:\模型测试")
+MODEL_TEST_MAX_BYTES = 32_212_254_720
+_STAGING_MARGIN_NUMERATOR = 105
+_MANIFEST_VERSION = "model_test_artifact_manifest_v1"
+_RESERVED_TOP_LEVEL = frozenset({"manifests", "reports", "staging"})
+
+
+def _is_reparse(path: Path) -> bool:
+    try:
+        mode = path.lstat().st_mode
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError as exc:
+        raise ValueError("storage target is unavailable") from exc
+    return stat.S_ISLNK(mode) or bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _safe_component(value: str, *, name: str) -> str:
+    if not isinstance(value, str) or not value or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for character in value):
+        raise ValueError(f"{name} is unsafe")
+    return value
+
+
+def _immutable_revision(value: str) -> str:
+    if not isinstance(value, str) or len(value) != 40 or any(character not in "0123456789abcdef" for character in value):
+        raise ValueError("revision must be an immutable lowercase 40-character commit")
+    return value
+
+
+def _within(root: Path, target: Path) -> bool:
+    try:
+        return os.path.commonpath((str(root), str(target))) == str(root)
+    except ValueError:
+        return False
+
+
+def _guard(root: Path, target: Path, *, allow_root: bool = False) -> tuple[Path, Path]:
+    root_abs = root.absolute()
+    target_abs = target.absolute()
+    if not _within(root_abs, target_abs):
+        raise ValueError("storage target is outside the configured root")
+    try:
+        root_resolved = root.resolve(strict=True)
+        target_resolved = target.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("storage target is unavailable") from exc
+    if not _within(root_resolved, target_resolved):
+        raise ValueError("storage target escapes root through traversal or reparse point")
+    if not allow_root and target_resolved == root_resolved:
+        raise ValueError("storage root itself is never a deletion target")
+    relative = target_abs.relative_to(root_abs)
+    current = root_abs
+    if _is_reparse(current):
+        raise ValueError("storage root is a reparse point")
+    for part in relative.parts:
+        current /= part
+        if _is_reparse(current):
+            raise ValueError("storage target contains a symlink or reparse point")
+    return root_resolved, target_resolved
+
+
+def _sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _logical_files(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    result: list[Path] = []
+    for directory, dirs, files in os.walk(root, followlinks=False):
+        current = Path(directory)
+        for name in list(dirs):
+            candidate = current / name
+            if _is_reparse(candidate):
+                dirs.remove(name)
+                result.append(candidate)
+        for name in files:
+            result.append(current / name)
+    return result
+
+
+def inventory_storage(root: Path = MODEL_TEST_ROOT) -> dict[str, object]:
+    """Return logical bytes without creating the storage root or opening a network client."""
+    root = Path(root)
+    total = 0
+    files = 0
+    for path in _logical_files(root):
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise ValueError("storage inventory changed while scanning") from exc
+        if stat.S_ISREG(info.st_mode):
+            total += info.st_size
+            files += 1
+    return {"root": str(root), "logical_bytes": total, "file_count": files, "max_bytes": MODEL_TEST_MAX_BYTES, "within_cap": total <= MODEL_TEST_MAX_BYTES}
+
+
+def assert_download_fits(*, root: Path, remote_bytes: int) -> None:
+    if isinstance(remote_bytes, bool) or not isinstance(remote_bytes, int) or remote_bytes < 0:
+        raise ValueError("remote_bytes is invalid")
+    current = int(inventory_storage(root)["logical_bytes"])
+    staged = (remote_bytes * _STAGING_MARGIN_NUMERATOR + 99) // 100
+    if current + staged > MODEL_TEST_MAX_BYTES:
+        raise ValueError("projected model download exceeds the 30 GiB storage cap")
+
+
+def _manifest_path(root: Path, provider_id: str, revision: str) -> Path:
+    return root / "manifests" / f"{provider_id}-{revision}.json"
+
+
+def _validate_registered_file(root: Path, path: Path) -> tuple[Path, str]:
+    root_resolved, resolved = _guard(root, path)
+    relative = resolved.relative_to(root_resolved)
+    if not relative.parts or relative.parts[0] in _RESERVED_TOP_LEVEL:
+        raise ValueError("registered file is not a model weight or runtime file")
+    info = resolved.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("registered target is not a regular file")
+    if getattr(info, "st_nlink", 1) != 1:
+        raise ValueError("registered target has hardlink ambiguity")
+    return resolved, relative.as_posix()
+
+
+def register_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, revision: str, files: Sequence[Path]) -> Path:
+    _safe_component(provider_id, name="provider_id")
+    _immutable_revision(revision)
+    if not isinstance(repo_id, str) or not repo_id.strip() or not isinstance(files, Sequence) or isinstance(files, (str, bytes)) or not files:
+        raise ValueError("artifact registration is invalid")
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    entries: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for file in files:
+        if not isinstance(file, Path):
+            raise ValueError("registered file path is invalid")
+        resolved, relative = _validate_registered_file(root, file)
+        if relative in seen:
+            raise ValueError("registered file is duplicated")
+        seen.add(relative)
+        entries.append({"relative_path": relative, "bytes": resolved.stat().st_size, "sha256": _sha256(resolved)})
+    entries.sort(key=lambda entry: str(entry["relative_path"]))
+    manifest = _manifest_path(root, provider_id, revision)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    if manifest.exists():
+        raise ValueError("artifact manifest already exists")
+    payload = {"contract_version": _MANIFEST_VERSION, "provider_id": provider_id, "repo_id": repo_id, "revision": revision, "files": entries, "artifact_is_authorization": False}
+    temporary = manifest.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(manifest)
+    return manifest
+
+
+def _load_manifest(root: Path, manifest_path: Path) -> tuple[dict[str, object], Path, Path]:
+    root_resolved, resolved_manifest = _guard(root, manifest_path)
+    if resolved_manifest.parent != root_resolved / "manifests":
+        raise ValueError("manifest is not stored in the root manifests directory")
+    try:
+        payload = json.loads(resolved_manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("manifest is unreadable") from exc
+    if not isinstance(payload, Mapping) or payload.get("contract_version") != _MANIFEST_VERSION:
+        raise ValueError("manifest is invalid")
+    provider = payload.get("provider_id")
+    revision = payload.get("revision")
+    _safe_component(provider, name="provider_id")
+    _immutable_revision(revision)
+    if resolved_manifest != _manifest_path(root_resolved, provider, revision):
+        raise ValueError("manifest path does not match its identity")
+    if not isinstance(payload.get("files"), list) or not payload["files"]:
+        raise ValueError("manifest files are invalid")
+    return dict(payload), root_resolved, resolved_manifest
+
+
+def delete_registered_artifact(*, root: Path, manifest_path: Path) -> dict[str, object]:
+    payload, root_resolved, resolved_manifest = _load_manifest(Path(root), Path(manifest_path))
+    registered: list[Path] = []
+    seen: set[str] = set()
+    for entry in payload["files"]:
+        if not isinstance(entry, Mapping) or set(entry) != {"relative_path", "bytes", "sha256"}:
+            raise ValueError("manifest entry is invalid")
+        relative, expected_bytes, expected_sha = entry["relative_path"], entry["bytes"], entry["sha256"]
+        if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or ".." in Path(relative).parts:
+            raise ValueError("manifest entry has outside traversal")
+        if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) or expected_bytes < 0 or not isinstance(expected_sha, str) or len(expected_sha) != 64:
+            raise ValueError("manifest entry is invalid")
+        candidate = root_resolved / Path(relative)
+        resolved, actual_relative = _validate_registered_file(root_resolved, candidate)
+        if actual_relative != relative or relative in seen:
+            raise ValueError("manifest entry is unregistered or duplicated")
+        seen.add(relative)
+        if resolved.stat().st_size != expected_bytes or _sha256(resolved) != expected_sha:
+            raise ValueError("registered file was modified")
+        registered.append(resolved)
+    for file in registered:
+        file.unlink()
+    receipt = {"contract_version": "model_test_artifact_deletion_receipt_v1", "provider_id": payload["provider_id"], "revision": payload["revision"], "deleted_count": len(registered), "deleted_files": sorted(seen), "manifest_path": str(resolved_manifest), "verified": True}
+    reports = root_resolved / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    receipt_path = reports / f"{payload['provider_id']}-{payload['revision']}-deletion.json"
+    receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    receipt["receipt_path"] = str(receipt_path)
+    return receipt
+
+
+def cleanup_failed_staging(*, root: Path, staging_path: Path) -> None:
+    root_resolved, staging = _guard(Path(root), Path(staging_path))
+    relative = staging.relative_to(root_resolved)
+    if not relative.parts or relative.parts[0] != "staging":
+        raise ValueError("staging target is outside the guarded staging directory")
+    for path in sorted(_logical_files(staging), key=lambda item: len(item.parts), reverse=True):
+        _guard(root_resolved, path)
+        if path.is_file():
+            path.unlink()
+    for directory, _, _ in os.walk(staging, topdown=False, followlinks=False):
+        current = Path(directory)
+        _guard(root_resolved, current)
+        current.rmdir()
+
+
+def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, revision: str, staging_path: Path, expected_files: Mapping[str, int]) -> Path:
+    _safe_component(provider_id, name="provider_id")
+    _immutable_revision(revision)
+    root = Path(root)
+    root_resolved, staging = _guard(root, Path(staging_path))
+    if staging.relative_to(root_resolved).parts[:2] != ("staging", provider_id):
+        raise ValueError("staging target is outside provider-specific staging")
+    if not isinstance(expected_files, Mapping) or not expected_files:
+        raise ValueError("expected files are invalid")
+    actual = {path.relative_to(staging).as_posix(): path for path in _logical_files(staging) if path.is_file()}
+    if set(actual) != set(expected_files) or any(not isinstance(size, int) or size < 0 or actual[name].stat().st_size != size for name, size in expected_files.items()):
+        raise ValueError("downloaded files do not match expected bytes")
+    destination = root_resolved / "artifacts" / provider_id / revision
+    if destination.exists():
+        raise ValueError("artifact destination already exists")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging.rename(destination)
+    return register_downloaded_artifact(root=root_resolved, provider_id=provider_id, repo_id=repo_id, revision=revision, files=sorted(actual_path for actual_path in destination.rglob("*") if actual_path.is_file()))
