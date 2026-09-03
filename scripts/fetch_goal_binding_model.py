@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-from hashlib import sha256
+from hashlib import sha1, sha256
 import json
 import os
 from pathlib import Path
 import sys
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+_PROFILE_DIRECTORY = _REPOSITORY_ROOT / "configs" / "model_profiles"
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
@@ -42,6 +43,116 @@ def _profile(path: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("model profile is invalid")
     return value
+
+
+def _alias(profile: dict[str, object], primary: str, legacy: str) -> object:
+    if primary in profile and legacy in profile and profile[primary] != profile[legacy]:
+        raise ValueError(f"profile conflicts with checked-in identity: {primary}/{legacy}")
+    return profile.get(primary, profile.get(legacy))
+
+
+def _artifact_names(names: object) -> list[str]:
+    if not isinstance(names, list):
+        raise ValueError("profile artifact declaration is invalid")
+    seen: set[str] = set()
+    for name in names:
+        if not isinstance(name, str) or not name or "\\" in name:
+            raise ValueError("unsafe checkpoint artifact path")
+        parts = name.split("/")
+        for part in parts:
+            base = part.split(".", 1)[0].upper()
+            if (not part or part in {".", ".."} or part.endswith((".", " "))
+                    or any(ord(char) < 32 or char in '<>:"|?*' for char in part)
+                    or base in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}):
+                raise ValueError(f"unsafe checkpoint artifact path: {name}")
+        folded = name.casefold()
+        if parts[0].casefold() in {".cache", ".goal-binding-transaction.json"}:
+            raise ValueError(f"unsafe checkpoint artifact path: {name}")
+        if folded in seen:
+            raise ValueError(f"duplicate checkpoint artifact path: {name}")
+        seen.add(folded)
+    for name in seen:
+        parts = name.split("/")
+        if any("/".join(parts[:index]) in seen for index in range(1, len(parts))):
+            raise ValueError(f"checkpoint artifact path collision: {name}")
+    return names
+
+
+def project_profile(*, profile: dict[str, object] | None = None, provider_id: str | None = None,
+                    repo_id: str | None = None, full_checkpoint: bool = False) -> dict[str, object]:
+    """Project checked-in identities without importing a model client or writing storage."""
+    canonical = [_profile(path) for path in sorted(_PROFILE_DIRECTORY.glob("*.json"))]
+    canonical = [item for item in canonical if item.get("contract_version") == "goal_binding_model_profile_v1"]
+    if profile is None:
+        if provider_id is None and repo_id is None:
+            raise ValueError("a profile or checked-in provider/repository selector is required")
+        matches = [item for item in canonical if (provider_id is None or item.get("provider_id") == provider_id)
+                   and (repo_id is None or item.get("repository_id") == repo_id)]
+        if len(matches) != 1:
+            raise ValueError("selectors must resolve a unique checked-in profile")
+        profile = matches[0]
+    provider = profile.get("provider_id")
+    repository = _alias(profile, "repository_id", "repo_id")
+    revision = _alias(profile, "upstream_revision", "revision")
+    if (provider_id is not None and provider_id != provider) or (repo_id is not None and repo_id != repository):
+        raise ValueError("selectors conflict with checked-in profile identity")
+    if not isinstance(provider, str) or provider in {".", ".."} or not isinstance(repository, str) or not repository:
+        raise ValueError("profile artifact declaration is invalid")
+    _safe_component(provider, name="provider_id")
+    matches = [item for item in canonical if item.get("provider_id") == provider or item.get("repository_id") == repository
+               or (profile.get("profile_id") is not None and item.get("profile_id") == profile["profile_id"])]
+    checkpoint = full_checkpoint or profile.get("full_checkpoint") is True
+    if matches or profile.get("contract_version") == "goal_binding_model_profile_v1":
+        matches = [item for item in matches if item.get("provider_id") == provider and item.get("repository_id") == repository]
+        if len(matches) != 1:
+            raise ValueError("profile must resolve a unique checked-in identity")
+        selected = matches[0]
+        if revision != selected.get("upstream_revision"):
+            raise ValueError("profile revision does not match checked-in revision")
+        if "profile_id" in profile and profile["profile_id"] != selected.get("profile_id"):
+            raise ValueError("profile_id does not match checked-in identity")
+        _immutable_revision(revision)
+        checkpoint = checkpoint or selected.get("runtime", {}).get("kind") != "llama_cpp"
+        requested = []
+        if not checkpoint:
+            for artifact in selected.get("artifacts", []):
+                if artifact.get("role") not in {"model", "mmproj"}:
+                    continue
+                parts = artifact.get("relative_path", "").split("/", 3)
+                if len(parts) != 4 or parts[:2] != ["artifacts", provider] or parts[2] not in {"not_acquired", revision}:
+                    raise ValueError("checked-in artifact path is invalid")
+                requested.append(parts[3])
+    else:
+        if provider_id is not None or repo_id is not None or "repository_id" in profile or "upstream_revision" in profile:
+            raise ValueError("profile must resolve a unique checked-in identity")
+        # 旧的独立文件声明保留显式解析分支；规范档案绝不回退到 main。
+        revision = profile.get("revision", "main")
+        requested = profile.get("artifact_files", [])
+        if checkpoint:
+            _immutable_revision(revision)
+    requested = _artifact_names(requested)
+    if not checkpoint and not requested:
+        raise ValueError("profile artifact declaration is invalid")
+    if not isinstance(revision, str) or not revision:
+        raise ValueError("profile revision is invalid")
+    return {"provider_id": provider, "repo_id": repository, "revision": revision,
+            "artifact_files": requested, "full_checkpoint": checkpoint}
+
+
+def _field(value: object, name: str) -> object:
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
+def _hex_digest(value: object, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and all(char in "0123456789abcdef" for char in value)
+
+
+def _git_blob_digest(path: Path, size: int) -> str:
+    value = sha1(b"blob " + str(size).encode("ascii") + b"\0")
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
 
 
 def _same_production_root(root: Path) -> bool:
@@ -143,14 +254,12 @@ def _pin_imported_hub_xet(module: object, xet_cache: Path) -> None:
             setattr(constants, "HF_XET_CACHE", str(xet_cache))
 
 
-def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
+def fetch_profile(*, profile: dict[str, object], root: Path, full_checkpoint: bool = False) -> Path:
     """Resolve and download only explicitly declared files; imported lazily on request."""
     if not _same_production_root(Path(root)):
         raise ValueError("production acquisition is pinned to E:\\模型测试; injected roots are test-only library primitives")
-    provider_id, repo_id, requested = profile.get("provider_id"), profile.get("repo_id"), profile.get("artifact_files")
-    if not isinstance(provider_id, str) or not isinstance(repo_id, str) or not isinstance(requested, list) or not requested or any(not isinstance(name, str) or not name or Path(name).is_absolute() or ".." in Path(name).parts for name in requested):
-        raise ValueError("profile artifact declaration is invalid")
-    _safe_component(provider_id, name="provider_id")
+    profile = project_profile(profile=profile, full_checkpoint=full_checkpoint)
+    provider_id, repo_id, requested = profile["provider_id"], profile["repo_id"], profile["artifact_files"]
     root = _storage._require_model_test_root(Path(root))
     _reject_reparse_root(root)
     xet_cache = _configure_xet(root)
@@ -161,7 +270,7 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
     except ImportError as exc:
         raise RuntimeError("huggingface_hub is required only for an explicit fetch") from exc
     api = HfApi(endpoint="https://huggingface.co")
-    requested_revision = profile.get("revision", "main")
+    requested_revision = profile["revision"]
     info = api.model_info(repo_id, revision=requested_revision, files_metadata=True)
     revision = getattr(info, "sha", None)
     try:
@@ -170,22 +279,39 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
         raise ValueError("Hugging Face did not resolve an immutable lowercase commit") from exc
     if not isinstance(revision, str):
         raise ValueError("Hugging Face did not resolve an immutable commit")
-    siblings = {getattr(item, "rfilename", None): item for item in getattr(info, "siblings", ())}
+    if _hex_digest(requested_revision, 40) and revision != requested_revision:
+        raise ValueError("Hugging Face resolved revision does not match the requested immutable revision")
+    sibling_items = list(getattr(info, "siblings", ()) or ())
+    names = _artifact_names([_field(item, "rfilename") for item in sibling_items])
+    siblings = dict(zip(names, sibling_items))
+    if profile["full_checkpoint"]:
+        requested = names
+        if not requested:
+            raise ValueError("Hugging Face checkpoint metadata is empty")
     expected: dict[str, int] = {}
     expected_hashes: dict[str, str] = {}
+    remote_hashes: dict[str, str] = {}
+    blob_hashes: dict[str, str] = {}
     for name in requested:
         sibling = siblings.get(name)
-        size = getattr(sibling, "size", None)
-        lfs = getattr(sibling, "lfs", None)
-        if not isinstance(size, int) and isinstance(lfs, dict):
-            size = lfs.get("size")
-        if not isinstance(size, int) or size < 0:
+        size = _field(sibling, "size")
+        lfs = _field(sibling, "lfs")
+        if size is None:
+            size = _field(lfs, "size")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
             raise ValueError(f"Hugging Face size is unavailable for {name}")
         expected[name] = size
-        oid = (lfs.get("sha256") or lfs.get("oid")) if isinstance(lfs, dict) else (getattr(lfs, "sha256", None) or getattr(lfs, "oid", None))
-        if not isinstance(oid, str) or len(oid) != 64 or any(char not in "0123456789abcdef" for char in oid):
-            raise ValueError(f"Hugging Face SHA-256 is unavailable for {name}")
-        expected_hashes[name] = oid
+        if lfs is not None:
+            oid = _field(lfs, "sha256") or _field(lfs, "oid")
+            if not _hex_digest(oid, 64):
+                raise ValueError(f"Hugging Face SHA-256 is unavailable for {name}")
+            remote_hashes[name] = oid
+        else:
+            blob = _field(sibling, "blob_id") or _field(sibling, "blobId")
+            if blob is not None:
+                if not _hex_digest(blob, 40):
+                    raise ValueError(f"Hugging Face Git blob hash is invalid for {name}")
+                blob_hashes[name] = blob
     with _quota_reservation(root):
         _storage._guarded_directory(root, ".cache", "huggingface", "xet")
         assert_download_fits(root=root, remote_bytes=sum(expected.values()))
@@ -197,8 +323,13 @@ def fetch_profile(*, profile: dict[str, object], root: Path) -> Path:
                 if downloaded.resolve() != target.resolve():
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(downloaded.read_bytes())
-                if target.stat().st_size != expected[name] or (name in expected_hashes and _digest(target) != expected_hashes[name]):
+                _storage._guard(root, target)
+                digest = _digest(target)
+                if (target.stat().st_size != expected[name]
+                        or (name in remote_hashes and digest != remote_hashes[name])
+                        or (name in blob_hashes and _git_blob_digest(target, expected[name]) != blob_hashes[name])):
                     raise ValueError(f"download verification failed for {name}")
+                expected_hashes[name] = digest
             remove_huggingface_local_metadata(root=root, staging_path=staging)
             marker = staging / ".goal-binding-transaction.json"
             marker.unlink()
@@ -218,15 +349,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=MODEL_TEST_ROOT)
     parser.add_argument("--inventory-only", action="store_true", help="Print logical storage usage without network or writes.")
     parser.add_argument("--profile", type=Path, help="Explicit JSON profile required for network acquisition.")
+    parser.add_argument("--provider-id", help="Select a unique checked-in provider identity.")
+    parser.add_argument("--repo-id", help="Select or verify the exact checked-in repository identity.")
+    parser.add_argument("--full-checkpoint", action="store_true", help="Fetch every file in pinned checkpoint metadata.")
     args = parser.parse_args(argv)
     if args.inventory_only:
         print(json.dumps(inventory_storage(args.root), ensure_ascii=False, sort_keys=True))
         return 0
-    if args.profile is None:
-        parser.error("--profile is required unless --inventory-only is used")
+    try:
+        profile = project_profile(profile=_profile(args.profile) if args.profile is not None else None,
+                                  provider_id=args.provider_id, repo_id=args.repo_id, full_checkpoint=args.full_checkpoint)
+    except ValueError as exc:
+        parser.error(str(exc))
     if not _same_production_root(args.root):
         parser.error("production acquisition is pinned to E:\\模型测试; --root is inventory-only")
-    manifest = fetch_profile(profile=_profile(args.profile), root=args.root)
+    manifest = fetch_profile(profile=profile, root=args.root)
     print(json.dumps({"manifest_path": str(manifest), "artifact_is_authorization": False}, ensure_ascii=False, sort_keys=True))
     return 0
 
