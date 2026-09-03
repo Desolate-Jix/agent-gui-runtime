@@ -30,21 +30,21 @@
     },
     {
       "role": "source",
-      "relative_path": "reports/managed-incumbent-80bef915b20b4fb98bd8c2685d0c012c/source.json",
-      "sha256": "01698a43088c505669ce7d0b97d1e74c0aad1d01e7b867a525d1ffe1402be751",
+      "relative_path": "reports/managed-incumbent-810a596216b04db08e95a80ae0f002d6/source.json",
+      "sha256": "66c0bbcbe78cc8f7cfcd5fd4b083bedfd9dda2ec945ea2b38163bb147566043a",
       "bytes": 30697
     },
     {
       "role": "preprocessing",
-      "relative_path": "reports/managed-incumbent-80bef915b20b4fb98bd8c2685d0c012c/preprocessing.json",
-      "sha256": "a9d101f8a5bdeabb107433f5db2d40c368494f42de26b86782e612fc61ce033d",
+      "relative_path": "reports/managed-incumbent-810a596216b04db08e95a80ae0f002d6/preprocessing.json",
+      "sha256": "47846a5c21d9e323cb392cd9a8a8f9462cc1d68d56580a3c3c3e35655e9796e5",
       "bytes": 1498
     }
   ],
   "artifact_manifest": {
     "status": "verified",
-    "relative_path": "reports/managed-incumbent-80bef915b20b4fb98bd8c2685d0c012c/manifest.json",
-    "sha256": "c55d5e041ef1fff12b0ed8cdc59025adf67cc8072e8b28007ec0e8dba42f934c"
+    "relative_path": "reports/managed-incumbent-810a596216b04db08e95a80ae0f002d6/manifest.json",
+    "sha256": "4778e4fd3b2e2ffacc3d0346ecc78f417cd0fe0bccc72a5be8da614b95bf0a59"
   },
   "runtime": {
     "kind": "llama_cpp",
@@ -59,8 +59,8 @@
   },
   "preprocessing": {
     "identity": "sealed_incumbent_qwen_projection_v1",
-    "source_revision": "local-repo@b1a60c7dd10d03a68059702442922893deb22415",
-    "sha256": "a9d101f8a5bdeabb107433f5db2d40c368494f42de26b86782e612fc61ce033d"
+    "source_revision": "local-repo@d2df83c5b6b7f999368ec5d35b75e33540e2600e",
+    "sha256": "47846a5c21d9e323cb392cd9a8a8f9462cc1d68d56580a3c3c3e35655e9796e5"
   },
   "max_output_bytes": 16384,
   "timeout_seconds": 120,
