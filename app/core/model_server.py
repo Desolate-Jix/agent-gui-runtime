@@ -26,6 +26,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 MODEL_PROFILE_DIR = ROOT_DIR / "configs" / "model_profiles"
 MODEL_SERVER_LEASE_DIR = ROOT_DIR / "logs" / "model_server_leases"
 _QWEN_HTTP_RESPONSE_MAX_BYTES = 1024 * 1024
+_SIMPLE_NATIVE_HTTP_REQUEST_MAX_BYTES = 32 * 1024 * 1024
 _ACTIVE_SERVER_STATUSES = {"running", "loading", "busy"}
 _QWEN_LOCAL_LEASE_LOCK = threading.Lock()
 _QWEN_LOCAL_ACQUISITION_LOCK = threading.Lock()
@@ -635,6 +636,109 @@ def run_qwen_binding_model(
     return parsed
 
 
+def run_qwen_projection_model(
+    *,
+    projection: Mapping[str, Any],
+    screenshot_bytes: bytes,
+    screenshot_media_type: str,
+    screenshot_sha256: str,
+    model_lease: dict[str, Any],
+    timeout_seconds: float = 120.0,
+) -> dict[str, Any]:
+    """使用精确租约发送不含 runtime ID 的短 ordinal 请求。"""
+    compact = deepcopy(dict(projection)) if isinstance(projection, Mapping) else None
+    if not isinstance(compact, dict) or set(compact) != {"image_size", "candidates"}:
+        raise ValueError("Qwen model projection is not closed")
+    image_size, candidates = compact["image_size"], compact["candidates"]
+    if (
+        not isinstance(image_size, list)
+        or len(image_size) != 2
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in image_size
+        )
+        or not isinstance(candidates, list)
+    ):
+        raise ValueError("Qwen model projection image or candidates are invalid")
+    for index, candidate in enumerate(candidates):
+        if (
+            not isinstance(candidate, dict)
+            or set(candidate) != {"i", "box", "active"}
+            or candidate.get("i") != index
+            or not isinstance(candidate.get("active"), bool)
+            or not isinstance(candidate.get("box"), list)
+            or len(candidate["box"]) != 4
+            or any(isinstance(edge, bool) or not isinstance(edge, int) for edge in candidate["box"])
+        ):
+            raise ValueError("Qwen model projection candidate is invalid")
+    if not isinstance(screenshot_bytes, bytes) or not screenshot_bytes:
+        raise ValueError("verified screenshot bytes are required")
+    if screenshot_media_type not in {"image/png", "image/jpeg"}:
+        raise ValueError("verified screenshot media type is invalid")
+    if sha256(screenshot_bytes).hexdigest() != screenshot_sha256:
+        raise ValueError("verified screenshot hash mismatch")
+    profile = _profile_for_qwen_model_lease(model_lease)
+    endpoint = str(profile.get("endpoint") or "").strip() or model_base_url(profile) + "/chat/completions"
+    image_url = "data:" + screenshot_media_type + ";base64," + base64.b64encode(screenshot_bytes).decode("ascii")
+    prompt = (
+        "Bind every ordinal candidate exactly once in order. Return only the closed bindings JSON. "
+        "Projection: "
+        + json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
+    body_payload = {
+        "model": str(profile.get("model_name") or profile.get("model_id") or "qwen"),
+        "temperature": 0.0,
+        "max_tokens": 1536,
+        "response_format": {
+            "type": "json_object",
+            "schema": _qwen_model_projection_response_schema(compact),
+        },
+        "messages": [
+            {"role": "system", "content": "Return one compact closed JSON object only."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            },
+        ],
+    }
+    body = json.dumps(body_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(body) > _SIMPLE_NATIVE_HTTP_REQUEST_MAX_BYTES:
+        raise ValueError("Qwen projection HTTP request byte limit exceeded")
+    http_request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    request_attempt = mark_qwen_model_request_in_flight(model_lease=model_lease)
+    if request_attempt is None:
+        raise ValueError("exact Qwen model lease could not be marked in flight")
+    try:
+        with urllib.request.urlopen(http_request, timeout=float(timeout_seconds)) as response:
+            response_bytes = response.read(_QWEN_HTTP_RESPONSE_MAX_BYTES + 1)
+            if len(response_bytes) > _QWEN_HTTP_RESPONSE_MAX_BYTES:
+                raise ValueError("Qwen HTTP response byte limit exceeded")
+            mark_qwen_model_response_body_complete(
+                model_lease=model_lease,
+                request_attempt=request_attempt,
+            )
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Qwen projection request failed: {error}") from error
+    response_payload = json.loads(response_bytes.decode("utf-8"))
+    choices = response_payload.get("choices") if isinstance(response_payload, dict) else None
+    message = choices[0].get("message") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        raise ValueError("Qwen projection response has no JSON message content")
+    parsed = json.loads(content)
+    if not isinstance(parsed, dict) or set(parsed) != {"bindings"}:
+        raise ValueError("Qwen projection response is not closed JSON")
+    return parsed
+
+
 def prepare_qwen_model_request_acquisition_owner(
     request_id: str, *, runtime_owner_ref: Mapping[str, object]
 ) -> dict[str, Any]:
@@ -1044,6 +1148,61 @@ def ensure_and_acquire_qwen_model_lease(
         )
 
 
+def ensure_and_acquire_scoped_qwen_model_lease(
+    *,
+    stage: str,
+    profile_id: str | None,
+    request_id: str,
+    wait_seconds: float,
+    profile_validator: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """不创建 benchmark owner/materialization 的精确 scoped Qwen 租约。"""
+    owner_request_id = _normalized_qwen_request_id(request_id)
+    paths = _qwen_acquisition_artifact_paths(owner_request_id)
+    if any(path.exists() for path in paths.values()):
+        raise ValueError("scoped Qwen request collides with benchmark acquisition artifacts")
+    with _qwen_acquisition_lock():
+        profile = deepcopy(profile_for_stage(stage, profile_id))
+        if profile_validator is not None:
+            profile_validator(deepcopy(profile))
+        scope_name = os.environ.get("AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", "").strip()
+        if not scope_name:
+            raise ValueError("scoped Qwen acquisition requires an exact process scope")
+        readiness = _ensure_model_server_for_profile(
+            profile=profile,
+            stage=stage,
+            wait_until_ready=True,
+            wait_seconds=wait_seconds,
+        )
+        after = readiness.get("after")
+        before = readiness.get("before")
+        status = str(
+            (after.get("status") if isinstance(after, dict) else "")
+            or (before.get("status") if isinstance(before, dict) else "")
+        ).strip()
+        if status != "running" or readiness.get("profile") != _public_profile(profile):
+            raise RuntimeError("scoped Qwen model service readiness is not exact")
+        if readiness.get("started") is not True:
+            raise RuntimeError("scoped Qwen cannot adopt a provider outside its exact process scope")
+        from app.learn.hybrid.windows_process_scope import WindowsProcessScope
+
+        scope = WindowsProcessScope(scope_name, create=False)
+        try:
+            member_pids = scope.pids()
+        finally:
+            scope.close()
+        binding = _observe_qwen_server_binding(profile, readiness)
+        identity = binding.get("server_process_identity") if isinstance(binding, dict) else None
+        if not _valid_process_identity(identity) or identity["pid"] not in member_pids:
+            raise RuntimeError("scoped Qwen provider identity is outside its exact process scope")
+        return _acquire_qwen_model_lease_under_acquisition_lock(
+            profile=profile,
+            request_id=owner_request_id,
+            readiness=readiness,
+            publish_runtime_acquired=False,
+        )
+
+
 def acquire_qwen_model_lease(
     *,
     profile: dict[str, Any],
@@ -1068,6 +1227,7 @@ def _acquire_qwen_model_lease_under_acquisition_lock(
     profile: dict[str, Any],
     request_id: str,
     readiness: dict[str, Any],
+    publish_runtime_acquired: bool = True,
 ) -> dict[str, Any]:
     profile_id = str(profile.get("profile_id") or "").strip()
     owner_request_id = str(request_id or "").strip()
@@ -1196,7 +1356,7 @@ def _acquire_qwen_model_lease_under_acquisition_lock(
             state=state,
         )
     runtime_path = os.environ.get("AGENT_GUI_HYBRID_PROVIDER_RUNTIME_PATH", "").strip()
-    if process_scope_name and runtime_path:
+    if publish_runtime_acquired and process_scope_name and runtime_path:
         _publish_qwen_runtime_acquired(
             Path(runtime_path),
             request_id=owner_request_id,
@@ -2370,6 +2530,17 @@ def release_managed_qwen_model_lease(
     )
 
 
+def release_scoped_qwen_model_lease(
+    model_lease: dict[str, Any], reason: str
+) -> dict[str, Any]:
+    """释放不带 benchmark acquisition artifact 的 scoped Qwen 租约。"""
+    return _release_exact_qwen_lease(
+        model_lease,
+        reason=reason,
+        persist_benchmark_artifacts=False,
+    )
+
+
 def mark_qwen_model_response_body_complete(
     *,
     model_lease: dict[str, Any] | None = None,
@@ -2430,6 +2601,7 @@ def _release_exact_qwen_lease(
     model_lease: object,
     *,
     reason: str,
+    persist_benchmark_artifacts: bool = True,
 ) -> dict[str, Any]:
     if not isinstance(model_lease, dict):
         raise ValueError("exact Qwen model lease is required before release")
@@ -2471,7 +2643,8 @@ def _release_exact_qwen_lease(
                     "server_termination": "not_required_shared",
                     "reason": reason,
                 }
-                _write_qwen_owner_tombstone(model_lease, result=result)
+                if persist_benchmark_artifacts:
+                    _write_qwen_owner_tombstone(model_lease, result=result)
                 _write_qwen_lease_state(state)
                 return result
             if not state.get("server_started_by_runtime"):
@@ -2482,7 +2655,8 @@ def _release_exact_qwen_lease(
                     "server_termination": "not_owned",
                     "reason": reason,
                 }
-                _write_qwen_owner_tombstone(model_lease, result=result)
+                if persist_benchmark_artifacts:
+                    _write_qwen_owner_tombstone(model_lease, result=result)
                 _delete_qwen_lease_state(incarnation_id)
                 return result
             token = uuid4().hex
@@ -2512,8 +2686,14 @@ def _release_exact_qwen_lease(
             token=resume_token,
             revision=resume_revision,
             reason=reason,
+            persist_benchmark_artifacts=persist_benchmark_artifacts,
         )
-    return _stop_and_finalize_qwen_incarnation(stop_state, token=token, revision=revision)
+    return _stop_and_finalize_qwen_incarnation(
+        stop_state,
+        token=token,
+        revision=revision,
+        persist_benchmark_artifacts=persist_benchmark_artifacts,
+    )
 
 
 def _stop_and_finalize_qwen_incarnation(
@@ -2521,6 +2701,7 @@ def _stop_and_finalize_qwen_incarnation(
     *,
     token: str,
     revision: int,
+    persist_benchmark_artifacts: bool = True,
 ) -> dict[str, Any]:
     incarnation = state["incarnation"]
     expected_process = incarnation["server_process_identity"]
@@ -2616,6 +2797,7 @@ def _stop_and_finalize_qwen_incarnation(
         token=token,
         revision=revision,
         model_lease=_qwen_public_lease(state["leases"][0]),
+        persist_benchmark_artifacts=persist_benchmark_artifacts,
     )
 
 
@@ -2659,6 +2841,7 @@ def _finish_qwen_finalization_cleanup(
     token: str,
     revision: int,
     model_lease: dict[str, Any],
+    persist_benchmark_artifacts: bool = True,
 ) -> dict[str, Any]:
     with _qwen_lease_lock():
         current_state = _load_qwen_lease_state(incarnation_id)
@@ -2677,17 +2860,18 @@ def _finish_qwen_finalization_cleanup(
         lease = _qwen_public_lease(current_state["leases"][0])
         if lease != model_lease:
             raise RuntimeError("Qwen finalization lease changed before cleanup")
-        _write_qwen_benchmark_release_observation(
-            lease,
-            result=result,
-            finalization_token=token,
-            release_reason=str(finalization.get("reason") or ""),
-        )
-        _write_qwen_owner_tombstone(
-            lease,
-            result=result,
-            finalization_token=token,
-        )
+        if persist_benchmark_artifacts:
+            _write_qwen_benchmark_release_observation(
+                lease,
+                result=result,
+                finalization_token=token,
+                release_reason=str(finalization.get("reason") or ""),
+            )
+            _write_qwen_owner_tombstone(
+                lease,
+                result=result,
+                finalization_token=token,
+            )
         _delete_qwen_lease_state(incarnation_id)
     return result
 
@@ -2799,6 +2983,7 @@ def _resume_qwen_finalization(
     token: str,
     revision: int,
     reason: str,
+    persist_benchmark_artifacts: bool = True,
 ) -> dict[str, Any]:
     finalization = state.get("finalization")
     if isinstance(finalization, dict) and finalization.get("phase") == "termination_proven":
@@ -2807,6 +2992,7 @@ def _resume_qwen_finalization(
             token=token,
             revision=revision,
             model_lease=_qwen_public_lease(state["leases"][0]),
+            persist_benchmark_artifacts=persist_benchmark_artifacts,
         )
     if not isinstance(finalization, dict):
         return _qwen_finalization_pending_result(state, reason=reason)
@@ -2842,6 +3028,7 @@ def _resume_qwen_finalization(
         token=token,
         revision=revision,
         model_lease=_qwen_public_lease(state["leases"][0]),
+        persist_benchmark_artifacts=persist_benchmark_artifacts,
     )
 
 
