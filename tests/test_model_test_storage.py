@@ -209,6 +209,37 @@ def test_materialize_rolls_back_destination_and_publication_on_atomic_failure(tm
     assert not registry.exists() or f"provider-a-{revision}.json" not in registry.read_text(encoding="utf-8")
 
 
+def test_materialize_runs_post_move_validation_before_registration_and_rolls_back(tmp_path: Path) -> None:
+    from app.learn.hybrid.model_test_storage import materialize_downloaded_artifact
+
+    revision = "a" * 40
+    staging = _write(tmp_path / "staging" / "provider-a" / revision / "model.bin", b"model").parent
+    destination = tmp_path / "artifacts" / "provider-a" / revision
+    observed: list[Path] = []
+
+    def reject(path: Path) -> None:
+        observed.append(path)
+        assert path == destination
+        assert (path / "model.bin").read_bytes() == b"model"
+        raise RuntimeError("post-move validation failed")
+
+    with pytest.raises(RuntimeError, match="post-move validation failed"):
+        materialize_downloaded_artifact(
+            root=tmp_path,
+            provider_id="provider-a",
+            repo_id="org/model",
+            revision=revision,
+            staging_path=staging,
+            expected_files={"model.bin": 5},
+            expected_sha256=_expected(b"model"),
+            post_move_validate=reject,
+        )
+    assert observed == [destination]
+    assert (staging / "model.bin").read_bytes() == b"model"
+    assert not destination.exists()
+    assert not (tmp_path / "manifests" / f"provider-a-{revision}.json").exists()
+
+
 def test_materialize_rehashes_after_download_verification_boundary(tmp_path: Path) -> None:
     from app.learn.hybrid.model_test_storage import materialize_downloaded_artifact
 

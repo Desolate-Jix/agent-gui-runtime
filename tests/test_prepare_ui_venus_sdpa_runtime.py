@@ -50,6 +50,14 @@ def _fake_runtime(staging: Path, versions: dict[str, str]) -> None:
     executable = Path(sys.executable)
     (staging / "Scripts").mkdir()
     shutil.copy2(executable, staging / "Scripts" / "python.exe")
+    base_source = Path(sys.base_prefix)
+    base = staging / "base"
+    base.mkdir()
+    shutil.copy2(base_source / "python.exe", base / "python.exe")
+    for candidate in base_source.glob("*.dll"):
+        shutil.copy2(candidate, base / candidate.name)
+    shutil.copytree(base_source / "DLLs", base / "DLLs")
+    shutil.copytree(base_source / "Lib", base / "Lib", ignore=shutil.ignore_patterns("site-packages", "__pycache__", "*.pyc"))
     _write(staging / "pyvenv.cfg", f"home = {executable.parent}\ninclude-system-site-packages = false\n")
     for extension in ("python311.dll", "python312.dll", "python313.dll"):
         candidate = executable.parent / extension
@@ -102,3 +110,16 @@ def test_prepare_ui_venus_runtime_materializes_smoked_specialized_artifact(tmp_p
     profile = json.loads(result["profile"].read_text(encoding="utf-8"))
     assert result["runtime_manifest"].is_file()
     assert deployed.verify_ui_venus_deployment(profile, tmp_path)["runtime"].name == "python.exe"
+    runtime_root = tmp_path / "artifacts" / deployed.WINDOWS_SDPA_RUNTIME_PROVIDER / runtime_revision
+    pyvenv = (runtime_root / "pyvenv.cfg").read_text(encoding="utf-8")
+    assert f"home = {runtime_root / 'base'}" in pyvenv
+    assert f"executable = {runtime_root / 'base' / 'python.exe'}" in pyvenv
+    assert str(staging) not in pyvenv
+    launched = subprocess.run(
+        [str(runtime_root / "Scripts" / "python.exe"), "-I", "-c", "import json,sys; print(json.dumps({'prefix':sys.prefix,'base_prefix':sys.base_prefix}))"],
+        check=False, capture_output=True, text=True, encoding="utf-8",
+    )
+    assert launched.returncode == 0, launched.stderr
+    identity = json.loads(launched.stdout)
+    assert Path(identity["prefix"]).resolve() == runtime_root.resolve()
+    assert Path(identity["base_prefix"]).resolve() == (runtime_root / "base").resolve()

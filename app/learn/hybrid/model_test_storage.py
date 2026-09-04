@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from hashlib import sha256
 import json
 import os
@@ -432,7 +432,7 @@ def remove_huggingface_local_metadata(*, root: Path, staging_path: Path) -> None
         cache.rmdir()
 
 
-def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, revision: str, staging_path: Path, expected_files: Mapping[str, int], expected_sha256: Mapping[str, str]) -> Path:
+def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: str, revision: str, staging_path: Path, expected_files: Mapping[str, int], expected_sha256: Mapping[str, str], post_move_validate: Callable[[Path], None] | None = None) -> Path:
     _safe_component(provider_id, name="provider_id")
     _immutable_revision(revision)
     root = _require_model_test_root(Path(root))
@@ -441,6 +441,8 @@ def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: st
         raise ValueError("staging target is outside provider-specific staging")
     if not isinstance(expected_files, Mapping) or not expected_files or not isinstance(expected_sha256, Mapping):
         raise ValueError("expected files are invalid")
+    if post_move_validate is not None and not callable(post_move_validate):
+        raise ValueError("post-move validator is invalid")
     actual = {path.relative_to(staging).as_posix(): path for path in _logical_files(staging) if path.is_file()}
     if set(actual) != set(expected_files) or set(expected_sha256) != set(expected_files) or any(not isinstance(name, str) or not isinstance(size, int) or size < 0 or actual[name].stat().st_size != size for name, size in expected_files.items()):
         raise ValueError("downloaded files do not match expected bytes")
@@ -457,6 +459,14 @@ def materialize_downloaded_artifact(*, root: Path, provider_id: str, repo_id: st
         raise ValueError("artifact destination parent is a reparse point")
     staging.rename(destination)
     try:
+        if post_move_validate is not None:
+            post_move_validate(destination)
+        moved = {path.relative_to(destination).as_posix(): path for path in _logical_files(destination) if path.is_file()}
+        if set(moved) != set(expected_files) or any(
+            moved[name].stat().st_size != expected_files[name] or _sha256(moved[name]) != expected_sha256[name]
+            for name in expected_files
+        ):
+            raise ValueError("artifact changed during post-move validation")
         return register_downloaded_artifact(root=root_resolved, provider_id=provider_id, repo_id=repo_id, revision=revision, files=sorted(actual_path for actual_path in destination.rglob("*") if actual_path.is_file()))
     except BaseException:
         if destination.exists() and not staging.exists():

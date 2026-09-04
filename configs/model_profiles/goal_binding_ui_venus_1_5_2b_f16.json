@@ -1,64 +1,64 @@
 {
+  "contract_version": "goal_binding_model_profile_v1",
+  "profile_id": "goal_binding_ui_venus_1_5_2b_f16",
   "arm_id": "goal_binding_ui_venus_1_5_2b_f16",
-  "artifact_is_authorization": false,
-  "artifact_manifest": {
-    "relative_path": "reports/ui-venus-sdpa-deployments/73efe51edad34fb8a42f1dbd49fe5a68/deployment.json",
-    "sha256": "ed99cf366995769ce9ac967fb705cb1ca20be09f588e4c386c5329c3ee301146",
-    "status": "verified"
-  },
+  "provider_id": "ui_venus_1_5_2b_f16",
+  "model_id": "inclusionAI/UI-Venus-1.5-2B",
+  "repository_id": "inclusionAI/UI-Venus-1.5-2B",
+  "upstream_revision": "bc4c6e62a1c545e043761439be95646d801853a4",
   "artifacts": [
     {
-      "bytes": 4877469712,
-      "relative_path": "artifacts/ui_venus_1_5_2b_f16/bc4c6e62a1c545e043761439be95646d801853a4/model.safetensors",
       "role": "model",
-      "sha256": "ca2e059e729b1d6dcb29040d817f36ddf09b4c6b7bf8c95b6c0929f069f64bea"
+      "relative_path": "artifacts/ui_venus_1_5_2b_f16/not_acquired/model.safetensors",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
     },
     {
-      "bytes": 274712,
-      "relative_path": "artifacts/ui_venus_1_5_2b_f16_sdpa_runtime/4d7daeaaf7aa8903a46da518f833c37536b74879/Scripts/python.exe",
       "role": "runtime",
-      "sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082"
+      "relative_path": "artifacts/ui_venus_1_5_2b_f16/not_acquired/python.exe",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
     },
     {
-      "bytes": 1114,
-      "relative_path": "artifacts/ui_venus_1_5_2b_f16_sdpa_runtime/4d7daeaaf7aa8903a46da518f833c37536b74879/official-source.json",
       "role": "source",
-      "sha256": "e50798a6b68f9d5cab4e346c40902bebe18abd7af1c738f7c98943ca1adbc6c1"
+      "relative_path": "artifacts/ui_venus_1_5_2b_f16/not_acquired/official-source.lock",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
     },
     {
-      "bytes": 808,
-      "relative_path": "artifacts/ui_venus_1_5_2b_f16_sdpa_runtime/4d7daeaaf7aa8903a46da518f833c37536b74879/preprocessing.json",
       "role": "preprocessing",
-      "sha256": "cc108ff2b2b25adb777f27c4952487829f652a6f16e45f9ed51205d94d89c66a"
+      "relative_path": "artifacts/ui_venus_1_5_2b_f16/not_acquired/preprocessing.lock",
+      "sha256": "not_acquired",
+      "bytes": "not_acquired"
     }
   ],
-  "contract_version": "goal_binding_model_profile_v1",
-  "coordinate_space": "normalized_0_1000",
+  "artifact_manifest": {
+    "status": "not_acquired",
+    "relative_path": "manifests/ui_venus_1_5_2b_f16.json",
+    "sha256": "not_acquired"
+  },
+  "runtime": {
+    "kind": "transformers_sdpa_windows_v1",
+    "isolated_runtime_path": "artifacts/ui_venus_1_5_2b_f16/not_acquired/python.exe",
+    "sha256": "not_acquired",
+    "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
+    "entrypoint": "scripts.model_servers.goal_binding_provider_runtimes:run_ui_venus"
+  },
   "dtype_or_quantization": "f16_weights_bf16_compute",
-  "execute_binding_enabled": false,
-  "final_submit_forbidden": true,
-  "license": "Apache-2.0",
-  "max_output_bytes": 16384,
-  "model_id": "inclusionAI/UI-Venus-1.5-2B",
   "native_output": {
     "kind": "ui_venus_point_v1",
     "raw_format": "utf8_native"
   },
+  "coordinate_space": "normalized_0_1000",
   "preprocessing": {
     "identity": "ui_venus_official_center_point_v1",
-    "sha256": "cc108ff2b2b25adb777f27c4952487829f652a6f16e45f9ed51205d94d89c66a",
-    "source_revision": "inclusionAI/UI-Venus@192a9247ad1129279ba1d6c263d4c9e7ecef3644"
+    "source_revision": "inclusionAI/UI-Venus@192a9247ad1129279ba1d6c263d4c9e7ecef3644",
+    "sha256": "not_acquired"
   },
-  "profile_id": "goal_binding_ui_venus_1_5_2b_f16",
-  "provider_id": "ui_venus_1_5_2b_f16",
-  "repository_id": "inclusionAI/UI-Venus-1.5-2B",
-  "runtime": {
-    "entrypoint": "scripts.model_servers.goal_binding_provider_runtimes:run_ui_venus",
-    "isolated_runtime_path": "artifacts/ui_venus_1_5_2b_f16_sdpa_runtime/4d7daeaaf7aa8903a46da518f833c37536b74879/Scripts/python.exe",
-    "kind": "transformers_sdpa_windows_v1",
-    "sha256": "21bb438c0d4a6f1f164b9a646f6ee000340185e5871180aec06db8d3f07c0082",
-    "worker": "scripts/model_servers/goal_binding_transformers_worker.py"
-  },
+  "max_output_bytes": 16384,
   "timeout_seconds": 120,
-  "upstream_revision": "bc4c6e62a1c545e043761439be95646d801853a4"
+  "license": "Apache-2.0",
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true
 }

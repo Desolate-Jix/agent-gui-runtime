@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -66,7 +67,12 @@ def _run_smoke(runtime_staging: Path) -> dict[str, object]:
         raise ValueError("prepared isolated runtime has no python.exe")
     script = runtime_staging / "runtime-smoke.py"
     script.write_text(_smoke_script(), encoding="utf-8", newline="\n")
-    result = subprocess.run([str(executable), "-I", str(script), str(runtime_staging)], check=False, capture_output=True, text=True, encoding="utf-8")
+    environment = dict(os.environ)
+    environment.pop("PYTHONHOME", None)
+    environment.pop("PYTHONPATH", None)
+    environment["PYTHONNOUSERSITE"] = "1"
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    result = subprocess.run([str(executable), "-I", "-B", str(script), str(runtime_staging)], check=False, capture_output=True, text=True, encoding="utf-8", env=environment)
     if result.returncode != 0:
         raise ValueError("prepared isolated runtime smoke failed")
     try:
@@ -105,6 +111,44 @@ def _expected_tree(root: Path) -> tuple[dict[str, int], dict[str, str]]:
 
 def _reference(path: Path, root: Path) -> dict[str, str]:
     return {"relative_path": path.relative_to(root).as_posix(), "sha256": _sha256(path)}
+
+
+def _pin_runtime_python_home(root: Path, runtime_staging: Path) -> None:
+    config_path = runtime_staging / "pyvenv.cfg"
+    base_python = runtime_staging / "base" / "python.exe"
+    if not config_path.is_file() or not base_python.is_file():
+        raise ValueError("prepared isolated runtime has no relocatable Python base")
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError("prepared isolated runtime pyvenv.cfg is unreadable") from exc
+    final_runtime = root / "artifacts" / deployed.WINDOWS_SDPA_RUNTIME_PROVIDER / deployed.WINDOWS_SDPA_RUNTIME_REVISION
+    final_base = final_runtime / "base"
+    result: list[str] = []
+    home_seen = False
+    executable_seen = False
+    for line in lines:
+        key = line.partition("=")[0].strip().casefold()
+        if key == "home":
+            if home_seen:
+                raise ValueError("prepared isolated runtime has duplicate Python home")
+            result.append(f"home = {final_base}")
+            home_seen = True
+        elif key == "executable":
+            if executable_seen:
+                raise ValueError("prepared isolated runtime has duplicate Python executable")
+            result.append(f"executable = {final_base / 'python.exe'}")
+            executable_seen = True
+        else:
+            result.append(line)
+    if not home_seen:
+        raise ValueError("prepared isolated runtime has no Python home")
+    if not executable_seen:
+        result.append(f"executable = {final_base / 'python.exe'}")
+    payload = "\n".join(result) + "\n"
+    if str(runtime_staging) in payload:
+        raise ValueError("prepared isolated runtime retains staging Python paths")
+    config_path.write_text(payload, encoding="utf-8", newline="\n")
 
 
 def prepare_ui_venus_sdpa_runtime(*, root: Path, checkpoint_manifest: Path, runtime_staging: Path, source_checkout: Path, profile_template: Path) -> dict[str, Path]:
@@ -158,8 +202,13 @@ def prepare_ui_venus_sdpa_runtime(*, root: Path, checkpoint_manifest: Path, runt
     })
     smoke_path = runtime_staging / "runtime-smoke.json"
     _write_json(smoke_path, {"contract_version": "goal_binding_ui_venus_sdpa_runtime_smoke_v1", **smoke, "python_executable_sha256": _sha256(runtime_staging / "Scripts" / "python.exe"), "smoke_script_sha256": _sha256(runtime_staging / "runtime-smoke.py"), "exit_code": 0})
+    _pin_runtime_python_home(root, runtime_staging)
     expected_files, expected_sha256 = _expected_tree(runtime_staging)
-    runtime_manifest = storage.materialize_downloaded_artifact(root=root, provider_id=deployed.WINDOWS_SDPA_RUNTIME_PROVIDER, repo_id=deployed.WINDOWS_SDPA_RUNTIME_REPOSITORY, revision=deployed.WINDOWS_SDPA_RUNTIME_REVISION, staging_path=runtime_staging, expected_files=expected_files, expected_sha256=expected_sha256)
+
+    def validate_relocated_runtime(destination: Path) -> None:
+        _run_smoke(destination)
+
+    runtime_manifest = storage.materialize_downloaded_artifact(root=root, provider_id=deployed.WINDOWS_SDPA_RUNTIME_PROVIDER, repo_id=deployed.WINDOWS_SDPA_RUNTIME_REPOSITORY, revision=deployed.WINDOWS_SDPA_RUNTIME_REVISION, staging_path=runtime_staging, expected_files=expected_files, expected_sha256=expected_sha256, post_move_validate=validate_relocated_runtime)
     profile = json.loads(Path(profile_template).read_text(encoding="utf-8"))
     roles = {
         "model": root / next(item["relative_path"] for item in checkpoint_payload["files"] if item["relative_path"].endswith("model.safetensors")),

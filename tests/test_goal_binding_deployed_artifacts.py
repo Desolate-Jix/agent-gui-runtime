@@ -101,6 +101,7 @@ def deployed_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
     }
     module_paths = [_write(runtime_root / path, name.encode("utf-8")) for name, path in packages.items()]
     executable = _write(runtime_root / "Scripts" / "python.exe", b"runtime")
+    base_python = _write(runtime_root / "base" / "python.exe", b"base-runtime")
     smoke_script = _write(runtime_root / "runtime-smoke.py", b"smoke")
     smoke_payload = {
         "contract_version": "goal_binding_ui_venus_sdpa_runtime_smoke_v1",
@@ -111,7 +112,8 @@ def deployed_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
         "exit_code": 0,
     }
     smoke_path = _write(runtime_root / "runtime-smoke.json", _json_bytes(smoke_payload))
-    runtime_paths = [_write(runtime_root / "pyvenv.cfg", b"home = test\n"), executable, smoke_script, *[runtime_root / "official" / name for name in official_sources], source_path, preprocessing_path, smoke_path, *module_paths]
+    pyvenv = _write(runtime_root / "pyvenv.cfg", f"home = {runtime_root / 'base'}\nexecutable = {base_python}\n".encode("utf-8"))
+    runtime_paths = [pyvenv, executable, base_python, smoke_script, *[runtime_root / "official" / name for name in official_sources], source_path, preprocessing_path, smoke_path, *module_paths]
     checkpoint_manifest = storage.register_downloaded_artifact(
         root=tmp_path,
         provider_id="ui_venus_1_5_2b_f16",
@@ -420,6 +422,18 @@ def test_deployment_rejects_missing_runtime_smoke_document(deployed_fixture: dic
     deployment["runtime_parent"]["sha256"] = sha256(manifest_path.read_bytes()).hexdigest()
     _rewrite_deployment(deployed_fixture, deployment)
     with pytest.raises(ValueError, match="runtime smoke document is missing"):
+        deployed.verify_ui_venus_deployment(deployed_fixture["profile"], root)
+
+
+def test_deployment_rejects_runtime_python_home_outside_registered_artifact(deployed_fixture: dict[str, object]) -> None:
+    from app.learn.hybrid import goal_binding_deployed_artifacts as deployed
+
+    root = deployed_fixture["root"]
+    assert isinstance(root, Path)
+    pyvenv = root / "artifacts" / "ui_venus_1_5_2b_f16_sdpa_runtime" / RUNTIME_REVISION / "pyvenv.cfg"
+    pyvenv.write_text("home = E:\\staging\\old-runtime\\base\nexecutable = E:\\staging\\old-runtime\\base\\python.exe\n", encoding="utf-8")
+    _refresh_runtime_parent(deployed_fixture)
+    with pytest.raises(ValueError, match="Python home"):
         deployed.verify_ui_venus_deployment(deployed_fixture["profile"], root)
 
 

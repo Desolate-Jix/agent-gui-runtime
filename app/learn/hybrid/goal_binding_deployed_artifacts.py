@@ -300,12 +300,14 @@ def _verify_runtime_smoke(*, files: Mapping[str, Mapping[str, object]], runtime_
     packages = document.get("packages")
     executable = (Path("artifacts") / runtime_provider / runtime_revision / "Scripts" / "python.exe").as_posix()
     pyvenv = (Path("artifacts") / runtime_provider / runtime_revision / "pyvenv.cfg").as_posix()
+    base_python = (Path("artifacts") / runtime_provider / runtime_revision / "base" / "python.exe").as_posix()
     smoke_script = (Path("artifacts") / runtime_provider / runtime_revision / "runtime-smoke.py").as_posix()
-    executable_record, script_record, pyvenv_record = files.get(executable), files.get(smoke_script), files.get(pyvenv)
+    executable_record, script_record, pyvenv_record, base_python_record = files.get(executable), files.get(smoke_script), files.get(pyvenv), files.get(base_python)
     if (
         not isinstance(python, Mapping) or set(python) != {"implementation", "version"}
         or python.get("implementation") != "CPython" or not isinstance(python.get("version"), str)
         or pyvenv_record is None
+        or base_python_record is None
         or document.get("python_executable_sha256") != (executable_record or {}).get("sha256")
         or document.get("smoke_script_sha256") != (script_record or {}).get("sha256")
         or document.get("exit_code") != 0
@@ -325,6 +327,29 @@ def _verify_runtime_smoke(*, files: Mapping[str, Mapping[str, object]], runtime_
         observed.add(distribution)
     if observed != _RUNTIME_PACKAGES:
         raise ValueError("UI-Venus runtime smoke package set is incomplete")
+    pyvenv_path = pyvenv_record.get("path")
+    if not isinstance(pyvenv_path, Path):
+        raise ValueError("UI-Venus runtime pyvenv.cfg path is invalid")
+    try:
+        config_lines = pyvenv_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError("UI-Venus runtime pyvenv.cfg is unreadable") from exc
+    config: dict[str, str] = {}
+    for line in config_lines:
+        key, separator, value = line.partition("=")
+        if not separator:
+            continue
+        normalized = key.strip().casefold()
+        if normalized in config:
+            raise ValueError("UI-Venus runtime pyvenv.cfg has duplicate fields")
+        config[normalized] = value.strip()
+    runtime_root = pyvenv_path.parent.resolve()
+    expected_home = (runtime_root / "base").resolve()
+    expected_executable = (expected_home / "python.exe").resolve()
+    home = Path(config.get("home", ""))
+    configured_executable = Path(config.get("executable", ""))
+    if not home.is_absolute() or not configured_executable.is_absolute() or home.resolve() != expected_home or configured_executable.resolve() != expected_executable:
+        raise ValueError("UI-Venus runtime Python home is not pinned to its registered artifact")
 
 
 def verify_ui_venus_deployment(profile: Mapping[str, object], artifact_root: Path) -> dict[str, Path]:
