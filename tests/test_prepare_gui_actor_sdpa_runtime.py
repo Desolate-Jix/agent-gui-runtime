@@ -32,7 +32,7 @@ OFFICIAL_SOURCE_REPOSITORY_PATHS = {
 def test_gui_actor_windows_sdpa_runtime_revision_is_frozen() -> None:
     from app.learn.hybrid import goal_binding_gui_actor_deployed_artifacts as deployed
 
-    assert deployed.WINDOWS_SDPA_RUNTIME_REVISION == "4c44a66451e817a4d6df1d2977019b483924ad84"
+    assert deployed.WINDOWS_SDPA_RUNTIME_REVISION == "0cb0af6e4805036b6995276c16afc2f5c80dfc46"
 
 
 def _write(path: Path, content: str) -> Path:
