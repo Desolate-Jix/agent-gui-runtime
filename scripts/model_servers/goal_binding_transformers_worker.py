@@ -149,7 +149,7 @@ def _dispatch_provider(
 
 
 def _verify_code_identity(value: object) -> dict[str, str]:
-    fields = {"worker_sha256", "provider_runtime_sha256", "worker_python_sha256", "goal_binding_model_callers_sha256", "goal_binding_deployed_artifacts_sha256", "model_test_storage_sha256"}
+    fields = {"worker_sha256", "provider_runtime_sha256", "worker_python_sha256", "goal_binding_model_callers_sha256", "goal_binding_deployed_artifacts_sha256", "goal_binding_gui_actor_deployed_artifacts_sha256", "model_test_storage_sha256"}
     if not isinstance(value, Mapping) or set(value) != fields:
         raise ValueError("worker code identity is unavailable")
     runtime_path = Path(__file__).with_name("goal_binding_provider_runtimes.py")
@@ -160,6 +160,7 @@ def _verify_code_identity(value: object) -> dict[str, str]:
         "worker_python_sha256": _sha_file(Path(sys.executable)),
         "goal_binding_model_callers_sha256": _sha_file(repository / "app/learn/hybrid/goal_binding_model_callers.py"),
         "goal_binding_deployed_artifacts_sha256": _sha_file(repository / "app/learn/hybrid/goal_binding_deployed_artifacts.py"),
+        "goal_binding_gui_actor_deployed_artifacts_sha256": _sha_file(repository / "app/learn/hybrid/goal_binding_gui_actor_deployed_artifacts.py"),
         "model_test_storage_sha256": _sha_file(repository / "app/learn/hybrid/model_test_storage.py"),
     }
     if dict(value) != observed:
@@ -211,6 +212,7 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
         "worker_python_sha256": _sha_file(Path(sys.executable)),
         "goal_binding_model_callers_sha256": _sha_file(Path(__file__).resolve().parents[2] / "app/learn/hybrid/goal_binding_model_callers.py"),
         "goal_binding_deployed_artifacts_sha256": _sha_file(Path(__file__).resolve().parents[2] / "app/learn/hybrid/goal_binding_deployed_artifacts.py"),
+        "goal_binding_gui_actor_deployed_artifacts_sha256": _sha_file(Path(__file__).resolve().parents[2] / "app/learn/hybrid/goal_binding_gui_actor_deployed_artifacts.py"),
         "model_test_storage_sha256": _sha_file(Path(__file__).resolve().parents[2] / "app/learn/hybrid/model_test_storage.py"),
     }
     started = time.perf_counter()

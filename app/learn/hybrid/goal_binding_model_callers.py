@@ -236,6 +236,10 @@ def _verified(profile: Mapping[str, object], artifact_dir: Path) -> dict[str, ob
     if isinstance(manifest, Mapping) and manifest.get("contract_version") == UI_VENUS_DEPLOYMENT_VERSION:
         verify_ui_venus_deployment(sealed, artifact_dir)
         return sealed
+    from app.learn.hybrid.goal_binding_gui_actor_deployed_artifacts import CONTRACT_VERSION as GUI_ACTOR_DEPLOYMENT_VERSION, verify_gui_actor_deployment
+    if isinstance(manifest, Mapping) and manifest.get("contract_version") == GUI_ACTOR_DEPLOYMENT_VERSION:
+        verify_gui_actor_deployment(sealed, artifact_dir)
+        return sealed
     if _sha256(raw) != ref["sha256"] or not isinstance(manifest, Mapping) or set(manifest) != {"contract_version", "provider_id", "repo_id", "revision", "files", "artifact_is_authorization"}:
         raise ValueError("verified goal-binding artifact manifest is invalid")
     if manifest["contract_version"] != "model_test_artifact_manifest_v1" or manifest["provider_id"] != sealed["provider_id"] or manifest["repo_id"] != sealed["repository_id"] or manifest["revision"] != sealed["upstream_revision"] or manifest["artifact_is_authorization"] is not False or not isinstance(manifest["files"], list):
@@ -286,6 +290,19 @@ def exact_process_identity(value: Mapping[str, object]) -> dict[str, int]:
     if any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in (pid, created)):
         raise ValueError("process identity is not exact")
     return {"pid": int(pid), "create_time_ns": int(created)}
+
+
+def _provider_code_identity(worker: Path, python: Path) -> dict[str, str]:
+    repository = worker.parents[2]
+    return {
+        "worker_sha256": _sha256_file(worker),
+        "provider_runtime_sha256": _sha256_file(worker.with_name("goal_binding_provider_runtimes.py")),
+        "worker_python_sha256": _sha256_file(python),
+        "goal_binding_model_callers_sha256": _sha256_file(repository / "app/learn/hybrid/goal_binding_model_callers.py"),
+        "goal_binding_deployed_artifacts_sha256": _sha256_file(repository / "app/learn/hybrid/goal_binding_deployed_artifacts.py"),
+        "goal_binding_gui_actor_deployed_artifacts_sha256": _sha256_file(repository / "app/learn/hybrid/goal_binding_gui_actor_deployed_artifacts.py"),
+        "model_test_storage_sha256": _sha256_file(repository / "app/learn/hybrid/model_test_storage.py"),
+    }
 
 
 def verify_live_worker_identity(
@@ -484,15 +501,7 @@ class GoalBindingProviderSession:
             (self.root / name).mkdir()
         worker = Path(__file__).resolve().parents[3] / self.profile["runtime"]["worker"]
         python = _worker_python(self.profile, self.artifact_dir)
-        repository = worker.parents[2]
-        code = {
-            "worker_sha256": _sha256_file(worker),
-            "provider_runtime_sha256": _sha256_file(worker.with_name("goal_binding_provider_runtimes.py")),
-            "worker_python_sha256": _sha256_file(python),
-            "goal_binding_model_callers_sha256": _sha256_file(repository / "app/learn/hybrid/goal_binding_model_callers.py"),
-            "goal_binding_deployed_artifacts_sha256": _sha256_file(repository / "app/learn/hybrid/goal_binding_deployed_artifacts.py"),
-            "model_test_storage_sha256": _sha256_file(repository / "app/learn/hybrid/model_test_storage.py"),
-        }
+        code = _provider_code_identity(worker, python)
         self.port = _reserve_loopback_port() if self.profile["runtime"]["kind"] == "llama_cpp" else None
         profile_hash = _sha256(json.dumps(self.profile, sort_keys=True).encode("utf-8"))
         name = benchmark_worker_scope_name_v1(authority_kind="test_only", run_id=self.run_root.name, stage="goal_binding", operation_id=str(self.profile["arm_id"]), worker_id=str(self.profile["profile_id"]), payload_sha256=profile_hash, execution_nonce=self.session_id)
