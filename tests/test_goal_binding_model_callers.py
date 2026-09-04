@@ -216,6 +216,17 @@ def test_probe_uses_no_gold_holdout_or_candidate_mapping(tmp_path: Path) -> None
     image = tmp_path / "screen.png"
     image.write_bytes(b"not-an-image-needed-before-acquisition")
     profile = load_goal_binding_profile(PROFILE_DIR / "goal_binding_ui_venus_1_5_2b_f16.json")
+    profile["upstream_revision"] = "not_acquired"
+    for artifact in profile["artifacts"]:
+        artifact["sha256"] = "not_acquired"
+        artifact["bytes"] = "not_acquired"
+    profile["artifact_manifest"] = {
+        "status": "not_acquired",
+        "relative_path": "manifests/ui_venus_1_5_2b_f16.json",
+        "sha256": "not_acquired",
+    }
+    profile["runtime"]["sha256"] = "not_acquired"
+    profile["preprocessing"]["sha256"] = "not_acquired"
     with pytest.raises(ValueError, match="not acquired|artifact"):
         probe_goal_binding_profile(profile=profile, image_path=image)
 
