@@ -104,6 +104,8 @@ Adapter 接受 sealed official inference path 的单一 top-1 point/action 结�
 
 原始官方实现固定使用 FlashAttention 2；本次原生 Windows regression 使用显式密封的 `transformers_sdpa_windows_v1` 运行变体，因为当前 Windows 环境没有可用的 FlashAttention 2。该变体只把 attention backend 改为 PyTorch SDPA；权重、BF16 计算、官方 prompt、预处理、`max_new_tokens=128`、原生 point 输出、Adapter 和冻结评分边界均不改变。不得按环境自动回退，也不得把该变体描述成逐字复现官方 kernel。
 
+其部署证据由 UI-Venus 专用 composite manifest 组成：保持已注册 checkpoint manifest 不变，另行注册完整隔离 Runtime，并绑定固定官方源码、预处理、依赖版本、实际 `python -I` import smoke、项目代码哈希及两个 parent manifest。该 manifest 只用于 regression evidence，不授予执行权限。
+
 ### 5.2 GUI-Actor
 
 Adapter 只读取：

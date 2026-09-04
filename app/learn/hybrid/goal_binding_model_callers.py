@@ -223,6 +223,10 @@ def _verified(profile: Mapping[str, object], artifact_dir: Path) -> dict[str, ob
     if isinstance(manifest, Mapping) and manifest.get("contract_version") == VERSION:
         verify_managed_artifacts(sealed, artifact_dir)
         return sealed
+    from app.learn.hybrid.goal_binding_deployed_artifacts import CONTRACT_VERSION as UI_VENUS_DEPLOYMENT_VERSION, verify_ui_venus_deployment
+    if isinstance(manifest, Mapping) and manifest.get("contract_version") == UI_VENUS_DEPLOYMENT_VERSION:
+        verify_ui_venus_deployment(sealed, artifact_dir)
+        return sealed
     if _sha256(raw) != ref["sha256"] or not isinstance(manifest, Mapping) or set(manifest) != {"contract_version", "provider_id", "repo_id", "revision", "files", "artifact_is_authorization"}:
         raise ValueError("verified goal-binding artifact manifest is invalid")
     if manifest["contract_version"] != "model_test_artifact_manifest_v1" or manifest["provider_id"] != sealed["provider_id"] or manifest["repo_id"] != sealed["repository_id"] or manifest["revision"] != sealed["upstream_revision"] or manifest["artifact_is_authorization"] is not False or not isinstance(manifest["files"], list):
@@ -369,6 +373,20 @@ def _worker_python(profile: Mapping[str, object], artifact_dir: Path) -> Path:
     return _safe_under(artifact_dir, artifact["relative_path"])
 
 
+def _isolated_worker_environment(scope_name: str) -> dict[str, str]:
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
+    environment.pop("PYTHONHOME", None)
+    environment.update(
+        PYTHONIOENCODING="utf-8",
+        PYTHONNOUSERSITE="1",
+        HF_HUB_OFFLINE="1",
+        TRANSFORMERS_OFFLINE="1",
+        AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME=scope_name,
+    )
+    return environment
+
+
 def _gpu_ownership_snapshot() -> dict[str, object]:
     from app.learn.hybrid.windows_process_scope import _identity_for_pid
     try:
@@ -433,7 +451,15 @@ class GoalBindingProviderSession:
             (self.root / name).mkdir()
         worker = Path(__file__).resolve().parents[3] / self.profile["runtime"]["worker"]
         python = _worker_python(self.profile, self.artifact_dir)
-        code = {"worker_sha256": _sha256_file(worker), "provider_runtime_sha256": _sha256_file(worker.with_name("goal_binding_provider_runtimes.py")), "worker_python_sha256": _sha256_file(python)}
+        repository = worker.parents[2]
+        code = {
+            "worker_sha256": _sha256_file(worker),
+            "provider_runtime_sha256": _sha256_file(worker.with_name("goal_binding_provider_runtimes.py")),
+            "worker_python_sha256": _sha256_file(python),
+            "goal_binding_model_callers_sha256": _sha256_file(repository / "app/learn/hybrid/goal_binding_model_callers.py"),
+            "goal_binding_deployed_artifacts_sha256": _sha256_file(repository / "app/learn/hybrid/goal_binding_deployed_artifacts.py"),
+            "model_test_storage_sha256": _sha256_file(repository / "app/learn/hybrid/model_test_storage.py"),
+        }
         self.port = _reserve_loopback_port() if self.profile["runtime"]["kind"] == "llama_cpp" else None
         profile_hash = _sha256(json.dumps(self.profile, sort_keys=True).encode("utf-8"))
         name = benchmark_worker_scope_name_v1(authority_kind="test_only", run_id=self.run_root.name, stage="goal_binding", operation_id=str(self.profile["arm_id"]), worker_id=str(self.profile["profile_id"]), payload_sha256=profile_hash, execution_nonce=self.session_id)
@@ -445,7 +471,7 @@ class GoalBindingProviderSession:
             self.launcher_identity = exact_process_identity(identity)
             self.identity = self.launcher_identity
             write_json(self.root / "parent-identity.json", self.launcher_identity)
-        env = dict(os.environ, PYTHONIOENCODING="utf-8", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME=name)
+        env = _isolated_worker_environment(name)
         with (self.root / "worker.stdout.bin").open("xb") as stdout, (self.root / "worker.stderr.bin").open("xb") as stderr:
             self.process = spawn_process_in_scope([str(python), str(worker), "--execute", "--session-json", str(self.root / "session.json")], scope_name=name, cwd=self.artifact_dir, stdout=stdout, stderr=stderr, env=env, before_resume=before_resume)
         ready = self._wait(self.root / "ready.json")

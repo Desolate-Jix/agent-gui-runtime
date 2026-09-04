@@ -139,7 +139,18 @@ def offline_arm(monkeypatch, tmp_path):
     baseline = {"status": "verified", "owners": [{"pid": 10, "create_time_ns": 20, "used_memory_mib": None}], "raw": "10, N/A"}
     monkeypatch.setattr(callers, "_gpu_ownership_snapshot", lambda: baseline, raising=False)
     monkeypatch.setattr(callers, "_resource_preflight", lambda profile: {"model_launch_allowed": True, "status": "ready"}, raising=False)
-    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    monkeypatch.setattr(
+        callers,
+        "_isolated_worker_environment",
+        lambda scope: {
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONNOUSERSITE": "1",
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME": scope,
+            "PYTHONPATH": str(tmp_path),
+        },
+    )
     arms = []
     def make(**changes):
         run_root = changes.pop("run_root", None)

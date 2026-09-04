@@ -62,6 +62,9 @@ def verified_artifact_paths(
     if profile.get("provider_id") == "qwen3_vl_8b_q4_k_m":
         from app.learn.hybrid.goal_binding_managed_artifacts import verify_managed_artifacts
         return verify_managed_artifacts(profile, artifact_root)
+    if profile.get("provider_id") == "ui_venus_1_5_2b_f16":
+        from app.learn.hybrid.goal_binding_deployed_artifacts import verify_ui_venus_deployment
+        return verify_ui_venus_deployment(profile, artifact_root)
     artifacts = profile.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         raise ValueError("provider artifact list is unavailable")
