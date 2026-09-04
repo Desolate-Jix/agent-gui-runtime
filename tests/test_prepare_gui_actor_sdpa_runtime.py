@@ -26,6 +26,12 @@ OFFICIAL_SOURCE = {
 }
 
 
+def test_gui_actor_windows_sdpa_runtime_revision_is_frozen() -> None:
+    from app.learn.hybrid import goal_binding_gui_actor_deployed_artifacts as deployed
+
+    assert deployed.WINDOWS_SDPA_RUNTIME_REVISION == "6ed93fbdc2487257a14123bde0acff74eebd2830"
+
+
 def _write(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="\n")
