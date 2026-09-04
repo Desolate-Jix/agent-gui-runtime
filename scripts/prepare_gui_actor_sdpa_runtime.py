@@ -209,6 +209,10 @@ def prepare_gui_actor_sdpa_runtime(
         raise ValueError("checkpoint parent identity is invalid")
     source_files = _verified_official_source(Path(source_checkout))
     for relative, content in source_files.items():
+        installed = runtime_staging / "Lib" / "site-packages" / relative
+        if not installed.is_file():
+            raise ValueError("prepared runtime installed source is incomplete")
+        installed.write_bytes(content)
         target = runtime_staging / "official" / relative
         if target.exists():
             raise ValueError("prepared runtime already contains official source")

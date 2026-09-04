@@ -188,6 +188,10 @@ def test_prepare_gui_actor_materializes_composite_runtime(tmp_path, monkeypatch)
         / RUNTIME_REVISION
     )
     _fake_runtime(staging, deployed.RUNTIME_PACKAGE_VERSIONS)
+    # Windows 安装可能把源码换行转换成 CRLF；封存前必须恢复为官方字节。
+    (staging / "Lib" / "site-packages" / "gui_actor" / "trainer.py").write_bytes(
+        OFFICIAL_SOURCE["gui_actor/trainer.py"].replace("\n", "\r\n").encode("utf-8")
+    )
 
     result = prepare.prepare_gui_actor_sdpa_runtime(
         root=tmp_path,
@@ -209,6 +213,9 @@ def test_prepare_gui_actor_materializes_composite_runtime(tmp_path, monkeypatch)
     )
     for relative in deployed.OFFICIAL_SOURCE_FILES:
         assert (runtime_root / "official" / relative).is_file()
+        assert (runtime_root / "Lib" / "site-packages" / relative).read_bytes() == (
+            runtime_root / "official" / relative
+        ).read_bytes()
     smoke = json.loads((runtime_root / "runtime-smoke.json").read_text("utf-8"))
     assert smoke["exit_code"] == 0
 
