@@ -279,6 +279,24 @@ def exact_process_identity(value: Mapping[str, object]) -> dict[str, int]:
     return {"pid": int(pid), "create_time_ns": int(created)}
 
 
+def verify_live_worker_identity(
+    *, worker_identity: Mapping[str, object], launcher_identity: Mapping[str, object], scope: object
+) -> dict[str, int]:
+    """在终止前校验实际 worker 的存活身份、Job 归属和启动器祖先。"""
+    from app.learn.hybrid.windows_process_scope import _identity_for_pid
+    import psutil
+
+    launcher = exact_process_identity(launcher_identity)
+    worker = exact_process_identity(worker_identity)
+    members = getattr(scope, "pids", None)
+    if not callable(members):
+        raise ValueError("worker cleanup scope is unavailable")
+    parents = {process.pid for process in psutil.Process(worker["pid"]).parents()}
+    if _identity_for_pid(worker["pid"]) != worker or worker["pid"] not in set(members()) or (worker != launcher and launcher["pid"] not in parents):
+        raise ValueError("worker cleanup identity is not live and bound")
+    return worker
+
+
 def verified_no_process_cleanup_receipt(provider: str) -> dict[str, object]:
     _text(provider, "cleanup provider", 96)
     return {"contract_version": "simple_native_provider_cleanup_v1", "provider": provider, "verified": True, "cleanup_status": "verified", "owned_processes": [], "provider_processes_after": [], "helper_processes_after": [], "orphan_descendant_pids": [], "active_listeners_after": [], "lease_files_after": []}
@@ -617,7 +635,18 @@ class GoalBindingProviderSession:
         observation = {"cleanup_status": "not_started"}
         cleanup_errors = []
         if self.process is not None:
+            import psutil
             cleanup_deadline = time.monotonic() + _CLEANUP_TIMEOUT_SECONDS
+            worker_identity = self.root / "worker-identity.json"
+            if self.identity == self.launcher_identity and worker_identity.is_file():
+                try:
+                    self.identity = verify_live_worker_identity(
+                        worker_identity=read_json(worker_identity),
+                        launcher_identity=self.launcher_identity,
+                        scope=self.scope,
+                    )
+                except (OSError, ValueError, RuntimeError, psutil.Error) as exc:
+                    cleanup_errors.append(str(exc))
             if not (self.root / "stop.json").exists():
                 write_json(self.root / "stop.json", {"session_sha256": self.config_sha})
             try:

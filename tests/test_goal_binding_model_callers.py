@@ -207,6 +207,113 @@ def test_unknown_residue_or_gpu_owner_blocks_next_provider() -> None:
     }) is False
 
 
+def test_session_cleanup_uses_bound_delayed_worker_identity(monkeypatch, tmp_path: Path) -> None:
+    from app.learn.hybrid import goal_binding_model_callers as callers
+    from app.learn.hybrid import windows_process_scope as scopes
+    from scripts.model_servers.goal_binding_transformers_worker import write_json
+
+    launcher = {"pid": 41, "create_time_ns": 100}
+    worker = {"pid": 42, "create_time_ns": 101}
+    digest = "a" * 64
+    session = callers.GoalBindingProviderSession(
+        {"provider_id": "ui_venus_1_5_2b_f16", "arm_id": "ui"},
+        tmp_path,
+        tmp_path / "run",
+    )
+    session.root = tmp_path / "session"
+    session.root.mkdir()
+    session.config_sha = digest
+    session.config = {"scope_name": "scope", "code_identity": {}}
+    session.launcher_identity = launcher
+    session.identity = launcher
+    session.baseline = {"status": "verified", "owners": []}
+    session.profile = {"provider_id": "ui_venus_1_5_2b_f16", "max_output_bytes": 16384}
+    session.runtime_state = None
+    session.sequence = 1
+
+    class Process:
+        def wait(self, timeout):
+            assert session.identity == worker
+            return 0
+        def poll(self): return 0
+        def close(self): return None
+
+    class Scope:
+        closed = False
+        def pids(self):
+            assert self.closed is False
+            return [launcher["pid"], worker["pid"]]
+        def close(self): self.closed = True
+
+    session.process = Process()
+    session.scope = Scope()
+    write_json(session.root / "worker-identity.json", worker)
+    write_json(session.root / "stopped.json", {
+        "session_sha256": digest,
+        "worker_process_identity": worker,
+        "runtime_cleanup": {"status": "released"},
+    })
+    monkeypatch.setattr(
+        scopes,
+        "observe_process_scope_cleanup",
+        lambda *args, **kwargs: {
+            "cleanup_status": "verified",
+            "member_identities_after": [],
+            "member_pids_after": [],
+            "active_listeners_after": [],
+        },
+    )
+    monkeypatch.setattr(scopes, "_identity_for_pid", lambda pid: worker)
+    monkeypatch.setattr(
+        __import__("psutil"),
+        "Process",
+        lambda pid: SimpleNamespace(parents=lambda: [SimpleNamespace(pid=launcher["pid"])]),
+    )
+    monkeypatch.setattr(callers, "_gpu_ownership_snapshot", lambda: {"status": "verified", "owners": []})
+
+    receipt = session.cleanup()
+
+    assert receipt["verified"] is True
+    assert receipt["cleanup_observations"][0]["worker_process_identity"] == worker
+
+
+@pytest.mark.parametrize("failure", ["wrong_incarnation", "outside_scope", "not_descended", "malformed"])
+def test_session_cleanup_rejects_unverified_live_worker_identity(monkeypatch, tmp_path: Path, failure: str) -> None:
+    from app.learn.hybrid import goal_binding_model_callers as callers
+    from app.learn.hybrid import windows_process_scope as scopes
+    from scripts.model_servers.goal_binding_transformers_worker import write_json
+
+    launcher = {"pid": 41, "create_time_ns": 100}
+    worker = {"pid": 42, "create_time_ns": 101}
+    session = callers.GoalBindingProviderSession({"provider_id": "ui_venus_1_5_2b_f16", "arm_id": "ui"}, tmp_path, tmp_path / "run")
+    session.root = tmp_path / "session"
+    session.root.mkdir()
+    session.config_sha = "a" * 64
+    session.config = {"scope_name": "scope", "code_identity": {}}
+    session.launcher_identity = launcher
+    session.identity = launcher
+    session.baseline = {"status": "verified", "owners": []}
+    session.profile = {"provider_id": "ui_venus_1_5_2b_f16", "max_output_bytes": 16384}
+    session.runtime_state = None
+    session.sequence = 1
+    session.process = SimpleNamespace(wait=lambda timeout: 0, poll=lambda: 0, close=lambda: None)
+    members = [launcher["pid"], worker["pid"]] if failure != "outside_scope" else [launcher["pid"]]
+    session.scope = SimpleNamespace(pids=lambda: members, close=lambda: None)
+    write_json(session.root / "worker-identity.json", {"pid": worker["pid"]} if failure == "malformed" else worker)
+    write_json(session.root / "stopped.json", {"session_sha256": session.config_sha, "worker_process_identity": worker, "runtime_cleanup": {"status": "released"}})
+    observed = {"pid": worker["pid"], "create_time_ns": 999} if failure == "wrong_incarnation" else worker
+    parents = [] if failure == "not_descended" else [SimpleNamespace(pid=launcher["pid"])]
+    monkeypatch.setattr(scopes, "_identity_for_pid", lambda pid: observed)
+    monkeypatch.setattr(__import__("psutil"), "Process", lambda pid: SimpleNamespace(parents=lambda: parents))
+    monkeypatch.setattr(scopes, "observe_process_scope_cleanup", lambda *args, **kwargs: {"cleanup_status": "verified", "member_identities_after": [], "member_pids_after": [], "active_listeners_after": []})
+    monkeypatch.setattr(callers, "_gpu_ownership_snapshot", lambda: {"status": "verified", "owners": []})
+
+    receipt = session.cleanup()
+
+    assert receipt["verified"] is False
+    assert receipt["cleanup_observations"][0]["errors"]
+
+
 def test_probe_uses_no_gold_holdout_or_candidate_mapping(tmp_path: Path) -> None:
     from app.learn.hybrid.goal_binding_model_callers import (
         load_goal_binding_profile,
