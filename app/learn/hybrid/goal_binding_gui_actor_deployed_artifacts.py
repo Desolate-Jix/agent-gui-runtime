@@ -127,11 +127,17 @@ def _verify_source(
     ):
         raise ValueError("GUI-Actor source identity document is invalid")
     namespace = Path("artifacts") / runtime_provider / runtime_revision / "official"
+    installed_namespace = (
+        Path("artifacts") / runtime_provider / runtime_revision / "Lib" / "site-packages"
+    )
     for relative, digest in official.items():
         safe = _relative(relative, field="GUI-Actor official source file")
         record = runtime_files.get((namespace / safe).as_posix())
         if record is None or record.get("sha256") != digest:
             raise ValueError("GUI-Actor source identity document changed or escaped")
+        installed_record = runtime_files.get((installed_namespace / safe).as_posix())
+        if installed_record is None or installed_record.get("sha256") != digest:
+            raise ValueError("GUI-Actor installed source is missing or changed")
     return _sha256_file(path)
 
 

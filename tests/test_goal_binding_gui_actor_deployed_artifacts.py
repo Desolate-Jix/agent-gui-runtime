@@ -36,6 +36,7 @@ def _build(
     source_revision: str | None = None,
     attention: str = "sdpa",
     smoke_exit: int = 0,
+    installed_source: str = "exact",
 ) -> dict[str, object]:
     from app.learn.hybrid import goal_binding_gui_actor_deployed_artifacts as deployed
     from app.learn.hybrid import model_test_storage as storage
@@ -67,6 +68,15 @@ def _build(
     }
     for relative, payload in official.items():
         _write(runtime_root / "official" / relative, payload)
+    installed_source_paths = []
+    if installed_source != "missing":
+        for relative, payload in official.items():
+            installed_payload = (
+                b"mutated" if installed_source == "mutated" and relative.endswith("inference.py") else payload
+            )
+            installed_source_paths.append(
+                _write(runtime_root / "Lib" / "site-packages" / relative, installed_payload)
+            )
     source = {
         "contract_version": "goal_binding_gui_actor_source_identity_v1",
         "official_source_revision": source_revision or deployed.OFFICIAL_SOURCE_REVISION,
@@ -134,6 +144,7 @@ def _build(
         source_path,
         preprocessing_path,
         *package_paths,
+        *installed_source_paths,
         *[runtime_root / "official" / relative for relative in official],
     ]
     checkpoint_manifest = storage.register_downloaded_artifact(
@@ -303,6 +314,22 @@ def test_gui_actor_deployment_rejects_extra_or_mutated_parent_file(
     with pytest.raises(ValueError, match="exactly match"):
         deployed.verify_gui_actor_deployment(
             extra_fixture["profile"], extra_fixture["root"]
+        )
+
+
+@pytest.mark.parametrize("installed_source", ["missing", "mutated"])
+def test_gui_actor_deployment_rejects_unproven_installed_source_copy(
+    tmp_path, monkeypatch, installed_source
+):
+    from app.learn.hybrid import goal_binding_gui_actor_deployed_artifacts as deployed
+
+    fixture = _build(
+        tmp_path, monkeypatch, installed_source=installed_source
+    )
+
+    with pytest.raises(ValueError, match="installed source"):
+        deployed.verify_gui_actor_deployment(
+            fixture["profile"], fixture["root"]
         )
 
     mutated_fixture = _build(tmp_path / "mutated", monkeypatch)
