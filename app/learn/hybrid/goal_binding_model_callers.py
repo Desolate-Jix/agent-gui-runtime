@@ -391,6 +391,11 @@ def _worker_python(profile: Mapping[str, object], artifact_dir: Path) -> Path:
     return _safe_under(artifact_dir, artifact["relative_path"])
 
 
+def worker_command(*, python: Path, worker: Path, session: Path) -> list[str]:
+    """禁止 worker 在已封存的 runtime 中写入或刷新字节码。"""
+    return [str(python), "-B", str(worker), "--execute", "--session-json", str(session)]
+
+
 def _isolated_worker_environment(scope_name: str) -> dict[str, str]:
     environment = dict(os.environ)
     environment.pop("PYTHONPATH", None)
@@ -398,6 +403,7 @@ def _isolated_worker_environment(scope_name: str) -> dict[str, str]:
     environment.update(
         PYTHONIOENCODING="utf-8",
         PYTHONNOUSERSITE="1",
+        PYTHONDONTWRITEBYTECODE="1",
         HF_HUB_OFFLINE="1",
         TRANSFORMERS_OFFLINE="1",
         AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME=scope_name,
@@ -491,7 +497,7 @@ class GoalBindingProviderSession:
             write_json(self.root / "parent-identity.json", self.launcher_identity)
         env = _isolated_worker_environment(name)
         with (self.root / "worker.stdout.bin").open("xb") as stdout, (self.root / "worker.stderr.bin").open("xb") as stderr:
-            self.process = spawn_process_in_scope([str(python), str(worker), "--execute", "--session-json", str(self.root / "session.json")], scope_name=name, cwd=self.artifact_dir, stdout=stdout, stderr=stderr, env=env, before_resume=before_resume)
+            self.process = spawn_process_in_scope(worker_command(python=python, worker=worker, session=self.root / "session.json"), scope_name=name, cwd=self.artifact_dir, stdout=stdout, stderr=stderr, env=env, before_resume=before_resume)
         ready = self._wait(self.root / "ready.json")
         from app.learn.hybrid.windows_process_scope import _identity_for_pid
         import psutil
@@ -683,6 +689,11 @@ class GoalBindingProviderSession:
                 cleanup_errors.append(str(exc))
         elif self.profile["provider_id"] == "qwen3_vl_8b_q4_k_m":
             cleanup_errors.append("managed incumbent release evidence is unavailable")
+        if self.process is not None and self.config is not None:
+            try:
+                _verified(self.profile, self.artifact_dir)
+            except (OSError, ValueError, RuntimeError) as exc:
+                cleanup_errors.append("provider artifact changed after session: " + str(exc))
         samples = []
         baseline_ids = {(owner["pid"], owner["create_time_ns"]) for owner in (self.baseline or {}).get("owners", [])}
         for _ in range(3):

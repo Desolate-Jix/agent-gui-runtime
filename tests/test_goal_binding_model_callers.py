@@ -190,6 +190,31 @@ def test_each_caller_binds_exact_pid_create_time_and_cleanup_receipt(tmp_path: P
     assert receipt["provider"] == "test-provider"
 
 
+def test_worker_command_disables_bytecode_writes_to_sealed_runtime(tmp_path: Path) -> None:
+    from app.learn.hybrid.goal_binding_model_callers import worker_command
+
+    python = tmp_path / "python.exe"
+    worker = tmp_path / "worker.py"
+    session = tmp_path / "session.json"
+
+    assert worker_command(python=python, worker=worker, session=session) == [
+        str(python),
+        "-B",
+        str(worker),
+        "--execute",
+        "--session-json",
+        str(session),
+    ]
+
+
+def test_worker_environment_disables_bytecode_writes_to_sealed_runtime() -> None:
+    from app.learn.hybrid.goal_binding_model_callers import _isolated_worker_environment
+
+    environment = _isolated_worker_environment("Local\\AgentGuiBenchmarkWorkerTest-test")
+
+    assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
 def test_unknown_residue_or_gpu_owner_blocks_next_provider() -> None:
     from app.learn.hybrid.goal_binding_model_callers import cleanup_receipt_is_clean
 
@@ -207,7 +232,8 @@ def test_unknown_residue_or_gpu_owner_blocks_next_provider() -> None:
     }) is False
 
 
-def test_session_cleanup_uses_bound_delayed_worker_identity(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("artifact_intact", [True, False])
+def test_session_cleanup_uses_bound_delayed_worker_identity(monkeypatch, tmp_path: Path, artifact_intact: bool) -> None:
     from app.learn.hybrid import goal_binding_model_callers as callers
     from app.learn.hybrid import windows_process_scope as scopes
     from scripts.model_servers.goal_binding_transformers_worker import write_json
@@ -270,11 +296,19 @@ def test_session_cleanup_uses_bound_delayed_worker_identity(monkeypatch, tmp_pat
         lambda pid: SimpleNamespace(parents=lambda: [SimpleNamespace(pid=launcher["pid"])]),
     )
     monkeypatch.setattr(callers, "_gpu_ownership_snapshot", lambda: {"status": "verified", "owners": []})
+    verified_artifacts = []
+    def verify_artifacts(profile, artifact_dir):
+        verified_artifacts.append((profile, artifact_dir))
+        if not artifact_intact:
+            raise ValueError("registered parent manifest file changed locally")
+        return profile
+    monkeypatch.setattr(callers, "_verified", verify_artifacts)
 
     receipt = session.cleanup()
 
-    assert receipt["verified"] is True
+    assert receipt["verified"] is artifact_intact
     assert receipt["cleanup_observations"][0]["worker_process_identity"] == worker
+    assert verified_artifacts == [(session.profile, tmp_path.resolve())]
 
 
 @pytest.mark.parametrize("failure", ["wrong_incarnation", "outside_scope", "not_descended", "malformed"])
