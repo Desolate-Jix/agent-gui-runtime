@@ -34,7 +34,7 @@ _CODE_FILES = frozenset({
     "scripts/model_servers/goal_binding_transformers_worker.py",
     "scripts/model_servers/goal_binding_provider_runtimes.py",
 })
-_RUNTIME_PACKAGES = frozenset({"torch", "torchvision", "transformers", "accelerate", "qwen-vl-utils", "Pillow"})
+_RUNTIME_PACKAGES = frozenset({"torch", "torchvision", "transformers", "accelerate", "qwen-vl-utils", "Pillow", "psutil"})
 OFFICIAL_SOURCE_FILES = {
     "models/grounding/ui_venus1_5_gd.py": "8cc7640387be1f8ed9a3452560c3b11ae6487b373229355a45128b79d2c4707c",
     "requirements.txt": "99fdb61e4d2aeb9a56c5026894293b229f82546346d7bf232b432085faa75d9c",
@@ -43,7 +43,7 @@ OFFICIAL_SOURCE_REVISION = "inclusionAI/UI-Venus@192a9247ad1129279ba1d6c263d4c9e
 RUNTIME_PACKAGE_VERSIONS = {
     "torch": "2.12.0+cu130", "torchvision": "0.27.0+cu130",
     "transformers": "5.12.0", "accelerate": "1.14.0",
-    "qwen-vl-utils": "0.0.14", "Pillow": "12.1.1",
+    "qwen-vl-utils": "0.0.14", "Pillow": "12.1.1", "psutil": "7.2.2",
 }
 _ROLES = frozenset({"model", "runtime", "source", "preprocessing"})
 _DEPLOYMENT_FIELDS = frozenset({"contract_version", "provider_id", "repo_id", "revision", "checkpoint_parent", "runtime_parent", "artifacts", "artifact_is_authorization"})

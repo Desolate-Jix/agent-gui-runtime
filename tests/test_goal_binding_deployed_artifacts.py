@@ -97,6 +97,7 @@ def deployed_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
         "accelerate": "site-packages/accelerate/__init__.py",
         "qwen-vl-utils": "site-packages/qwen_vl_utils/__init__.py",
         "Pillow": "site-packages/PIL/__init__.py",
+        "psutil": "site-packages/psutil/__init__.py",
     }
     module_paths = [_write(runtime_root / path, name.encode("utf-8")) for name, path in packages.items()]
     executable = _write(runtime_root / "Scripts" / "python.exe", b"runtime")
@@ -489,5 +490,3 @@ def test_deployment_rejects_source_document_without_official_file_hashes(deploye
     _refresh_runtime_parent(deployed_fixture)
     with pytest.raises(ValueError, match="source identity document"):
         deployed.verify_ui_venus_deployment(deployed_fixture["profile"], root)
-
-\n

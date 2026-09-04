@@ -55,7 +55,7 @@ def _fake_runtime(staging: Path, versions: dict[str, str]) -> None:
         candidate = executable.parent / extension
         if candidate.exists():
             shutil.copy2(candidate, staging / extension)
-    module_names = {"torch": "torch", "torchvision": "torchvision", "transformers": "transformers", "accelerate": "accelerate", "qwen-vl-utils": "qwen_vl_utils", "Pillow": "PIL"}
+    module_names = {"torch": "torch", "torchvision": "torchvision", "transformers": "transformers", "accelerate": "accelerate", "qwen-vl-utils": "qwen_vl_utils", "Pillow": "PIL", "psutil": "psutil"}
     for distribution, module in module_names.items():
         _write(staging / "site-packages" / module / "__init__.py", "VALUE = 1\n")
         metadata_name = distribution.replace("-", "_")
@@ -73,6 +73,7 @@ def test_ui_venus_production_source_and_sdpa_constants_are_frozen() -> None:
     assert deployed.RUNTIME_PACKAGE_VERSIONS == {
         "torch": "2.12.0+cu130", "torchvision": "0.27.0+cu130", "transformers": "5.12.0",
         "accelerate": "1.14.0", "qwen-vl-utils": "0.0.14", "Pillow": "12.1.1",
+        "psutil": "7.2.2",
     }
 
 
