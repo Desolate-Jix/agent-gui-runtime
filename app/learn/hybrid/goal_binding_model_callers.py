@@ -129,6 +129,15 @@ def _validate_profile(profile: Mapping[str, object]) -> dict[str, object]:
         result["provider_id"] == "ui_venus_1_5_2b_f16"
         and kind == "ui_venus_point_v1"
     )
+    is_gui_actor_sdpa_contract = (
+        result["provider_id"] == "gui_actor_3b_bf16"
+        and kind == "gui_actor_topk_points_v1"
+    )
+    if is_gui_actor_sdpa_contract:
+        if runtime_kind != "gui_actor_transformers_sdpa_windows_v1":
+            raise ValueError("GUI-Actor requires its sealed SDPA runtime kind")
+    elif runtime_kind == "gui_actor_transformers_sdpa_windows_v1":
+        raise ValueError("profile runtime kind is incompatible with provider_id or native output")
     if runtime_kind == "transformers_sdpa_windows_v1":
         if result["provider_id"] != "ui_venus_1_5_2b_f16":
             raise ValueError("profile runtime kind is incompatible with provider_id")
@@ -162,7 +171,7 @@ def _validate_profile(profile: Mapping[str, object]) -> dict[str, object]:
     expected_runtime_kind = {
         "qwen_goal_binding_array_v1": "llama_cpp",
         "ui_venus_point_v1": "transformers_sdpa_windows_v1",
-        "gui_actor_topk_points_v1": "gui_actor_official_runtime",
+        "gui_actor_topk_points_v1": "gui_actor_transformers_sdpa_windows_v1",
         "phi_ground_any_v1": "vllm",
         "gguf_bare_point_pair_v1": "llama_cpp",
     }[native_kind]

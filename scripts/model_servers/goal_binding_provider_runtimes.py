@@ -207,6 +207,15 @@ def _load_dependencies(profile: Mapping[str, object], artifact_root: Path) -> di
             raise ProviderIntegrityError(
                 "UI-Venus requires the sealed transformers_sdpa_windows_v1 runtime"
             )
+    if provider == "gui_actor_3b_bf16":
+        runtime = profile.get("runtime")
+        if (
+            not isinstance(runtime, Mapping)
+            or runtime.get("kind") != "gui_actor_transformers_sdpa_windows_v1"
+        ):
+            raise ProviderIntegrityError(
+                "GUI-Actor requires its sealed SDPA runtime"
+            )
     checkpoint = paths["model"].parent
     if provider == "phi_ground_any_bf16":
         if sys.platform == "win32":
@@ -224,7 +233,7 @@ def _load_dependencies(profile: Mapping[str, object], artifact_root: Path) -> di
     from gui_actor.modeling_qwen25vl import Qwen2_5_VLForConditionalGenerationWithPointer
     from gui_actor.inference import inference
     from gui_actor.constants import grounding_system_message
-    model = Qwen2_5_VLForConditionalGenerationWithPointer.from_pretrained(checkpoint, local_files_only=True, torch_dtype=torch.bfloat16, device_map="cuda:0", attn_implementation="flash_attention_2").eval()
+    model = Qwen2_5_VLForConditionalGenerationWithPointer.from_pretrained(checkpoint, local_files_only=True, torch_dtype=torch.bfloat16, device_map="cuda:0", attn_implementation="sdpa").eval()
     return {"model": model, "processor": processor, "tokenizer": processor.tokenizer, "torch": torch, "inference": inference, "grounding_system_message": grounding_system_message}
 
 

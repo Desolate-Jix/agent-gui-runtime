@@ -90,6 +90,38 @@ def test_ui_venus_profile_seals_the_windows_sdpa_runtime_with_its_native_shape()
     assert profile["native_output"]["kind"] == "ui_venus_point_v1"
 
 
+def test_gui_actor_profile_seals_its_windows_sdpa_runtime_without_changing_native_contract() -> None:
+    from app.learn.hybrid.goal_binding_model_callers import load_goal_binding_profile
+
+    profile = load_goal_binding_profile(
+        PROFILE_DIR / "goal_binding_gui_actor_3b_bf16.json"
+    )
+
+    assert profile["runtime"]["kind"] == "gui_actor_transformers_sdpa_windows_v1"
+    assert profile["native_output"]["kind"] == "gui_actor_topk_points_v1"
+    assert profile["coordinate_space"] == "normalized_0_1"
+
+
+@pytest.mark.parametrize(
+    "runtime_kind",
+    ("gui_actor_official_runtime", "transformers_sdpa_windows_v1"),
+)
+def test_gui_actor_profile_rejects_unsealed_or_ui_venus_runtime_kind(
+    runtime_kind: str,
+) -> None:
+    from app.learn.hybrid.goal_binding_model_callers import _validate_profile
+
+    profile = json.loads(
+        (PROFILE_DIR / "goal_binding_gui_actor_3b_bf16.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    profile["runtime"]["kind"] = runtime_kind
+
+    with pytest.raises(ValueError, match="GUI-Actor.*sealed SDPA runtime kind"):
+        _validate_profile(profile)
+
+
 def test_windows_sdpa_runtime_rejects_a_non_ui_venus_native_shape() -> None:
     from app.learn.hybrid.goal_binding_model_callers import _validate_profile
 

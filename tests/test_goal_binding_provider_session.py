@@ -457,6 +457,120 @@ def test_ui_venus_loader_rejects_legacy_runtime_before_loading_transformers(
         runtimes._load_dependencies(profile, tmp_path)
 
 
+def test_gui_actor_loader_uses_local_bf16_cuda_and_sdpa(monkeypatch, tmp_path):
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+
+    events = []
+
+    class Model:
+        def eval(self):
+            events.append(("eval", None))
+            return self
+
+    class Processor:
+        tokenizer = object()
+
+    def load_processor(*args, **kwargs):
+        events.append(("processor", kwargs))
+        return Processor()
+
+    def load_model(*args, **kwargs):
+        events.append(("model", kwargs))
+        return Model()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(
+            AutoProcessor=SimpleNamespace(from_pretrained=load_processor)
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(bfloat16="bf16"),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "gui_actor.modeling_qwen25vl",
+        SimpleNamespace(
+            Qwen2_5_VLForConditionalGenerationWithPointer=SimpleNamespace(
+                from_pretrained=load_model
+            )
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "gui_actor.inference",
+        SimpleNamespace(inference=object()),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "gui_actor.constants",
+        SimpleNamespace(grounding_system_message="official system"),
+    )
+    monkeypatch.setattr(
+        runtimes,
+        "verified_artifact_paths",
+        lambda *args: {"model": tmp_path / "model.safetensors"},
+    )
+    profile = {
+        "provider_id": "gui_actor_3b_bf16",
+        "runtime": {"kind": "gui_actor_transformers_sdpa_windows_v1"},
+        "preprocessing": {
+            "source_revision": "microsoft/GUI-Actor@d98d1bbd01862f9112114b83b032f492c365a173"
+        },
+    }
+
+    dependencies = runtimes._load_dependencies(profile, tmp_path)
+
+    assert dependencies["tokenizer"] is dependencies["processor"].tokenizer
+    processor_kwargs = next(value for name, value in events if name == "processor")
+    model_kwargs = next(value for name, value in events if name == "model")
+    assert processor_kwargs == {"local_files_only": True}
+    assert model_kwargs == {
+        "local_files_only": True,
+        "torch_dtype": "bf16",
+        "device_map": "cuda:0",
+        "attn_implementation": "sdpa",
+    }
+
+
+def test_gui_actor_loader_rejects_legacy_runtime_before_importing_model_stack(
+    monkeypatch, tmp_path
+):
+    import builtins
+
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+
+    imported = []
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "torch" or name == "transformers" or name.startswith("gui_actor"):
+            imported.append(name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    monkeypatch.setattr(
+        runtimes,
+        "verified_artifact_paths",
+        lambda *args: {"model": tmp_path / "model.safetensors"},
+    )
+    profile = {
+        "provider_id": "gui_actor_3b_bf16",
+        "runtime": {"kind": "gui_actor_official_runtime"},
+        "preprocessing": {
+            "source_revision": "microsoft/GUI-Actor@d98d1bbd01862f9112114b83b032f492c365a173"
+        },
+    }
+
+    with pytest.raises(runtimes.ProviderIntegrityError, match="sealed"):
+        runtimes._load_dependencies(profile, tmp_path)
+
+    assert imported == []
+
+
 def test_tensor_telemetry_projection_preserves_order():
     from scripts.model_servers.goal_binding_provider_runtimes import _json_safe
     class Array:

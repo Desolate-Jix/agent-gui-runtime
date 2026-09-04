@@ -38,7 +38,7 @@
     "sha256": "not_acquired"
   },
   "runtime": {
-    "kind": "gui_actor_official_runtime",
+    "kind": "gui_actor_transformers_sdpa_windows_v1",
     "isolated_runtime_path": "artifacts/gui_actor_3b_bf16/not_acquired/python.exe",
     "sha256": "not_acquired",
     "worker": "scripts/model_servers/goal_binding_transformers_worker.py",
