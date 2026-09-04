@@ -102,6 +102,8 @@ Closed result rules：
 
 Adapter 接受 sealed official inference path 的单一 top-1 point/action 结果。若官方结果同时含动作文本和点，只读取 profile 指定的 point field；动作文本不进入 canonical result。坐标空间由 profile 明确声明并按 screenshot width/height 一次性投影。多点、缺点、附加无法解释的坐标或越界均为 `PROVIDER_FAILURE`。
 
+原始官方实现固定使用 FlashAttention 2；本次原生 Windows regression 使用显式密封的 `transformers_sdpa_windows_v1` 运行变体，因为当前 Windows 环境没有可用的 FlashAttention 2。该变体只把 attention backend 改为 PyTorch SDPA；权重、BF16 计算、官方 prompt、预处理、`max_new_tokens=128`、原生 point 输出、Adapter 和冻结评分边界均不改变。不得按环境自动回退，也不得把该变体描述成逐字复现官方 kernel。
+
 ### 5.2 GUI-Actor
 
 Adapter 只读取：

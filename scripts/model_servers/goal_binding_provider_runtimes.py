@@ -195,6 +195,15 @@ def _load_dependencies(profile: Mapping[str, object], artifact_root: Path) -> di
     revisions = {"ui_venus_1_5_2b_f16": "inclusionAI/UI-Venus@192a9247ad1129279ba1d6c263d4c9e7ecef3644", "gui_actor_3b_bf16": "microsoft/GUI-Actor@d98d1bbd01862f9112114b83b032f492c365a173", "phi_ground_any_bf16": "microsoft/Phi-Ground@395640833d9b4748446d007257d87924df733ecb"}
     if profile.get("preprocessing", {}).get("source_revision") != revisions[provider]:
         raise ProviderIntegrityError("official source revision differs from pinned provider source")
+    if provider == "ui_venus_1_5_2b_f16":
+        runtime = profile.get("runtime")
+        if (
+            not isinstance(runtime, Mapping)
+            or runtime.get("kind") != "transformers_sdpa_windows_v1"
+        ):
+            raise ProviderIntegrityError(
+                "UI-Venus requires the sealed transformers_sdpa_windows_v1 runtime"
+            )
     checkpoint = paths["model"].parent
     if provider == "phi_ground_any_bf16":
         if sys.platform == "win32":
@@ -207,7 +216,7 @@ def _load_dependencies(profile: Mapping[str, object], artifact_root: Path) -> di
     if provider == "ui_venus_1_5_2b_f16":
         from transformers import AutoModelForImageTextToText
         from qwen_vl_utils import process_vision_info
-        model = AutoModelForImageTextToText.from_pretrained(checkpoint, local_files_only=True, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True, attn_implementation="flash_attention_2").to("cuda").eval()
+        model = AutoModelForImageTextToText.from_pretrained(checkpoint, local_files_only=True, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True, attn_implementation="sdpa").to("cuda").eval()
         return {"model": model, "processor": processor, "torch": torch, "process_vision_info": process_vision_info}
     from gui_actor.modeling_qwen25vl import Qwen2_5_VLForConditionalGenerationWithPointer
     from gui_actor.inference import inference

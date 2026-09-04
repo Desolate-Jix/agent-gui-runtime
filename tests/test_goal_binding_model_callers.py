@@ -79,6 +79,48 @@ def test_profiles_are_closed_non_authorizing_and_use_exact_model_ids() -> None:
         )
 
 
+def test_ui_venus_profile_seals_the_windows_sdpa_runtime_with_its_native_shape() -> None:
+    from app.learn.hybrid.goal_binding_model_callers import load_goal_binding_profile
+
+    profile = load_goal_binding_profile(
+        PROFILE_DIR / "goal_binding_ui_venus_1_5_2b_f16.json"
+    )
+
+    assert profile["runtime"]["kind"] == "transformers_sdpa_windows_v1"
+    assert profile["native_output"]["kind"] == "ui_venus_point_v1"
+
+
+def test_windows_sdpa_runtime_rejects_a_non_ui_venus_native_shape() -> None:
+    from app.learn.hybrid.goal_binding_model_callers import _validate_profile
+
+    profile = json.loads(
+        (PROFILE_DIR / "goal_binding_ui_venus_1_5_2b_f16.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    profile["native_output"] = {
+        "kind": "gui_actor_topk_points_v1",
+        "raw_format": "utf8_native",
+    }
+
+    with pytest.raises(ValueError, match="runtime kind.*native output"):
+        _validate_profile(profile)
+
+
+def test_windows_sdpa_runtime_rejects_a_non_ui_venus_provider_id() -> None:
+    from app.learn.hybrid.goal_binding_model_callers import _validate_profile
+
+    profile = json.loads(
+        (PROFILE_DIR / "goal_binding_ui_venus_1_5_2b_f16.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    profile["provider_id"] = "gui_actor_3b_bf16"
+
+    with pytest.raises(ValueError, match="runtime kind.*provider_id"):
+        _validate_profile(profile)
+
+
 def test_ui_venus_and_phi_workers_return_only_native_output_trace() -> None:
     worker = _worker_module()
     for provider_id, raw_native in (

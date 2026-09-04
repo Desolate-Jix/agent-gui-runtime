@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -392,7 +393,13 @@ def test_official_ui_loader_constructs_once_and_two_inferences(monkeypatch, tmp_
     monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(bfloat16="bf16", cuda=SimpleNamespace(is_available=lambda: False)))
     monkeypatch.setitem(sys.modules, "qwen_vl_utils", SimpleNamespace(process_vision_info=lambda messages: ([messages[0]["content"][0]["image"]], None)))
     monkeypatch.setattr(runtimes, "verified_artifact_paths", lambda *a: {"model": tmp_path / "model.safetensors"})
-    profile = {"provider_id": "ui_venus_1_5_2b_f16", "preprocessing": {"source_revision": "inclusionAI/UI-Venus@192a9247ad1129279ba1d6c263d4c9e7ecef3644"}}
+    profile = {
+        "provider_id": "ui_venus_1_5_2b_f16",
+        "runtime": {"kind": "transformers_sdpa_windows_v1"},
+        "preprocessing": {
+            "source_revision": "inclusionAI/UI-Venus@192a9247ad1129279ba1d6c263d4c9e7ecef3644"
+        },
+    }
     session = runtimes.open_session(profile=profile, artifact_root=tmp_path, session_root=tmp_path, scope_name="unused", listener_port=None)
     image = tmp_path / "screen.png"
     Image.new("RGB", (2, 2)).save(image)
@@ -404,8 +411,39 @@ def test_official_ui_loader_constructs_once_and_two_inferences(monkeypatch, tmp_
     assert [name for name, value in events].count("generate") == 2
     assert events[0][1]["local_files_only"] is True
     assert events[0][1]["torch_dtype"] == "bf16"
+    assert events[0][1]["attn_implementation"] == "sdpa"
     messages = next(value for name, value in events if name == "messages")
     assert messages[0]["content"][1]["text"] == "Output the center point of the position corresponding to the following instruction: \nOpen. \n\nThe output should just be the coordinates of a point, in the format [x,y]. Additionally, if the task is infeasible (e.g., the task is not related to the image), the output should be [-1,-1]."
+
+
+def test_ui_venus_loader_rejects_legacy_runtime_before_loading_transformers(
+    monkeypatch, tmp_path
+):
+    from scripts.model_servers import goal_binding_provider_runtimes as runtimes
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("an unsealed UI-Venus runtime must not load Transformers")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(AutoProcessor=SimpleNamespace(from_pretrained=forbidden)),
+    )
+    monkeypatch.setattr(
+        runtimes,
+        "verified_artifact_paths",
+        lambda *args: {"model": tmp_path / "model.safetensors"},
+    )
+    profile = {
+        "provider_id": "ui_venus_1_5_2b_f16",
+        "runtime": {"kind": "transformers"},
+        "preprocessing": {
+            "source_revision": "inclusionAI/UI-Venus@192a9247ad1129279ba1d6c263d4c9e7ecef3644"
+        },
+    }
+
+    with pytest.raises(runtimes.ProviderIntegrityError, match="sealed"):
+        runtimes._load_dependencies(profile, tmp_path)
 
 
 def test_tensor_telemetry_projection_preserves_order():

@@ -124,6 +124,18 @@ def _validate_profile(profile: Mapping[str, object]) -> dict[str, object]:
     if kind not in {"qwen_goal_binding_array_v1", "ui_venus_point_v1", "gui_actor_topk_points_v1", "phi_ground_any_v1", "gguf_bare_point_pair_v1"}:
         raise ValueError("profile native output kind is unsupported")
     result["native_output"] = {"kind": kind, "raw_format": _text(native.get("raw_format"), "profile native raw format", 64)}
+    runtime_kind = result["runtime"]["kind"]  # type: ignore[index]
+    is_ui_venus_sdpa_contract = (
+        result["provider_id"] == "ui_venus_1_5_2b_f16"
+        and kind == "ui_venus_point_v1"
+    )
+    if runtime_kind == "transformers_sdpa_windows_v1":
+        if result["provider_id"] != "ui_venus_1_5_2b_f16":
+            raise ValueError("profile runtime kind is incompatible with provider_id")
+        if kind != "ui_venus_point_v1":
+            raise ValueError("profile runtime kind is incompatible with native output")
+    elif is_ui_venus_sdpa_contract:
+        raise ValueError("UI-Venus native output requires the sealed SDPA runtime kind")
     preprocessing = profile.get("preprocessing")
     if not isinstance(preprocessing, Mapping) or set(preprocessing) != {"identity", "source_revision", "sha256"}:
         raise ValueError("profile preprocessing is not closed")
@@ -149,7 +161,7 @@ def _validate_profile(profile: Mapping[str, object]) -> dict[str, object]:
     }[native_kind]
     expected_runtime_kind = {
         "qwen_goal_binding_array_v1": "llama_cpp",
-        "ui_venus_point_v1": "transformers",
+        "ui_venus_point_v1": "transformers_sdpa_windows_v1",
         "gui_actor_topk_points_v1": "gui_actor_official_runtime",
         "phi_ground_any_v1": "vllm",
         "gguf_bare_point_pair_v1": "llama_cpp",
