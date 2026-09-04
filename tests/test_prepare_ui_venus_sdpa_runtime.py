@@ -73,7 +73,7 @@ def _fake_runtime(staging: Path, versions: dict[str, str]) -> None:
 def test_ui_venus_production_source_and_sdpa_constants_are_frozen() -> None:
     from app.learn.hybrid import goal_binding_deployed_artifacts as deployed
 
-    assert deployed.WINDOWS_SDPA_RUNTIME_REVISION == "e4882e51e27a984127ea06ba5512524aa8839783"
+    assert deployed.WINDOWS_SDPA_RUNTIME_REVISION == "1101372301d4e112678bef68e4db634e0117a652"
     assert deployed.OFFICIAL_SOURCE_FILES == {
         "models/grounding/ui_venus1_5_gd.py": "8cc7640387be1f8ed9a3452560c3b11ae6487b373229355a45128b79d2c4707c",
         "requirements.txt": "99fdb61e4d2aeb9a56c5026894293b229f82546346d7bf232b432085faa75d9c",
