@@ -31,15 +31,13 @@ WINDOWS_SDPA_RUNTIME_REVISION = "6ed93fbdc2487257a14123bde0acff74eebd2830"
 OFFICIAL_SOURCE_REVISION = (
     "microsoft/GUI-Actor@d98d1bbd01862f9112114b83b032f492c365a173"
 )
-OFFICIAL_SOURCE_FILES = frozenset(
-    {
-        "gui_actor/__init__.py",
-        "gui_actor/modeling_qwen25vl.py",
-        "gui_actor/inference.py",
-        "gui_actor/constants.py",
-        "gui_actor/trainer.py",
-    }
-)
+OFFICIAL_SOURCE_FILES = {
+    "gui_actor/__init__.py": "src/gui_actor/__init__.py",
+    "gui_actor/modeling_qwen25vl.py": "src/gui_actor/modeling_qwen25vl.py",
+    "gui_actor/inference.py": "src/gui_actor/inference.py",
+    "gui_actor/constants.py": "src/gui_actor/constants.py",
+    "gui_actor/trainer.py": "src/gui_actor/trainer.py",
+}
 RUNTIME_PACKAGE_VERSIONS = {
     "torch": "2.5.1+cu124",
     "torchvision": "0.20.1+cu124",
@@ -122,7 +120,7 @@ def _verify_source(
         or set(code) != _CODE_FILES
         or dict(code) != _current_code_hashes()
         or not isinstance(official, Mapping)
-        or set(official) != OFFICIAL_SOURCE_FILES
+        or set(official) != set(OFFICIAL_SOURCE_FILES)
         or any(not _is_sha256(value) for value in official.values())
     ):
         raise ValueError("GUI-Actor source identity document is invalid")

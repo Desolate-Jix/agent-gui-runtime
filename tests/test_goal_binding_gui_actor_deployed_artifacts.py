@@ -260,15 +260,13 @@ def test_gui_actor_runtime_identity_uses_its_compatible_packages_and_import_clos
         "Pillow": "11.1.0",
         "psutil": "7.0.0",
     }
-    assert deployed.OFFICIAL_SOURCE_FILES == frozenset(
-        {
-            "gui_actor/__init__.py",
-            "gui_actor/modeling_qwen25vl.py",
-            "gui_actor/inference.py",
-            "gui_actor/constants.py",
-            "gui_actor/trainer.py",
-        }
-    )
+    assert deployed.OFFICIAL_SOURCE_FILES == {
+        "gui_actor/__init__.py": "src/gui_actor/__init__.py",
+        "gui_actor/modeling_qwen25vl.py": "src/gui_actor/modeling_qwen25vl.py",
+        "gui_actor/inference.py": "src/gui_actor/inference.py",
+        "gui_actor/constants.py": "src/gui_actor/constants.py",
+        "gui_actor/trainer.py": "src/gui_actor/trainer.py",
+    }
 
 
 def test_gui_actor_deployment_rejects_cross_lineage_parent(tmp_path, monkeypatch):

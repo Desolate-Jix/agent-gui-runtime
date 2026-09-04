@@ -24,6 +24,9 @@ OFFICIAL_SOURCE = {
     "gui_actor/inference.py": "def inference(*args, **kwargs):\n    return None\n",
     "gui_actor/constants.py": "grounding_system_message = 'system'\n",
 }
+OFFICIAL_SOURCE_REPOSITORY_PATHS = {
+    relative: f"src/{relative}" for relative in OFFICIAL_SOURCE
+}
 
 
 def test_gui_actor_windows_sdpa_runtime_revision_is_frozen() -> None:
@@ -59,7 +62,7 @@ def _checkpoint(root: Path, *, revision: str | None = None) -> Path:
 
 def _source_checkout(path: Path) -> tuple[Path, str]:
     for relative, content in OFFICIAL_SOURCE.items():
-        _write(path / relative, content)
+        _write(path / OFFICIAL_SOURCE_REPOSITORY_PATHS[relative], content)
     subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
     subprocess.run(
         ["git", "-C", str(path), "config", "user.email", "test@example.invalid"],

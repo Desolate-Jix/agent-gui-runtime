@@ -58,9 +58,9 @@ def _verified_official_source(source: Path) -> dict[str, bytes]:
     if _git(source, "rev-parse", "HEAD") != OFFICIAL_SOURCE_GIT_REVISION:
         raise ValueError("pinned GUI-Actor source revision is invalid")
     result: dict[str, bytes] = {}
-    for relative in sorted(deployed.OFFICIAL_SOURCE_FILES):
+    for relative, repository_relative in sorted(deployed.OFFICIAL_SOURCE_FILES.items()):
         completed = subprocess.run(
-            ["git", "-C", str(source), "show", f"{OFFICIAL_SOURCE_GIT_REVISION}:{relative}"],
+            ["git", "-C", str(source), "show", f"{OFFICIAL_SOURCE_GIT_REVISION}:{repository_relative}"],
             check=False,
             capture_output=True,
         )
