@@ -545,6 +545,9 @@ def test_gui_actor_runtime_calls_official_topk_three_and_preserves_all_points(tm
 
     assert calls[0]["use_placeholder"] is True and calls[0]["topk"] == 3
     assert result["parsed_native"] == {"topk_points": prediction["topk_points"]}
+    assert json.loads(result["raw_native_output"]) == {
+        "topk_points": prediction["topk_points"]
+    }
     assert calls[0]["conversation"][0]["content"][0]["text"] == "official system"
     assert calls[0]["conversation"][1]["content"][1]["text"] == "button: Open"
 

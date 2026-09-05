@@ -316,7 +316,7 @@ def run_gui_actor(
     listener_port: int | None = None,
     dependencies: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Construct the official pointer runtime and retain its complete top-k result."""
+    """Construct the official pointer runtime and retain only its bounded top-k result."""
     if incumbent_projection is not None or incumbent_request is not None:
         raise ValueError("challenger cannot receive incumbent candidate projection")
     deps = dict(dependencies) if dependencies is not None else _load_dependencies(profile, artifact_root)
@@ -334,11 +334,13 @@ def run_gui_actor(
         use_placeholder=True,
         topk=3,
     )
-    safe_prediction = _json_safe(prediction)
-    raw = json.dumps(safe_prediction, ensure_ascii=False, separators=(",", ":"))
+    if not isinstance(prediction, Mapping) or "topk_points" not in prediction:
+        raise ValueError("GUI-Actor prediction must contain topk_points")
+    native = {"topk_points": _json_safe(prediction["topk_points"])}
+    raw = json.dumps(native, ensure_ascii=False, separators=(",", ":"))
     return _result(
         raw,
-        parsed_native={"topk_points": safe_prediction["topk_points"]} if isinstance(safe_prediction, dict) and isinstance(safe_prediction.get("topk_points"), list) else None,
+        parsed_native=native,
         telemetry=_metrics(
             generation_tokens=None,
             peak_vram_bytes=_cuda_peak(torch_module) if torch_module is not None else None,

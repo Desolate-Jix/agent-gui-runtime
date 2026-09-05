@@ -52,7 +52,7 @@ def test_gui_telemetry_raw_is_separate_from_full_ordered_topk(monkeypatch, tmp_p
     assert result["parsed_native"] == {"topk_points": prediction["topk_points"]}
 
 
-def test_official_gui_no_pointer_preserves_raw_and_same_runtime_continues(monkeypatch, tmp_path):
+def test_official_gui_no_pointer_preserves_bounded_raw_and_same_runtime_continues(monkeypatch, tmp_path):
     from scripts.model_servers import goal_binding_provider_runtimes as runtimes
     request = payload(tmp_path, "gui_actor_3b_bf16")
     predictions = [
@@ -76,7 +76,7 @@ def test_official_gui_no_pointer_preserves_raw_and_same_runtime_continues(monkey
         second = worker._run_provider_once(request, dispatcher=runtime)
     finally:
         runtime.close()
-    assert json.loads(first["raw_native_output"]) == predictions[0]
+    assert json.loads(first["raw_native_output"]) == {"topk_points": None}
     assert first["raw_native_output_sha256"] == hashlib.sha256(first["raw_native_output"].encode("utf-8")).hexdigest()
     assert first["failure"]["kind"] == "malformed_native_output"
     assert first["failure"]["terminal"] is False
