@@ -12,7 +12,7 @@ import tempfile
 
 
 MODEL_TEST_ROOT = Path(r"E:\模型测试")
-MODEL_TEST_MAX_BYTES = 32_212_254_720
+MODEL_TEST_MAX_BYTES = 50_000_000_000
 _STAGING_MARGIN_NUMERATOR = 105
 _MANIFEST_VERSION = "model_test_artifact_manifest_v1"
 _RESERVED_TOP_LEVEL = frozenset({"manifests", "reports", "staging"})
@@ -229,7 +229,7 @@ def assert_download_fits(*, root: Path, remote_bytes: int) -> None:
     current = int(inventory_storage(root)["logical_bytes"])
     staged = (remote_bytes * _STAGING_MARGIN_NUMERATOR + 99) // 100
     if current + staged > MODEL_TEST_MAX_BYTES:
-        raise ValueError("projected model download exceeds the 30 GiB storage cap")
+        raise ValueError("projected model download exceeds the 50 GB storage cap")
 
 
 def _manifest_path(root: Path, provider_id: str, revision: str) -> Path:

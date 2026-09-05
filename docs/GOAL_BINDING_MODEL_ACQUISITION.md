@@ -10,7 +10,7 @@ uv run python scripts/fetch_goal_binding_model.py --provider-id ui_venus_1_5_2b_
 ```
 
 - Model acquisition is restricted to `E:\模型测试`; its entire contents must stay
-  within 30 GiB, including staging and caches. Inventory is read-only.
+  within 50 GB (50,000,000,000 bytes), including staging and caches. Inventory is read-only.
 - Canonical provider/repository selectors resolve a unique checked-in profile
   and its exact upstream commit. Unacquired or unresolved revisions do not fall
   back to `main`.
@@ -40,7 +40,7 @@ uv run --no-sync python scripts/prepare_goal_binding_incumbent.py --root "E:\模
 This explicitly generates small identity documents and an outer-v1 profile under
 `reports/managed-incumbent-<unique-id>/`; it does not copy/download weights, change
 the checked-in profile, start a model, or write to the incumbent asset tree.
-Reports count toward the same guarded 30 GiB storage cap; publication holds the
+Reports count toward the same guarded 50 GB storage cap; publication holds the
 existing acquisition quota reservation through writing, inventory and verification.
 Only the exact
 `qwen3_vl_8b_q4_k_m` incumbent can use the internal

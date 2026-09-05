@@ -34,7 +34,16 @@ def test_inventory_counts_all_logical_bytes_under_root(tmp_path: Path) -> None:
     assert report["within_cap"] is True
 
 
-def test_projected_download_over_30_gib_is_rejected_before_write(tmp_path: Path) -> None:
+def test_model_selection_storage_budget_is_fifty_decimal_gb(tmp_path: Path) -> None:
+    from app.learn.hybrid.model_test_storage import MODEL_TEST_MAX_BYTES, assert_download_fits
+
+    assert MODEL_TEST_MAX_BYTES == 50_000_000_000
+    assert_download_fits(root=tmp_path, remote_bytes=40_000_000_000)
+    with pytest.raises(ValueError, match="cap"):
+        assert_download_fits(root=tmp_path, remote_bytes=50_000_000_000)
+
+
+def test_projected_download_over_storage_cap_is_rejected_before_write(tmp_path: Path) -> None:
     from app.learn.hybrid.model_test_storage import MODEL_TEST_MAX_BYTES, assert_download_fits
 
     before = set(tmp_path.rglob("*"))
