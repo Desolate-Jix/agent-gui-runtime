@@ -58,7 +58,55 @@ def _verified_official_source(source_checkout: Path) -> dict[str, bytes]:
 
 
 def _smoke_script() -> str:
-    return '''import importlib\nimport importlib.metadata\nimport json\nfrom pathlib import Path\nimport platform\nimport sys\nruntime = Path(sys.argv[1]).resolve()\nsite_packages = runtime / "site-packages"\nsys.path.insert(0, str(site_packages))\nitems = [("torch", "torch"), ("torchvision", "torchvision"), ("transformers", "transformers"), ("accelerate", "accelerate"), ("qwen-vl-utils", "qwen_vl_utils"), ("Pillow", "PIL"), ("psutil", "psutil")]\npackages = []\nfor distribution, module_name in items:\n    module = importlib.import_module(module_name)\n    origin = Path(module.__file__).resolve()\n    try:\n        relative = origin.relative_to(runtime).as_posix()\n    except ValueError:\n        raise RuntimeError("module origin escapes staging runtime")\n    packages.append({"distribution": distribution, "version": importlib.metadata.version(distribution), "module_origin": relative})\nprint(json.dumps({"python": {"implementation": platform.python_implementation(), "version": platform.python_version()}, "packages": packages}, sort_keys=True))\n'''
+    return '''import importlib
+import importlib.metadata
+import json
+from pathlib import Path
+import platform
+import site
+import sys
+
+
+def _packages(runtime):
+    site_packages = runtime / "site-packages"
+    site.addsitedir(str(site_packages))
+    for package_path in (site_packages, site_packages / "win32", site_packages / "win32" / "lib", site_packages / "Pythonwin"):
+        sys.path.insert(0, str(package_path))
+    items = [("torch", "torch"), ("torchvision", "torchvision"), ("transformers", "transformers"), ("accelerate", "accelerate"), ("qwen-vl-utils", "qwen_vl_utils"), ("Pillow", "PIL"), ("psutil", "psutil"), ("pywin32", "win32api")]
+    packages = []
+    for distribution, module_name in items:
+        module = importlib.import_module(module_name)
+        origin = Path(module.__file__).resolve()
+        try:
+            relative = origin.relative_to(runtime).as_posix()
+        except ValueError:
+            raise RuntimeError("module origin escapes staging runtime")
+        packages.append({"distribution": distribution, "version": importlib.metadata.version(distribution), "module_origin": relative})
+    return {"python": {"implementation": platform.python_implementation(), "version": platform.python_version()}, "packages": packages}
+
+
+def _startup_readiness(runtime, project_root):
+    sys.path.insert(0, str(project_root))
+    for module_name in ("win32api", "win32con", "win32event", "win32job", "win32process"):
+        module = importlib.import_module(module_name)
+        try:
+            Path(module.__file__).resolve().relative_to(runtime)
+        except ValueError:
+            raise RuntimeError("Windows process scope module origin escapes runtime")
+    from app.learn.hybrid.windows_process_scope import WindowsProcessScope, windows_process_scope_available
+    if WindowsProcessScope is None or not windows_process_scope_available():
+        raise RuntimeError("WindowsProcessScope is unavailable")
+    return {"windows_process_scope_ready": True}
+
+
+mode = sys.argv[1]
+if mode == "packages":
+    print(json.dumps(_packages(Path(sys.argv[2]).resolve()), sort_keys=True))
+elif mode == "startup":
+    print(json.dumps(_startup_readiness(Path(sys.argv[2]).resolve(), Path(sys.argv[3]).resolve()), sort_keys=True))
+else:
+    raise RuntimeError("runtime smoke mode is invalid")
+'''
 
 
 def _run_smoke(runtime_staging: Path) -> dict[str, object]:
@@ -72,15 +120,24 @@ def _run_smoke(runtime_staging: Path) -> dict[str, object]:
     environment.pop("PYTHONPATH", None)
     environment["PYTHONNOUSERSITE"] = "1"
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
-    result = subprocess.run([str(executable), "-I", "-B", str(script), str(runtime_staging)], check=False, capture_output=True, text=True, encoding="utf-8", env=environment)
+    result = subprocess.run([str(executable), "-I", "-B", str(script), "packages", str(runtime_staging)], check=False, capture_output=True, text=True, encoding="utf-8", env=environment)
     if result.returncode != 0:
-        raise ValueError("prepared isolated runtime smoke failed")
+        raise ValueError("prepared isolated runtime package smoke failed")
     try:
         observed = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise ValueError("prepared isolated runtime smoke emitted invalid JSON") from exc
     if not isinstance(observed, dict) or set(observed) != {"python", "packages"}:
         raise ValueError("prepared isolated runtime smoke emitted invalid identity")
+    startup = subprocess.run([str(executable), "-B", str(script), "startup", str(runtime_staging), str(PROJECT_ROOT)], check=False, capture_output=True, text=True, encoding="utf-8", env=environment)
+    if startup.returncode != 0:
+        raise ValueError("prepared isolated runtime Windows process scope startup smoke failed")
+    try:
+        readiness = json.loads(startup.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError("prepared isolated runtime Windows process scope startup smoke emitted invalid JSON") from exc
+    if readiness != {"windows_process_scope_ready": True}:
+        raise ValueError("prepared isolated runtime Windows process scope startup smoke emitted invalid identity")
     packages = observed.get("packages")
     if not isinstance(packages, list) or len(packages) != len(deployed.RUNTIME_PACKAGE_VERSIONS):
         raise ValueError("prepared isolated runtime smoke package set is invalid")
@@ -99,7 +156,7 @@ def _run_smoke(runtime_staging: Path) -> dict[str, object]:
         names.add(distribution)
     if names != set(deployed.RUNTIME_PACKAGE_VERSIONS):
         raise ValueError("prepared isolated runtime smoke package set is incomplete")
-    return observed
+    return {**observed, **readiness}
 
 
 def _expected_tree(root: Path) -> tuple[dict[str, int], dict[str, str]]:

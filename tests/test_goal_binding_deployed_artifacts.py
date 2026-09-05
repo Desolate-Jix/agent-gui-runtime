@@ -98,6 +98,7 @@ def deployed_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
         "qwen-vl-utils": "site-packages/qwen_vl_utils/__init__.py",
         "Pillow": "site-packages/PIL/__init__.py",
         "psutil": "site-packages/psutil/__init__.py",
+        "pywin32": "site-packages/win32/win32api.pyd",
     }
     module_paths = [_write(runtime_root / path, name.encode("utf-8")) for name, path in packages.items()]
     executable = _write(runtime_root / "Scripts" / "python.exe", b"runtime")
@@ -110,6 +111,7 @@ def deployed_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[st
         "python_executable_sha256": sha256(executable.read_bytes()).hexdigest(),
         "smoke_script_sha256": sha256(smoke_script.read_bytes()).hexdigest(),
         "exit_code": 0,
+        "windows_process_scope_ready": True,
     }
     smoke_path = _write(runtime_root / "runtime-smoke.json", _json_bytes(smoke_payload))
     pyvenv = _write(runtime_root / "pyvenv.cfg", f"home = {runtime_root / 'base'}\nexecutable = {base_python}\n".encode("utf-8"))
@@ -440,6 +442,7 @@ def test_deployment_rejects_runtime_python_home_outside_registered_artifact(depl
 @pytest.mark.parametrize("mutation, message", [
     (lambda value: value.clear(), "runtime smoke document is invalid"),
     (lambda value: value["packages"].pop(), "package set is invalid"),
+    (lambda value: value.__setitem__("windows_process_scope_ready", False), "Windows process scope readiness is invalid"),
     (lambda value: value["packages"].__setitem__(0, {**value["packages"][0], "module_origin": "../escape.py"}), "module origin"),
 ])
 def test_deployment_rejects_missing_malformed_or_escape_runtime_smoke(deployed_fixture: dict[str, object], mutation, message: str) -> None:

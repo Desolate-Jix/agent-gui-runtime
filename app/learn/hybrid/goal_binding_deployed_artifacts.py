@@ -17,7 +17,7 @@ UI_VENUS_PROVIDER = "ui_venus_1_5_2b_f16"
 UI_VENUS_REPOSITORY = "inclusionAI/UI-Venus-1.5-2B"
 WINDOWS_SDPA_RUNTIME_PROVIDER = "ui_venus_1_5_2b_f16_sdpa_runtime"
 WINDOWS_SDPA_RUNTIME_REPOSITORY = "Desolate-Jix/agent-gui-runtime"
-WINDOWS_SDPA_RUNTIME_REVISION = "1101372301d4e112678bef68e4db634e0117a652"
+WINDOWS_SDPA_RUNTIME_REVISION = "5b84a19727de0e402503d214cc2f39ae60b07cce"
 UI_VENUS_CHECKPOINT_REVISION = "bc4c6e62a1c545e043761439be95646d801853a4"
 UI_VENUS_CHECKPOINT_FILES = frozenset({
     ".gitattributes", "README.md", "chat_template.json", "config.json",
@@ -34,7 +34,7 @@ _CODE_FILES = frozenset({
     "scripts/model_servers/goal_binding_transformers_worker.py",
     "scripts/model_servers/goal_binding_provider_runtimes.py",
 })
-_RUNTIME_PACKAGES = frozenset({"torch", "torchvision", "transformers", "accelerate", "qwen-vl-utils", "Pillow", "psutil"})
+_RUNTIME_PACKAGES = frozenset({"torch", "torchvision", "transformers", "accelerate", "qwen-vl-utils", "Pillow", "psutil", "pywin32"})
 OFFICIAL_SOURCE_FILES = {
     "models/grounding/ui_venus1_5_gd.py": "8cc7640387be1f8ed9a3452560c3b11ae6487b373229355a45128b79d2c4707c",
     "requirements.txt": "99fdb61e4d2aeb9a56c5026894293b229f82546346d7bf232b432085faa75d9c",
@@ -44,6 +44,7 @@ RUNTIME_PACKAGE_VERSIONS = {
     "torch": "2.12.0+cu130", "torchvision": "0.27.0+cu130",
     "transformers": "5.12.0", "accelerate": "1.14.0",
     "qwen-vl-utils": "0.0.14", "Pillow": "12.1.1", "psutil": "7.2.2",
+    "pywin32": "311",
 }
 _ROLES = frozenset({"model", "runtime", "source", "preprocessing"})
 _DEPLOYMENT_FIELDS = frozenset({"contract_version", "provider_id", "repo_id", "revision", "checkpoint_parent", "runtime_parent", "artifacts", "artifact_is_authorization"})
@@ -293,7 +294,7 @@ def _verify_runtime_smoke(*, files: Mapping[str, Mapping[str, object]], runtime_
         raise ValueError("UI-Venus runtime smoke document is missing")
     document = _read_closed_json(
         record["path"],
-        fields=frozenset({"contract_version", "python", "packages", "python_executable_sha256", "smoke_script_sha256", "exit_code"}),
+        fields=frozenset({"contract_version", "python", "packages", "python_executable_sha256", "smoke_script_sha256", "exit_code", "windows_process_scope_ready"}),
         label="UI-Venus runtime smoke document",
     )
     python = document.get("python")
@@ -313,6 +314,8 @@ def _verify_runtime_smoke(*, files: Mapping[str, Mapping[str, object]], runtime_
         or document.get("exit_code") != 0
     ):
         raise ValueError("UI-Venus runtime smoke CPython identity is invalid")
+    if document.get("windows_process_scope_ready") is not True:
+        raise ValueError("UI-Venus Windows process scope readiness is invalid")
     if not isinstance(packages, list) or len(packages) != len(_RUNTIME_PACKAGES):
         raise ValueError("UI-Venus runtime smoke package set is invalid")
     observed: set[str] = set()

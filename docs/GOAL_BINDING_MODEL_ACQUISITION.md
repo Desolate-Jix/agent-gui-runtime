@@ -22,6 +22,12 @@ uv run python scripts/fetch_goal_binding_model.py --provider-id ui_venus_1_5_2b_
   local SHA-256 and is rechecked before existing storage registration.
 - Runtime/dependency installation and source/runtime identity registration are
   separate steps. This command never marks a model as tested or selected.
+- UI-Venus Windows SDPA runtime materialization pins `pywin32==311`; its
+  `ui_venus_runtime.pth` must expose the root, `win32`, `win32/lib`, `Pythonwin`,
+  and `pywin32_system32` paths, then run `import pywin32_bootstrap`. The sealed
+  no-model smoke imports all five
+  `win32*` modules through the runtime’s ordinary startup path and verifies
+  `WindowsProcessScope` before the profile can be used.
 - Existing D-drive incumbent weights/runtime are not migration or deletion
   targets. This acquisition workflow does not access unique holdout.
 
