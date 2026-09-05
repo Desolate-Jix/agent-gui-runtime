@@ -46,6 +46,7 @@ RUNTIME_PACKAGE_VERSIONS = {
     "qwen-vl-utils": "0.0.8",
     "Pillow": "11.1.0",
     "psutil": "7.0.0",
+    "pywin32": "311",
 }
 _SOURCE_VERSION = "goal_binding_gui_actor_source_identity_v1"
 _PREPROCESSING_VERSION = "goal_binding_gui_actor_preprocessing_v1"

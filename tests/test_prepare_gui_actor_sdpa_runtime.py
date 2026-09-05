@@ -35,6 +35,18 @@ def test_gui_actor_windows_sdpa_runtime_revision_is_frozen() -> None:
     assert deployed.WINDOWS_SDPA_RUNTIME_REVISION == "0cb0af6e4805036b6995276c16afc2f5c80dfc46"
 
 
+def test_gui_actor_runtime_includes_windows_process_scope_dependency() -> None:
+    from app.learn.hybrid import goal_binding_gui_actor_deployed_artifacts as deployed
+    import scripts.prepare_gui_actor_sdpa_runtime as prepare
+
+    assert deployed.RUNTIME_PACKAGE_VERSIONS["pywin32"] == "311"
+    smoke = prepare._smoke_script()
+    assert '("pywin32", "win32api")' in smoke
+    assert "importlib.import_module(module_name)" in smoke
+    for module in ("win32api", "win32con", "win32event", "win32job", "win32process"):
+        assert f'"{module}"' in smoke
+
+
 def _write(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="\n")
@@ -119,7 +131,10 @@ def _fake_runtime(staging: Path, versions: dict[str, str]) -> None:
         "qwen-vl-utils": "qwen_vl_utils",
         "Pillow": "PIL",
         "psutil": "psutil",
+        "pywin32": "win32api",
     }
+    for module in ("win32con", "win32event", "win32job", "win32process"):
+        _write(staging / "Lib" / "site-packages" / f"{module}.py", "VALUE = 1\n")
     for distribution, module in modules.items():
         _write(
             staging / "Lib" / "site-packages" / module / "__init__.py",

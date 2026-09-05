@@ -259,6 +259,7 @@ def test_gui_actor_runtime_identity_uses_its_compatible_packages_and_import_clos
         "qwen-vl-utils": "0.0.8",
         "Pillow": "11.1.0",
         "psutil": "7.0.0",
+        "pywin32": "311",
     }
     assert deployed.OFFICIAL_SOURCE_FILES == {
         "gui_actor/__init__.py": "src/gui_actor/__init__.py",
