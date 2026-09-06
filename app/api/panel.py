@@ -87,6 +87,7 @@ from app.learn.workflow_service import (
     finish_guarded_learning_workflow_stage_operation,
     get_production_learning_workflow_service_composition,
     heartbeat_guarded_learning_workflow_stage_operation,
+    prepare_learning_selection_review_replay,
     project_guarded_learning_workflow_runtime_attachment,
     recover_guarded_learning_workflow_stage_operation,
     start_guarded_learning_stage_worker,
@@ -860,6 +861,17 @@ def start_learning_workflow_stage_operation_endpoint(
     request: PanelStartLearningWorkflowStageOperationRequest,
 ) -> APIResponse:
     """签发服务端阶段租约，防止浏览器超时后遗留无主运行状态。"""
+
+    if request.learning_pipeline_mode == "hybrid_v1_2":
+        return APIResponse(
+            success=False,
+            message="Hybrid v1.2 is currently available for offline replay only",
+            data=None,
+            error=ErrorModel(
+                code="hybrid_selection_replay_only",
+                details="Managed model dispatch and production review persistence are not ready",
+            ),
+        )
 
     if (
         request.learning_pipeline_mode == "hybrid_v1_1"
@@ -1645,9 +1657,14 @@ def _authoritative_hybrid_capture_lineage_from_source(
 def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewRequest) -> APIResponse:
     """Load a model learning draft for display-only human review."""
     try:
+        prepared = prepare_learning_selection_review_replay(
+            project_root=ROOT_DIR,
+            source_path=request.source_path,
+        )
+        source_path = prepared["trial_path"] if prepared is not None else request.source_path
         expected_run_id, expected_revision, expected_lineage_ref = _authoritative_hybrid_workflow_expectations(
             request.workflow_run_id,
-            source_path=request.source_path,
+            source_path=source_path,
         )
         load_options: dict[str, Any] = {
             "project_root": ROOT_DIR,
@@ -1659,7 +1676,9 @@ def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewReq
                 expected_hybrid_workflow_revision=expected_revision,
                 expected_current_capture_lineage_ref=expected_lineage_ref,
             )
-        result = load_learning_draft_review(request.source_path, **load_options)
+        result = load_learning_draft_review(source_path, **load_options)
+        if prepared is not None:
+            result.update(prepared)
         trace_path = write_trace(
             category="panel",
             operation="load-learning-draft-review",

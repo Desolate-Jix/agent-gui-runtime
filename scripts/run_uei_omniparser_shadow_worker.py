@@ -51,6 +51,39 @@ def _hub_cache_path(profile: dict[str, object]) -> Path:
     return Path(str(expected_paths["huggingface_cache_path"])).expanduser()
 
 
+def _asset_paths(profile: dict[str, object]) -> tuple[Path, Path]:
+    """读取成对的受信 worker 覆盖，缺省时保留既有 profile 路径。"""
+    configured_code = os.environ.get("AGENT_GUI_UEI_OMNIPARSER_CODE_PATH")
+    configured_weights = os.environ.get("AGENT_GUI_UEI_OMNIPARSER_WEIGHTS_PATH")
+    if configured_code is None and configured_weights is None:
+        expected_paths = profile.get("expected_paths")
+        if not isinstance(expected_paths, dict):
+            raise ValueError("asset_path_invalid")
+        return (
+            ROOT / str(expected_paths["code_path"]),
+            ROOT / str(expected_paths["weights_path"]),
+        )
+    if configured_code is None or configured_weights is None:
+        raise ValueError("asset_path_invalid")
+    return (
+        _trusted_asset_path(configured_code),
+        _trusted_asset_path(configured_weights),
+    )
+
+
+def _trusted_asset_path(value: str) -> Path:
+    candidate = Path(value)
+    if not value.strip() or not candidate.is_absolute():
+        raise ValueError("asset_path_invalid")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as error:
+        raise ValueError("asset_path_invalid") from error
+    if not resolved.is_dir():
+        raise ValueError("asset_path_invalid")
+    return resolved
+
+
 
 def project_omni_official_items(items: list[dict[str, object]]) -> dict[str, object]:
     """在 runtime adapter 附加字段前，保留官方 Omni 的四个 native 字段。"""
@@ -70,8 +103,7 @@ def _run(
     from scripts import run_omniparser_learn_smoke as runner
 
     profile = runner._load_profile()
-    code_path = ROOT / profile["expected_paths"]["code_path"]
-    weights_path = ROOT / profile["expected_paths"]["weights_path"]
+    code_path, weights_path = _asset_paths(profile)
     cache_path = _hub_cache_path(profile)
     preflight = runner._preflight(code_path=code_path, weights_path=weights_path, hub_cache=cache_path)
     detector, caption, check_ocr_box, get_som_labeled_img = runner._load_official_models(code_path, weights_path, cache_path)

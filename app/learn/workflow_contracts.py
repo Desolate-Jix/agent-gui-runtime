@@ -5,13 +5,13 @@ from typing import Any, Literal, cast
 from pydantic import BaseModel, Field
 
 
-LearningPipelineMode = Literal["incumbent", "hybrid_v1_1"]
+LearningPipelineMode = Literal["incumbent", "hybrid_v1_1", "hybrid_v1_2"]
 
 
 def normalize_learning_pipeline_mode(value: object = "incumbent") -> LearningPipelineMode:
     normalized = str(value or "incumbent").strip()
-    if normalized not in {"incumbent", "hybrid_v1_1"}:
-        raise ValueError("learning_pipeline_mode must be incumbent or hybrid_v1_1")
+    if normalized not in {"incumbent", "hybrid_v1_1", "hybrid_v1_2"}:
+        raise ValueError("learning_pipeline_mode must be incumbent, hybrid_v1_1, or hybrid_v1_2")
     return cast(LearningPipelineMode, normalized)
 
 

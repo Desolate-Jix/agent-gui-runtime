@@ -1965,19 +1965,189 @@
     };
   }
 
+  function selectionAuditText(value, fallback = "") {
+    const text = String(value ?? fallback).normalize("NFKC").trim();
+    return text || fallback;
+  }
+
+  function selectionAuditEscape(value) {
+    return selectionAuditText(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function selectionAuditEscapeExact(value) {
+    return (typeof value === "string" && value.length > 0 ? value : "未提供")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function selectionAuditPoint(value) {
+    if (!Array.isArray(value) || value.length !== 2 || !value.every(Number.isFinite)) return null;
+    return [value[0], value[1]];
+  }
+
+  function selectionAuditPointText(value) {
+    const point = selectionAuditPoint(value);
+    if (point === null) return "未提供";
+    const coordinate = (item) => {
+      const rounded = Math.round(item * 1000) / 1000;
+      return String(Object.is(rounded, -0) ? 0 : rounded);
+    };
+    return `(${coordinate(point[0])}, ${coordinate(point[1])})`;
+  }
+
+  function selectionAuditBindingReason(proposal) {
+    const value = proposal && typeof proposal === "object" ? proposal : {};
+    const reason = selectionAuditText(value.binding_reason, "");
+    if (reason) return reason;
+    return value.binding_status === "bound" ? "已绑定（未提供原因）" : "未提供原因";
+  }
+
+  // 新选择投影仅展示原始选择证据；缺失值不能被 UI 补造。
+  function buildHybridSelectionReviewAudit(inputProjection) {
+    const projection = clone(inputProjection || {});
+    const selection = projection.selection && typeof projection.selection === "object"
+      ? projection.selection : {};
+    const topProposal = selection.model_proposal && typeof selection.model_proposal === "object"
+      ? selection.model_proposal : {};
+    const refinement = projection.refinement && typeof projection.refinement === "object"
+      ? projection.refinement : {};
+    return {
+      origin_kind: selectionAuditText(projection.screen_facts?.execution_origin, "unknown"),
+      selection: {
+        status: selectionAuditText(selection.selection_status, "missing"),
+        target_text: typeof selection.target_text === "string" && selection.target_text.length > 0
+          ? selection.target_text : null,
+        binding_status: selectionAuditText(topProposal.binding_status, "未提供绑定状态"),
+        reason: selectionAuditBindingReason(topProposal),
+        candidate_id: selection.candidate_id == null ? null : selectionAuditText(selection.candidate_id),
+        provider_id: selectionAuditText(topProposal.provider_id, "missing"),
+        native_output_ref: clone(topProposal.native_output_ref ?? null),
+      },
+      refinement: {
+        status: selectionAuditText(refinement.status, "missing"),
+        reason: selectionAuditText(refinement.reason, "missing"),
+      },
+      candidates: (Array.isArray(projection.candidates) ? projection.candidates : []).map((candidate) => {
+        const candidateSelection = candidate?.selection && typeof candidate.selection === "object"
+          ? candidate.selection : null;
+        const candidateProposal = candidateSelection?.model_proposal && typeof candidateSelection.model_proposal === "object"
+          ? candidateSelection.model_proposal
+          : (candidate?.model_proposal?.selection && typeof candidate.model_proposal.selection === "object"
+            ? candidate.model_proposal.selection : {});
+        const score = Number.isFinite(candidateProposal.source_score) ? candidateProposal.source_score : null;
+        const semantics = candidate?.reviewed_semantics && typeof candidate.reviewed_semantics === "object"
+          ? candidate.reviewed_semantics : {};
+        const semanticState = selectionAuditText(
+          semantics.status || (semantics.source === "human_review" ? "human_supplied" : ""),
+          "missing",
+        );
+        const candidateRefinement = candidate?.refinement && typeof candidate.refinement === "object"
+          ? candidate.refinement : refinement;
+        const refinementProviderResult = candidateRefinement.provider_result
+          && typeof candidateRefinement.provider_result === "object"
+          ? candidateRefinement.provider_result : {};
+        const refinementIsValidated = candidateRefinement.status === "validated";
+        const refinedPoint = refinementIsValidated
+          ? selectionAuditPoint(refinementProviderResult.canonical_capture_pixel_point) : null;
+        const refinementPolicy = candidateRefinement.policy && typeof candidateRefinement.policy === "object"
+          ? candidateRefinement.policy : {};
+        return {
+          candidate_id: selectionAuditText(candidate?.candidate_id, "missing"),
+          original_bbox: clone(candidate?.model_proposal?.bbox_original ?? null),
+          reviewed_bbox: clone(candidate?.reviewed_geometry?.bbox_original ?? candidate?.reviewed_geometry?.bbox ?? null),
+          model_score: { value: score, source: score === null ? "missing" : selectionAuditText(candidateProposal.provider_id, "missing") },
+          original_gui_actor_point: {
+            point: selectionAuditPoint(candidateProposal.canonical_capture_pixel_point),
+            provider_id: selectionAuditText(candidateProposal.provider_id, "missing"),
+            coordinate_space: "capture_pixel_xyxy",
+            display_only: true,
+          },
+          selection: {
+            status: selectionAuditText(candidateSelection?.selection_status, "candidate_not_selected"),
+            binding_status: selectionAuditText(candidateProposal.binding_status, "未提供绑定状态"),
+            reason: selectionAuditBindingReason(candidateProposal),
+          },
+          omni_provenance: clone(candidate?.model_proposal?.omni_candidate?.provenance ?? {
+            source_item_id: candidate?.model_proposal?.omni_candidate?.source_item_id ?? null,
+          }),
+          semantics: {
+            state: semanticState,
+            role: semantics.role == null ? null : selectionAuditText(semantics.role),
+            label: semantics.label == null ? null : selectionAuditText(semantics.label),
+            description: semantics.description == null ? null : selectionAuditText(semantics.description),
+            provider_id: semantics.provider_id == null ? null : selectionAuditText(semantics.provider_id),
+          },
+          refinement: {
+            status: selectionAuditText(candidateRefinement.status, "missing"),
+            reason: selectionAuditText(candidateRefinement.reason, "missing"),
+            trigger: typeof refinementPolicy.geometric_trigger === "boolean"
+              ? String(refinementPolicy.geometric_trigger) : "未提供",
+            provider_id: selectionAuditText(refinementProviderResult.provider_id, "missing"),
+            validated_vista_point: refinedPoint,
+            display_only: true,
+          },
+          warnings: (Array.isArray(candidate?.warnings) ? candidate.warnings : []).map((warning) => selectionAuditText(warning)),
+        };
+      }),
+    };
+  }
+
+  function renderHybridSelectionReviewAuditHtml(audit) {
+    const value = audit && typeof audit === "object" ? audit : {};
+    const selection = value.selection || {};
+    const refinement = value.refinement || {};
+    const allCandidates = Array.isArray(value.candidates) ? value.candidates : [];
+    const selectedCandidateId = value.focus_candidate_id == null || String(value.focus_candidate_id) === ""
+      ? (selection.candidate_id == null ? "" : String(selection.candidate_id))
+      : String(value.focus_candidate_id);
+    const visibleCandidates = selectedCandidateId
+      ? allCandidates.filter((candidate) => candidate.candidate_id === selectedCandidateId)
+      : [];
+    const shortCandidateId = (candidateId) => {
+      const text = String(candidateId || "");
+      return text.length > 18 ? `#${text.slice(-12)}` : text;
+    };
+    const rows = visibleCandidates.map((candidate) => `
+      <div class="image-inspector-hybrid-selection-candidate">
+        <strong title="${selectionAuditEscape(candidate.candidate_id)}">${selectionAuditEscape(shortCandidateId(candidate.candidate_id))}</strong>
+        <span>selection=${selectionAuditEscape(candidate.selection?.status)} · binding=${selectionAuditEscape(candidate.selection?.binding_status)} · reason=${selectionAuditEscape(candidate.selection?.reason)}</span>
+        <span>score=${candidate.model_score?.value === null ? "未提供" : selectionAuditEscape(candidate.model_score?.value)} · source=${selectionAuditEscape(candidate.model_score?.source)}</span>
+        <span>omni=${selectionAuditEscape(candidate.omni_provenance?.source_item_id, "missing")}</span>
+        <span>semantics=${selectionAuditEscape(candidate.semantics?.state)} · label=${selectionAuditEscape(candidate.semantics?.label, "missing")}</span>
+        <span>原始 GUIActor 点=${selectionAuditEscape(selectionAuditPointText(candidate.original_gui_actor_point?.point))} · source=${selectionAuditEscape(candidate.original_gui_actor_point?.provider_id)}</span>
+        <span>已验证 VISTA 精修点=${selectionAuditEscape(selectionAuditPointText(candidate.refinement?.validated_vista_point))} · source=${selectionAuditEscape(candidate.refinement?.provider_id)} · status=${selectionAuditEscape(candidate.refinement?.status)} · trigger=${selectionAuditEscape(candidate.refinement?.trigger)} · reason=${selectionAuditEscape(candidate.refinement?.reason)}</span>
+      </div>`).join("");
+    return `<strong>Selection review facts</strong>
+      <span>origin=${selectionAuditEscape(value.origin_kind, "not_declared")} · selection=${selectionAuditEscape(selection.status)} · binding=${selectionAuditEscape(selection.binding_status)} · reason=${selectionAuditEscape(selection.reason)}</span>
+      <span>识别目标=${selectionAuditEscapeExact(selection.target_text)}</span>
+      <span>refinement=${selectionAuditEscape(refinement.status)} · ${selectionAuditEscape(refinement.reason)}</span>
+      <span>点位图例：原始 GUIActor 点与已验证 VISTA 精修点仅展示，不是人工运行点；仅 refinement=validated 才显示 VISTA 点。</span>
+      <span>candidates=${allCandidates.length} · view=current candidate only · full state preserved</span>
+      ${rows || "<span>no candidate: abstained or unbound</span>"}`;
+  }
+
   function createHybridReviewState(inputProjection) {
     let projection = clone(inputProjection || {});
-    if (projection.contract_version !== "hybrid_review_projection_v2") {
+    const isSelectionReview = projection.contract_version === "hybrid_selection_review_v1";
+    if (projection.contract_version !== "hybrid_review_projection_v2" && !isSelectionReview) {
       throw new Error("Hybrid review projection contract is invalid");
     }
-    if (!Array.isArray(projection.candidates) || projection.candidates.length === 0) {
+    if (!Array.isArray(projection.candidates) || (!isSelectionReview && projection.candidates.length === 0)) {
       throw new Error("Hybrid review projection candidates are required");
     }
     const ids = projection.candidates.map((candidate) => String(candidate?.candidate_id || ""));
     if (ids.some((candidateId) => !candidateId) || new Set(ids).size !== ids.length) {
       throw new Error("Hybrid review candidate identity set is invalid");
     }
-    let selectedCandidateId = ids[0];
+    let selectedCandidateId = ids[0] || null;
     const undoHistory = [];
     const redoHistory = [];
     if (!Array.isArray(projection.review_decisions)) projection.review_decisions = [];
@@ -1989,6 +2159,7 @@
 
     function candidateById(candidateId) {
       const candidate = projection.candidates.find((item) => item.candidate_id === candidateId);
+      if (!candidate && isSelectionReview) return null;
       if (!candidate) throw new Error(`Unknown Hybrid review candidate: ${candidateId}`);
       return candidate;
     }
@@ -2035,12 +2206,13 @@
 
     return {
       select(candidateId) {
-        candidateById(candidateId);
+        if (!candidateById(candidateId)) return null;
         selectedCandidateId = candidateId;
         return this.currentCandidate();
       },
       currentCandidate() {
-        return clone(candidateById(selectedCandidateId));
+        const candidate = selectedCandidateId == null ? null : candidateById(selectedCandidateId);
+        return candidate ? clone(candidate) : null;
       },
       candidates() {
         return clone(projection.candidates);
@@ -2075,12 +2247,14 @@
         appendDecision(candidate, "semantic_edit", { semantics: clone(next) });
         candidate.reviewed_semantics = {
           ...next,
+          ...(isSelectionReview ? { status: "human_supplied", provider_id: null } : {}),
           revision: candidate.review_decisions.length,
         };
         selectedCandidateId = candidateId;
         return this.currentCandidate();
       },
       proposeHumanPoint(candidateId, xy) {
+        if (isSelectionReview) throw new Error("Selection review does not support human point proposals");
         const candidate = candidateById(candidateId);
         if (!Array.isArray(xy) || xy.length !== 2 || !xy.every((edge) => Number.isFinite(edge))) {
           throw new Error("Hybrid human point proposal must be a finite xy list");
@@ -2106,6 +2280,7 @@
         return this.currentCandidate();
       },
       tombstone(candidateId, reason = "deleted_by_reviewer") {
+        if (isSelectionReview) throw new Error("Selection review does not support tombstones");
         const candidate = candidateById(candidateId);
         const normalizedReason = String(reason || "").trim();
         if (!normalizedReason) throw new Error("Hybrid tombstone reason is required");
@@ -2120,6 +2295,7 @@
         return this.currentCandidate();
       },
       add(bbox, semantics) {
+        if (isSelectionReview) throw new Error("Selection review does not support adding candidates");
         const nextBbox = validateBbox(bbox);
         const nextSemantics = {
           role: String(semantics?.role || "").trim(),
@@ -2210,6 +2386,7 @@
   const api = {
     CONTRACT_VERSION,
     buildAttachDialogModel,
+    buildHybridSelectionReviewAudit,
     buildInterfaceAssetLibrary,
     buildInterfaceAssetLibraryRows,
     buildLearningResultsReviewGroups,
@@ -2228,6 +2405,7 @@
     resolveInterfaceAssetOpenTarget,
     resolveDraftItemWorkflowBinding,
     resolveInterfaceWorkflowCorrectionTarget,
+    renderHybridSelectionReviewAuditHtml,
     userFacingLearningLabel,
   };
 

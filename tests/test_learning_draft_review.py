@@ -1866,6 +1866,7 @@ def test_panel_learning_draft_review_fast_load_skips_related_sidecar_discovery(
 
     monkeypatch.setattr(panel_api, "load_learning_draft_review", fake_load_learning_draft_review)
     monkeypatch.setattr(panel_api, "write_trace", lambda **_kwargs: "logs/traces/fast-load.json")
+    monkeypatch.setattr(panel_api, "prepare_learning_selection_review_replay", lambda **_kwargs: None)
 
     response = panel_api.load_learning_draft_review_endpoint(
         panel_api.PanelLoadLearningDraftReviewRequest(

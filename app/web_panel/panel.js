@@ -3609,6 +3609,7 @@ function learningDraftEditorSelectedItem() {
 function updateLearningDraftEditorControls() {
   const selected = learningDraftEditorSelectedItem();
   const workflowBound = learningDraftEditorWorkflowBinding?.authority === "workflow";
+  const selectionReviewOnly = learningHybridReviewState?.snapshot?.().contract_version === "hybrid_selection_review_v1";
   const historyState = learningHybridReviewState || learningDraftEditorState;
   const undo = $("imageInspectorUndoBtn");
   const redo = $("imageInspectorRedoBtn");
@@ -3637,11 +3638,11 @@ function updateLearningDraftEditorControls() {
   }
   if (undo) undo.disabled = !historyState?.canUndo();
   if (redo) redo.disabled = !historyState?.canRedo();
-  if (remove) remove.disabled = !selected;
+  if (remove) remove.disabled = !selected || selectionReviewOnly;
   if (humanPoint) {
     const hybridSelected = Boolean(selected && learningHybridReviewCandidate(selected.target_id));
-    humanPoint.hidden = !hybridSelected;
-    humanPoint.disabled = !hybridSelected;
+    humanPoint.hidden = !hybridSelected || selectionReviewOnly;
+    humanPoint.disabled = !hybridSelected || selectionReviewOnly;
   }
   if (label) {
     label.disabled = !selected;
@@ -3696,7 +3697,10 @@ function updateLearningDraftEditorControls() {
     setSelectValueIfPresent(riskLevel, selected?.risk_level || "normal");
   }
   const add = $("imageInspectorAddRegionBtn");
-  if (add) add.classList.toggle("active", learningDraftEditorAddMode);
+  if (add) {
+    add.disabled = selectionReviewOnly;
+    add.classList.toggle("active", learningDraftEditorAddMode && !selectionReviewOnly);
+  }
   const compact = $("imageInspectorCompactBoxesBtn");
   if (compact) {
     compact.textContent = learningDraftEditorCompactMode ? "显示全部框" : "精简框";
@@ -3794,7 +3798,11 @@ function renderLearningDraftEditorBoxes() {
       data-editor-kind="${escapeAttr(item.target_kind)}"
       data-editor-id="${escapeAttr(item.target_id)}"
       style="left:${bbox.x * scaleX}px;top:${bbox.y * scaleY}px;width:${bbox.width * scaleX}px;height:${bbox.height * scaleY}px">
-      <span>${escapeHtml(item.label || item.target_id)}</span>
+      <span title="${escapeAttr(item.target_id)}">${escapeHtml(
+        learningHybridReviewCandidate(item.target_id)
+          ? `#${String(item.target_id).slice(-12)}`
+          : (item.label || item.target_id),
+      )}</span>
       ${overlapGroup ? `<button type="button" class="image-inspector-overlap-count"
         data-editor-overlap-owner="${escapeAttr(itemKey)}"
         aria-label="显示 ${overlapGroup.memberKeys.length} 个重叠框">+${overlapGroup.memberKeys.length}</button>` : ""}
@@ -4014,6 +4022,20 @@ function openLearningDraftBoxEditor(imagePathOverride = "", options = {}) {
   }
   updateLearningDraftEditorControls();
   syncImageInspectorWorkflowReviewPanel();
+  const projection = learningHybridReviewState?.snapshot?.();
+  if (projection?.contract_version === "hybrid_selection_review_v1") {
+    const selectedCandidateId = String(projection.selection?.candidate_id || "").trim();
+    if (selectedCandidateId && learningHybridReviewCandidate(selectedCandidateId)) {
+      selectLearningDraftEditorItem("region", selectedCandidateId);
+      const revealSelectedBox = () => $("imageInspectorBox")?.scrollIntoView?.({ block: "nearest" });
+      const image = $("imageInspectorImage");
+      if (image?.naturalWidth) revealSelectedBox();
+      else image?.addEventListener?.("load", revealSelectedBox, { once: true });
+    } else {
+      // 弃权选择没有候选框，仍需立即显示选择审核事实。
+      renderLearningHybridReviewAudit();
+    }
+  }
   return true;
 }
 
@@ -15599,7 +15621,7 @@ function resetLearningDraftEditorState(review = null) {
   const draft = review?.draft && typeof review.draft === "object" ? review.draft : {};
   const hybridProjection = review?.hybrid_review_projection;
   learningHybridReviewState = (
-    hybridProjection?.contract_version === "hybrid_review_projection_v2"
+    ["hybrid_review_projection_v2", "hybrid_selection_review_v1"].includes(hybridProjection?.contract_version)
     && typeof globalThis.InterfaceWorkflowReview?.createHybridReviewState === "function"
   )
     ? globalThis.InterfaceWorkflowReview.createHybridReviewState(hybridProjection)
@@ -15618,6 +15640,7 @@ function resetLearningDraftEditorState(review = null) {
   ].filter((item) => item.target_id && normalizeBbox(item.bbox));
   learningDraftEditorBaseItems = structuredClone(items);
   learningDraftEditorState = typeof factory === "function" ? factory(items) : null;
+  if (learningHybridReviewState) rebuildLearningDraftEditorHybridMirror();
   learningDraftEditorSelected = null;
   learningDraftEditorWorkflowSelection = null;
   learningDraftEditorActive = false;
@@ -15640,7 +15663,7 @@ function rebuildLearningDraftEditorHybridMirror() {
     (item) => [String(item.target_id || ""), structuredClone(item)],
   ));
   hybridCandidates.forEach((candidate) => {
-    const bbox = candidate.reviewed_geometry?.bbox;
+    const bbox = candidate.reviewed_geometry?.bbox_original || candidate.reviewed_geometry?.bbox;
     if (!Array.isArray(bbox) || bbox.length !== 4) return;
     const semantics = candidate.reviewed_semantics || {};
     const current = itemsById.get(candidate.candidate_id) || {
@@ -15715,6 +15738,22 @@ function renderLearningHybridReviewAudit() {
     return;
   }
   const screen = learningHybridReviewState.screenFacts();
+  const snapshot = learningHybridReviewState.snapshot();
+  if (snapshot.contract_version === "hybrid_selection_review_v1") {
+    const auditFactory = globalThis.InterfaceWorkflowReview?.buildHybridSelectionReviewAudit;
+    const htmlFactory = globalThis.InterfaceWorkflowReview?.renderHybridSelectionReviewAuditHtml;
+    const audit = typeof auditFactory === "function" ? auditFactory(snapshot) : null;
+    if (audit && typeof audit === "object") {
+      audit.focus_candidate_id = learningDraftEditorSelected?.target_id || null;
+    }
+    screenHost.hidden = false;
+    screenHost.innerHTML = typeof htmlFactory === "function"
+      ? htmlFactory(audit)
+      : "<strong>Selection review facts unavailable</strong>";
+    candidateHost.hidden = true;
+    candidateHost.innerHTML = "";
+    return;
+  }
   const candidate = learningDraftEditorSelected
     ? learningHybridReviewCandidate(learningDraftEditorSelected.target_id)
     : null;
@@ -15806,6 +15845,18 @@ function learningDraftOwnershipOperations() {
 }
 
 function learningDraftReviewPatch() {
+  if (learningDraftReview?.hybrid_review_projection?.contract_version === "hybrid_selection_review_v1") {
+    if (learningHybridReviewState?.snapshot?.()?.contract_version !== "hybrid_selection_review_v1") {
+      throw new Error("Selection review state is unavailable; reload the current draft");
+    }
+    // 选择审核只提交追加记录；不得同时提交旧表单对派生 regions 的修改。
+    return {
+      ...learningHybridReviewState.reviewPatch(),
+      expected_hybrid_review_projection_ref: structuredClone(learningDraftReview.hybrid_review_projection_ref),
+      review_status: "needs_human_review",
+      source_after_review: "mixed",
+    };
+  }
   const manualCandidate = learningDraftManualCandidate(learningDraftReview?.draft || {});
   const patch = {
     review_status: String($("learningDraftReviewStatusSelect")?.value || "needs_human_review"),
@@ -18061,6 +18112,9 @@ function setSelectValueIfPresent(select, value) {
 }
 
 function renderLearningDraftManualEditPanel(review) {
+  const selectionReviewOnly = review?.hybrid_review_projection?.contract_version === "hybrid_selection_review_v1";
+  if ($("learningDraftManualEditPanel")) $("learningDraftManualEditPanel").hidden = selectionReviewOnly;
+  if (selectionReviewOnly) return;
   const draft = review?.draft || {};
   const candidate = learningDraftManualCandidate(draft);
   if ($("learningDraftManualRegionLabel")) $("learningDraftManualRegionLabel").value = String(candidate.label || "");
@@ -20910,6 +20964,24 @@ async function removeCurrentInterfaceWorkflowSource() {
   return saveInterfaceWorkflowReview({ commitEditor: false });
 }
 
+function selectionReviewSummaryCounts(review) {
+  const projection = review?.hybrid_review_projection;
+  if (projection?.contract_version !== "hybrid_selection_review_v1") return null;
+  const candidates = Array.isArray(projection.candidates) ? projection.candidates : [];
+  const precise = review?.audit?.precise_understanding_summary;
+  const auditMatchesProjection = precise?.contract_version === "precise_understanding_summary_v1"
+    && precise.candidate_only === true
+    && precise.region_count_scope === "semantically_reviewed_selected_candidates"
+    && Number.isInteger(precise.candidate_count)
+    && precise.candidate_count === candidates.length
+    && Number.isInteger(precise.region_count)
+    && precise.region_count >= 0;
+  return {
+    candidate_box_count: candidates.length,
+    semantically_reviewed_region_count: auditMatchesProjection ? precise.region_count : null,
+  };
+}
+
 function renderLearningDraftReview(review) {
   learningDraftReview = review || null;
   document.body.dataset.learningDraftReviewOpen = "true";
@@ -20924,7 +20996,15 @@ function renderLearningDraftReview(review) {
   const rules = Array.isArray(draft.verification_rules) ? draft.verification_rules : [];
   const draftImagePath = learningDraftSourceImagePath(draft);
   if ($("learningDraftReviewSummary")) {
-    const counts = [
+    const selectionCounts = selectionReviewSummaryCounts(review);
+    const counts = selectionCounts ? [
+      `${t("learning_draft_states")}: ${states.length}`,
+      `候选框数量: ${selectionCounts.candidate_box_count}`,
+      `已具备语义的学习区域: ${selectionCounts.semantically_reviewed_region_count ?? "未提供"}`,
+      `${t("learning_draft_actions")}: ${actions.length}`,
+      `${t("learning_draft_blockers")}: ${blockers.length}`,
+      `${t("learning_draft_verification_rules")}: ${rules.length}`,
+    ].join(" · ") : [
       `${t("learning_draft_states")}: ${states.length}`,
       `${t("learning_draft_regions")}: ${regions.length}`,
       `${t("learning_draft_actions")}: ${actions.length}`,
@@ -21299,6 +21379,25 @@ async function loadLearningDraftReview(options = {}) {
       const ueiShadowSummary = data.uei_shadow_provider_summary;
       if (ueiShadowSummary !== undefined && (ueiShadowSummary === null || typeof ueiShadowSummary !== "object")) {
         data.uei_shadow_provider_summary = null;
+      }
+      if (data.prepared_from_selection_replay === true) {
+        const preparedTrialPath = String(data.trial_path || "").trim();
+        if (!preparedTrialPath) {
+          clearLearningDraftReviewDisplay("selection replay preparation returned no trial path", {
+            preserveWorkflowReview: options.skipWorkflowReview === true,
+          });
+          if (!options.skipResponse) {
+            renderResponse({
+              success: false,
+              message: "Prepared selection replay is missing trial_path",
+              data,
+            }, "Learning draft review");
+          }
+          return null;
+        }
+        setLearningDraftReviewSourcePath(preparedTrialPath, {
+          preserveWorkflowReview: options.skipWorkflowReview === true,
+        });
       }
       learningDraftReviewBboxEdits = { regions: {}, actions: {} };
       learningDraftReview = data;

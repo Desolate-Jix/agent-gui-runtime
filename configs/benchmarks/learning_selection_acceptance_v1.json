@@ -1,0 +1,2072 @@
+{
+  "contract_version": "learning_selection_acceptance_catalog_v1",
+  "artifact_is_authorization": false,
+  "execution_enabled": false,
+  "baseline": {
+    "name": "Omni+GUIActor+VISTA",
+    "aggregate": {
+      "targets": 35,
+      "correct": 26,
+      "wrong": 0,
+      "abstained": 9
+    },
+    "fixed25": {
+      "targets": 25,
+      "correct": 18,
+      "wrong": 0,
+      "abstained": 7
+    },
+    "public10": {
+      "targets": 10,
+      "correct": 8,
+      "wrong": 0,
+      "abstained": 2
+    },
+    "fixed25_score_provenance": "recomputed_from_frozen_baseline_artifacts",
+    "public10_score_provenance": "recorded_public_chain_score"
+  },
+  "source_refs": {
+    "fixed_bindings": {
+      "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+      "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+    },
+    "fixed_roi_requests": {
+      "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\roi-requests.json",
+      "sha256": "3d0475119b8595a42964ebd1268a364a2b0bef2ed2e65efdc5bd5bc4e5f34db2"
+    },
+    "fixed_vista_report": {
+      "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+      "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+    },
+    "fixed_gold": {
+      "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+      "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+    },
+    "fixed_scorer": {
+      "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+      "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+    },
+    "public_manifest": {
+      "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+      "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+    },
+    "public_requests": {
+      "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+      "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+    },
+    "public_chain_score": {
+      "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+      "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+    },
+    "public_gold": {
+      "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+      "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+    }
+  },
+  "inference_rows": [
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-01",
+      "target_text": "Select the button labeled 'New task'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-001.png",
+      "image_sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-001/goal-01/6f6ed51f3629173e",
+      "binding_id": "gui_actor::omni::case-001/goal-01/6f6ed51f3629173e"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-02",
+      "target_text": "Select the textbox labeled 'Search board'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-001.png",
+      "image_sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-001/goal-02/c698dee856d63179",
+      "binding_id": "gui_actor::omni::case-001/goal-02/c698dee856d63179"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-03",
+      "target_text": "Select the tab labeled 'Active'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-001.png",
+      "image_sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-001/goal-03/d9a0bdd28ade6009",
+      "binding_id": "gui_actor::omni::case-001/goal-03/d9a0bdd28ade6009"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-04",
+      "target_text": "Select the combobox labeled 'Filter'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-001.png",
+      "image_sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-001/goal-04/fa1d180735d39651",
+      "binding_id": "gui_actor::omni::case-001/goal-04/fa1d180735d39651"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-05",
+      "target_text": "Select the link labeled 'Settings'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-001.png",
+      "image_sha256": "b8b8f80e28038d47705cdeccb5c526e49cf656b55493c5df2764aa3c2f434db7",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-001/goal-05/528c67a80b20e7d1",
+      "binding_id": "gui_actor::omni::case-001/goal-05/528c67a80b20e7d1"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-01",
+      "target_text": "Select the button labeled 'Compose'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-002.png",
+      "image_sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-002/goal-01/76480a55052c1ad3",
+      "binding_id": "gui_actor::omni::case-002/goal-01/76480a55052c1ad3"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-02",
+      "target_text": "Select the textbox labeled 'Search mail'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-002.png",
+      "image_sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-002/goal-02/d197107ad7b815cc",
+      "binding_id": "gui_actor::omni::case-002/goal-02/d197107ad7b815cc"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-03",
+      "target_text": "Select the tab labeled 'Primary'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-002.png",
+      "image_sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-002/goal-03/8c9fae6f8e85dd9b",
+      "binding_id": "gui_actor::omni::case-002/goal-03/8c9fae6f8e85dd9b"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-04",
+      "target_text": "Select the checkbox labeled 'Select all'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-002.png",
+      "image_sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-002/goal-04/ea0b0a2d61f8d033",
+      "binding_id": "gui_actor::omni::case-002/goal-04/ea0b0a2d61f8d033"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-05",
+      "target_text": "Select the menuitem labeled 'More'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-002.png",
+      "image_sha256": "c50672317fd79f773ebc3b39298c299abe3446c2cad6dfb187521b93a191c68d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-002/goal-05/bdafdee7e95fe5d3",
+      "binding_id": "gui_actor::omni::case-002/goal-05/bdafdee7e95fe5d3"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-01",
+      "target_text": "Select the button labeled 'Back'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-003.png",
+      "image_sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-003/goal-01/6c716ac493e9bf8a",
+      "binding_id": "gui_actor::omni::case-003/goal-01/6c716ac493e9bf8a"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-02",
+      "target_text": "Select the textbox labeled 'Find a setting'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-003.png",
+      "image_sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-003/goal-02/5f7e6cbf62b7d54f",
+      "binding_id": "gui_actor::omni::case-003/goal-02/5f7e6cbf62b7d54f"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-03",
+      "target_text": "Select the checkbox labeled 'Bluetooth'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-003.png",
+      "image_sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-003/goal-03/2260dd2c5d57e30b",
+      "binding_id": "gui_actor::omni::case-003/goal-03/2260dd2c5d57e30b"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-04",
+      "target_text": "Select the tab labeled 'Display'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-003.png",
+      "image_sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-003/goal-04/067b04b0772a529a",
+      "binding_id": "gui_actor::omni::case-003/goal-04/067b04b0772a529a"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-05",
+      "target_text": "Select the link labeled 'Advanced'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-003.png",
+      "image_sha256": "dcd9c17fa400ebadf632ce91ba6bb0f3dd6fbba6f02c51b9688e8e91ba240591",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-003/goal-05/9551da30677a119f",
+      "binding_id": "gui_actor::omni::case-003/goal-05/9551da30677a119f"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-01",
+      "target_text": "Select the button labeled 'Back'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-004.png",
+      "image_sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-004/goal-01/6c716ac493e9bf8a",
+      "binding_id": "gui_actor::omni::case-004/goal-01/6c716ac493e9bf8a"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-02",
+      "target_text": "Select the textbox labeled 'Search files'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-004.png",
+      "image_sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-004/goal-02/80e7798974635447",
+      "binding_id": "gui_actor::omni::case-004/goal-02/80e7798974635447"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-03",
+      "target_text": "Select the button labeled 'New folder'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-004.png",
+      "image_sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-004/goal-03/160e2a6fddf14026",
+      "binding_id": "gui_actor::omni::case-004/goal-03/160e2a6fddf14026"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-04",
+      "target_text": "Select the combobox labeled 'View'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-004.png",
+      "image_sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-004/goal-04/8e61f187577674c6",
+      "binding_id": "gui_actor::omni::case-004/goal-04/8e61f187577674c6"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-05",
+      "target_text": "Select the tab labeled 'Details'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-004.png",
+      "image_sha256": "61f3000b8c4ad9ab3e695bc0cc8011541020a0d9280aa2fc84af31d0ff764bb5",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-004/goal-05/bcc7455889cd15fd",
+      "binding_id": "gui_actor::omni::case-004/goal-05/bcc7455889cd15fd"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-01",
+      "target_text": "Select the button labeled 'Today'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-005.png",
+      "image_sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-005/goal-01/026f1db8739e0ba7",
+      "binding_id": "gui_actor::omni::case-005/goal-01/026f1db8739e0ba7"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-02",
+      "target_text": "Select the button labeled 'New event'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-005.png",
+      "image_sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-005/goal-02/96a018d13c5be47b",
+      "binding_id": "gui_actor::omni::case-005/goal-02/96a018d13c5be47b"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-03",
+      "target_text": "Select the combobox labeled 'Month'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-005.png",
+      "image_sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-005/goal-03/45c8418d1ad5edc3",
+      "binding_id": "gui_actor::omni::case-005/goal-03/45c8418d1ad5edc3"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-04",
+      "target_text": "Select the textbox labeled 'Search calendar'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-005.png",
+      "image_sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-005/goal-04/6439917ef52f8bbc",
+      "binding_id": "gui_actor::omni::case-005/goal-04/6439917ef52f8bbc"
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-05",
+      "target_text": "Select the link labeled 'Settings'",
+      "image_path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\corpus\\regression\\case-005.png",
+      "image_sha256": "0d4c71618bc227ba45656e49a2f507cafa2d85c125ad1958a0c4480b25e04d4d",
+      "image_size": [
+        1280,
+        720
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\combination\\prepared-v4\\combination-bindings.json",
+          "sha256": "5ec116958650471cff49d5633828e6b6d369f32e6340fa3fab8b060014c543b4"
+        },
+        {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\configs\\benchmarks\\goal_binding_provider_ab_v1.json",
+          "sha256": "cea9247a2d01f0fb3f4c24620a3e6157e8d85188ed4a75750425683fa2c74622"
+        }
+      ],
+      "historical_goal_id": "case-005/goal-05/528c67a80b20e7d1",
+      "binding_id": "gui_actor::omni::case-005/goal-05/528c67a80b20e7d1"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-01",
+      "target_id": "screenspot-v2-web-01",
+      "target_text": "delete the 'article' tag for searching",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-web-01-web_df804fb9-f96e-425e-b1a3-fe8f6810a1de.png",
+      "image_sha256": "e7316cb7f8cde9e6999ff069a7be0b341397e2af1175c1bdabea11af377cbf48",
+      "image_size": [
+        2560,
+        1440
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-web-01",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-web-01"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-02",
+      "target_id": "screenspot-v2-web-02",
+      "target_text": "show cloth color for current season",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-web-02-web_41a4c02b-d68f-48a0-9ea1-a5a20d2ddf3c.png",
+      "image_sha256": "0aa333fe11e8ebaf1c68749b393011ba75e3eb22b22db36eb9f86d2e5a35e62e",
+      "image_size": [
+        2560,
+        1440
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-web-02",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-web-02"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-03",
+      "target_id": "screenspot-v2-web-03",
+      "target_text": "don't show post previews",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-web-03-web_6c4e07ff-3589-4a78-99cf-fcf703a33a74.png",
+      "image_sha256": "726097733533bace9a0adbf9177a2f582f8b601402de6018ce06462f251ba5ca",
+      "image_size": [
+        2560,
+        1440
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-web-03",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-web-03"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-04",
+      "target_id": "screenspot-v2-web-04",
+      "target_text": "adjusting the display layout of items",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-web-04-web_844d70be-3743-409c-abf0-a148975fdbc8.png",
+      "image_sha256": "8ac8f880018786ab024b2534866027973a4ce25fb3b203099451e89183ae8b0f",
+      "image_size": [
+        2560,
+        1440
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-web-04",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-web-04"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-05",
+      "target_id": "screenspot-v2-web-05",
+      "target_text": "check the books on tv & film",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-web-05-web_22f4dba1-1fb0-46f0-b7b5-4dfdf35de24a.png",
+      "image_sha256": "0da042d2568aeb65e7a381d1f8cd6294a496ba9019cea596c063abf38d99e63d",
+      "image_size": [
+        2560,
+        1440
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-web-05",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-web-05"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-06",
+      "target_id": "screenspot-v2-desktop-06",
+      "target_text": "question about bluetooth",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-desktop-06-pc_be3ea55b-e1f3-478a-8982-a05f37cc910f.png",
+      "image_sha256": "8b8689e4b70bbbbdd2f05879c6616d8d31ed4997f9e4a0eb76219dd6c7c88d79",
+      "image_size": [
+        1338,
+        894
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-desktop-06",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-desktop-06"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-07",
+      "target_id": "screenspot-v2-desktop-07",
+      "target_text": "view more information about bomber",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-desktop-07-pc_z7ydq8.png",
+      "image_sha256": "63d302f70f64e3a021f670d346c8756dd8fce7e7dbdaa16d175bb79c9254b3a7",
+      "image_size": [
+        2560,
+        1440
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-desktop-07",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-desktop-07"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-08",
+      "target_id": "screenspot-v2-desktop-08",
+      "target_text": "save file",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-desktop-08-pc_e73c6749-043f-4a24-8e56-6c829f78255d.png",
+      "image_sha256": "dd5f81091a448da3910b418b711f3458f998dc0ed7724e438920ec9c73320237",
+      "image_size": [
+        1710,
+        1554
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-desktop-08",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-desktop-08"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-09",
+      "target_id": "screenspot-v2-desktop-09",
+      "target_text": "remove a network connected device",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-desktop-09-pc_2773ea59-8493-4c89-957a-d2ec661e6384.png",
+      "image_sha256": "de7e17dbc9c8d7aa872687af4cf9195ceaa437cefece78f31da4fc209a5763fb",
+      "image_size": [
+        1332,
+        1268
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-desktop-09",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-desktop-09"
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-10",
+      "target_id": "screenspot-v2-desktop-10",
+      "target_text": "switch to desktop settings",
+      "image_path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\images\\regression\\regression-desktop-10-pc_66906e9c-dc3c-49e9-aaf0-0e7d5efc97db.png",
+      "image_sha256": "3b8f2fa1272278c0fb9f510151b5a985e38dc54e5482cd7a3f8ab6a960635114",
+      "image_size": [
+        1340,
+        1156
+      ],
+      "source_manifest_refs": [
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public-regression-manifest.json",
+          "sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b"
+        },
+        {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\provider-requests.json",
+          "sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3"
+        }
+      ],
+      "historical_goal_id": "screenspot-v2-desktop-10",
+      "binding_id": "gui_actor_3b_bf16::local.runtime/omniparser::screenspot-v2-desktop-10"
+    }
+  ],
+  "scoring_rows": [
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-01",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            48,
+            88,
+            166,
+            126
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        69,
+        99
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "2816caaab3c0beebc0deeb31544dc26b9f9df7cbb3e6f100dceccf15ce1d42b9",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-02",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            420,
+            78,
+            700,
+            118
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-03",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            282,
+            150,
+            364,
+            184
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        294,
+        159
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "4c170c7b7a77251776bb9bce476a455a603c087b8824a7d0d6be42f720d9adc2",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-04",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            982,
+            150,
+            1116,
+            188
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        1003,
+        160
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "4c170c7b7a77251776bb9bce476a455a603c087b8824a7d0d6be42f720d9adc2",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-001",
+      "target_id": "case-001-target-05",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            52,
+            648,
+            132,
+            676
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-01",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            34,
+            78,
+            142,
+            114
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        51,
+        90
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "14a44b419fd1a7a2b0853d1642cc6492489f1d8c7b5a3679fb4330d52937b25b",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-02",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            310,
+            70,
+            738,
+            108
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-03",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            242,
+            140,
+            332,
+            172
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        255,
+        150
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "14a44b419fd1a7a2b0853d1642cc6492489f1d8c7b5a3679fb4330d52937b25b",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-04",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            230,
+            194,
+            326,
+            222
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-002",
+      "target_id": "case-002-target-05",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            1160,
+            140,
+            1224,
+            170
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        1169,
+        146
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "9d6d1985e15094fd6e2838f633dbde0f9f3ab89b521fa84d571e5e93900a08cb",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-01",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            28,
+            38,
+            98,
+            72
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        38,
+        47
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "4c170c7b7a77251776bb9bce476a455a603c087b8824a7d0d6be42f720d9adc2",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-02",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            246,
+            38,
+            610,
+            76
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-03",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            330,
+            174,
+            448,
+            206
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        332,
+        182
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "455871c63680e3915475d0ff102a09cc2848f88460fad6b2d7bfab7550e851a5",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-04",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            32,
+            126,
+            118,
+            160
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        43,
+        136
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "60df2003b1b3f135637127b071a0dc6086308a5919f0fa73da8aa19fd9bb6fe4",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-003",
+      "target_id": "case-003-target-05",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            334,
+            606,
+            430,
+            634
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        357,
+        615
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "54ccda064016cbd22ce0fa1f475d397567a04a6539746461f68d13c2f9f5bc63",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-01",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            18,
+            46,
+            78,
+            76
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        27,
+        56
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "3bb8f6037606bcce24c57ce2bb9893c09adecfa9597e6a61a897e07632f8716a",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-02",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            744,
+            42,
+            1068,
+            78
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-03",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            102,
+            102,
+            208,
+            136
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        117,
+        114
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "412c66311d27a06510ce4d561129565f04666f6137489491ac4fd3d54a0764f5",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-04",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            1090,
+            100,
+            1194,
+            134
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        1105,
+        108
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "9d6d1985e15094fd6e2838f633dbde0f9f3ab89b521fa84d571e5e93900a08cb",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-004",
+      "target_id": "case-004-target-05",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            872,
+            100,
+            956,
+            134
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        886,
+        109
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "4c170c7b7a77251776bb9bce476a455a603c087b8824a7d0d6be42f720d9adc2",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-01",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            34,
+            82,
+            112,
+            118
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        45,
+        92
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "4c170c7b7a77251776bb9bce476a455a603c087b8824a7d0d6be42f720d9adc2",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-02",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            116,
+            82,
+            232,
+            118
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        133,
+        92
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "c541cae76a5f54c54ced1fbbaa9baab6552158e148e146d4158f20e5ae0ed848",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-03",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            536,
+            82,
+            648,
+            118
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        553,
+        93
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "b75550d8da667bba05b812a1472a3ef5cc2e439c5f90aa9e672e2920d0f82011",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-04",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            830,
+            80,
+            1086,
+            118
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "fixed25",
+      "case_id": "case-005",
+      "target_id": "case-005-target-05",
+      "ground_truth": {
+        "acceptable_regions": [
+          [
+            1148,
+            86,
+            1222,
+            112
+          ]
+        ],
+        "source_ref": {
+          "path": "D:\\agent-gui-runtime\\.worktrees\\simple-provider-protocol-v1\\tests\\fixtures\\portfolio_hybrid_v1_1\\gold.v1.json",
+          "sha256": "261ddb82346dccbcfe9595a7fd475c8476c35284aafd9ea33324a19c006a4d4f"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recomputed_from_frozen_baseline_artifacts",
+      "prior_prediction": [
+        1159,
+        96
+      ],
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-roi-v4-20260905-01\\output\\report.json",
+        "sha256": "fbdf6c89607ce9ca5b7eeaae93cf6043dcda578479ae47ed408a8c9deec9afab"
+      },
+      "raw_prediction_sha256": "662bec59c89427a8de55c61be6b530b46d9dc35f09167803dfa4d10596e419b4",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\score_roi_chain.py",
+        "sha256": "19a440b32e3c688e62b72f47e2e2e196e99a01cd52652a80efa41da69b0e686d"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-01",
+      "target_id": "screenspot-v2-web-01",
+      "ground_truth": {
+        "bbox_xyxy": [
+          465,
+          663,
+          520,
+          718
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-public-roi-20260905-01\\output\\report.json",
+        "sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264"
+      },
+      "raw_prediction_sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-02",
+      "target_id": "screenspot-v2-web-02",
+      "ground_truth": {
+        "bbox_xyxy": [
+          1888,
+          1165,
+          2230,
+          1258
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-03",
+      "target_id": "screenspot-v2-web-03",
+      "ground_truth": {
+        "bbox_xyxy": [
+          438,
+          1131,
+          482,
+          1176
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-public-roi-20260905-01\\output\\report.json",
+        "sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264"
+      },
+      "raw_prediction_sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-04",
+      "target_id": "screenspot-v2-web-04",
+      "ground_truth": {
+        "bbox_xyxy": [
+          518,
+          769,
+          704,
+          848
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-public-roi-20260905-01\\output\\report.json",
+        "sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264"
+      },
+      "raw_prediction_sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-web-05",
+      "target_id": "screenspot-v2-web-05",
+      "ground_truth": {
+        "bbox_xyxy": [
+          550,
+          94,
+          1004,
+          173
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-public-roi-20260905-01\\output\\report.json",
+        "sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264"
+      },
+      "raw_prediction_sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-06",
+      "target_id": "screenspot-v2-desktop-06",
+      "ground_truth": {
+        "bbox_xyxy": [
+          1245,
+          801,
+          1315,
+          864
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-public-roi-20260905-01\\output\\report.json",
+        "sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264"
+      },
+      "raw_prediction_sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-07",
+      "target_id": "screenspot-v2-desktop-07",
+      "ground_truth": {
+        "bbox_xyxy": [
+          1466,
+          644,
+          1613,
+          780
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-public-roi-20260905-01\\output\\report.json",
+        "sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264"
+      },
+      "raw_prediction_sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-08",
+      "target_id": "screenspot-v2-desktop-08",
+      "ground_truth": {
+        "bbox_xyxy": [
+          438,
+          2,
+          499,
+          63
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-public-roi-20260905-01\\output\\report.json",
+        "sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264"
+      },
+      "raw_prediction_sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-09",
+      "target_id": "screenspot-v2-desktop-09",
+      "ground_truth": {
+        "bbox_xyxy": [
+          88,
+          1091,
+          141,
+          1142
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "abstained",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": null,
+      "raw_prediction_sha256": null,
+      "binding_status": "UNBOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    },
+    {
+      "suite": "public10",
+      "case_id": "screenspot-v2-desktop-10",
+      "target_id": "screenspot-v2-desktop-10",
+      "ground_truth": {
+        "bbox_xyxy": [
+          492,
+          141,
+          640,
+          184
+        ],
+        "source_ref": {
+          "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\scoring-only\\ground-truth.json",
+          "sha256": "e7beb45267106d1dedaa738f400d45f26b1e62367c10ce7792503a092cd4fb64"
+        }
+      },
+      "baseline_outcome": "correct",
+      "outcome_provenance": "recorded_public_chain_score",
+      "prior_prediction": null,
+      "prediction_source_ref": {
+        "path": "E:\\模型测试\\runs\\three-slot-vista-public-roi-20260905-01\\output\\report.json",
+        "sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264"
+      },
+      "raw_prediction_sha256": "501861933936d29c06c2f9694d1adb78119470be2c5d83d7f414576732b67264",
+      "binding_status": "BOUND",
+      "scorer_source_ref": {
+        "path": "E:\\模型测试\\reports\\three-slot-selection-20260905\\public-regression\\public10-chain-score.json",
+        "sha256": "1487667e57837c9117b3276057fa6527991392e37005cd340c929821f8fce9ad"
+      },
+      "human_correction_applied": false
+    }
+  ]
+}

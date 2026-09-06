@@ -691,6 +691,54 @@ def _benchmark_v2_generic_receipt_matches_binding_operation(
     )
 
 
+def run_learning_selection_actual_no_action(**kwargs: Any) -> dict[str, Any]:
+    """显式实验入口：真实推理到既有审核草稿，不改变生产默认。"""
+    from app.learn.hybrid.selection_actual import run_actual_selection
+
+    return run_actual_selection(**kwargs)
+
+
+def prepare_learning_selection_review_replay(
+    *, project_root: str | Path, source_path: str | Path,
+) -> dict[str, Any] | None:
+    """将显式回放输入接入既有草稿审核入口，不启动模型或动作。"""
+    root = Path(project_root).resolve()
+    path = Path(source_path)
+    resolved = (root / path).resolve() if not path.is_absolute() else path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("selection replay source escaped project root") from exc
+    payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict) or payload.get("learning_pipeline_mode") != "hybrid_v1_2":
+        return None
+    if payload.get("contract_version") in {
+        "learning_template_draft_v1", "reviewed_template_candidate_v1",
+        "learning_draft_review_v1", "pathgraph_candidate_v1",
+    }:
+        return None
+    if payload.get("execution_origin") != "replay":
+        raise ValueError("selection input preparation requires explicit replay origin")
+    from app.learn.workflow_tasks.hybrid_selection import run_hybrid_selection_task
+
+    response = run_hybrid_selection_task(payload)
+    if response.get("outcome") != "completed":
+        raise ValueError("selection replay stopped: " + str(response.get("reason") or "not_completed"))
+    from app.learn.hybrid.selection_persistence import persist_selection_review_trial
+
+    trial_path = persist_selection_review_trial(
+        project_root=root, payload=payload, response=response,
+    )
+    return {
+        "trial_path": trial_path,
+        "prepared_from_selection_replay": True,
+        "execution_origin": "replay",
+        "replay_input_path": resolved.relative_to(root).as_posix(),
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+
+
 def build_learning_pipeline_initial_worker_request(
     *,
     learning_pipeline_mode: str = "incumbent",
@@ -709,6 +757,23 @@ def build_learning_pipeline_initial_worker_request(
             "task_kind": "vision_observe_screen",
             "payload": deepcopy(payload),
         }
+    if mode == "hybrid_v1_2":
+        required = {
+            "run_id", "workflow_revision", "hybrid_capture_bundle_ref", "request_ref",
+            "registration_ref", "manifest_ref", "capture_image_path", "hybrid_config",
+            "capture_bundle", "omni_inventory", "gui_actor_selection_input", "target_text",
+            "refinement_policy",
+        }
+        missing = sorted(field for field in required if field not in payload)
+        if missing:
+            raise LearningWorkflowStageOperationError(
+                f"Hybrid v1.2 pipeline payload missing: {', '.join(missing)}"
+            )
+        selection_payload = {key: deepcopy(payload[key]) for key in required}
+        selection_payload["learning_pipeline_mode"] = "hybrid_v1_2"
+        selection_payload["execution_origin"] = "replay"
+        selection_payload["gui_actor_provider_state"] = "replay_ready"
+        return {"task_kind": "panel_learning_hybrid_selection", "payload": selection_payload}
 
     required = {
         "run_id",
@@ -917,7 +982,7 @@ def start_learning_workflow_stage_operation(
         "started_at": issued_at.isoformat(),
         "lease_expires_at": lease_expires_at.isoformat(),
     }
-    if pipeline_mode == "hybrid_v1_1":
+    if pipeline_mode in {"hybrid_v1_1", "hybrid_v1_2"}:
         stage_execution["learning_pipeline_mode"] = pipeline_mode
     state = transition_learning_workflow_run(
         store=store,
@@ -9716,7 +9781,7 @@ def continue_learning_stage_worker_result(
         stage=stage,
         task_kind=task_kind,
         response=response,
-    ) if learning_pipeline_mode == "hybrid_v1_1" else None
+    ) if learning_pipeline_mode in {"hybrid_v1_1", "hybrid_v1_2"} else None
     if decision is None:
         decision = interpret_learning_stage_worker_result(
             stage=stage,
@@ -10428,6 +10493,21 @@ def _interpret_hybrid_post_calibration_worker_result(
 ) -> dict[str, Any] | None:
     """只解释 Hybrid 的校准后两步，避免进入 incumbent review-repair。"""
 
+    if task_kind == "panel_learning_hybrid_selection":
+        if stage != "screen_understanding":
+            raise LearningWorkflowStageOperationError("Hybrid selection task must remain in screen_understanding")
+        if (
+            response.get("contract_version") != "hybrid_selection_task_result_v1"
+            or response.get("learning_pipeline_mode") != "hybrid_v1_2"
+            or response.get("execute_binding_enabled") is not False
+        ):
+            raise LearningWorkflowStageOperationError("Hybrid selection worker result contract is invalid")
+        if response.get("outcome") != "completed":
+            return {"stage": stage, "task_kind": task_kind, "stage_finished": True, "continuation_status": "terminal_result", "outcome": "safe_stopped", "reason": f"SAFE_STOP · {response.get('reason') or 'selection unavailable'}", "evidence_refs": {}}
+        review = response.get("review_projection")
+        if not isinstance(review, dict) or review.get("contract_version") != "hybrid_selection_review_v1":
+            raise LearningWorkflowStageOperationError("Hybrid selection review projection is invalid")
+        return {"stage": stage, "task_kind": task_kind, "stage_finished": True, "continuation_status": "terminal_result", "outcome": "completed", "reason": "Hybrid v1.2 selection review projection completed", "evidence_refs": {"hybrid_selection_review": deepcopy(review)}}
     if task_kind not in {
         "panel_learning_calibration_sequence",
         "panel_learning_hybrid_review_projection",

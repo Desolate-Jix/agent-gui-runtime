@@ -4,6 +4,12 @@
 
 [简体中文](README.zh-CN.md)
 
+### Experimental selection integration (2026-09-06)
+
+`hybrid_v1_2` has an explicit **no-action experimental path**: real Omni → GUIActor → optional VISTA → WorkflowService → existing review API → simulated review → learning-region consumer → save and fresh-process reload. The completed actual `integration-20260906-r2` run covers all 35 approved existing targets under `never` / `conditional` / `always` (105 records): each arm has 27 correct, 0 wrong, and 8 abstained; all requested VISTA refinements validated and all owned cleanup records verified. The raw 26 correct cases were preserved; fixed25 `case-001-target-05` is the only recorded abstained→correct gain. Missing semantics still block compilation. Production stage start remains blocked; live Windows acceptance is not run. No default model or action authority changed. See [verified artifacts, commands and limitations](docs/LEARNING_PIPELINE_STATUS.md).
+
+The visible panel has saved and reloaded an explicitly simulated review. Selection edits use one append-only ledger; overlays and diagnostic summaries derive from the verified projection. The panel distinguishes candidate boxes from semantically reviewed learning regions and displays the exact recognition target plus original GUIActor and validated VISTA points separately. This is not final user acceptance or complete state/action understanding.
+
 ## A reliability runtime target between computer-use agents and Windows GUI actions
 
 An in-progress Windows GUI runtime designed to turn uncertain exploration into human-reviewed operational knowledge, then re-locate, gate, execute, and verify semantic actions against the current interface.

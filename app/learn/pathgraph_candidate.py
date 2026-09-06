@@ -27,8 +27,28 @@ def build_pathgraph_candidate_from_review(
     reviewed = json.loads(source_bytes.decode("utf-8-sig"))
     if not isinstance(reviewed, dict) or reviewed.get("contract_version") != "reviewed_template_candidate_v1":
         raise ValueError("reviewed template candidate is invalid")
+    selection_learning = (reviewed.get("draft") or {}).get("hybrid_selection_learning") if isinstance(reviewed.get("draft"), dict) else None
+    if isinstance(selection_learning, dict) and selection_learning.get("contract_version") == "hybrid_selection_learning_projection_v1" and selection_learning.get("learning_state") != "ready_for_learning":
+        return {
+            "contract_version": "pathgraph_candidate_build_v1", "validation_status": "blocked_missing_semantics",
+            "artifact_type": "pathgraph_candidate", "reviewed_template_candidate_path": _relative_path(reviewed_path, root),
+            "missing_fields": list(selection_learning.get("missing_fields") or []), "artifact_is_authorization": False,
+            "execute_binding_enabled": False, "final_submit_forbidden": True, "real_action_requires_gate": True,
+        }
 
-    draft = _nested_draft_from_reviewed(reviewed.get("draft") if isinstance(reviewed.get("draft"), dict) else {})
+    flat_draft = dict(reviewed.get("draft") or {})
+    if isinstance(selection_learning, dict):
+        # 选择审核只补齐区域语义；转换坐标格式后交给既有消费者。
+        flat_draft["regions"] = [
+            {
+                **item, "region_id": item["candidate_id"],
+                "bbox": {"x": item["bbox"][0], "y": item["bbox"][1], "w": item["bbox"][2] - item["bbox"][0], "h": item["bbox"][3] - item["bbox"][1]},
+                "coordinate_space": "capture_pixel_xyxy", "review_only": True,
+                "artifact_is_authorization": False, "execute_binding_enabled": False,
+            }
+            for item in selection_learning["regions"]
+        ]
+    draft = _nested_draft_from_reviewed(flat_draft)
     source_ref = {
         "trial_path": _relative_path(reviewed_path, root),
         "reviewed_candidate_path": _relative_path(reviewed_path, root),
@@ -44,6 +64,12 @@ def build_pathgraph_candidate_from_review(
         "app_name": _app_name_from_reviewed(reviewed, draft),
     }
     graph = _build_runtime_path_graph(trial, draft, source_ref)
+    if isinstance(selection_learning, dict):
+        # 旧消费者的缺省状态不能充当 GUIActor 没有提供的工作流语义。
+        graph["states"] = []
+        graph["transitions"] = []
+        graph["action_templates"] = []
+        graph["summary"].update(state_count=0, transition_count=0, action_template_count=0)
     interface_map = _build_interface_map(trial, draft, source_ref, graph)
     _mark_candidate_graph(graph)
     _mark_candidate_interface_map(interface_map)

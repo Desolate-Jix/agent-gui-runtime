@@ -394,7 +394,11 @@ class OmniParserShadowAdapter:
             try:
                 spawn_options: dict[str, object] = {
                     "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
-                    "env": _offline_environment(self._configuration.cache_path), "cwd": str(ROOT),
+                    "env": _offline_environment(
+                        self._configuration.cache_path,
+                        code_path=self._configuration.code_path,
+                        weights_path=self._configuration.weights_path,
+                    ), "cwd": str(ROOT),
                     "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
                 }
                 if os.name != "nt":
@@ -1228,7 +1232,15 @@ def _active_listener_endpoints(
     return listeners, True
 
 
-def _offline_environment(cache_path: Path) -> dict[str, str]:
+def _offline_environment(
+    cache_path: Path,
+    *,
+    code_path: Path | None = None,
+    weights_path: Path | None = None,
+) -> dict[str, str]:
+    """只把受信配置中的 Omni 资产路径传给隔离 worker。"""
+    if (code_path is None) != (weights_path is None):
+        raise ValueError("trusted Omni asset paths must be paired")
     runtime_cache_root = ROOT / "runtime_state" / "omniparser-home"
     environment = {
         "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_CACHE": str(cache_path),
@@ -1237,6 +1249,9 @@ def _offline_environment(cache_path: Path) -> dict[str, str]:
         "TORCHINDUCTOR_CACHE_DIR": str(runtime_cache_root / "torchinductor"),
         "YOLO_CONFIG_DIR": str(runtime_cache_root / "ultralytics"),
     }
+    if code_path is not None and weights_path is not None:
+        environment["AGENT_GUI_UEI_OMNIPARSER_CODE_PATH"] = str(code_path.resolve())
+        environment["AGENT_GUI_UEI_OMNIPARSER_WEIGHTS_PATH"] = str(weights_path.resolve())
     for name in ("SystemRoot", "WINDIR", "PATH", "ProgramFiles", "ProgramW6432"):
         value = os.environ.get(name)
         if value:

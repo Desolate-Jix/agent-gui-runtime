@@ -7243,6 +7243,7 @@ def test_hybrid_registered_handler_chain_resolves_actual_callables() -> None:
         "panel_learning_hybrid_fusion": "run_hybrid_fusion_task",
         "panel_learning_calibration_sequence": "run_learning_calibration_sequence",
         "panel_learning_hybrid_review_projection": "run_hybrid_review_projection_task",
+        "panel_learning_hybrid_selection": "run_hybrid_selection_task",
     }
     assert set(workflow_worker.HYBRID_STAGE_HANDLER_REGISTRY) == set(expected)
     for task_kind, name in expected.items():

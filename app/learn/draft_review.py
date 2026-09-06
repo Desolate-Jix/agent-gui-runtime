@@ -13,6 +13,13 @@ from app.learn.hybrid.review_projection import (
     apply_hybrid_review_decisions,
     validate_hybrid_review_projection,
 )
+from app.learn.hybrid.selection_persistence import (
+    load_selection_review_projection, persist_selection_review_projection,
+    project_selection_learning, selection_review_diagnostics, validate_selection_trial_binding,
+)
+from app.learn.hybrid.selection_review import apply_selection_review_decisions
+from app.learn.hybrid.selection_save_lock import atomic_write_text, selection_save_lock
+from app.learn.recognition.uei.canonical import canonical_json_bytes
 
 from PIL import Image, ImageDraw, UnidentifiedImageError
 
@@ -249,8 +256,10 @@ def load_learning_draft_review(
     )
 
     draft, attempt_index = _select_draft(payload)
+    validate_selection_trial_binding(project_root=root, source_path=resolved, payload=payload)
     selected_draft = draft
     hybrid_projection_source = deepcopy(draft.get("hybrid_review_projection_ref"))
+    selection_projection_source = deepcopy(draft.get("hybrid_selection_review_projection_ref"))
     if draft.get("hybrid_review_projection") is not None:
         hybrid_projection_source = deepcopy(draft.get("hybrid_review_projection"))
     source_ref = {
@@ -337,6 +346,17 @@ def load_learning_draft_review(
                 displayed_source_image=displayed_source_image,
                 root=root,
             )
+    selection_review = None
+    if isinstance(selection_projection_source, dict):
+        selection_review = load_selection_review_projection(
+            project_root=root, projection_ref=selection_projection_source,
+            expected_capture_lineage_ref=current_capture_lineage_ref,
+            displayed_source_sha256=str(displayed_source_image.get("sha256") or ""),
+            displayed_source_size=deepcopy(displayed_source_image.get("image_size") or {}),
+        )
+        normalized_draft["regions"].extend(deepcopy(selection_review["regions"]))
+        if selection_review["regions"]:
+            _bind_projected_review_source_copy(normalized_draft, displayed_source_image=displayed_source_image, root=root)
     strip_uei_shadow_review_cache(normalized_draft)
     result = {
         "contract_version": REVIEW_CONTRACT,
@@ -366,6 +386,17 @@ def load_learning_draft_review(
         result["hybrid_review_projection_ref"] = deepcopy(hybrid_review["projection_ref"])
     if isinstance(hybrid_review, dict) and isinstance(hybrid_review.get("status"), dict):
         result["hybrid_review_projection_status"] = deepcopy(hybrid_review["status"])
+    if isinstance(selection_review, dict):
+        result["hybrid_review_projection"] = deepcopy(selection_review["projection"])
+        result["hybrid_review_projection_ref"] = deepcopy(selection_review["projection_ref"])
+        result["hybrid_review_projection_status"] = deepcopy(selection_review["status"])
+        result["hybrid_selection_review_parent_evidence"] = deepcopy(selection_review["parent_evidence"])
+        result["hybrid_selection_actual_execution"] = deepcopy(selection_review.get("actual_execution"))
+        diagnostics = selection_review_diagnostics(selection_review["projection"])
+        result["audit"].update(diagnostics)
+        result["audit"]["source_freshness_summary"] = _source_freshness_summary(
+            normalized_draft, root, diagnostics["manual_bbox_edit_summary"],
+        )
     if workflow_node_identity:
         result["workflow_node_identity"] = workflow_node_identity
     if payload.get("contract_version") == REVIEWED_TEMPLATE_CONTRACT:
@@ -519,7 +550,163 @@ def _apply_hybrid_review_decision_patch(
     return updated
 
 
+def _apply_hybrid_selection_review_decision_patch(
+    draft: dict[str, Any], *, review: dict[str, Any], review_patch: dict[str, Any], root: Path,
+) -> dict[str, Any] | None:
+    """从 UEI 可信父证据追加选择审核决定。"""
+    projection = review.get("hybrid_review_projection")
+    parents = review.get("hybrid_selection_review_parent_evidence")
+    if not isinstance(projection, dict) or projection.get("contract_version") != "hybrid_selection_review_v1" or not isinstance(parents, dict):
+        return None
+    if "hybrid_selection_review_decisions" in review_patch:
+        raise ValueError("selection review uses the shared hybrid_review_decisions field")
+    requested = review_patch.get("hybrid_review_decisions", [])
+    if not isinstance(requested, list) or not all(isinstance(item, dict) for item in requested):
+        raise ValueError("hybrid_review_decisions must be an object list")
+    existing = projection.get("review_decisions")
+    if not isinstance(existing, list):
+        raise ValueError("selection review decision ledger is invalid")
+    existing_by_id = {item.get("decision_id"): item for item in existing if isinstance(item, dict)}
+    if len(existing_by_id) != len(existing):
+        raise ValueError("selection review decision ledger contains duplicate ids")
+    additions = []
+    for decision in requested:
+        decision = {key: deepcopy(value) for key, value in decision.items() if key not in {"decision_index", "source"}}
+        prior = existing_by_id.get(decision.get("decision_id"))
+        if prior is None:
+            additions.append(deepcopy(decision)); continue
+        comparable = {key: deepcopy(value) for key, value in prior.items() if key not in {"decision_index", "source"}}
+        if canonical_json_bytes(comparable) != canonical_json_bytes(decision):
+            raise ValueError("selection review decision_id cannot be rewritten")
+    updated = apply_selection_review_decisions(projection, decisions=additions, **parents) if additions else deepcopy(projection)
+    reference = persist_selection_review_projection(project_root=root, parent_evidence=parents, projection=updated, actual_execution=review.get("hybrid_selection_actual_execution"))
+    candidate_ids = {item.get("candidate_id") for item in updated.get("candidates", []) if isinstance(item, dict)}
+    draft["regions"] = [item for item in draft.get("regions", []) if not (isinstance(item, dict) and item.get("candidate_id") in candidate_ids and item.get("review_only") is True)]
+    draft["hybrid_selection_review_projection_ref"] = reference
+    draft["hybrid_selection_learning"] = project_selection_learning(updated)
+    return updated
+
+
+def _immutable_selection_projection_ref(value: Any, *, required: bool) -> dict[str, str] | None:
+    """只接受 UEI 不可变对象的完整引用，拒绝可扩展客户端对象。"""
+    if value is None and not required:
+        return None
+    if not isinstance(value, dict) or set(value) != {"id", "content_sha256"}:
+        raise ValueError("expected_hybrid_review_projection_ref is required for selection saves")
+    projection_id = value.get("id")
+    content_hash = value.get("content_sha256")
+    if not isinstance(projection_id, str) or not projection_id or not isinstance(content_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", content_hash):
+        raise ValueError("expected_hybrid_review_projection_ref is invalid")
+    return {"id": projection_id, "content_sha256": content_hash}
+
+
+def _selection_projection_ref_from_payload(payload: dict[str, Any]) -> dict[str, str] | None:
+    draft = payload.get("draft") if payload.get("contract_version") == REVIEWED_TEMPLATE_CONTRACT else payload
+    if not isinstance(draft, dict):
+        return None
+    return _immutable_selection_projection_ref(
+        draft.get("hybrid_selection_review_projection_ref"), required=False,
+    )
+
+
+def _selection_save_context(
+    source_path: str | Path,
+    *,
+    root: Path,
+    expected_hybrid_run_id: str | None,
+    expected_hybrid_workflow_revision: int | None,
+    expected_current_capture_lineage_ref: dict[str, str] | None,
+) -> tuple[dict[str, str] | None, Path | None]:
+    """从原始 trial 或候选件确定 selection CAS 域，尚不产生副作用。"""
+    source_resolved = _resolve_source_path(source_path, root)
+    try:
+        source_payload = json.loads(source_resolved.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None, None
+    direct_ref = (
+        _selection_projection_ref_from_payload(source_payload)
+        if isinstance(source_payload, dict)
+        else None
+    )
+    if direct_ref is None and not (
+        isinstance(source_payload, dict)
+        and source_payload.get("contract_version") in {
+            "pathgraph_candidate_v1",
+            "pathgraph_candidate_validation_report_v1",
+        }
+    ):
+        return None, None
+    review = load_learning_draft_review(
+        source_path,
+        project_root=root,
+        discover_related_sidecars=_review_source_requires_sidecar_discovery(source_path, root),
+        expected_hybrid_run_id=expected_hybrid_run_id,
+        expected_hybrid_workflow_revision=expected_hybrid_workflow_revision,
+        expected_current_capture_lineage_ref=expected_current_capture_lineage_ref,
+    )
+    selection_ref = _selection_projection_ref_from_payload(review.get("draft", {}))
+    if selection_ref is None:
+        return None, None
+    review_root = (root / "artifacts" / "learning-draft-review").resolve()
+    if source_resolved.name == "reviewed_template_candidate.json" and source_resolved.parent.parent == review_root:
+        return selection_ref, source_resolved.parent
+    return selection_ref, review_root / _slug_for_output(review["source"])
+
+
 def save_reviewed_template_candidate(
+    source_path: str | Path,
+    review_patch: dict[str, Any] | None,
+    *,
+    project_root: str | Path | None = None,
+    expected_hybrid_run_id: str | None = None,
+    expected_hybrid_workflow_revision: int | None = None,
+    expected_current_capture_lineage_ref: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """保存审核候选；选择审核保存以当前候选件作为 CAS head。"""
+    root = Path(project_root).resolve() if project_root is not None else PROJECT_ROOT
+    patch = deepcopy(review_patch) if isinstance(review_patch, dict) else {}
+    selection_ref, out_dir = _selection_save_context(
+        source_path,
+        root=root,
+        expected_hybrid_run_id=expected_hybrid_run_id,
+        expected_hybrid_workflow_revision=expected_hybrid_workflow_revision,
+        expected_current_capture_lineage_ref=expected_current_capture_lineage_ref,
+    )
+    if selection_ref is None:
+        return _save_reviewed_template_candidate_unlocked(
+            source_path, patch, project_root=root,
+            expected_hybrid_run_id=expected_hybrid_run_id,
+            expected_hybrid_workflow_revision=expected_hybrid_workflow_revision,
+            expected_current_capture_lineage_ref=expected_current_capture_lineage_ref,
+        )
+    expected_ref = _immutable_selection_projection_ref(
+        patch.pop("expected_hybrid_review_projection_ref", None),
+        required=True,
+    )
+    assert out_dir is not None
+    candidate_path = out_dir / "reviewed_template_candidate.json"
+    with selection_save_lock(out_dir):
+        head_ref = selection_ref
+        head_path: str | Path = source_path
+        if candidate_path.is_file():
+            head_payload = _load_candidate_json(candidate_path, root)
+            if not isinstance(head_payload, dict):
+                raise ValueError("selection save candidate head is invalid")
+            head_ref = _selection_projection_ref_from_payload(head_payload)
+            if head_ref is None:
+                raise ValueError("selection save candidate head lacks projection ref")
+            head_path = candidate_path
+        if expected_ref != head_ref:
+            raise ValueError("expected_hybrid_review_projection_ref conflict")
+        return _save_reviewed_template_candidate_unlocked(
+            head_path, patch, project_root=root,
+            expected_hybrid_run_id=expected_hybrid_run_id,
+            expected_hybrid_workflow_revision=expected_hybrid_workflow_revision,
+            expected_current_capture_lineage_ref=expected_current_capture_lineage_ref,
+        )
+
+
+def _save_reviewed_template_candidate_unlocked(
     source_path: str | Path,
     review_patch: dict[str, Any] | None,
     *,
@@ -606,6 +793,11 @@ def save_reviewed_template_candidate(
         changes.append(
             f"hybrid_review_decisions:{len(hybrid_projection.get('review_decisions', []))}"
         )
+    selection_projection = _apply_hybrid_selection_review_decision_patch(
+        draft, review=review, review_patch=review_patch, root=root,
+    )
+    if selection_projection is not None:
+        changes.append(f"hybrid_review_decisions:{len(selection_projection.get('review_decisions', []))}")
     hierarchy_ownership_review = _apply_hierarchy_ownership_corrections(
         draft,
         human_review_patch,
@@ -659,8 +851,15 @@ def save_reviewed_template_candidate(
         if operation.get("op") == "add":
             changes.append(f"{operation.get('target_kind')}_add:{operation.get('target_id')}")
 
+    overlay_draft = draft
+    if selection_projection is not None:
+        from app.learn.hybrid.selection_persistence import selection_review_regions
+
+        # 显示层从当前审核投影派生框，不把重复 regions 写回持久草稿。
+        overlay_draft = deepcopy(draft)
+        overlay_draft["regions"] = selection_review_regions(selection_projection)
     reviewed_overlay_path = _render_human_review_overlay(
-        draft,
+        overlay_draft,
         root=root,
         out_dir=out_dir,
         revision=int(human_review_patch.get("revision") or 0),
@@ -688,13 +887,14 @@ def save_reviewed_template_candidate(
         review_status = "needs_human_review"
     if hierarchy_ownership_review:
         review_status = "needs_human_review"
-    if hybrid_projection is not None:
+    if hybrid_projection is not None or selection_projection is not None:
         review_status = "needs_human_review"
     requested_source = str(review_patch.get("source_after_review") or "mixed").strip()
     source_after_review = "assisted_generation" if requested_source == "assisted_generation" else "mixed"
-    manual_bbox_edit_summary = _manual_bbox_edit_summary(draft)
+    diagnostics = selection_review_diagnostics(selection_projection) if selection_projection is not None else None
+    manual_bbox_edit_summary = diagnostics["manual_bbox_edit_summary"] if diagnostics else _manual_bbox_edit_summary(draft)
     source_freshness_summary = _source_freshness_summary(draft, root, manual_bbox_edit_summary)
-    precise_understanding_summary = _precise_understanding_summary(draft)
+    precise_understanding_summary = diagnostics["precise_understanding_summary"] if diagnostics else _precise_understanding_summary(draft)
     screen_preview = review.get("screen_understanding_preview") if isinstance(review.get("screen_understanding_preview"), dict) else {}
     precise_understanding_readiness_summary = (
         deepcopy(screen_preview.get("precise_understanding_readiness_summary"))
@@ -716,7 +916,7 @@ def save_reviewed_template_candidate(
         "counts_as_pure_model_generated": False,
         "artifact_is_authorization": False,
         "draft_only": False,
-        "reviewed_by_human": hybrid_projection is None,
+        "reviewed_by_human": hybrid_projection is None and selection_projection is None,
         "review_status": review_status,
         "final_submit_forbidden": True,
         "real_action_requires_gate": True,
@@ -765,7 +965,11 @@ def save_reviewed_template_candidate(
     )
     if correction_memory:
         candidate["audit"]["correction_memory"] = deepcopy(correction_memory)
-    out_path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    candidate_text = json.dumps(candidate, ensure_ascii=False, indent=2) + "\n"
+    if selection_projection is not None:
+        atomic_write_text(out_path, candidate_text)
+    else:
+        out_path.write_text(candidate_text, encoding="utf-8")
     result = {
         "contract_version": "learning_draft_review_save_v1",
         "reviewed_template_candidate_path": _relative_path(out_path, root),
@@ -1938,6 +2142,9 @@ def _normalized_draft(draft: dict[str, Any]) -> dict[str, Any]:
         "learning_source": draft.get("learning_source") or "observe_model",
         "ui_hierarchy": deepcopy(draft.get("ui_hierarchy")) if isinstance(draft.get("ui_hierarchy"), dict) else {},
         "page_details": deepcopy(draft.get("page_details")) if isinstance(draft.get("page_details"), dict) else {},
+        "capture_lineage_ref": deepcopy(draft.get("capture_lineage_ref")) if isinstance(draft.get("capture_lineage_ref"), dict) else None,
+        "hybrid_selection_review_projection_ref": deepcopy(draft.get("hybrid_selection_review_projection_ref")) if isinstance(draft.get("hybrid_selection_review_projection_ref"), dict) else None,
+        "hybrid_selection_learning": deepcopy(draft.get("hybrid_selection_learning")) if isinstance(draft.get("hybrid_selection_learning"), dict) else None,
         "notes": _list_of_dicts_or_strings(draft.get("notes")),
         "safety": safety,
     }
@@ -3305,9 +3512,14 @@ def _render_human_review_overlay(
             y1 = max(0, min(image.height - 1, bbox["y"]))
             x2 = max(x1, min(image.width - 1, bbox["x"] + bbox["w"]))
             y2 = max(y1, min(image.height - 1, bbox["y"] + bbox["h"]))
-            draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
+            is_selection = item.get("kind") == "hybrid_selection_review_candidate"
+            model_proposal = item.get("model_proposal") or {}
+            selected = is_selection and model_proposal.get("selection") is not None
+            box_color = (220, 30, 50) if selected else color
+            draw.rectangle((x1, y1, x2, y2), outline=box_color, width=3)
             item_id = str(item.get(id_key) or item.get("action_id") or index).strip()
-            draw.text((x1 + 3, y1 + 3), f"{kind}{index} {item_id}", fill=color)
+            label = f"{kind}{index}" if is_selection else f"{kind}{index} {item_id}"
+            draw.text((x1 + 3, y1 + 3), label, fill=box_color)
     suffix = f"r{revision:04d}" if revision > 0 else "legacy"
     output = out_dir / f"human_review_overlay_{suffix}.png"
     image.save(output)

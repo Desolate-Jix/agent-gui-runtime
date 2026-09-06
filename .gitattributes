@@ -17,6 +17,8 @@
 # Config / data
 *.json text eol=lf
 configs/benchmarks/portfolio_hybrid_v1_1_gate.json text eol=crlf
+# 冻结验收目录以原始字节绑定证据，检出时保留既有 CRLF。
+configs/benchmarks/learning_selection_acceptance_v1.json text eol=crlf
 *.yaml text eol=lf
 *.yml text eol=lf
 *.toml text eol=lf

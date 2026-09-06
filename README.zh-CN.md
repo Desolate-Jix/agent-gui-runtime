@@ -4,6 +4,12 @@
 
 [English](README.md)
 
+### 实验选择接入（2026-09-06）
+
+`hybrid_v1_2` 已有显式的**无动作实验路径**：真实 Omni → GUIActor → 按需 VISTA → WorkflowService → 既有审核 API → 模拟修订 → 学习区域消费者 → 保存与新进程重载。已完成的 actual `integration-20260906-r2` 覆盖全部 35 个已批准既有目标的 `never` / `conditional` / `always` 三臂（105 条记录）：每臂 27 correct、0 wrong、8 abstained；所有请求的 VISTA 精修均已验证，全部受管清理记录均已核验。原有 26 个 correct 均保留，fixed25 `case-001-target-05` 是唯一记录的 abstained→correct 增益。缺语义仍拒绝编译。生产 stage start 仍阻断；真实 Windows 验收未运行。默认模型和动作权限未改变。参见[真实产物、命令与限制](docs/LEARNING_PIPELINE_STATUS.md)。
+
+可见面板已保存并重载明确标记的模拟修订；selection 使用统一追加记录，框图和诊断摘要从复验后的投影派生。面板分别显示候选框、具备语义的学习区域、精确识别目标、原始 GUIActor 点和已验证 VISTA 点。这不是用户最终确认，也不是完整状态/动作理解。
+
 ## 位于 Computer-Use Agent 与 Windows GUI 动作之间的可靠性 Runtime 目标
 
 这是一个仍在完善中的 Windows GUI Runtime，目标是把不确定的界面探索转化为经人工审核的操作知识，再针对当前界面重新定位、Gate、执行并验证语义动作。

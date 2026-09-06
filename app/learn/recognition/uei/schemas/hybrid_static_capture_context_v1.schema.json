@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hybrid_static_capture_context_v1",
+  "type": "object",
+  "required": [
+    "contract_version", "context_id", "run_id", "workflow_revision",
+    "capture_lineage_ref", "window_binding", "static_asset", "availability",
+    "sources", "derived_views", "artifact_is_authorization",
+    "execute_binding_enabled", "final_submit_forbidden",
+    "real_action_requires_gate", "authorization_scope", "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {"const": "hybrid_static_capture_context_v1"},
+    "context_id": {"type": "string", "minLength": 1, "maxLength": 512},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "workflow_revision": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "capture_lineage_ref": {"$ref": "#/$defs/ref"},
+    "window_binding": {"const": null},
+    "static_asset": {"$ref": "#/$defs/static_asset"},
+    "availability": {
+      "type": "object",
+      "required": ["ocr", "uia"],
+      "properties": {
+        "ocr": {"type": "object", "required": ["status"], "properties": {"status": {"const": "not_collected_static"}}, "additionalProperties": false},
+        "uia": {"type": "object", "required": ["status", "reason"], "properties": {"status": {"const": "not_applicable_static"}, "reason": {"const": "no_live_window"}}, "additionalProperties": false}
+      },
+      "additionalProperties": false
+    },
+    "sources": {"type": "array", "minItems": 0, "maxItems": 0},
+    "derived_views": {"type": "array", "minItems": 0, "maxItems": 0},
+    "artifact_is_authorization": {"const": false},
+    "execute_binding_enabled": {"const": false},
+    "final_submit_forbidden": {"const": true},
+    "real_action_requires_gate": {"const": true},
+    "authorization_scope": {"const": "display_and_review_only"},
+    "content_sha256": {"$ref": "#/$defs/sha"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ref": {
+      "type": "object", "required": ["id", "content_sha256"],
+      "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 512}, "content_sha256": {"$ref": "#/$defs/sha"}},
+      "additionalProperties": false
+    },
+    "manifest_ref": {
+      "type": "object", "required": ["relative_path", "sha256"],
+      "properties": {
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^[^\\\\/][^\\\\]*$"},
+        "sha256": {"$ref": "#/$defs/sha"}
+      },
+      "additionalProperties": false
+    },
+    "static_asset": {
+      "type": "object", "required": ["case_id", "dataset", "revision", "source_manifest_ref"],
+      "properties": {
+        "case_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "dataset": {"enum": ["OS-Copilot/ScreenSpot-v2", "portfolio_hybrid_v1_1"]},
+        "revision": {"type": "string"},
+        "source_manifest_ref": {"$ref": "#/$defs/manifest_ref"}
+      },
+      "if": {"properties": {"dataset": {"const": "OS-Copilot/ScreenSpot-v2"}}},
+      "then": {"properties": {"revision": {"pattern": "^[0-9a-f]{40}$"}}},
+      "else": {"properties": {"revision": {"const": "bb09975c8042f72a59e41fa9f22969cf5104c8419deb5e9d62804ee855a35d92"}}},
+      "additionalProperties": false
+    }
+  }
+}

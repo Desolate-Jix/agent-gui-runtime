@@ -43,6 +43,7 @@ from app.learn.workflow_tasks.hybrid_qwen import (
 from app.learn.workflow_tasks.hybrid_review import (
     run_hybrid_review_projection_task,
 )
+from app.learn.workflow_tasks.hybrid_selection import run_hybrid_selection_task
 from app.learn.recognition.uei.canonical import content_sha256, seal_immutable
 from app.learn.hybrid.gpu_lifecycle import (
     assert_next_provider_safe_to_start,
@@ -76,6 +77,7 @@ SUPPORTED_LEARNING_STAGE_TASK_KINDS = frozenset(
         "panel_learning_hybrid_qwen_binding",
         "panel_learning_hybrid_fusion",
         "panel_learning_hybrid_review_projection",
+        "panel_learning_hybrid_selection",
         "vision_observe_screen",
         "vision_locate_target",
     }
@@ -104,6 +106,7 @@ _HYBRID_MANAGED_TASK_KINDS = frozenset(
         "panel_learning_hybrid_fusion",
         "panel_learning_calibration_sequence",
         "panel_learning_hybrid_review_projection",
+        "panel_learning_hybrid_selection",
     }
 )
 HYBRID_STAGE_HANDLER_REGISTRY = {
@@ -131,6 +134,11 @@ HYBRID_STAGE_HANDLER_REGISTRY = {
         "handler": "run_hybrid_review_projection_task",
         "provider": "review",
         "previous_cleanup_receipt": "vista_cleanup_receipt",
+    },
+    "panel_learning_hybrid_selection": {
+        "handler": "run_hybrid_selection_task",
+        "provider": None,
+        "previous_cleanup_receipt": None,
     },
 }
 HYBRID_LIFECYCLE_COMPONENT_REGISTRY = {
@@ -1672,6 +1680,7 @@ def hybrid_registered_lifecycle_status() -> dict[str, Any]:
         "panel_learning_hybrid_fusion": (None, None),
         "panel_learning_calibration_sequence": ("vista", "qwen_gpu_cleanup_receipt"),
         "panel_learning_hybrid_review_projection": ("review", "vista_cleanup_receipt"),
+        "panel_learning_hybrid_selection": (None, None),
     }
     expected_components = {
         "start_guard": ("worker", "_assert_hybrid_provider_start_guard"),
@@ -2362,10 +2371,16 @@ def execute_learning_stage_worker_task(
     learning_pipeline_mode = normalize_learning_pipeline_mode(
         payload.get("learning_pipeline_mode", "incumbent")
     )
+    if normalized_kind == "panel_learning_hybrid_selection" and learning_pipeline_mode != "hybrid_v1_2":
+        raise LearningStageWorkerError("selection task requires hybrid_v1_2")
+    if learning_pipeline_mode == "hybrid_v1_2" and normalized_kind != "panel_learning_hybrid_selection":
+        raise LearningStageWorkerError("hybrid_v1_2 supports only selection task")
     execution_payload = deepcopy(payload)
     orchestration = execution_payload.pop("_hybrid_orchestration", None)
     supervisor_context = execution_payload.pop("_hybrid_supervisor", None)
     execution_payload.pop("learning_pipeline_mode", None)
+    if learning_pipeline_mode == "hybrid_v1_2":
+        execution_payload["learning_pipeline_mode"] = "hybrid_v1_2"
     if (
         learning_pipeline_mode == "hybrid_v1_1"
         and normalized_kind == "panel_learning_calibration_sequence"
@@ -2470,6 +2485,12 @@ def execute_learning_stage_worker_task(
             )
             if learning_pipeline_mode == "hybrid_v1_1":
                 response = seal_immutable(response)
+        elif normalized_kind == "panel_learning_hybrid_selection":
+            assert hybrid_handler is not None
+            response = hybrid_handler(
+                execution_payload,
+                cancellation_event=cancellation_event,
+            )
         elif normalized_kind == "panel_learning_hybrid_omni_discovery":
             assert hybrid_handler is not None
             response = hybrid_handler(

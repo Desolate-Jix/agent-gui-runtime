@@ -1,0 +1,13 @@
+{
+  "contract_version": "learn_hybrid_config_v1_2",
+  "config_id": "learn_hybrid_v1_2",
+  "rollout_mode": "opt_in",
+  "providers": {"omni": "local.runtime/omniparser", "selection": "gui_actor_3b_bf16", "refinement": "vista_4b"},
+  "selection": {"native_shape": "gui_actor_topk_points_v1", "coordinate_space": "normalized_0_1", "top_k_policy": "top1_only"},
+  "refinement": {"policy_version": "selection_refinement_modes_v1", "mode": "conditional", "trigger_version": "selection_edge_margin_trigger_v1", "threshold_ratio": 0.1},
+  "artifact_is_authorization": false,
+  "execute_binding_enabled": false,
+  "final_submit_forbidden": true,
+  "real_action_requires_gate": true,
+  "authorization_scope": "display_and_review_only"
+}

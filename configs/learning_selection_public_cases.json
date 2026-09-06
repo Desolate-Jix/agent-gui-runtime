@@ -1,0 +1,79 @@
+{
+  "schema": "learning_selection_known_public_cases_v1",
+  "manifest_sha256": "9f61e5c6e9b4af27df217c2a8a33d2e650cfc500e94cbede617365ba16cbb32b",
+  "provider_requests_sha256": "f5abaedfea426dff5e60bc80a2f4e820fceeebf5c9426555bfa766467aa6e5a3",
+  "dataset": "OS-Copilot/ScreenSpot-v2",
+  "revision": "5efbb1f1b5463a575f2eb7bc30fe29e49c15f93c",
+  "cases": [
+    {
+      "case_id": "screenspot-v2-web-01",
+      "goal": "delete the 'article' tag for searching",
+      "capture_sha256": "e7316cb7f8cde9e6999ff069a7be0b341397e2af1175c1bdabea11af377cbf48",
+      "source_width": 2560,
+      "source_height": 1440
+    },
+    {
+      "case_id": "screenspot-v2-web-02",
+      "goal": "show cloth color for current season",
+      "capture_sha256": "0aa333fe11e8ebaf1c68749b393011ba75e3eb22b22db36eb9f86d2e5a35e62e",
+      "source_width": 2560,
+      "source_height": 1440
+    },
+    {
+      "case_id": "screenspot-v2-web-03",
+      "goal": "don't show post previews",
+      "capture_sha256": "726097733533bace9a0adbf9177a2f582f8b601402de6018ce06462f251ba5ca",
+      "source_width": 2560,
+      "source_height": 1440
+    },
+    {
+      "case_id": "screenspot-v2-web-04",
+      "goal": "adjusting the display layout of items",
+      "capture_sha256": "8ac8f880018786ab024b2534866027973a4ce25fb3b203099451e89183ae8b0f",
+      "source_width": 2560,
+      "source_height": 1440
+    },
+    {
+      "case_id": "screenspot-v2-web-05",
+      "goal": "check the books on tv & film",
+      "capture_sha256": "0da042d2568aeb65e7a381d1f8cd6294a496ba9019cea596c063abf38d99e63d",
+      "source_width": 2560,
+      "source_height": 1440
+    },
+    {
+      "case_id": "screenspot-v2-desktop-06",
+      "goal": "question about bluetooth",
+      "capture_sha256": "8b8689e4b70bbbbdd2f05879c6616d8d31ed4997f9e4a0eb76219dd6c7c88d79",
+      "source_width": 1338,
+      "source_height": 894
+    },
+    {
+      "case_id": "screenspot-v2-desktop-07",
+      "goal": "view more information about bomber",
+      "capture_sha256": "63d302f70f64e3a021f670d346c8756dd8fce7e7dbdaa16d175bb79c9254b3a7",
+      "source_width": 2560,
+      "source_height": 1440
+    },
+    {
+      "case_id": "screenspot-v2-desktop-08",
+      "goal": "save file",
+      "capture_sha256": "dd5f81091a448da3910b418b711f3458f998dc0ed7724e438920ec9c73320237",
+      "source_width": 1710,
+      "source_height": 1554
+    },
+    {
+      "case_id": "screenspot-v2-desktop-09",
+      "goal": "remove a network connected device",
+      "capture_sha256": "de7e17dbc9c8d7aa872687af4cf9195ceaa437cefece78f31da4fc209a5763fb",
+      "source_width": 1332,
+      "source_height": 1268
+    },
+    {
+      "case_id": "screenspot-v2-desktop-10",
+      "goal": "switch to desktop settings",
+      "capture_sha256": "3b8f2fa1272278c0fb9f510151b5a985e38dc54e5482cd7a3f8ab6a960635114",
+      "source_width": 1340,
+      "source_height": 1156
+    }
+  ]
+}
