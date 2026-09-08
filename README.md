@@ -1,3 +1,11 @@
+# 分支归档 / Branch archive
+
+**用途 / Purpose:** 早期规划、思维导图与说明文档 / Early planning, mind maps and documentation
+
+详见 [分支用途 / Branch purpose](BRANCH_PURPOSE.md)。这不是已验收正式版 / Not an accepted formal release.
+
+---
+
 ﻿# agent-gui-runtime
 
 A local Windows-only GUI automation runtime for AI agents.
