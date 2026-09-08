@@ -1,3 +1,11 @@
+# 分支归档 / Branch archive
+
+**用途 / Purpose:** 模型接入协议、GUIActor 运行环境及存储约束 / Provider protocol, GUIActor runtime and model storage constraints
+
+详见 [分支用途 / Branch purpose](BRANCH_PURPOSE.md)。这不是已验收正式版 / Not an accepted formal release.
+
+---
+
 # agent-gui-runtime
 
 **Version 0.3.0 · Windows GUI Agent Runtime · Portfolio v1 frozen · bounded Quick Apply-only release**
