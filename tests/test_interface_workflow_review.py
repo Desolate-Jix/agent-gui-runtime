@@ -458,8 +458,10 @@ def test_panel_workflow_review_can_skip_related_sidecar_discovery(
             summary=Path(source_path).stem,
         )
 
+    from app.learn import learning_draft_review_service as review_service
+
     monkeypatch.setattr(
-        panel_api,
+        review_service,
         "load_learning_draft_review",
         fake_load_learning_draft_review,
     )
@@ -1845,13 +1847,21 @@ def test_save_workflow_review_candidate_rejects_unknown_contract(
 ) -> None:
     try:
         save_interface_workflow_review_candidate(
-            {"contract_version": "unknown_contract"},
+            {"contract_version": "unknown_contract", "workflow": {"workflow_id": "unknown-contract-case"}},
             project_root=tmp_path,
         )
     except ValueError as exc:
         assert "single_application_workflow_review_v1" in str(exc)
     else:
         raise AssertionError("unknown workflow review contract must be rejected")
+
+
+def test_save_workflow_review_candidate_rejects_missing_workflow_before_contract(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="must contain a workflow object"):
+        save_interface_workflow_review_candidate(
+            {"contract_version": "unknown_contract"}, project_root=tmp_path,
+        )
+    assert not (tmp_path / "artifacts" / "interface-workflow-reviews").exists()
 
 
 def test_panel_saves_reviewed_workflow_without_publishing_memory(

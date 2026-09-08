@@ -1,5 +1,5 @@
 {
-  "kind": "legacy_web_source_and_test_snapshot_v2",
+  "kind": "legacy_web_source_and_test_snapshot_v3",
   "source_head": "bc085dd800b0d5e18d0509c36f7c985d4756a815",
   "captured_utc": "2026-09-08T11:08:10.094752+00:00",
   "files": [
@@ -94,9 +94,23 @@
       "bytes": 5479,
       "git_blob": "f9ee26cf1dc8a7a640a1aff23506b2f7aeac250c",
       "capture_stage": "R8S before retained-contract migration"
+    },
+    {
+      "path": "tests/test_interface_workflow_review.py",
+      "sha256": "7167cafa70ffd950376566d92a0a782a38f4b7b623c8ed1f23faced7f7378b42",
+      "bytes": 89406,
+      "git_blob": "53137fbbc0e2679b2bcd05387511881b24bee7ae",
+      "capture_stage": "R8T before interface review and persistence contract migration"
+    },
+    {
+      "path": "tests/test_learning_workflow_store_persistence.py",
+      "sha256": "1653a5851e6374d39f899de4ab050897a8328ff89ce33cad6989d98cdda2a92d",
+      "bytes": 17953,
+      "git_blob": "90a0df8003bdf2433ffa144a2b215c80b1adb763",
+      "capture_stage": "R8T before interface review and persistence contract migration"
     }
   ],
-  "scope": "13 R8R legacy-web source originals plus 2 R8S mixed shared-contract/legacy-adapter test originals; other files inherit the preparation baseline",
+  "scope": "13 R8R legacy-web source originals, 2 R8S review test originals and 2 R8T interface-review/persistence test originals; other files inherit the preparation baseline",
   "excluded": [
     "current formal changes outside the listed files",
     "models",
@@ -106,5 +120,5 @@
   ],
   "runtime_acceptance": "not tested by this archival operation",
   "source_is_not_data_backup": true,
-  "captured_test_utc": "2026-09-08T11:23:28.794451+00:00"
+  "captured_test_utc": "2026-09-08T11:43:29.940667+00:00"
 }
