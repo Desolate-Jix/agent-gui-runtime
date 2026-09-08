@@ -1,3 +1,11 @@
+# 分支归档 / Branch archive
+
+**用途 / Purpose:** 误放 SEEK 演示的撤回记录 / Revert history for a misplaced SEEK demonstration
+
+详见 [分支用途 / Branch purpose](BRANCH_PURPOSE.md)。这不是已验收正式版 / Not an accepted formal release.
+
+---
+
 # agent-gui-runtime
 
 ## 2026-07-12 Stage2 multi-row header and partial-card reconciliation
