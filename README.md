@@ -1,3 +1,11 @@
+# 分支归档 / Branch archive
+
+**用途 / Purpose:** 存储空间与 SEEK 流程优化 / Storage and SEEK workflow optimization
+
+详见 [分支用途 / Branch purpose](BRANCH_PURPOSE.md)。这不是已验收正式版 / Not an accepted formal release.
+
+---
+
 # agent-gui-runtime
 
 [中文](README.md) | [English](README.en.md)
