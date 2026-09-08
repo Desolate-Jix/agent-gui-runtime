@@ -1,3 +1,11 @@
+# 分支归档 / Branch archive
+
+**用途 / Purpose:** 通用界面识别与脱敏 0.2.0 发布 / General UI recognition and privacy-safe 0.2.0 release
+
+详见 [分支用途 / Branch purpose](BRANCH_PURPOSE.md)。这不是已验收正式版 / Not an accepted formal release.
+
+---
+
 # agent-gui-runtime
 
 **版本 0.2.0 · Windows GUI Agent Runtime**
