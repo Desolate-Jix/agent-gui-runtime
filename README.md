@@ -23,3 +23,9 @@ Append the exact two current test originals before removing their legacy adapter
 Preserve six exact pre-migration test originals: learning demo scaffold, page detail candidate, goal readiness, offline new assets, synthetic SEEK replay and model artifact loading. All 23 originals across R8R/R8S/R8T/R8U are listed and raw-hash verified. These tests contain synthetic fixtures; archiving their source does not back up models, user data or a runnable current project. Necessary behavior must remain on maintained owners, with legacy entrypoints blocked during verification.
 
 保存六份修改前测试原件：学习演示骨架、页面详情候选、目标就绪度、离线新资产、合成 SEEK 回放和模型产物加载。R8R/R8S/R8T/R8U 共 23 份原件按清单核验原始摘要。测试使用合成素材；源码归档不等于模型、用户数据或完整可运行项目备份。必要业务应保留在维护实现中，并在旧入口禁用时验证。
+
+## R8V lifecycle and old boundary tests / R8V 生命周期与旧边界测试
+
+Preserve five exact originals before classifying and migrating runner, stage-operation, stage-worker, deterministic-root and continuous-handoff tests. The manifest now lists 28 byte-verified originals. Shared business/worker contracts must remain; pure retired-web presentation, request-model or mocked routing tests may retire only with explicit classification and separate retained-contract verification. Archived failures are not fixed merely by retirement. No model, user history or runnable current environment backup is implied.
+
+在分类与迁移前保存运行器、阶段操作、后台任务、确定性分区和连续任务交接的五份准确测试原件，清单共 28 份按原始字节核验。共享业务和 worker 契约必须保留；纯旧网页呈现、请求模型或模拟路由检查仅在明确分类并独立验证保留契约后退役。归档退休不等于修复原失败，也不代表模型、用户历史或完整运行环境备份。

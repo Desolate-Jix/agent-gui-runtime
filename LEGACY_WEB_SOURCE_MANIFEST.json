@@ -1,5 +1,5 @@
 {
-  "kind": "legacy_web_source_and_test_snapshot_v4",
+  "kind": "legacy_web_source_and_test_snapshot_v5",
   "source_head": "bc085dd800b0d5e18d0509c36f7c985d4756a815",
   "captured_utc": "2026-09-08T11:08:10.094752+00:00",
   "files": [
@@ -150,9 +150,44 @@
       "bytes": 8231,
       "git_blob": "ee0109eddf703d79f163e7e3113d6d50eb82bde1",
       "capture_stage": "R8U before learning demo, page candidate, offline asset and model artifact consumer migration"
+    },
+    {
+      "path": "tests/test_learning_workflow_runner.py",
+      "sha256": "861613747d7cfe19848191184b2230ef059627faa8c95b1b1ac050a235132e8b",
+      "bytes": 10923,
+      "git_blob": "cae2932c3cface76504b046e35ce6e9968ae5519",
+      "capture_stage": "R8V before lifecycle consumer migration and legacy-only boundary test retirement"
+    },
+    {
+      "path": "tests/test_learning_workflow_stage_execution.py",
+      "sha256": "9420742d4bd659fc89458b22fcd95433b43868a8e6172c99fa435902c1c59d36",
+      "bytes": 171240,
+      "git_blob": "18a02f1587a8ef010f6ea2870f805099ed1af8a5",
+      "capture_stage": "R8V before lifecycle consumer migration and legacy-only boundary test retirement"
+    },
+    {
+      "path": "tests/test_learning_workflow_stage_worker.py",
+      "sha256": "66e08bd468876c987a20ff90115404769f7bf9a1c424830808f202623ba507be",
+      "bytes": 503337,
+      "git_blob": "3040bcea9acb7efc04996196e79246a26fd2caa5",
+      "capture_stage": "R8V before lifecycle consumer migration and legacy-only boundary test retirement"
+    },
+    {
+      "path": "tests/test_deterministic_root_partition.py",
+      "sha256": "74b380138e7a53bdf5d08cfd3e1e9cd68be6d5b7b55582dfc4604c69abbb7ba5",
+      "bytes": 53014,
+      "git_blob": "e466f7509d876421a67da2a1c5ba03de85f0c2ca",
+      "capture_stage": "R8V before lifecycle consumer migration and legacy-only boundary test retirement"
+    },
+    {
+      "path": "tests/test_continuous_task_handoff.py",
+      "sha256": "972579638128399fb0fe88f98008e29d4d528274b8f71cb16f1e91b858dc5c08",
+      "bytes": 12559,
+      "git_blob": "f743ec85164e8afdb31c888cb1e1e255cf7440ec",
+      "capture_stage": "R8V before lifecycle consumer migration and legacy-only boundary test retirement"
     }
   ],
-  "scope": "13 R8R legacy-web originals, 2 R8S review, 2 R8T interface/store and 6 R8U learning/demo/artifact test originals; other files inherit the preparation baseline",
+  "scope": "13 R8R legacy-web originals and 15 R8S/R8T/R8U/R8V review, artifact and lifecycle test originals; other files inherit the preparation baseline",
   "excluded": [
     "current formal changes outside the listed files",
     "models",
@@ -162,5 +197,5 @@
   ],
   "runtime_acceptance": "not tested by this archival operation",
   "source_is_not_data_backup": true,
-  "captured_test_utc": "2026-09-08T12:01:09.104772+00:00"
+  "captured_test_utc": "2026-09-08T12:23:14.288438+00:00"
 }
