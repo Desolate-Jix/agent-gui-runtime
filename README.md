@@ -17,3 +17,9 @@ Two current test files are appended before migrating their three legacy-adapter 
 Append the exact two current test originals before removing their legacy adapters: interface review load/save/delete and workflow-store runtime-attachment coverage. The combined manifest now records 17 originals across R8R/R8S/R8T. The baseline has 74 passing cases; migration must retain necessary behavior and prove execution with legacy entrypoints unavailable. This archive is still not a complete current project or a runnable environment/data backup.
 
 移除旧适配前，追加两份当前测试原件：界面审核加载/保存/删除，以及工作流持久化和运行时附着状态。R8R/R8S/R8T 清单共 17 份原件。本轮原始基线 74 项通过；迁移必须保留必要业务验证，并在旧入口不可用时重跑。归档仍不是完整当前项目或可运行环境/数据备份。
+
+## R8U learning and artifact consumers / R8U 学习与产物调用方
+
+Preserve six exact pre-migration test originals: learning demo scaffold, page detail candidate, goal readiness, offline new assets, synthetic SEEK replay and model artifact loading. All 23 originals across R8R/R8S/R8T/R8U are listed and raw-hash verified. These tests contain synthetic fixtures; archiving their source does not back up models, user data or a runnable current project. Necessary behavior must remain on maintained owners, with legacy entrypoints blocked during verification.
+
+保存六份修改前测试原件：学习演示骨架、页面详情候选、目标就绪度、离线新资产、合成 SEEK 回放和模型产物加载。R8R/R8S/R8T/R8U 共 23 份原件按清单核验原始摘要。测试使用合成素材；源码归档不等于模型、用户数据或完整可运行项目备份。必要业务应保留在维护实现中，并在旧入口禁用时验证。

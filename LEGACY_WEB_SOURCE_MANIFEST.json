@@ -1,5 +1,5 @@
 {
-  "kind": "legacy_web_source_and_test_snapshot_v3",
+  "kind": "legacy_web_source_and_test_snapshot_v4",
   "source_head": "bc085dd800b0d5e18d0509c36f7c985d4756a815",
   "captured_utc": "2026-09-08T11:08:10.094752+00:00",
   "files": [
@@ -108,9 +108,51 @@
       "bytes": 17953,
       "git_blob": "90a0df8003bdf2433ffa144a2b215c80b1adb763",
       "capture_stage": "R8T before interface review and persistence contract migration"
+    },
+    {
+      "path": "tests/test_learn_demo_scaffold.py",
+      "sha256": "80ff6c462ee542a2daaa43ec6f10ffd1b3845e6be01f827c18525889010ad982",
+      "bytes": 23821,
+      "git_blob": "5975c06b807144fc7c158d90671a7c7fa0a27c36",
+      "capture_stage": "R8U before learning demo, page candidate, offline asset and model artifact consumer migration"
+    },
+    {
+      "path": "tests/test_learn_page_detail_candidate.py",
+      "sha256": "68303c68b90f3b6fbe163076442aea08ab38c8f81664d4394e8ac03b58dd325c",
+      "bytes": 74072,
+      "git_blob": "2fa2de76e38d4a8b093c84f6d52f819cdb5b0be8",
+      "capture_stage": "R8U before learning demo, page candidate, offline asset and model artifact consumer migration"
+    },
+    {
+      "path": "tests/test_learning_mode_demo_goal_readiness.py",
+      "sha256": "81c21dbff089aab12e1b718bfa9b79ef24b0e98040279516931985a06f827b8b",
+      "bytes": 29694,
+      "git_blob": "f6f1f410995c3f0209bd2f0386535127df14ac73",
+      "capture_stage": "R8U before learning demo, page candidate, offline asset and model artifact consumer migration"
+    },
+    {
+      "path": "tests/test_learning_new_asset_offline.py",
+      "sha256": "fceca1b5b8af650016b52d8314dbcf7f2b1113bb4546560de713e8c15da5bc89",
+      "bytes": 16647,
+      "git_blob": "7884446403a6d2fb272b3af85787a7596511e49c",
+      "capture_stage": "R8U before learning demo, page candidate, offline asset and model artifact consumer migration"
+    },
+    {
+      "path": "tests/test_reviewed_workflow_seek_e2e_v2.py",
+      "sha256": "ac9e585df50b84b60fe483bfe894f7bd29b41adb184ab845ea5d04be17f44cc3",
+      "bytes": 18847,
+      "git_blob": "8bf694264188f09ea7ac5c064c773db372c8cf14",
+      "capture_stage": "R8U before learning demo, page candidate, offline asset and model artifact consumer migration"
+    },
+    {
+      "path": "tests/test_model_artifact_loader.py",
+      "sha256": "da304a26b039846a544ff36945db72d91d91cba334523ec91dd10159ef3beeb2",
+      "bytes": 8231,
+      "git_blob": "ee0109eddf703d79f163e7e3113d6d50eb82bde1",
+      "capture_stage": "R8U before learning demo, page candidate, offline asset and model artifact consumer migration"
     }
   ],
-  "scope": "13 R8R legacy-web source originals, 2 R8S review test originals and 2 R8T interface-review/persistence test originals; other files inherit the preparation baseline",
+  "scope": "13 R8R legacy-web originals, 2 R8S review, 2 R8T interface/store and 6 R8U learning/demo/artifact test originals; other files inherit the preparation baseline",
   "excluded": [
     "current formal changes outside the listed files",
     "models",
@@ -120,5 +162,5 @@
   ],
   "runtime_acceptance": "not tested by this archival operation",
   "source_is_not_data_backup": true,
-  "captured_test_utc": "2026-09-08T11:43:29.940667+00:00"
+  "captured_test_utc": "2026-09-08T12:01:09.104772+00:00"
 }
