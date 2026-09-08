@@ -1,3 +1,11 @@
+# 分支归档 / Branch archive
+
+**用途 / Purpose:** SEEK 演示原始开发记录 / Original SEEK demo development history
+
+详见 [分支用途 / Branch purpose](BRANCH_PURPOSE.md)。这不是已验收正式版 / Not an accepted formal release.
+
+---
+
 # agent-gui-runtime
 
 ## 2026-07-12 Stage2 multi-row header and partial-card reconciliation
