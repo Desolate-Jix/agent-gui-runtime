@@ -1,5 +1,5 @@
 {
-  "kind": "legacy_web_source_and_test_snapshot_v6",
+  "kind": "legacy_web_source_and_test_snapshot_v7",
   "source_head": "bc085dd800b0d5e18d0509c36f7c985d4756a815",
   "captured_utc": "2026-09-08T11:08:10.094752+00:00",
   "files": [
@@ -192,9 +192,23 @@
       "bytes": 103193,
       "git_blob": "f0ee0f46b57fa96f222d72979706da98492a40a4",
       "capture_stage": "R8W before maintained persistence proof migration and fixture repair"
+    },
+    {
+      "path": "tests/js/panel_learning_draft_review_visibility.test.cjs",
+      "sha256": "b6f63f3fd1030d5c359fdc2ce909d20a0fbb3a7469655bb4f7e271c1f642430f",
+      "bytes": 9626,
+      "git_blob": "56a44c84efcb494aaa145f9c05671e8e72a0d2b1",
+      "capture_stage": "R9A before retirement of two legacy DOM/CSS visibility test files"
+    },
+    {
+      "path": "tests/js/panel_operational_memory_visibility.test.cjs",
+      "sha256": "f8ca1afe914a64e7404956cb5bd5901c498ea742af36b6014ccd2746774fcee6",
+      "bytes": 2348,
+      "git_blob": "08252a03f1d0d74a961b1adb83ac808b8cc1bcfe",
+      "capture_stage": "R9A before retirement of two legacy DOM/CSS visibility test files"
     }
   ],
-  "scope": "13 legacy-web originals, 15 review/artifact/lifecycle test originals and one pre-migration persistence proof script; other files inherit the preparation baseline",
+  "scope": "29 prior explicit originals plus two legacy DOM/CSS visibility test originals; other files inherit the preparation baseline",
   "excluded": [
     "current formal changes outside the listed files",
     "models",
@@ -204,5 +218,6 @@
   ],
   "runtime_acceptance": "not tested by this archival operation",
   "source_is_not_data_backup": true,
-  "captured_test_utc": "2026-09-08T13:01:01.408931+00:00"
+  "captured_test_utc": "2026-09-08T13:01:01.408931+00:00",
+  "captured_ui_test_utc": "2026-09-08T15:08:46.944765+00:00"
 }

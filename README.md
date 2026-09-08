@@ -35,3 +35,9 @@ Preserve five exact originals before classifying and migrating runner, stage-ope
 Preserve the exact Hybrid v1.1 persistence proof script before replacing its legacy lifecycle, draft-review and interface-review calls with maintained owners. All 29 manifest originals are byte-verified. Retain synthetic provider boundaries, rejection controls, exact saved-byte reload, fresh-process compilation/publication ordering and non-authorization assertions. The archived fake Qwen response has a known protocol mismatch; archiving is not a repair. This source archive is not a model, user-history or runnable environment backup.
 
 在将 Hybrid v1.1 持久化证明脚本的旧生命周期、草稿审核和界面流程审核调用改为维护实现前，保存准确原件；清单共 29 份按原始字节核验。保留合成 provider 隔离、拒绝负控、准确保存字节重载、全新进程编译／发布顺序以及不授权断言。归档中的假 Qwen 响应存在已知协议不一致，归档不是修复；本源码归档不包含模型、用户历史或完整运行环境。
+
+## R9A legacy display-test retirement / R9A 旧显示测试退役
+
+Preserve exact pre-retirement bytes of two legacy-only visibility test files (12 Node tests): panel_learning_draft_review_visibility and panel_operational_memory_visibility. These cover DOM/CSS layout, page visibility, containment and focus, not the maintained native UI. Seven other reviewed files (105 tests) retain shared confirmation, identity, revision, source-binding and non-authorization checks and are NOT retired. The local Node baseline separately records nine existing failures in retained mixed tests; deleting display tests is not a fix. All 31 explicit manifest originals are byte-verified. This archive is source-only, not a model, user-history, installed-release or environment backup.
+
+保存两份纯旧网页显示测试退役前的精确字节，共 12 个 Node 用例：panel_learning_draft_review_visibility 与 panel_operational_memory_visibility，仅覆盖旧 DOM/CSS 布局、页面显隐、容器与聚焦，不代表维护中的原生界面。另七份经审查的文件含 105 项确认、标识、修订、来源绑定和不授权检查，保留等待迁移，不在删除范围。离线基线另记录保留的混合测试中九项既有失败，删除显示测试不是修复。全部 31 份显式清单原件按字节核验；本分支仅归档源码，不备份模型、用户历史、安装版或完整环境。
