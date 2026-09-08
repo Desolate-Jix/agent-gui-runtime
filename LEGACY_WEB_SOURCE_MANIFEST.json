@@ -1,5 +1,5 @@
 {
-  "kind": "legacy_web_source_and_test_snapshot_v5",
+  "kind": "legacy_web_source_and_test_snapshot_v6",
   "source_head": "bc085dd800b0d5e18d0509c36f7c985d4756a815",
   "captured_utc": "2026-09-08T11:08:10.094752+00:00",
   "files": [
@@ -185,9 +185,16 @@
       "bytes": 12559,
       "git_blob": "f743ec85164e8afdb31c888cb1e1e255cf7440ec",
       "capture_stage": "R8V before lifecycle consumer migration and legacy-only boundary test retirement"
+    },
+    {
+      "path": "scripts/prove_portfolio_hybrid_v1_1_persistence.py",
+      "sha256": "15378a42b993d11e0f33ea6285f4e67ff31863195575a1d601224cd1f0a1c776",
+      "bytes": 103193,
+      "git_blob": "f0ee0f46b57fa96f222d72979706da98492a40a4",
+      "capture_stage": "R8W before maintained persistence proof migration and fixture repair"
     }
   ],
-  "scope": "13 R8R legacy-web originals and 15 R8S/R8T/R8U/R8V review, artifact and lifecycle test originals; other files inherit the preparation baseline",
+  "scope": "13 legacy-web originals, 15 review/artifact/lifecycle test originals and one pre-migration persistence proof script; other files inherit the preparation baseline",
   "excluded": [
     "current formal changes outside the listed files",
     "models",
@@ -197,5 +204,5 @@
   ],
   "runtime_acceptance": "not tested by this archival operation",
   "source_is_not_data_backup": true,
-  "captured_test_utc": "2026-09-08T12:23:14.288438+00:00"
+  "captured_test_utc": "2026-09-08T13:01:01.408931+00:00"
 }

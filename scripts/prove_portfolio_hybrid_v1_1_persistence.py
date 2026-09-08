@@ -1734,21 +1734,20 @@ def _worker_compile(
 ) -> dict[str, Any]:
     os.environ.setdefault("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
     os.environ.setdefault("AGENT_GUI_LEARNING_WORKFLOW_STORE_PATH", ":memory:")
-    from app.api import panel as panel_api
+    from app.api import reviewed_workflows as reviewed_workflows
 
-    panel_api.ROOT_DIR = root
     source = root / source_relative
     source_bytes = source.read_bytes()
     source_sha = _sha256_bytes(source_bytes)
     if source_sha != expected_sha:
         raise RuntimeError("worker reloaded source bytes do not match expected SHA-256")
-    compile_request = panel_api.PanelCompileReviewedWorkflowAssetRequest(
+    compile_request = reviewed_workflows.PanelCompileReviewedWorkflowAssetRequest(
         application_identity_key=application_identity_key,
         workflow_id=workflow_id,
         expected_source_workflow_sha256=expected_sha,
     )
     compile_envelope = _api_payload(
-        panel_api.compile_reviewed_workflow_asset_endpoint(compile_request),
+        reviewed_workflows.compile_reviewed_workflow_asset_endpoint(compile_request, project_root=root),
         operation="compile_without_publish",
     )
     compile_data = compile_envelope.get("result")
@@ -1780,18 +1779,18 @@ def _worker_compile(
 
     store = ReviewedWorkflowAssetStore(project_root=root)
     before = store.registry()
-    publish_request = panel_api.PanelPublishReviewedWorkflowAssetRequest(
+    publish_request = reviewed_workflows.PanelPublishReviewedWorkflowAssetRequest(
         application_identity_key=application_identity_key,
         workflow_id=workflow_id,
         expected_source_workflow_sha256=expected_sha,
         expected_registry_revision=before["registry_revision"],
     )
     first = _api_payload(
-        panel_api.publish_reviewed_workflow_asset_endpoint(publish_request),
+        reviewed_workflows.publish_reviewed_workflow_asset_endpoint(publish_request, project_root=root),
         operation="publish_once",
     )
     duplicate = _api_payload(
-        panel_api.publish_reviewed_workflow_asset_endpoint(publish_request),
+        reviewed_workflows.publish_reviewed_workflow_asset_endpoint(publish_request, project_root=root),
         operation="duplicate_publish",
     )
     after = store.registry()

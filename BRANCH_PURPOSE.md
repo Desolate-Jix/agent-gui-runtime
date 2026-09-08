@@ -45,3 +45,9 @@ Preserve six exact pre-migration test originals: learning demo scaffold, page de
 Preserve five exact originals before classifying and migrating runner, stage-operation, stage-worker, deterministic-root and continuous-handoff tests. The manifest now lists 28 byte-verified originals. Shared business/worker contracts must remain; pure retired-web presentation, request-model or mocked routing tests may retire only with explicit classification and separate retained-contract verification. Archived failures are not fixed merely by retirement. No model, user history or runnable current environment backup is implied.
 
 在分类与迁移前保存运行器、阶段操作、后台任务、确定性分区和连续任务交接的五份准确测试原件，清单共 28 份按原始字节核验。共享业务和 worker 契约必须保留；纯旧网页呈现、请求模型或模拟路由检查仅在明确分类并独立验证保留契约后退役。归档退休不等于修复原失败，也不代表模型、用户历史或完整运行环境备份。
+
+## R8W persistence proof migration / R8W 持久化证明迁移
+
+Preserve the exact Hybrid v1.1 persistence proof script before replacing its legacy lifecycle, draft-review and interface-review calls with maintained owners. All 29 manifest originals are byte-verified. Retain synthetic provider boundaries, rejection controls, exact saved-byte reload, fresh-process compilation/publication ordering and non-authorization assertions. The archived fake Qwen response has a known protocol mismatch; archiving is not a repair. This source archive is not a model, user-history or runnable environment backup.
+
+在将 Hybrid v1.1 持久化证明脚本的旧生命周期、草稿审核和界面流程审核调用改为维护实现前，保存准确原件；清单共 29 份按原始字节核验。保留合成 provider 隔离、拒绝负控、准确保存字节重载、全新进程编译／发布顺序以及不授权断言。归档中的假 Qwen 响应存在已知协议不一致，归档不是修复；本源码归档不包含模型、用户历史或完整运行环境。
