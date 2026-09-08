@@ -1,3 +1,11 @@
+# 分支归档 / Branch archive
+
+**用途 / Purpose:** 分层区域划分与粗粒度区域候选实验 / Hierarchical partitioning and coarse region proposal experiments
+
+详见 [分支用途 / Branch purpose](BRANCH_PURPOSE.md)。这不是已验收正式版 / Not an accepted formal release.
+
+---
+
 # agent-gui-runtime
 
 Windows GUI Agent Runtime for observing, understanding, locating, safely operating, tracing, and learning reusable interface structures across websites and desktop software.
