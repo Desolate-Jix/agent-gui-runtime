@@ -21,3 +21,9 @@ The native project stays at `codex/dev-native-desktop`. No models, runtime data,
 The archive operation checks all captured bytes against its manifest, reads the newly published remote commit back, and preserves the main HEAD/index/worktree source. It performs no GUI, Agent, model or external-input acceptance. The source rule scan reports only its scoped patterns, not an exhaustive privacy guarantee.
 
 归档操作逐文件检查清单、回读新远端提交，并保持主工作树 HEAD/索引/源码。未执行 GUI、Agent、模型或外部输入验收；规则扫描只代表所检查的模式，不是穷尽隐私保证。
+
+## R8S test originals / R8S 测试原件
+
+Two current test files are appended before migrating their three legacy-adapter procedures to the maintained owner. The manifest now lists 15 source/test originals: the original 13 R8R web files plus these two R8S tests. Other current test helpers/maintained implementations are not included by this operation; the archive is not claimed runnable. Original assertions and bytes remain available here; current shared-contract coverage must be verified separately, with old entrypoints unavailable.
+
+在将三个旧适配层测试过程迁到维护模块之前，追加两份当前测试原件。清单现有 15 份源码/测试原件：R8R 的 13 个网页文件及 R8S 的两份测试。本次不加入其他当前测试辅助文件或维护实现，不声称归档可独立运行。原断言和字节保留在此；现有通用契约覆盖需在旧入口不可用时另行验证。

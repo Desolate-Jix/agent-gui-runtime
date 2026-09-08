@@ -1,5 +1,5 @@
 {
-  "kind": "legacy_web_source_snapshot_v1",
+  "kind": "legacy_web_source_and_test_snapshot_v2",
   "source_head": "bc085dd800b0d5e18d0509c36f7c985d4756a815",
   "captured_utc": "2026-09-08T11:08:10.094752+00:00",
   "files": [
@@ -80,9 +80,23 @@
       "sha256": "c6a5b26999b07ac539505de3d9a2695bd7068843271611c37dbb9d92a707933f",
       "bytes": 372,
       "git_blob": "34215a75a431752c6c01c7ad93bdfd1d2e6bc802"
+    },
+    {
+      "path": "tests/test_reviewed_workflow_v2_api.py",
+      "sha256": "936350d7145c99b36a5991b84d6761eb23d092400b639fdfbc563d5e3fcf3256",
+      "bytes": 20441,
+      "git_blob": "84a3ad7ca4d62eea2d3ed4b54f08c8ee22d595ac",
+      "capture_stage": "R8S before retained-contract migration"
+    },
+    {
+      "path": "tests/test_reviewed_workflow_publication_ownership.py",
+      "sha256": "55c04eb6e16db8c9e10e45b2056c7adf85d53e984bd850717a374b1a1d2ee191",
+      "bytes": 5479,
+      "git_blob": "f9ee26cf1dc8a7a640a1aff23506b2f7aeac250c",
+      "capture_stage": "R8S before retained-contract migration"
     }
   ],
-  "scope": "13 exact current legacy web source files over the earlier remote preparation baseline; not the complete current formal working tree",
+  "scope": "13 R8R legacy-web source originals plus 2 R8S mixed shared-contract/legacy-adapter test originals; other files inherit the preparation baseline",
   "excluded": [
     "current formal changes outside the listed files",
     "models",
@@ -91,5 +105,6 @@
     "local ignored documents"
   ],
   "runtime_acceptance": "not tested by this archival operation",
-  "source_is_not_data_backup": true
+  "source_is_not_data_backup": true,
+  "captured_test_utc": "2026-09-08T11:23:28.794451+00:00"
 }

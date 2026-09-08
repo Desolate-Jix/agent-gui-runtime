@@ -12,17 +12,16 @@ from tests.test_reviewed_workflow_compiler_v2 import _base_review, _persist_revi
 
 
 @pytest.fixture(autouse=True)
-def _restore_panel_root(monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.api.panel as panel_api
+def _use_temp_publication_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import app.api.reviewed_workflows as panel_api
 
-    monkeypatch.setattr(panel_api, "ROOT_DIR", panel_api.ROOT_DIR)
+    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
 
 
 def _request_source(tmp_path: Path) -> tuple[str, str, str]:
-    source, digest = _persist_reviewed_workflow(tmp_path)
-    import app.api.panel as panel_api
-
-    panel_api.ROOT_DIR = tmp_path
+    _source, digest = _persist_reviewed_workflow(tmp_path)
     return "web:nz.seek.com", "seek_home_to_apply", digest
 
 
@@ -33,7 +32,7 @@ def _workflow_source(tmp_path: Path, workflow_id: str) -> Path:
 
 
 def test_compile_endpoint_compiles_server_resolved_registry_source(tmp_path: Path) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     response = panel_api.compile_reviewed_workflow_asset_endpoint(
@@ -51,7 +50,7 @@ def test_compile_endpoint_compiles_server_resolved_registry_source(tmp_path: Pat
 
 
 def test_compile_endpoint_blocks_stale_sha_without_writing_cas(tmp_path: Path) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, _ = _request_source(tmp_path)
     response = panel_api.compile_reviewed_workflow_asset_endpoint(
@@ -68,7 +67,7 @@ def test_compile_endpoint_blocks_stale_sha_without_writing_cas(tmp_path: Path) -
 
 
 def test_compile_endpoint_blocks_unreviewed_or_dangerous_workflow(tmp_path: Path) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     source = _workflow_source(tmp_path, workflow_id)
@@ -96,7 +95,7 @@ def test_compile_endpoint_blocks_unreviewed_or_dangerous_workflow(tmp_path: Path
 
 
 def test_publish_endpoint_recompiles_publishes_and_rejects_cas_conflict(tmp_path: Path) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     request = panel_api.PanelPublishReviewedWorkflowAssetRequest(
@@ -128,7 +127,7 @@ def test_publish_endpoint_recompiles_publishes_and_rejects_cas_conflict(tmp_path
 
 
 def test_publish_request_rejects_client_supplied_asset(tmp_path: Path) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     with pytest.raises(ValidationError):
@@ -144,8 +143,7 @@ def test_publish_request_rejects_client_supplied_asset(tmp_path: Path) -> None:
 
 
 def test_preview_is_read_only_and_never_calls_capture_or_action_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.api.panel as panel_api
-
+    import app.api.reviewed_workflows as panel_api
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     published = panel_api.publish_reviewed_workflow_asset_endpoint(
         panel_api.PanelPublishReviewedWorkflowAssetRequest(
@@ -186,8 +184,10 @@ def test_preview_is_read_only_and_never_calls_capture_or_action_api(tmp_path: Pa
     assert response.data["state_resolution"]["status"] == "resolved"
 
 
-def test_preview_blocks_content_hash_mismatch(tmp_path: Path) -> None:
-    import app.api.panel as panel_api
+def test_preview_blocks_content_hash_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     published = panel_api.publish_reviewed_workflow_asset_endpoint(
@@ -213,11 +213,13 @@ def test_actual_http_preview_is_read_only_and_unresolved_is_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import app.api.action as action_api
-    import app.api.panel as panel_api
+    import app.api.panel as legacy_panel
+    import app.api.reviewed_workflows as panel_api
     from app.core.input_controller import input_controller
     from app.core.screenshot import screenshot_service
     from app.main import app
 
+    monkeypatch.setattr(legacy_panel, "ROOT_DIR", tmp_path)
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     published = panel_api.publish_reviewed_workflow_asset_endpoint(
         panel_api.PanelPublishReviewedWorkflowAssetRequest(
@@ -255,7 +257,7 @@ def test_actual_http_preview_is_read_only_and_unresolved_is_failure(
 def test_compile_rejects_malformed_registry_shape_without_path_leak(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     monkeypatch.setattr(
@@ -278,7 +280,7 @@ def test_compile_rejects_malformed_registry_shape_without_path_leak(
 def test_compile_reports_current_cas_revision_without_mutating_existing_cas(
     tmp_path: Path,
 ) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     published = panel_api.publish_reviewed_workflow_asset_endpoint(
@@ -307,13 +309,13 @@ def test_compile_reports_current_cas_revision_without_mutating_existing_cas(
 def test_publish_blocks_injected_source_mutation_after_compile_without_cas_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     source = _workflow_source(tmp_path, workflow_id)
     real_compile = panel_api._compile_reviewed_workflow_request
 
-    def compile_then_mutate(request):
+    def compile_then_mutate(request, *, project_root=None):
         result = real_compile(request)
         source.write_bytes(source.read_bytes() + b"\n")
         return result
@@ -336,12 +338,12 @@ def test_publish_rejects_compiled_source_workflow_identity_substitution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     real_compile = panel_api._compile_reviewed_workflow_request
 
-    def compile_then_substitute_identity(request):
+    def compile_then_substitute_identity(request, *, project_root=None):
         result = real_compile(request)
         result["asset"]["source_review_lineage"]["source_workflow_id"] = (
             "different.reviewed.workflow"
@@ -370,13 +372,13 @@ def test_publish_rejects_compiled_source_workflow_identity_substitution(
 def test_compile_hides_injected_oserror_absolute_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     monkeypatch.setattr(
         panel_api,
         "_compile_reviewed_workflow_request",
-        lambda request: (_ for _ in ()).throw(OSError(r"C:\private\reviewed_workflow.json")),
+        lambda request, *, project_root=None: (_ for _ in ()).throw(OSError(r"C:\private\reviewed_workflow.json")),
     )
     response = panel_api.compile_reviewed_workflow_asset_endpoint(
         panel_api.PanelCompileReviewedWorkflowAssetRequest(
@@ -393,7 +395,7 @@ def test_compile_hides_injected_oserror_absolute_path(
 def test_actual_loader_rejects_malformed_registry_before_values_iteration(
     tmp_path: Path,
 ) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     registry_path = tmp_path / "artifacts" / "interface-workflow-reviews" / "registry.json"
@@ -411,10 +413,14 @@ def test_actual_loader_rejects_malformed_registry_before_values_iteration(
     assert response.error.code == "reviewed_workflow_compile_failed"
 
 
-def test_preview_omitted_observation_returns_read_only_envelope(tmp_path: Path) -> None:
-    import app.api.panel as panel_api
+def test_preview_omitted_observation_returns_read_only_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.api.panel as legacy_panel
+    import app.api.reviewed_workflows as panel_api
     from app.main import app
 
+    monkeypatch.setattr(legacy_panel, "ROOT_DIR", tmp_path)
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     published = panel_api.publish_reviewed_workflow_asset_endpoint(
         panel_api.PanelPublishReviewedWorkflowAssetRequest(
@@ -436,11 +442,11 @@ def test_preview_omitted_observation_returns_read_only_envelope(tmp_path: Path) 
 def test_compile_sanitizes_blocked_reason_path_for_compile_and_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     blocked = {"contract_version": "reviewed_workflow_compile_result_v2", "status": "blocked", "asset": None, "blocked_reasons": [{"code": "source_workflow_read_failed", "message": r"C:\private\secret.json"}]}
-    monkeypatch.setattr(panel_api, "_compile_reviewed_workflow_request", lambda request: blocked)
+    monkeypatch.setattr(panel_api, "_compile_reviewed_workflow_request", lambda request, *, project_root=None: blocked)
     request = panel_api.PanelCompileReviewedWorkflowAssetRequest(application_identity_key=application_identity_key, workflow_id=workflow_id, expected_source_workflow_sha256=digest)
     compile_response = panel_api.compile_reviewed_workflow_asset_endpoint(request)
     publish_response = panel_api.publish_reviewed_workflow_asset_endpoint(panel_api.PanelPublishReviewedWorkflowAssetRequest(**request.model_dump(), expected_registry_revision=0))
@@ -449,7 +455,7 @@ def test_compile_sanitizes_blocked_reason_path_for_compile_and_publish(
 
 
 def test_compile_hides_corrupt_cas_registry_path(tmp_path: Path) -> None:
-    import app.api.panel as panel_api
+    import app.api.reviewed_workflows as panel_api
 
     application_identity_key, workflow_id, digest = _request_source(tmp_path)
     cas_registry = tmp_path / "runtime_state" / "reviewed-workflow-assets-v2" / "registry.json"
