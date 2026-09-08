@@ -2,18 +2,14 @@
 setlocal
 cd /d "%~dp0"
 
-where uv >nul 2>nul
-if errorlevel 1 (
-  echo uv is not available on PATH.
-  echo Install uv or open this project from an environment where uv works.
-  pause
+if not exist ".venv\Scripts\python.exe" (
+  echo Project Python environment is missing. Python 3.11 is required.
+  echo Explicit setup: uv sync --locked --group dev
   exit /b 1
 )
 
-uv run python scripts\start_test_panel.py %*
+".venv\Scripts\python.exe" scripts\start_test_panel.py %*
 if errorlevel 1 (
-  echo.
-  echo Failed to start the test panel.
-  pause
+  echo Failed to start or check the test panel. 1>&2
   exit /b 1
 )

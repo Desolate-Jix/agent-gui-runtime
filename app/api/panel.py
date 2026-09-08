@@ -24,16 +24,12 @@ from app.agent.continuous_task_handoff import (
     start_continuous_task_resume,
 )
 from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
-from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore, content_sha256
-from app.agent.reviewed_workflow_compiler import compile_reviewed_workflow_asset_v2
-from app.agent.reviewed_workflow_replay import resolve_current_state
 from app.core.runtime_artifacts import write_trace
 from app.core.model_server import load_model_profiles
 from app.core.model_server import model_base_url
 from app.learn.draft_review import load_learning_draft_review
 from app.learn.interface_workflow_review import (
     build_interface_node_review_revision,
-    build_interface_workflow_review,
     delete_interface_workflow_review_candidate,
     delete_learning_evidence,
     load_interface_workflow_library_registry,
@@ -87,7 +83,6 @@ from app.learn.workflow_service import (
     finish_guarded_learning_workflow_stage_operation,
     get_production_learning_workflow_service_composition,
     heartbeat_guarded_learning_workflow_stage_operation,
-    prepare_learning_selection_review_replay,
     project_guarded_learning_workflow_runtime_attachment,
     recover_guarded_learning_workflow_stage_operation,
     start_guarded_learning_stage_worker,
@@ -126,6 +121,21 @@ from app.learn.recognition import (
     fusion_status_from_two_stage,
 )
 from app.api.models.response import APIResponse, ErrorModel
+from app.api.reviewed_workflows import (
+    PanelPreviewReviewedWorkflowReplayRequest,
+    preview_reviewed_workflow_replay_endpoint as _preview_reviewed_workflow_replay_endpoint,
+    PanelCompileReviewedWorkflowAssetRequest,
+    PanelPublishReviewedWorkflowAssetRequest,
+    compile_reviewed_workflow_asset_endpoint as _compile_reviewed_workflow_asset_endpoint,
+    publish_reviewed_workflow_asset_endpoint as _publish_reviewed_workflow_asset_endpoint,
+)
+from app.learn.interface_workflow_lock import interface_workflow_lock as _interface_workflow_lock
+from app.learn.interface_workflow_service import save_interface_workflow_review_transaction
+from app.learn.learning_draft_review_service import (
+    load_interface_workflow_review_transaction,
+    load_learning_draft_review_transaction,
+    save_learning_draft_review_transaction,
+)
 from scripts.report_learn_fusion_model_start_approval_packet import (
     report_learn_fusion_model_start_approval_packet,
 )
@@ -219,9 +229,6 @@ def _hybrid_rollout_status() -> dict[str, Any]:
         "incumbent_default": True,
     }
 
-
-_INTERFACE_WORKFLOW_SAVE_LOCKS_GUARD = Lock()
-_INTERFACE_WORKFLOW_SAVE_LOCKS: dict[str, Lock] = {}
 
 
 class PanelImageUploadRequest(BaseModel):
@@ -318,28 +325,6 @@ class PanelDeleteInterfaceWorkflowRequest(BaseModel):
     workflow_id: str = Field(min_length=1)
 
 
-class PanelCompileReviewedWorkflowAssetRequest(BaseModel):
-    """服务端解析 v1 人审流程并编译 v2 资产。"""
-
-    model_config = ConfigDict(extra="forbid")
-    application_identity_key: str = Field(min_length=1)
-    workflow_id: str = Field(min_length=1)
-    expected_source_workflow_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
-
-
-class PanelPublishReviewedWorkflowAssetRequest(PanelCompileReviewedWorkflowAssetRequest):
-    """重新编译后以 CAS revision 发布 v2 资产。"""
-
-    expected_registry_revision: int = Field(ge=0)
-
-
-class PanelPreviewReviewedWorkflowReplayRequest(BaseModel):
-    """只读地解析已发布资产的当前状态；绝不捕获或执行。"""
-
-    model_config = ConfigDict(extra="forbid")
-    asset_id: str = Field(min_length=1)
-    expected_content_sha256: str = Field(pattern=r"^[0-9a-fA-F]{64}$")
-    current_observation: dict[str, Any] | None = None
 
 
 class PanelCreateLearningDemoGoalReadinessRequest(BaseModel):
@@ -1419,266 +1404,25 @@ def load_model_artifact(request: PanelLoadModelArtifactRequest) -> APIResponse:
         )
 
 
-def _authoritative_hybrid_workflow_expectations(
-    workflow_run_id: str | None,
-    *,
-    source_path: str,
-) -> tuple[str | None, int | None, dict[str, str] | None]:
-    """仅从服务端工作流存储恢复 Hybrid 新鲜度与来源绑定。"""
-
-    normalized_run_id = str(workflow_run_id or "").strip()
-    if not normalized_run_id:
-        return None, None, None
-    try:
-        state = validate_learning_workflow_state(
-            learning_workflow_run_store.get(normalized_run_id)
-        )
-    except (LearningWorkflowTransitionError, TypeError, ValueError):
-        return None, None, None
-    revision = state.get("revision")
-    if (
-        state.get("run_id") != normalized_run_id
-        or isinstance(revision, bool)
-        or not isinstance(revision, int)
-        or revision < 0
-    ):
-        return None, None, None
-    try:
-        resolved_sources = _authoritative_hybrid_source_binding_paths(source_path)
-    except (OSError, TypeError, ValueError):
-        return None, None, None
-    source_keys = {
-        "trial_path",
-        "source_path",
-        "original_draft_path",
-        "review_path",
-        "scaffold_path",
-    }
-    source_bound = False
-    bound_source_path: Path | None = None
-    for event in state.get("events", []):
-        refs = event.get("evidence_refs") if isinstance(event, dict) else None
-        if not isinstance(refs, dict):
-            continue
-        for key in source_keys:
-            evidence_path = refs.get(key)
-            if not isinstance(evidence_path, str) or not evidence_path.strip():
-                continue
-            try:
-                resolved_evidence = _resolve_panel_artifact_file(evidence_path)
-                source_bound = resolved_evidence in resolved_sources
-            except (OSError, TypeError, ValueError):
-                continue
-            if source_bound:
-                bound_source_path = resolved_evidence
-                break
-        if source_bound:
-            break
-    if not source_bound:
-        return None, None, None
-    lineage_ref = _authoritative_hybrid_capture_lineage_from_source(
-        str(bound_source_path)
-    )
-    if lineage_ref is None:
-        return None, None, None
-    managed_present, managed_revision, managed_lineage_ref = (
-        _authoritative_managed_hybrid_trial_expectations(
-            state=state,
-            trial_path=bound_source_path,
-            capture_lineage_ref=lineage_ref,
-        )
-    )
-    if managed_present:
-        if managed_revision is None or managed_lineage_ref is None:
-            return None, None, None
-        return str(state["run_id"]), managed_revision, managed_lineage_ref
-    return str(state["run_id"]), revision, lineage_ref
 
 
-def _authoritative_managed_hybrid_trial_expectations(
-    *,
-    state: dict[str, Any],
-    trial_path: Path,
-    capture_lineage_ref: dict[str, str],
-) -> tuple[bool, int | None, dict[str, str] | None]:
-    """从服务端绑定的 managed trial 恢复生成投影时的操作版本。"""
-
-    resolved_trial = trial_path.resolve()
-    managed_completions: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
-    for event in state.get("events", []):
-        if not isinstance(event, dict):
-            continue
-        refs = event.get("evidence_refs")
-        if not isinstance(refs, dict):
-            continue
-        continuation = refs.get("worker_continuation")
-        event_trial = refs.get("trial_path")
-        try:
-            event_trial_path = (
-                _resolve_panel_artifact_file(event_trial)
-                if isinstance(event_trial, str) and event_trial.strip()
-                else None
-            )
-        except (OSError, TypeError, ValueError):
-            event_trial_path = None
-        if (
-            event_trial_path == resolved_trial
-            and isinstance(continuation, dict)
-            and continuation.get("task_kind")
-            == "panel_learning_hybrid_review_projection"
-        ):
-            managed_completions.append((event, refs, continuation))
-    if not managed_completions:
-        return False, None, None
-    if len(managed_completions) != 1:
-        return True, None, None
-    completion_event, completion_refs, continuation = managed_completions[0]
-    if (
-        completion_event.get("stage") != "screen_understanding"
-        or completion_event.get("outcome") != "completed"
-    ):
-        return True, None, None
-    try:
-        payload = json.loads(trial_path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return True, None, None
-    if not isinstance(payload, dict) or "managed_hybrid_lineage" not in payload:
-        return True, None, None
-    managed = payload.get("managed_hybrid_lineage")
-    expected_managed_fields = {
-        "run_id",
-        "workflow_revision",
-        "operation_id",
-        "worker_id",
-        "result_sha256",
-        "capture_lineage_ref",
-        "hybrid_capture_bundle_ref",
-    }
-    if not isinstance(managed, dict) or set(managed) != expected_managed_fields:
-        return True, None, None
-    run_id = managed.get("run_id")
-    operation_revision = managed.get("workflow_revision")
-    operation_id = managed.get("operation_id")
-    worker_id = managed.get("worker_id")
-    result_sha256 = managed.get("result_sha256")
-    if (
-        run_id != state.get("run_id")
-        or isinstance(operation_revision, bool)
-        or not isinstance(operation_revision, int)
-        or operation_revision < 0
-        or not all(
-            isinstance(value, str) and value
-            for value in (operation_id, worker_id, result_sha256)
-        )
-        or len(result_sha256) != 64
-        or managed.get("capture_lineage_ref") != capture_lineage_ref
-        or managed.get("hybrid_capture_bundle_ref")
-        != completion_refs.get("hybrid_capture_bundle_ref")
-        or continuation.get("operation_id") != operation_id
-        or continuation.get("worker_id") != worker_id
-        or continuation.get("result_sha256") != result_sha256
-    ):
-        return True, None, None
-    operation_bound = False
-    for event in state.get("events", []):
-        if not isinstance(event, dict):
-            continue
-        refs = event.get("evidence_refs")
-        if not isinstance(refs, dict):
-            continue
-        execution = refs.get("stage_execution")
-        if (
-            event.get("revision") == operation_revision
-            and isinstance(execution, dict)
-            and execution.get("operation_id") == operation_id
-            and execution.get("stage") == "screen_understanding"
-        ):
-            operation_bound = True
-    if (
-        not operation_bound
-        or not isinstance(completion_event.get("revision"), int)
-        or completion_event["revision"] <= operation_revision
-    ):
-        return True, None, None
-    return True, operation_revision, deepcopy(capture_lineage_ref)
 
 
-def _authoritative_hybrid_source_binding_paths(source_path: str) -> set[Path]:
-    """只允许服务端受管审核件回溯到工作流已经记录的原始来源。"""
-
-    resolved = _resolve_panel_artifact_file(source_path)
-    paths = {resolved}
-    try:
-        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return paths
-    if not isinstance(payload, dict) or payload.get("contract_version") != "reviewed_template_candidate_v1":
-        return paths
-    source = payload.get("source")
-    original = source.get("original_draft_path") if isinstance(source, dict) else None
-    if isinstance(original, str) and original.strip():
-        paths.add(_resolve_panel_artifact_file(original))
-    return paths
 
 
-def _authoritative_hybrid_capture_lineage_from_source(
-    source_path: str,
-) -> dict[str, str] | None:
-    resolved = _resolve_panel_artifact_file(source_path)
-    try:
-        payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    candidates = [payload]
-    for key in ("draft", "learning_draft", "best_learning_draft"):
-        child = payload.get(key)
-        if isinstance(child, dict):
-            candidates.append(child)
-    refs: dict[tuple[str, str], dict[str, str]] = {}
-    for candidate in candidates:
-        values = [candidate.get("capture_lineage_ref")]
-        page_details = candidate.get("page_details")
-        if isinstance(page_details, dict):
-            values.append(page_details.get("capture_lineage_ref"))
-        for value in values:
-            if (
-                isinstance(value, dict)
-                and set(value) == {"id", "content_sha256"}
-                and all(isinstance(value.get(field), str) and value[field] for field in ("id", "content_sha256"))
-            ):
-                ref = {"id": value["id"], "content_sha256": value["content_sha256"]}
-                refs[(ref["id"], ref["content_sha256"])] = ref
-    return next(iter(refs.values())) if len(refs) == 1 else None
 
 
 @router.post("/panel/load_learning_draft_review", response_model=APIResponse)
 def load_learning_draft_review_endpoint(request: PanelLoadLearningDraftReviewRequest) -> APIResponse:
     """Load a model learning draft for display-only human review."""
     try:
-        prepared = prepare_learning_selection_review_replay(
-            project_root=ROOT_DIR,
+        result = load_learning_draft_review_transaction(
             source_path=request.source_path,
+            workflow_run_id=request.workflow_run_id,
+            discover_related_sidecars=request.discover_related_sidecars,
+            project_root=ROOT_DIR,
+            workflow_store=learning_workflow_run_store,
         )
-        source_path = prepared["trial_path"] if prepared is not None else request.source_path
-        expected_run_id, expected_revision, expected_lineage_ref = _authoritative_hybrid_workflow_expectations(
-            request.workflow_run_id,
-            source_path=source_path,
-        )
-        load_options: dict[str, Any] = {
-            "project_root": ROOT_DIR,
-            "discover_related_sidecars": request.discover_related_sidecars,
-        }
-        if expected_run_id is not None and expected_revision is not None:
-            load_options.update(
-                expected_hybrid_run_id=expected_run_id,
-                expected_hybrid_workflow_revision=expected_revision,
-                expected_current_capture_lineage_ref=expected_lineage_ref,
-            )
-        result = load_learning_draft_review(source_path, **load_options)
-        if prepared is not None:
-            result.update(prepared)
         trace_path = write_trace(
             category="panel",
             operation="load-learning-draft-review",
@@ -1788,52 +1532,16 @@ def load_interface_workflow_review_endpoint(
 ) -> APIResponse:
     """加载多份单界面草稿，生成只读的单软件流程审核图。"""
 
-    loaded_reviews: list[dict[str, Any]] = []
-    invalid_sources: list[dict[str, Any]] = []
-    for source_path in request.draft_source_paths:
-        normalized_path = str(source_path or "").strip()
-        if not normalized_path:
-            invalid_sources.append(
-                {
-                    "source_path": "",
-                    "failure_category": "invalid_review_source",
-                    "reason": "source path is empty",
-                }
-            )
-            continue
-        try:
-            expected_run_id, expected_revision, expected_lineage_ref = _authoritative_hybrid_workflow_expectations(
-                request.workflow_run_ids_by_source.get(normalized_path),
-                source_path=normalized_path,
-            )
-            load_options: dict[str, Any] = {
-                "project_root": ROOT_DIR,
-                "discover_related_sidecars": request.discover_related_sidecars,
-            }
-            if expected_run_id is not None and expected_revision is not None:
-                load_options.update(
-                    expected_hybrid_run_id=expected_run_id,
-                    expected_hybrid_workflow_revision=expected_revision,
-                    expected_current_capture_lineage_ref=expected_lineage_ref,
-                )
-            loaded_reviews.append(
-                load_learning_draft_review(normalized_path, **load_options)
-            )
-        except Exception as exc:
-            invalid_sources.append(
-                {
-                    "source_path": normalized_path,
-                    "failure_category": "invalid_review_source",
-                    "reason": str(exc),
-                }
-            )
     try:
-        result = build_interface_workflow_review(
+        result = load_interface_workflow_review_transaction(
+            draft_source_paths=request.draft_source_paths,
+            workflow_run_ids_by_source=request.workflow_run_ids_by_source,
+            discover_related_sidecars=request.discover_related_sidecars,
             goal=request.goal,
             application_identity=request.application_identity,
-            draft_sources=loaded_reviews,
+            project_root=ROOT_DIR,
+            workflow_store=learning_workflow_run_store,
         )
-        result["invalid_sources"].extend(invalid_sources)
         trace_path = write_trace(
             category="panel",
             operation="load-interface-workflow-review",
@@ -1863,175 +1571,14 @@ def load_interface_workflow_review_endpoint(
         )
 
 
-def _interface_node_review_revision_hash(revision: dict[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            revision,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-
-
-def _restore_unchanged_interface_review_confirmations(
-    review: dict[str, Any],
-) -> dict[str, Any]:
-    """仅用服务端已验证的同一修订续存人工审核事实。"""
-
-    prepared = deepcopy(review)
-    workflow = prepared.get("workflow") if isinstance(prepared, dict) else None
-    workflow_id = str(workflow.get("workflow_id") or "").strip() if isinstance(workflow, dict) else ""
-    if not workflow_id:
-        return prepared
-
-    registry = load_interface_workflow_library_registry(project_root=ROOT_DIR)
-    record = registry.get("workflows", {}).get(workflow_id)
-    if not isinstance(record, dict):
-        return prepared
-    identity_key = str(record.get("application_identity_key") or "").strip()
-    if not identity_key:
-        return prepared
-    persisted = load_interface_workflow_review_context(
-        project_root=ROOT_DIR,
-        application_identity_key=identity_key,
-        workflow_id=workflow_id,
-    )
-    persisted_nodes = {
-        str(node.get("node_id") or "").strip(): node
-        for node in persisted.get("nodes") or []
-        if isinstance(node, dict) and str(node.get("node_id") or "").strip()
-    }
-    reviewed_statuses = {
-        "approved",
-        "human_approved",
-        "human_confirmed",
-        "human_reviewed",
-        "reviewed",
-    }
-    for node in prepared.get("nodes") or []:
-        if not isinstance(node, dict) or node.get("reviewed_by_human") is not True:
-            continue
-        if str(node.get("review_status") or "").strip().casefold() not in reviewed_statuses:
-            continue
-        node_id = str(node.get("node_id") or "").strip()
-        previous = persisted_nodes.get(node_id)
-        if not isinstance(previous, dict) or previous.get("reviewed_by_human") is not True:
-            continue
-        if str(previous.get("review_status") or "").strip().casefold() not in reviewed_statuses:
-            continue
-        persisted_path = Path(str(record.get("path") or ""))
-        persisted_path = (
-            persisted_path.resolve()
-            if persisted_path.is_absolute()
-            else (ROOT_DIR / persisted_path).resolve()
-        )
-        persisted_source_asset_sha256 = hashlib.sha256(
-            persisted_path.read_bytes()
-        ).hexdigest()
-        integrity = evaluate_interface_workflow_node_integrity(
-            review=persisted,
-            node=previous,
-            record=record,
-            project_root=ROOT_DIR,
-            source_asset_sha256=persisted_source_asset_sha256,
-        )
-        if not (
-            integrity["eligibility"]["agent_usable"]
-            and integrity["integrity_verified"]
-        ):
-            continue
-        previous_revision = integrity["canonical_revision"]
-        current_revision = build_interface_node_review_revision(
-            prepared,
-            node_id=node_id,
-        )
-        if current_revision != previous_revision:
-            continue
-        node["human_review_confirmation"] = {
-            "contract_version": "interface_node_human_review_confirmation_v1",
-            "revision": current_revision,
-        }
-    return prepared
-
-
-def _interface_workflow_save_lock(review: dict[str, Any]) -> Lock:
-    workflow = review.get("workflow") if isinstance(review, dict) else None
-    workflow_id = str(workflow.get("workflow_id") or "").strip() if isinstance(workflow, dict) else ""
-    lock_key = "".join(
-        character if character.isalnum() or character in "_.-" else "_"
-        for character in workflow_id
-    ).strip("._") or "__invalid_workflow__"
-    return _interface_workflow_lock(workflow_id)
-
-
-def _interface_workflow_lock(workflow_id: str) -> Lock:
-    lock_key = "".join(
-        character if character.isalnum() or character in "_.-" else "_"
-        for character in str(workflow_id or "").strip()
-    ).strip("._") or "__invalid_workflow__"
-    with _INTERFACE_WORKFLOW_SAVE_LOCKS_GUARD:
-        return _INTERFACE_WORKFLOW_SAVE_LOCKS.setdefault(lock_key, Lock())
-
-
 def _save_interface_workflow_review_transaction(
     review: dict[str, Any],
     *,
     out_dir: str | None,
 ) -> dict[str, Any]:
-    """串行化同一流程的审核重算、落盘与只读投影。"""
-
-    with _interface_workflow_save_lock(review):
-        prepared_review = _restore_unchanged_interface_review_confirmations(review)
-        result = save_interface_workflow_review_candidate(
-            prepared_review,
-            project_root=ROOT_DIR,
-            out_dir=out_dir,
-        )
-        saved_review_path = Path(result["path"])
-        saved_review_bytes = saved_review_path.read_bytes()
-        normalized_review = json.loads(saved_review_bytes.decode("utf-8-sig"))
-        result["saved_review"] = normalized_review
-        if result["node_count"] > 0:
-            registry = load_interface_workflow_library_registry(project_root=ROOT_DIR)
-            workflow_record = registry.get("workflows", {}).get(result["workflow_id"])
-            trusted_revisions: dict[str, PersistedReviewRevision] = {}
-            if isinstance(workflow_record, dict):
-                source_asset_sha256 = hashlib.sha256(saved_review_bytes).hexdigest()
-                for node in normalized_review.get("nodes") or []:
-                    if not isinstance(node, dict):
-                        continue
-                    node_id = str(node.get("node_id") or "").strip()
-                    integrity = evaluate_interface_workflow_node_integrity(
-                        review=normalized_review,
-                        node=node,
-                        record=workflow_record,
-                        project_root=ROOT_DIR,
-                        source_asset_sha256=source_asset_sha256,
-                    )
-                    if (
-                        integrity["integrity_verified"]
-                        and integrity["eligibility"]["agent_usable"]
-                    ):
-                        trusted_revisions[node_id] = PersistedReviewRevision(
-                            revision=integrity["canonical_revision"],
-                            revision_hash=integrity["canonical_revision_hash"],
-                            source_asset_sha256=source_asset_sha256,
-                        )
-            result["interface_asset_projection"] = save_workflow_review_as_application_assets(
-                normalized_review,
-                project_root=ROOT_DIR,
-                persisted_review_revisions=trusted_revisions,
-            )
-        else:
-            result["interface_asset_projection"] = {
-                "status": "not_covered",
-                "reason": "workflow_has_no_interface_nodes",
-                "saved_interface_count": 0,
-                "saved_transition_count": 0,
-                "artifact_is_authorization": False,
-            }
-        return result
+    return save_interface_workflow_review_transaction(
+        review, project_root=ROOT_DIR, out_dir=out_dir
+    )
 
 
 @router.post("/panel/save_interface_workflow_review", response_model=APIResponse)
@@ -2080,145 +1627,19 @@ def save_interface_workflow_review_endpoint(
         )
 
 
-def _resolve_reviewed_workflow_source(
-    *, application_identity_key: str, workflow_id: str
-) -> tuple[str, str]:
-    """仅信任 v1 registry 中绑定的项目内 source workflow。"""
-
-    identity_key = str(application_identity_key or "").strip()
-    selected_workflow_id = str(workflow_id or "").strip()
-    registry = load_interface_workflow_library_registry(project_root=ROOT_DIR)
-    if not isinstance(registry, dict):
-        raise ValueError("interface workflow registry is invalid")
-    applications = registry.get("applications")
-    workflows = registry.get("workflows")
-    revision = registry.get("registry_revision")
-    if not isinstance(applications, dict) or not isinstance(workflows, dict) or type(revision) is not int or revision < 0:
-        raise ValueError("interface workflow registry shape is invalid")
-    application = applications.get(identity_key)
-    if not isinstance(application, dict):
-        raise ValueError("interface workflow application identity not found")
-    workflow_ids = application.get("workflow_ids")
-    if not isinstance(workflow_ids, list) or any(not isinstance(item, str) for item in workflow_ids):
-        raise ValueError("interface workflow application workflow_ids are invalid")
-    if selected_workflow_id not in set(workflow_ids):
-        raise ValueError("interface workflow does not belong to selected application")
-    record = workflows.get(selected_workflow_id)
-    if not isinstance(record, dict):
-        raise ValueError("interface workflow not found")
-    if str(record.get("application_identity_key") or "").strip() != identity_key:
-        raise ValueError("interface workflow application identity mismatch")
-    declared_path = Path(str(record.get("path") or ""))
-    resolved_path = declared_path.resolve() if declared_path.is_absolute() else (ROOT_DIR / declared_path).resolve()
-    if ROOT_DIR not in resolved_path.parents or not resolved_path.is_file():
-        raise ValueError("interface workflow source path is invalid")
-    source_sha = str(record.get("source_asset_sha256") or "").strip().lower()
-    if len(source_sha) != 64 or any(character not in "0123456789abcdef" for character in source_sha):
-        raise ValueError("interface workflow source SHA-256 is invalid")
-    return resolved_path.relative_to(ROOT_DIR).as_posix(), source_sha
-
-
-def _compile_reviewed_workflow_request(
-    request: PanelCompileReviewedWorkflowAssetRequest,
-) -> dict[str, Any]:
-    source_path, registry_sha = _resolve_reviewed_workflow_source(
-        application_identity_key=request.application_identity_key,
-        workflow_id=request.workflow_id,
-    )
-    expected_sha = request.expected_source_workflow_sha256.lower()
-    if expected_sha != registry_sha:
-        return {
-            "contract_version": "reviewed_workflow_compile_result_v2",
-            "status": "blocked",
-            "asset": None,
-            "blocked_reasons": [{"code": "source_workflow_sha256_mismatch", "message": "expected source workflow SHA-256 does not match registry binding"}],
-        }
-    return compile_reviewed_workflow_asset_v2(
-        project_root=ROOT_DIR,
-        source_workflow_path=source_path,
-        expected_source_workflow_sha256=expected_sha,
-    )
-
-
-def _safe_blocked_compile_result(result: dict[str, Any]) -> dict[str, Any]:
-    """阻断结果只暴露稳定 reason code，绝不回传编译器的文件路径文本。"""
-
-    return {
-        "contract_version": "reviewed_workflow_compile_result_v2",
-        "status": "blocked",
-        "asset": None,
-        "blocked_reasons": [
-            {"code": str(item.get("code") or "compile_blocked"), "message": "reviewed workflow compilation blocked"}
-            for item in result.get("blocked_reasons", [])
-            if isinstance(item, dict)
-        ],
-    }
-
-
 @router.post("/panel/compile_reviewed_workflow_asset", response_model=APIResponse)
 def compile_reviewed_workflow_asset_endpoint(request: PanelCompileReviewedWorkflowAssetRequest) -> APIResponse:
-    """编译服务端注册的人审流程；此端点不写入 v2 CAS。"""
-
-    try:
-        result = _compile_reviewed_workflow_request(request)
-        registry_revision = ReviewedWorkflowAssetStore(project_root=ROOT_DIR).registry()["registry_revision"]
-    except (OSError, ValueError, json.JSONDecodeError):
-        return APIResponse(success=False, message="Reviewed workflow compile failed", data=None, error=ErrorModel(code="reviewed_workflow_compile_failed", details="server-side reviewed workflow source validation failed"))
-    if result.get("status") != "compiled":
-        return APIResponse(success=False, message="Reviewed workflow compile blocked", data={"result": _safe_blocked_compile_result(result), "registry_revision": registry_revision, "artifact_is_authorization": False, "execute_binding_enabled": False}, error=ErrorModel(code="reviewed_workflow_compile_blocked", details="reviewed workflow compilation did not satisfy fail-closed checks"))
-    return APIResponse(success=True, message="Reviewed workflow compiled", data={"result": result, "registry_revision": registry_revision, "artifact_is_authorization": False, "execute_binding_enabled": False}, error=None)
+    return _compile_reviewed_workflow_asset_endpoint(request, project_root=ROOT_DIR)
 
 
 @router.post("/panel/publish_reviewed_workflow_asset", response_model=APIResponse)
 def publish_reviewed_workflow_asset_endpoint(request: PanelPublishReviewedWorkflowAssetRequest) -> APIResponse:
-    """在 CAS 写入前重新编译；从不接受客户端提供的 asset。"""
-
-    try:
-        with _interface_workflow_lock(request.workflow_id):
-            compile_request = PanelCompileReviewedWorkflowAssetRequest(
-                application_identity_key=request.application_identity_key,
-                workflow_id=request.workflow_id,
-                expected_source_workflow_sha256=request.expected_source_workflow_sha256,
-            )
-            result = _compile_reviewed_workflow_request(compile_request)
-            if result.get("status") != "compiled" or not isinstance(result.get("asset"), dict):
-                return APIResponse(success=False, message="Reviewed workflow publish blocked", data={"compile_result": _safe_blocked_compile_result(result)}, error=ErrorModel(code="reviewed_workflow_compile_blocked", details="reviewed workflow must compile immediately before publish"))
-            # 在 CAS 写入前再次读取 v1 binding 与 source bytes，避免 save/delete 的 TOCTOU。
-            source_path, source_sha = _resolve_reviewed_workflow_source(application_identity_key=request.application_identity_key, workflow_id=request.workflow_id)
-            if (
-                request.workflow_id
-                != result["asset"]["source_review_lineage"]["source_workflow_id"]
-                or source_sha
-                != result["asset"]["source_review_lineage"]["source_workflow_sha256"]
-                or hashlib.sha256((ROOT_DIR / source_path).read_bytes()).hexdigest()
-                != source_sha
-            ):
-                return APIResponse(success=False, message="Reviewed workflow publish blocked", data={"compile_result": result}, error=ErrorModel(code="reviewed_workflow_source_changed", details="reviewed workflow source changed before publish"))
-            publish_result = ReviewedWorkflowAssetStore(project_root=ROOT_DIR).publish(result["asset"], expected_registry_revision=request.expected_registry_revision)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return APIResponse(success=False, message="Reviewed workflow publish failed", data=None, error=ErrorModel(code="reviewed_workflow_publish_failed", details="server-side reviewed workflow publish validation failed"))
-    return APIResponse(success=True, message="Reviewed workflow published", data={"compile_result": result, "publish_result": publish_result, "artifact_is_authorization": False, "execute_binding_enabled": False}, error=None)
+    return _publish_reviewed_workflow_asset_endpoint(request, project_root=ROOT_DIR)
 
 
 @router.post("/panel/preview_reviewed_workflow_replay", response_model=APIResponse)
 def preview_reviewed_workflow_replay_endpoint(request: PanelPreviewReviewedWorkflowReplayRequest) -> APIResponse:
-    """只读 replay preview：仅加载 CAS 与解析 observation，绝不调用捕获或 action。"""
-
-    try:
-        asset = ReviewedWorkflowAssetStore(project_root=ROOT_DIR).load_active(request.asset_id)
-        actual_sha = content_sha256(asset)
-        preview_base = {"mode": "read_only_preview", "would_call_action_api": False, "execution_authorized": False, "artifact_is_authorization": False, "execute_binding_enabled": False}
-        if actual_sha != request.expected_content_sha256.lower():
-            return APIResponse(success=False, message="Reviewed workflow preview blocked", data=preview_base, error=ErrorModel(code="reviewed_workflow_preview_hash_mismatch", details="expected content SHA-256 does not match active reviewed workflow asset"))
-        if not request.current_observation:
-            return APIResponse(success=False, message="Reviewed workflow preview observation required", data={**preview_base, "asset_id": asset["asset_id"], "content_sha256": actual_sha}, error=ErrorModel(code="reviewed_workflow_preview_observation_required", details="a nonempty current observation is required for read-only replay preview"))
-        resolution = resolve_current_state(asset, request.current_observation)
-    except (OSError, ValueError, json.JSONDecodeError):
-        return APIResponse(success=False, message="Reviewed workflow preview failed", data={"mode": "read_only_preview", "would_call_action_api": False, "execution_authorized": False, "artifact_is_authorization": False, "execute_binding_enabled": False}, error=ErrorModel(code="reviewed_workflow_preview_failed", details="server-side reviewed workflow preview validation failed"))
-    data = {**preview_base, "asset_id": asset["asset_id"], "content_sha256": actual_sha, "state_resolution": resolution}
-    if resolution.get("status") != "resolved":
-        return APIResponse(success=False, message="Reviewed workflow preview unresolved", data=data, error=ErrorModel(code="reviewed_workflow_preview_unresolved", details="current observation did not resolve one reviewed workflow state"))
-    return APIResponse(success=True, message="Reviewed workflow replay preview resolved", data=data, error=None)
+    return _preview_reviewed_workflow_replay_endpoint(request, project_root=ROOT_DIR)
 
 
 @router.post("/panel/delete_learning_evidence", response_model=APIResponse)
@@ -2338,29 +1759,11 @@ def list_surface_rule_registry_endpoint() -> APIResponse:
 def save_learning_draft_review_endpoint(request: PanelSaveLearningDraftReviewRequest) -> APIResponse:
     """Save a reviewed template candidate without enabling execution."""
     try:
-        review_patch = deepcopy(request.review_patch)
-        workflow_run_id = review_patch.pop("_hybrid_workflow_run_id", None)
-        expected_run_id, expected_revision, expected_lineage_ref = (
-            _authoritative_hybrid_workflow_expectations(
-                workflow_run_id,
-                source_path=request.source_path,
-            )
-        )
-        review_patch.pop("_server_hybrid_expectations", None)
-        if (
-            expected_run_id is not None
-            and expected_revision is not None
-            and expected_lineage_ref is not None
-        ):
-            review_patch["_server_hybrid_expectations"] = {
-                "run_id": expected_run_id,
-                "workflow_revision": expected_revision,
-                "capture_lineage_ref": expected_lineage_ref,
-            }
-        result = build_pathgraph_candidate_from_review(
-            request.source_path,
-            review_patch,
+        result = save_learning_draft_review_transaction(
+            source_path=request.source_path,
+            review_patch=request.review_patch,
             project_root=ROOT_DIR,
+            workflow_store=learning_workflow_run_store,
         )
         trace_path = write_trace(
             category="panel",

@@ -1,0 +1,95 @@
+{
+  "kind": "legacy_web_source_snapshot_v1",
+  "source_head": "bc085dd800b0d5e18d0509c36f7c985d4756a815",
+  "captured_utc": "2026-09-08T11:08:10.094752+00:00",
+  "files": [
+    {
+      "path": "app/main.py",
+      "sha256": "d484d22d3477b93078b6fc9756ea8ccb06eefc6f579dd7b721721c197486d6bc",
+      "bytes": 1272,
+      "git_blob": "625b8142b93449e34f7396624b16c220c7f294f6"
+    },
+    {
+      "path": "app/api/panel.py",
+      "sha256": "56416a2de3e669220cfce3ae500bd29541175b6cfaadfc055a32cab97cdffefd",
+      "bytes": 235636,
+      "git_blob": "73381359883e0c2e5026e690983a1d24fd88eba6"
+    },
+    {
+      "path": "app/web_panel/agent_runtime_panel.js",
+      "sha256": "029fc89894c2dfa735e40463934ca792deae26043e1db4194f146e4443ba637a",
+      "bytes": 16426,
+      "git_blob": "4c42641ac78f053a1337011455940e5c47c07074"
+    },
+    {
+      "path": "app/web_panel/execute_test_page.html",
+      "sha256": "bbd569849d8bd779d402e2672bc20f59b916d9c99fefaeb2c4035e2497d833b6",
+      "bytes": 2160,
+      "git_blob": "169da48d0a52affa25e29d2cedf2b5e3c2ae1660"
+    },
+    {
+      "path": "app/web_panel/index.html",
+      "sha256": "c986c1fde8b1fca959745023c6adcbe328038611996501e2a2e8f29eb94f1af8",
+      "bytes": 131967,
+      "git_blob": "fe142d1ece1fbe88c033015fcf60f09490283fb0"
+    },
+    {
+      "path": "app/web_panel/interface_workflow_graph.js",
+      "sha256": "95a310f5469c00a058d399e9f6dc53684a8f9c469f62abbf8edf6eaf59d1360f",
+      "bytes": 32817,
+      "git_blob": "fe4284ffc8e75afd3305114937c8eec7c1b3f14e"
+    },
+    {
+      "path": "app/web_panel/learning_draft_editor.js",
+      "sha256": "9ea843da615ccd023be58ec17df66733b879c22df8c7cf86f29a85eaaee66bf2",
+      "bytes": 15021,
+      "git_blob": "27786475a72c7977d4c4040d67dc1a9fd764b889"
+    },
+    {
+      "path": "app/web_panel/learning_workflow_review.js",
+      "sha256": "d00ef2c7da04ffa15e8044e260c6f53ba95bf7995b565141a8b4559a3136acce",
+      "bytes": 102857,
+      "git_blob": "dabf0a6122b19cbe83558f5588f4f94077d8e709"
+    },
+    {
+      "path": "app/web_panel/panel.css",
+      "sha256": "a9b950d2853af32ed4507e1cc59bb752ffe4b1b2ed67b5814885df6563931e27",
+      "bytes": 146602,
+      "git_blob": "3ff9c1a3023a2ab3646c2bb98078fbe26bac1964"
+    },
+    {
+      "path": "app/web_panel/panel.js",
+      "sha256": "98269b5f3d13b6d3e8edd1e751f1be52c03a3dc7cb5200da6d1b8c0abe04f417",
+      "bytes": 1160361,
+      "git_blob": "10864de8b2c02b524f9855e8b9cc63fdf7b9da5e"
+    },
+    {
+      "path": "app/web_panel/seek_resume_fixture.html",
+      "sha256": "094252731c24d65c95f111f0baba4d26f508b313091e4948e6ac59533d4149e3",
+      "bytes": 7451,
+      "git_blob": "aae0e391feff8e333093b6a5be3a5574283bce1e"
+    },
+    {
+      "path": "scripts/start_test_panel.py",
+      "sha256": "adb791fca7eb8c98e15b037fd75b15c35a86fc55c0608c76507f500ce9884fa3",
+      "bytes": 14801,
+      "git_blob": "cd68a437d5eea2d5545997f2be0857af64752c5e"
+    },
+    {
+      "path": "start_test_panel.bat",
+      "sha256": "c6a5b26999b07ac539505de3d9a2695bd7068843271611c37dbb9d92a707933f",
+      "bytes": 372,
+      "git_blob": "34215a75a431752c6c01c7ad93bdfd1d2e6bc802"
+    }
+  ],
+  "scope": "13 exact current legacy web source files over the earlier remote preparation baseline; not the complete current formal working tree",
+  "excluded": [
+    "current formal changes outside the listed files",
+    "models",
+    "runtime data",
+    "unique experiment history",
+    "local ignored documents"
+  ],
+  "runtime_acceptance": "not tested by this archival operation",
+  "source_is_not_data_backup": true
+}
