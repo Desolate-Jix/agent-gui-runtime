@@ -24,10 +24,13 @@ from uuid import uuid4
 
 from app.agent.desktop_backend import BackendDispatchReceipt
 from app.agent.runtime_contracts import AgentObservationV1, RuntimeResultReceiptV1
+from app.agent.runtime_fresh_receipt import RuntimeFreshResultReceipt, RuntimeFreshReceiptError
+from app.agent.fresh_learning_action_contracts import FreshLearningClaimObservation, FreshLearningActionContractError
 
 
 STORE_CONTRACT_VERSION = "runtime_receipt_record_v1"
 STORE_CONTRACT_VERSION_V2 = "runtime_receipt_record_v2"
+FRESH_STORE_CONTRACT_VERSION = "runtime_fresh_receipt_record_v1"
 POINTER_CONTRACT_VERSION = "runtime_receipt_pointer_v1"
 INTENT_POINTER_CONTRACT_VERSION = "runtime_receipt_intent_pointer_v1"
 STORE_ROOT = Path("runtime_state/runtime-receipts-v1")
@@ -103,11 +106,11 @@ class _PublishedBytesConflict(RuntimeReceiptStoreError):
 
 @dataclass(frozen=True, slots=True)
 class RuntimeReceiptRecord:
-    runtime_receipt: RuntimeResultReceiptV1
+    runtime_receipt: RuntimeResultReceiptV1 | RuntimeFreshResultReceipt
     backend_receipt: BackendDispatchReceipt | None
     content_sha256: str
     verification_evidence: dict[str, Any] | None = None
-    next_observation: AgentObservationV1 | None = None
+    next_observation: AgentObservationV1 | FreshLearningClaimObservation | None = None
 
 
 def _canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -186,7 +189,10 @@ class RuntimeReceiptStore:
     静态 reparse 重定向会 fail closed；敌对并发目录交换不属于 Portfolio v1。
     """
 
-    def __init__(self, *, project_root: str | Path) -> None:
+    def __init__(self, *, project_root: str | Path, create_layout: bool = True) -> None:
+        if type(create_layout) is not bool:
+            raise TypeError("create_layout must be bool")
+        self._create_layout = create_layout
         self.project_root = Path(project_root).resolve()
         self.root = self.project_root / STORE_ROOT
         self.objects_root = self.root / "objects"
@@ -204,6 +210,11 @@ class RuntimeReceiptStore:
     ) -> dict[str, str]:
         """验证并不可变发布一个 Receipt record。"""
 
+        if isinstance(receipt, RuntimeFreshResultReceipt) or (
+            isinstance(receipt, Mapping) and receipt.get("contract_version") in {'runtime_fresh_result_receipt_v1', 'runtime_fresh_result_receipt_v2'}
+        ):
+            return self._put_fresh(receipt, backend_receipt=backend_receipt, next_observation=next_observation,
+                                   verification_evidence=verification_evidence)
         validated = self._validate_runtime_receipt(receipt)
         if backend_receipt is not None and not isinstance(
             backend_receipt, BackendDispatchReceipt
@@ -284,6 +295,75 @@ class RuntimeReceiptStore:
             "content_sha256": content_sha256,
         }
 
+    def _put_fresh(
+        self, receipt: RuntimeFreshResultReceipt | Mapping[str, object], *,
+        backend_receipt: BackendDispatchReceipt | None, verification_evidence: Mapping[str, object] | None,
+        next_observation: FreshLearningClaimObservation | Mapping[str, object] | None,
+    ) -> dict[str, str]:
+        if verification_evidence is not None:
+            raise RuntimeReceiptStoreError("fresh factual receipt cannot carry verification evidence")
+        try:
+            checked = RuntimeFreshResultReceipt.from_dict(
+                receipt.model_dump(mode="json") if isinstance(receipt, RuntimeFreshResultReceipt) else receipt
+            )
+            checked_next = (None if next_observation is None else (
+                FreshLearningClaimObservation.from_dict(next_observation.to_dict())
+                if isinstance(next_observation, FreshLearningClaimObservation)
+                else FreshLearningClaimObservation.from_dict(next_observation)
+            ))
+        except (RuntimeFreshReceiptError, FreshLearningActionContractError) as exc:
+            raise RuntimeReceiptStoreError(str(exc)) from exc
+        if (checked_next is None) != (checked.next_observation_id is None):
+            raise RuntimeReceiptStoreError("fresh receipt next observation mismatch")
+        if checked_next is not None and (checked_next.observation_id != checked.next_observation_id
+                or checked_next.session_id != checked.session_id
+                or checked_next.to_dict()["source"]["source_sha256"] != checked.source_sha256):
+            raise RuntimeReceiptStoreError("fresh receipt next observation binding mismatch")
+        if backend_receipt is not None and not isinstance(backend_receipt, BackendDispatchReceipt):
+            raise RuntimeReceiptStoreError("invalid backend receipt object")
+        self._validate_fresh_pairing(checked, backend_receipt, checked_next)
+        envelope = {"store_contract_version": FRESH_STORE_CONTRACT_VERSION,
+                    "runtime_receipt": checked.model_dump(mode="json"),
+                    "backend_receipt": asdict(backend_receipt) if backend_receipt else None,
+                    "next_observation": checked_next.to_dict() if checked_next else None}
+        raw = _canonical_json_bytes(envelope)
+        digest = hashlib.sha256(raw).hexdigest()
+        self._publish_bytes(self._object_path(digest), raw)
+        pointer = {"store_contract_version": POINTER_CONTRACT_VERSION, "receipt_id": checked.receipt_id, "content_sha256": digest}
+        try:
+            self._publish_bytes(self._pointer_path(checked.receipt_id), _canonical_json_bytes(pointer))
+            intent_pointer = {"store_contract_version": INTENT_POINTER_CONTRACT_VERSION,
+                "session_id": checked.session_id, "observation_id": checked.observation_id,
+                "intent_id": checked.intent_id, "receipt_id": checked.receipt_id, "content_sha256": digest}
+            self._publish_bytes(self._intent_pointer_path(session_id=checked.session_id,
+                observation_id=checked.observation_id, intent_id=checked.intent_id), _canonical_json_bytes(intent_pointer))
+        except _PublishedBytesConflict as exc:
+            raise RuntimeReceiptStoreError("fresh runtime receipt identity conflict") from exc
+        return {"receipt_id": checked.receipt_id, "content_sha256": digest}
+
+    @staticmethod
+    def _validate_fresh_pairing(receipt, backend, next_observation) -> None:
+        if backend is None or backend.status != receipt.dispatch_status:
+            raise RuntimeReceiptStoreError("fresh receipt backend dispatch status mismatch")
+        expected = {"dispatched": "none", "not_started": "backend_failed", "indeterminate": "backend_result_lost"}
+        if backend.reason_code != expected[backend.status]:
+            raise RuntimeReceiptStoreError("fresh receipt backend reason mismatch")
+        if receipt.outcome == "ACTION_RECORDED":
+            if next_observation is None:
+                raise RuntimeReceiptStoreError("fresh recorded receipt requires after observation")
+        elif next_observation is not None:
+            raise RuntimeReceiptStoreError("fresh non-recorded receipt forbids after observation")
+        if next_observation is not None:
+            value = next_observation.to_dict()
+            if next_observation.session_id != receipt.session_id or value["source"]["source_sha256"] != receipt.source_sha256:
+                raise RuntimeReceiptStoreError("fresh receipt next observation binding mismatch")
+        if receipt.action.semantic_action == "fill_field":
+            actual = receipt.evidence.text_field_verification["actual"]
+            if actual is not None and (next_observation is None
+                    or actual["capture_id"] != next_observation.to_dict()["capture"]["capture_id"]
+                    or actual["observed_at_ns"] < next_observation.to_dict()["capture"]["observed_at_ns"]):
+                raise RuntimeReceiptStoreError("fresh text receipt read differs from after capture")
+
     def get(self, ref: Mapping[str, object]) -> RuntimeReceiptRecord:
         """读取并重新验证一个精确 immutable ref。"""
 
@@ -316,6 +396,27 @@ class RuntimeReceiptStore:
         if hashlib.sha256(raw).hexdigest() != digest:
             raise RuntimeReceiptStoreError("runtime receipt object checksum mismatch")
         version = envelope.get("store_contract_version")
+        if version == FRESH_STORE_CONTRACT_VERSION:
+            if set(envelope) != {"store_contract_version", "runtime_receipt", "backend_receipt", "next_observation"}:
+                raise RuntimeReceiptStoreError("invalid fresh runtime receipt record contract")
+            try:
+                receipt = RuntimeFreshResultReceipt.from_dict(envelope.get("runtime_receipt"))
+            except RuntimeFreshReceiptError as exc:
+                raise RuntimeReceiptStoreError(str(exc)) from exc
+            if receipt.receipt_id != receipt_id:
+                raise RuntimeReceiptStoreError("fresh receipt identity mismatch")
+            backend = self._validate_backend_payload(envelope.get("backend_receipt"))
+            value = envelope.get("next_observation")
+            try:
+                next_observation = None if value is None else FreshLearningClaimObservation.from_dict(value)
+            except FreshLearningActionContractError as exc:
+                raise RuntimeReceiptStoreError(str(exc)) from exc
+            if (next_observation is None) != (receipt.next_observation_id is None):
+                raise RuntimeReceiptStoreError("fresh receipt next observation mismatch")
+            if next_observation is not None and next_observation.observation_id != receipt.next_observation_id:
+                raise RuntimeReceiptStoreError("fresh receipt next observation identity mismatch")
+            self._validate_fresh_pairing(receipt, backend, next_observation)
+            return RuntimeReceiptRecord(receipt, backend, digest, next_observation=next_observation)
         v1_keys = {
             "store_contract_version",
             "runtime_receipt",
@@ -620,6 +721,25 @@ class RuntimeReceiptStore:
             ) from exc
         if not isinstance(verification, dict):
             raise RuntimeReceiptStoreError("verification evidence must be an object")
+        if receipt.action.semantic_action == "scroll_region":
+            spatial = verification.get("scroll_spatial_evidence")
+            parameters = receipt.action.scroll_parameters
+            if (not isinstance(spatial, dict) or parameters is None
+                or spatial.get("contract_version") != "scroll_spatial_evidence_v1"
+                or spatial.get("target_container_id") != parameters["target_container_id"]
+                or (semantic_success and (
+                    spatial.get("status") != "target_visual_change"
+                    or spatial.get("target_changed") is not True
+                    or spatial.get("non_target_stable") is not True
+                ))):
+                raise RuntimeReceiptStoreError("scroll receipt spatial evidence mismatch")
+        if receipt.action.semantic_action == "fill_field":
+            cls._validate_text_field_verification_outcome(
+                receipt,
+                verification,
+                semantic_success=semantic_success,
+                verification_failed=verification_failed,
+            )
         verification_ref = (
             f"verification:{hashlib.sha256(_canonical_json_bytes(verification)).hexdigest()}"
         )
@@ -651,6 +771,41 @@ class RuntimeReceiptStore:
         cls._validate_verification_lineage(receipt, verification, observation)
         return verification, observation
 
+    @staticmethod
+    def _validate_text_field_verification_outcome(
+        receipt: RuntimeResultReceiptV1,
+        verification: Mapping[str, Any],
+        *,
+        semantic_success: bool,
+        verification_failed: bool,
+    ) -> dict[str, Any]:
+        """填写回执只接受可重算、无原文的字段后验引用。"""
+        try:
+            from app.agent.text_field_evidence import (
+                validate_text_field_verification_reference,
+            )
+
+            declaration = receipt.action.text_parameters_ref
+            proof = validate_text_field_verification_reference(
+                verification.get("text_field_verification"), declaration
+            )
+        except (ImportError, TypeError, ValueError) as exc:
+            raise RuntimeReceiptStoreError(
+                "fill receipt text field verification is invalid"
+            ) from exc
+        reason = proof.get("reason_code")
+        if semantic_success:
+            if proof.get("status") != "verified" or reason != "none":
+                raise RuntimeReceiptStoreError(
+                    "verified fill receipt text field verification mismatch"
+                )
+        elif verification_failed and proof.get("status") == "not_verified":
+            if reason != receipt.reason_code:
+                raise RuntimeReceiptStoreError(
+                    "fill receipt text field failure reason mismatch"
+                )
+        return proof
+
     @classmethod
     def _validate_blocked_verification(
         cls,
@@ -659,8 +814,23 @@ class RuntimeReceiptStore:
     ) -> None:
         failure_code = verification.get("failure_code")
         expected_keys = set(_BLOCKED_VERIFICATION_BASE_KEYS)
+        if receipt.action.semantic_action == "scroll_region":
+            expected_keys.add("scroll_spatial_evidence")
+            if failure_code in {"scroll_no_visual_change", "scroll_non_target_visual_change", "scroll_unknown"}:
+                expected_keys.add("semantic_verification")
         if failure_code in {"destination_mismatch", "post_action_failure"}:
             expected_keys.add("post_state_resolution")
+        text_proof = None
+        if receipt.action.semantic_action == "fill_field":
+            expected_keys.add("text_field_verification")
+            text_proof = cls._validate_text_field_verification_outcome(
+                receipt,
+                verification,
+                semantic_success=False,
+                verification_failed=True,
+            )
+            if text_proof.get("status") == "not_verified":
+                expected_keys.add("semantic_verification")
         if (
             set(verification) != expected_keys
             or
@@ -676,6 +846,14 @@ class RuntimeReceiptStore:
         if failure_code != receipt.reason_code:
             raise RuntimeReceiptStoreError(
                 "verification failure reason mismatch"
+            )
+        if (
+            text_proof is not None
+            and text_proof.get("status") == "not_verified"
+            and failure_code != text_proof.get("reason_code")
+        ):
+            raise RuntimeReceiptStoreError(
+                "fill receipt text field failure reason mismatch"
             )
         if failure_code == "destination_mismatch":
             cls._validate_resolved_state(
@@ -696,8 +874,11 @@ class RuntimeReceiptStore:
         verification: Mapping[str, Any],
         observation: AgentObservationV1,
     ) -> None:
+        expected_keys = _VERIFIED_VERIFICATION_KEYS | ({"scroll_spatial_evidence"} if receipt.action.semantic_action == "scroll_region" else set())
+        if receipt.action.semantic_action == "fill_field":
+            expected_keys.add("text_field_verification")
         if (
-            set(verification) != _VERIFIED_VERIFICATION_KEYS
+            set(verification) != expected_keys
             or
             verification.get("contract_version") != "transition_verification_v1"
             or verification.get("status") != "verified"
@@ -814,16 +995,27 @@ class RuntimeReceiptStore:
             or anchors != sorted(set(anchors))
         ):
             raise RuntimeReceiptStoreError("post-state anchors are invalid")
-        canonical_origin = cls._normalized_http_origin(value.get("canonical_origin"))
-        observed_origin = cls._normalized_http_origin(value.get("observed_origin"))
-        if canonical_origin is None or observed_origin is None:
-            raise RuntimeReceiptStoreError("next observation application mismatch")
+        native_origin = value.get("canonical_origin") == "" and value.get("observed_origin") == ""
+        is_native = (
+            observation.application.kind == "native" if observation is not None else native_origin
+        )
+        observed_origin = None
+        if is_native:
+            identity_refs = [ref for ref in value["evidence_refs"] if ref.startswith("native-identity:")]
+            if (
+                not native_origin
+                or len(identity_refs) != 1
+                or re.fullmatch(r"native-identity:[0-9a-f]{64}", identity_refs[0]) is None
+                or (observation is not None and not observation.application.identity_ref.startswith("application:native:"))
+            ):
+                raise RuntimeReceiptStoreError("native application verification lineage mismatch")
+        else:
+            canonical_origin = cls._normalized_http_origin(value.get("canonical_origin"))
+            observed_origin = cls._normalized_http_origin(value.get("observed_origin"))
+            if canonical_origin is None or observed_origin is None:
+                raise RuntimeReceiptStoreError("next observation application mismatch")
         if observation is None:
             return
-        if observation.application.kind != "web":
-            raise RuntimeReceiptStoreError(
-                "native application verification is unsupported"
-            )
         if (
             value.get("state_id") != observation.state.state_id
             or value.get("state_availability")
@@ -832,9 +1024,10 @@ class RuntimeReceiptStore:
             != observation.state.resolution_sha256
         ):
             raise RuntimeReceiptStoreError("verification state resolution mismatch")
-        parsed = urlsplit(observed_origin)
-        if observation.application.identity_ref != f"application:web:{parsed.hostname}":
-            raise RuntimeReceiptStoreError("next observation application mismatch")
+        if not is_native:
+            parsed = urlsplit(observed_origin)
+            if observation.application.identity_ref != f"application:web:{parsed.hostname}":
+                raise RuntimeReceiptStoreError("next observation application mismatch")
 
     @classmethod
     def _validate_blocked_state(
@@ -863,7 +1056,8 @@ class RuntimeReceiptStore:
             != receipt.workflow.source_workflow_sha256
             or value.get("reviewed_revision_hash")
             != receipt.workflow.reviewed_revision_hash
-            or cls._normalized_http_origin(value.get("canonical_origin")) is None
+            # 原生无法匹配后的失败证据可保留空 origin，但该分支不能推进状态。
+            or (value.get("canonical_origin") != "" and cls._normalized_http_origin(value.get("canonical_origin")) is None)
         ):
             raise RuntimeReceiptStoreError("invalid blocked post-state contract")
         cls._validate_capture_lineage(value.get("capture_lineage"))
@@ -1026,9 +1220,10 @@ class RuntimeReceiptStore:
                     "runtime receipt store reparse redirection is forbidden"
                 )
         try:
-            self.objects_root.mkdir(parents=True, exist_ok=True)
-            self.receipt_ids_root.mkdir(parents=True, exist_ok=True)
-            self.intent_ids_root.mkdir(parents=True, exist_ok=True)
+            if self._create_layout:
+                self.objects_root.mkdir(parents=True, exist_ok=True)
+                self.receipt_ids_root.mkdir(parents=True, exist_ok=True)
+                self.intent_ids_root.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             raise RuntimeReceiptStoreError(
                 f"runtime receipt store layout is unavailable: {exc}"

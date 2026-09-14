@@ -1,2 +1,0 @@
-*.json -text !eol diff whitespace=cr-at-eol
-.gitattributes text eol=lf

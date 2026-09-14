@@ -7,6 +7,8 @@ import os
 import re
 import tempfile
 import time
+import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ from app.vision.ocr_anchors import (
     scale_ocr_anchor_payload,
 )
 from app.vision.prompting import build_region_analysis_prompt
+from app.vision.request_control import ModelRequestError, current_model_request, read_cancellable_response
 from app.vision.schemas import ImageSize, VisionAnalyzeRequest, VisionAnalyzeResponse
 
 
@@ -112,6 +115,8 @@ class LocalVisionProvider:
                 attempt_records.append(attempt_record)
                 notes.extend(attempt_notes)
                 break
+            except ModelRequestError:
+                raise
             except Exception as exc:
                 attempt_record["status"] = "failed"
                 attempt_record["error"] = str(exc)
@@ -208,16 +213,21 @@ class LocalVisionProvider:
                 },
             ],
         }
-        request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
+        request_context = current_model_request()
+        legacy_request_id = str(os.environ.get("AGENT_GUI_MODEL_REQUEST_ID") or "").strip()
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        if request_id:
-            payload["request_id"] = request_id
-            headers["X-Agent-GUI-Request-ID"] = request_id
+        if legacy_request_id:
+            payload["request_id"] = legacy_request_id
+            headers["X-Agent-GUI-Request-ID"] = legacy_request_id
         if request_timeout_seconds is not None and float(request_timeout_seconds) > 0:
             payload["request_timeout_seconds"] = float(request_timeout_seconds)
-        body = json.dumps(payload).encode("utf-8")
         loading_deadline = time.monotonic() + self.timeout_seconds
         while True:
+            request_id = legacy_request_id
+            if request_context is not None:
+                request_id = str(uuid.uuid4())
+                payload["request_id"] = request_id
+                headers["X-Agent-GUI-Request-ID"] = request_id
             managed_profile = self._attest_managed_request_profile()
             if managed_profile is not None:
                 payload["model"] = str(
@@ -229,34 +239,74 @@ class LocalVisionProvider:
                 endpoint = str(managed_profile.get("endpoint") or "").strip()
             else:
                 endpoint = self.endpoint
+            body = json.dumps(payload).encode("utf-8")
+            request_url = self._chat_completions_url(endpoint)
+            if request_context is not None:
+                request_context.check(request_url, str(payload.get("model") or self.model_name))
             request = Request(
-                self._chat_completions_url(endpoint),
+                request_url,
                 data=body,
                 headers=headers,
                 method="POST",
             )
             request_attempt = self._mark_request_in_flight(request_id)
-            try:
-                with urlopen(request, timeout=self.timeout_seconds) as response:
-                    response_bytes = response.read()
+            with request_context.request_scope(request_id) if request_context is not None else nullcontext():
+                try:
+                    if request_context is None:
+                        with urlopen(request, timeout=self.timeout_seconds) as response:
+                            response_bytes = response.read()
+                    else:
+                        response_bytes = read_cancellable_response(
+                            request, timeout=self.timeout_seconds, context=request_context
+                        )
+                        request_context.check(request_url, str(payload.get("model") or self.model_name))
                     self._mark_response_body_complete(
                         request_id,
                         request_attempt=request_attempt,
                     )
-                    return json.loads(response_bytes.decode("utf-8"))
-            except HTTPError as exc:
-                details = exc.read().decode("utf-8", errors="replace")
-                self._mark_response_body_complete(
-                    request_id,
-                    request_attempt=request_attempt,
-                )
-                if self._model_is_loading(exc.code, details) and time.monotonic() < loading_deadline:
-                    self._model_loading_retries += 1
-                    time.sleep(min(1.0, max(0.0, loading_deadline - time.monotonic())))
-                    continue
-                raise RuntimeError(f"local vision endpoint returned HTTP {exc.code}: {details}") from exc
-            except URLError as exc:
-                raise RuntimeError(f"failed to reach local vision endpoint {endpoint}: {exc.reason}") from exc
+                    if request_context is not None:
+                        # 实例复验后的完整响应已结束本请求；解析失败仍须拒绝，不应伪装成在途。
+                        request_context.request_completed(request_id)
+                    try:
+                        result = json.loads(response_bytes.decode("utf-8"))
+                    except (UnicodeError, ValueError) as error:
+                        if request_context is not None:
+                            raise ModelRequestError("model_response_invalid") from error
+                        raise
+                    return result
+                except ModelRequestError:
+                    raise
+                except HTTPError as exc:
+                    error_bytes = exc.read()
+                    if request_context is None:
+                        details = error_bytes.decode("utf-8", errors="replace")
+                    else:
+                        request_context.check(request_url, str(payload.get("model") or self.model_name))
+                        request_context.request_completed(request_id)
+                        try:
+                            details = error_bytes.decode("utf-8")
+                        except UnicodeDecodeError as decode_error:
+                            raise ModelRequestError(
+                                "model_response_invalid",
+                                "local vision endpoint returned invalid UTF-8 error bytes",
+                            ) from decode_error
+                    self._mark_response_body_complete(
+                        request_id,
+                        request_attempt=request_attempt,
+                    )
+                    if self._model_is_loading(exc.code, details) and time.monotonic() < loading_deadline:
+                        self._model_loading_retries += 1
+                        wait_seconds = min(1.0, max(0.0, loading_deadline - time.monotonic()))
+                        if request_context is None:
+                            time.sleep(wait_seconds)
+                        elif request_context.cancelled.wait(wait_seconds):
+                            request_context.check_cancelled()
+                        continue
+                    if request_context is not None:
+                        raise ModelRequestError("model_response_http_error") from exc
+                    raise RuntimeError(f"local vision endpoint returned HTTP {exc.code}: {details}") from exc
+                except URLError as exc:
+                    raise RuntimeError(f"failed to reach local vision endpoint {endpoint}: {exc.reason}") from exc
 
     def _attest_managed_request_profile(self) -> dict[str, Any] | None:
         if self._managed_model_lease is None:
@@ -693,6 +743,8 @@ class LocalVisionProvider:
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
+            except ModelRequestError:
+                raise
             except Exception as exc:
                 error = RuntimeError(str(exc))
                 error.diagnostics = {

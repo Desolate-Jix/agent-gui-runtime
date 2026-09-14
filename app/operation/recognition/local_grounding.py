@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from difflib import SequenceMatcher
+import math
+from app.operation.recognition.text_match import text_similarity as _text_similarity, normalize_text as _normalize_text
 from pathlib import Path
 
 from PIL import Image
@@ -63,6 +64,16 @@ def _ground_candidate(
         candidate_texts=[candidate.label, candidate.text, candidate.element.description],
     )
     if match is None:
+        from app.operation.recognition.native_control_ocr_observation import KEY, record_native_ocr
+        observed = record_native_ocr(image_path=image_path, image_size=image_size,
+            crop=crop_bbox, candidate=candidate, ocr_result=ocr_result)
+        if observed is not None:
+            candidate.element.evidence[KEY] = observed
+        reasons = ['no_matching_local_ocr_text']
+        if not ocr_result.matches:
+            reasons.append('local_ocr_returned_no_text')
+        elif _ocr_outside_target(ocr_result.matches, crop_bbox, candidate.element.bbox):
+            reasons.append('local_ocr_no_text_in_target')
         return LocalGroundingCandidateResult(
             candidate_id=candidate.candidate_id,
             element_id=candidate.element_id,
@@ -74,7 +85,7 @@ def _ground_candidate(
             confidence=round(candidate.score * 0.6, 4),
             matched_text=None,
             matched_text_bbox=None,
-            reasons=["no_matching_local_ocr_text"],
+            reasons=reasons,
         )
 
     local_bbox = {
@@ -101,6 +112,26 @@ def _ground_candidate(
         matched_text_bbox=local_bbox,
         reasons=["matched_local_ocr_text", "mapped_crop_text_center_to_full_image"],
     )
+
+
+def _ocr_outside_target(matches, crop, target) -> bool:
+    """只排除目标框外的上下文文字；无效框或任何重叠都不能声明目标无字。"""
+    if not matches:
+        return False
+    for match in matches:
+        box = getattr(match, 'bbox', None)
+        values = [getattr(box, key, None) for key in ('x', 'y', 'width', 'height')]
+        if any(type(value) not in (int, float) or not math.isfinite(value) for value in values):
+            return False
+        x, y, width, height = values
+        if (x < 0 or y < 0 or width <= 0 or height <= 0
+                or x + width > crop['width'] or y + height > crop['height']):
+            return False
+        x, y = x + crop['x'], y + crop['y']
+        if (x < target.x + target.w and x + width > target.x
+                and y < target.y + target.h and y + height > target.y):
+            return False
+    return True
 
 
 def _crop_bbox(bbox: BBox, *, image_size: tuple[int, int], padding: int) -> dict[str, int]:
@@ -145,25 +176,10 @@ def _best_match(matches: list[OCRTextMatch], *, goal: str, candidate_texts: list
         return None
     scored.sort(key=lambda item: (item[0], item[1].score), reverse=True)
     best_score, best_match = scored[0]
+    # 同名文字分布在不同位置时不能凭列表顺序选出坐标。
+    if any(_normalize_text(other.text) == _normalize_text(best_match.text)
+           and other.bbox != best_match.bbox for _, other in scored[1:]):
+        return None
     return best_match if best_score >= 0.45 else None
 
 
-def _text_similarity(left: str, right: str) -> float:
-    if not left or not right:
-        return 0.0
-    if left == right:
-        return 1.0
-    if left in right or right in left:
-        return 0.9
-    left_tokens = set(left.split())
-    right_tokens = set(right.split())
-    token_score = 0.0
-    if left_tokens and right_tokens:
-        token_score = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
-    return max(token_score, SequenceMatcher(None, left, right).ratio())
-
-
-def _normalize_text(value: str) -> str:
-    normalized = str(value or "").casefold()
-    normalized = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", normalized)
-    return " ".join(normalized.split())

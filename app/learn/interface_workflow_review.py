@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.agent.action_semantics import ACTIVITY_ACTIONS
+from app.agent.scroll_parameters import SCROLL_SEMANTIC_ACTION, validate_scroll_review_subject
+from app.agent.text_parameters import TEXT_SEMANTIC_ACTION, validate_text_review_subject
+
 from collections import OrderedDict
 from copy import deepcopy
 import hashlib
@@ -14,6 +18,7 @@ from app.learn.agent_evidence import (
 )
 from app.learn.application_identity import normalize_application_identity
 from app.learn.draft_review import validate_reviewed_template_candidate_source
+from app.learn.review_write_guard import resolved_review_path, save_guarded_review, validate_immutable_components
 
 
 INTERFACE_WORKFLOW_REVIEW_CONTRACT = "single_application_workflow_review_v1"
@@ -21,6 +26,8 @@ INTERFACE_NODE_HUMAN_REVIEW_CONFIRMATION_CONTRACT = (
     "interface_node_human_review_confirmation_v1"
 )
 ALLOWED_REVIEW_ACTION_TYPES = {
+    *ACTIVITY_ACTIONS,
+    SCROLL_SEMANTIC_ACTION,
     "back",
     "close_modal",
     "continue_next_step",
@@ -209,11 +216,31 @@ def build_interface_workflow_review(
         signature = _state_signature(review, draft, source_index)
         node_id = _preserved_node_id(review) or f"interface_{_stable_hash(signature)[:12]}"
         source_path = _source_path(review)
+        hybrid_source = _hybrid_review_source_record(review)
         if signature in nodes_by_signature:
             node = nodes_by_signature[signature]
             node["observation_count"] += 1
-            if source_path and source_path not in node["source_paths"]:
-                node["source_paths"].append(source_path)
+            if source_path:
+                existing_provenance = _normalized_hybrid_review_provenance(
+                    node.get("hybrid_review_source_provenance")
+                )
+                existing_source = None
+                if existing_provenance is not None:
+                    existing_source = next(
+                        (
+                            item for item in existing_provenance["sources"]
+                            if item["source_path"] == source_path
+                        ),
+                        None,
+                    )
+                if source_path in node["source_paths"] and existing_source != hybrid_source:
+                    raise ValueError("conflicting duplicate hybrid review source claim")
+                merged_provenance = _merge_hybrid_review_source_provenance(
+                    node.get("hybrid_review_source_provenance"), hybrid_source
+                )
+                if source_path not in node["source_paths"]:
+                    node["source_paths"].append(source_path)
+                node["hybrid_review_source_provenance"] = merged_provenance
             if node["evidence_status"] != "ready":
                 replacement = _node_evidence(review, draft)
                 if replacement["evidence_status"] == "ready":
@@ -245,6 +272,10 @@ def build_interface_workflow_review(
                 draft.get("ui_hierarchy") if isinstance(draft.get("ui_hierarchy"), dict) else {}
             ),
             "hierarchy_ownership_review": _hierarchy_ownership_review(draft),
+            "selection_replay_provenance": _selection_replay_provenance(review),
+            "hybrid_review_source_provenance": _hybrid_review_source_provenance(
+                [hybrid_source] if hybrid_source else []
+            ),
             "states": _clean_list(draft.get("states")),
             "regions": _clean_list(draft.get("regions")),
             "controls": _clean_list(
@@ -309,6 +340,55 @@ def save_interface_workflow_review_candidate(
     *,
     project_root: Path,
     out_dir: str | Path | None = None,
+    create_only: bool = False,
+    verify_only: bool = False,
+) -> dict[str, Any]:
+    """串行化公共保存路径，并为精确审核提供不可覆盖的证据版本。"""
+
+    if not isinstance(review, dict) or not isinstance(review.get("workflow"), dict):
+        raise ValueError("workflow review must contain a workflow object")
+    workflow_id = str(review["workflow"].get("workflow_id") or "").strip()
+    if create_only:
+        validate_immutable_components(workflow_id, review.get("nodes"))
+    safe_id = "".join(character if character.isalnum() or character in "_.-" else "_" for character in workflow_id).strip("._")
+    if not safe_id:
+        raise ValueError("workflow.workflow_id does not contain a safe file name")
+    root = resolved_review_path(Path(project_root))
+    destination_root = _resolve_review_output_dir(root, out_dir if out_dir is not None else "artifacts/interface-workflow-reviews")
+    pending_index: list[dict[str, Any]] = []
+
+    def defer_index(**kwargs: Any) -> None:
+        pending_index.append(kwargs)
+
+    def registry_binding() -> dict[str, Any] | None:
+        if not pending_index:
+            return None
+        values = pending_index[0]
+        return {"workflow_id": values["workflow"]["workflow_id"],
+                "identity_key": values["identity"]["identity_key"],
+                "record": _workflow_review_registry_record(**values)}
+
+    def publish() -> None:
+        for values in pending_index:
+            _index_workflow_review(**values)
+
+    return save_guarded_review(
+        review=review, project_root=root, destination_root=destination_root,
+        workflow_dir=destination_root / safe_id, create_only=create_only,
+        save=lambda: _save_interface_workflow_review_candidate_unlocked(
+            review, project_root=root, out_dir=destination_root,
+            index_callback=defer_index if create_only else _index_workflow_review),
+        registry_binding=registry_binding, publish=publish,
+        verify_only=verify_only,
+    )
+
+
+def _save_interface_workflow_review_candidate_unlocked(
+    review: dict[str, Any],
+    *,
+    project_root: Path,
+    out_dir: str | Path | None = None,
+    index_callback: Any = None,
 ) -> dict[str, Any]:
     """保存人工审核后的流程草稿，但不授予发布或执行权限。"""
 
@@ -345,8 +425,18 @@ def save_interface_workflow_review_candidate(
         item["display_only"] = True
         item["artifact_is_authorization"] = False
         item["execute_binding_enabled"] = False
-    _validate_workflow_structure(workflow=workflow, nodes=nodes, edges=edges)
     root = Path(project_root).resolve()
+    hybrid_node_ids = _validate_hybrid_review_source_provenance(
+        nodes, project_root=root
+    )
+    selection_node_ids = _validate_selection_replay_provenance(
+        nodes, project_root=root, verified_hybrid_node_ids=hybrid_node_ids
+    )
+    _validate_workflow_structure(workflow=workflow, nodes=nodes, edges=edges)
+    _validate_selection_replay_apply_edges(
+        selection_node_ids=selection_node_ids,
+        edges=edges,
+    )
     destination_root = (
         _resolve_review_output_dir(root, out_dir)
         if out_dir is not None
@@ -359,6 +449,9 @@ def save_interface_workflow_review_candidate(
     if not safe_workflow_id:
         raise ValueError("workflow.workflow_id does not contain a safe file name")
     destination = destination_root / safe_workflow_id / "reviewed_workflow.json"
+    pinned_hybrid_refs = _pinned_hybrid_authoritative_refs(
+        nodes, project_root=root
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     # 先固化证据路径，再计算确认修订，确保服务器持久化后的规范修订一致。
     _materialize_durable_node_evidence(
@@ -416,6 +509,7 @@ def save_interface_workflow_review_candidate(
         workflow_id=workflow_id,
         workflow_dir=destination.parent,
         project_root=root,
+        pinned_hybrid_refs=pinned_hybrid_refs,
     )
     for node in nodes:
         node_id = str(node.get("node_id") or "").strip()
@@ -440,7 +534,7 @@ def save_interface_workflow_review_candidate(
     identity_key = application_identity.get("identity_key")
     library_index_status = "identity_unresolved"
     if identity_key:
-        _index_workflow_review(
+        (index_callback or _index_workflow_review)(
             registry_path=destination_root / "registry.json",
             identity=application_identity,
             workflow=workflow,
@@ -530,14 +624,109 @@ def _materialize_durable_node_evidence(
         node["evidence"] = evidence
 
 
+def build_interface_node_review_source_payload(
+    node: dict[str, Any],
+    *,
+    workflow_id: str,
+    project_root: Path,
+) -> dict[str, Any]:
+    """生成可编辑审核来源的规范投影，供保存与只读完整性校验共用。"""
+
+    node_id = str(node.get("node_id") or "").strip()
+    evidence = node.get("evidence") if isinstance(node.get("evidence"), dict) else {}
+    page_details = deepcopy(node.get("page_details")) if isinstance(node.get("page_details"), dict) else {}
+    screen = page_details.get("screen") if isinstance(page_details.get("screen"), dict) else {}
+    screen.update(
+        {
+            "summary": str(node.get("display_name") or node_id),
+            "source_image_path": _project_path_reference(
+                evidence.get("source_screenshot_path"),
+                project_root,
+            ),
+            "source_image_sha256": str(evidence.get("source_screenshot_sha256") or "").strip(),
+            "artifact_is_authorization": False,
+            "execute_binding_enabled": False,
+        }
+    )
+    page_details["screen"] = screen
+    return {
+        "contract_version": "interface_workflow_node_review_source_v1",
+        "workflow_id": workflow_id,
+        "node_id": node_id,
+        "draft": {
+            "contract_version": "learning_template_draft_v1",
+            "screen_summary": str(node.get("display_name") or node_id),
+            "state_guess": str(node.get("surface_type") or "unknown_surface"),
+            "state_signature": str(node.get("state_signature") or node_id),
+            "states": deepcopy(node.get("states")) if isinstance(node.get("states"), list) else [],
+            "regions": deepcopy(node.get("regions")) if isinstance(node.get("regions"), list) else [],
+            "action_templates": _editable_action_templates(node),
+            "blockers": deepcopy(node.get("blockers")) if isinstance(node.get("blockers"), list) else [],
+            "verification_rules": (
+                deepcopy(node.get("verification_rules"))
+                if isinstance(node.get("verification_rules"), list)
+                else []
+            ),
+            "page_details": page_details,
+            "learning_source": "reviewed_multi_interface_workflow",
+            "safety": {
+                "artifact_is_authorization": False,
+                "execute_binding_enabled": False,
+                "final_submit_forbidden": True,
+            },
+        },
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
+
+
+def _pinned_hybrid_authoritative_refs(
+    nodes: list[dict[str, Any]],
+    *,
+    project_root: Path,
+) -> dict[int, dict[str, str]]:
+    """在持久写入前校验并固定 v2 来源快照。"""
+
+    pinned: dict[int, dict[str, str]] = {}
+    for index, node in enumerate(nodes):
+        provenance = _normalized_hybrid_review_provenance(
+            node.get("hybrid_review_source_provenance")
+        )
+        source_paths = node.get("source_paths")
+        if provenance is None or not isinstance(source_paths, list):
+            continue
+        sources = provenance["sources"]
+        normalized_paths = [str(value or "").strip() for value in source_paths]
+        if len(sources) != 1 or normalized_paths != [sources[0]["source_path"]]:
+            continue
+        source_path = sources[0]["source_path"]
+        source = (project_root / source_path).resolve()
+        if project_root != source and project_root not in source.parents:
+            raise ValueError("hybrid authoritative source changed before materialization")
+        if (
+            not source.is_file()
+            or hashlib.sha256(source.read_bytes()).hexdigest()
+            != sources[0]["source_sha256"]
+        ):
+            raise ValueError("hybrid authoritative source changed before materialization")
+        pinned[index] = {
+            "id": source_path,
+            "content_sha256": sources[0]["source_sha256"],
+        }
+    return pinned
+
+
 def _materialize_editable_node_review_sources(
     nodes: list[dict[str, Any]],
     *,
     workflow_id: str,
     workflow_dir: Path,
     project_root: Path,
+    pinned_hybrid_refs: Mapping[int, dict[str, str]] | None = None,
 ) -> None:
     """为正式流程节点生成可由人工框编辑器加载的只读证据投影。"""
+
+    pinned_hybrid_refs = dict(pinned_hybrid_refs or {})
 
     source_dir = workflow_dir / "node-review-sources"
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -549,51 +738,11 @@ def _materialize_editable_node_review_sources(
         ).strip("._") or f"interface_{index + 1}"
         source_path = source_dir / f"{safe_node_id}.json"
         source_ref = _project_path_reference(source_path, project_root)
-        evidence = node.get("evidence") if isinstance(node.get("evidence"), dict) else {}
-        page_details = deepcopy(node.get("page_details")) if isinstance(node.get("page_details"), dict) else {}
-        screen = page_details.get("screen") if isinstance(page_details.get("screen"), dict) else {}
-        screen.update(
-            {
-                "summary": str(node.get("display_name") or node_id),
-                "source_image_path": _project_path_reference(
-                    evidence.get("source_screenshot_path"),
-                    project_root,
-                ),
-                "source_image_sha256": str(evidence.get("source_screenshot_sha256") or "").strip(),
-                "artifact_is_authorization": False,
-                "execute_binding_enabled": False,
-            }
+        payload = build_interface_node_review_source_payload(
+            node,
+            workflow_id=workflow_id,
+            project_root=project_root,
         )
-        page_details["screen"] = screen
-        payload = {
-            "contract_version": "interface_workflow_node_review_source_v1",
-            "workflow_id": workflow_id,
-            "node_id": node_id,
-            "draft": {
-                "contract_version": "learning_template_draft_v1",
-                "screen_summary": str(node.get("display_name") or node_id),
-                "state_guess": str(node.get("surface_type") or "unknown_surface"),
-                "state_signature": str(node.get("state_signature") or node_id),
-                "states": deepcopy(node.get("states")) if isinstance(node.get("states"), list) else [],
-                "regions": deepcopy(node.get("regions")) if isinstance(node.get("regions"), list) else [],
-                "action_templates": _editable_action_templates(node),
-                "blockers": deepcopy(node.get("blockers")) if isinstance(node.get("blockers"), list) else [],
-                "verification_rules": (
-                    deepcopy(node.get("verification_rules"))
-                    if isinstance(node.get("verification_rules"), list)
-                    else []
-                ),
-                "page_details": page_details,
-                "learning_source": "reviewed_multi_interface_workflow",
-                "safety": {
-                    "artifact_is_authorization": False,
-                    "execute_binding_enabled": False,
-                    "final_submit_forbidden": True,
-                },
-            },
-            "artifact_is_authorization": False,
-            "execute_binding_enabled": False,
-        }
         source_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -610,6 +759,7 @@ def _materialize_editable_node_review_sources(
             else {}
         )
         evidence.pop("authoritative_source_ref", None)
+        pinned_hybrid_ref = pinned_hybrid_refs.get(index)
         verified_refs = [
             reference
             for value in existing_paths
@@ -623,7 +773,10 @@ def _materialize_editable_node_review_sources(
         has_authoritative_reviewed_source = (
             len(existing_paths) == 1 and len(verified_refs) == 1
         )
-        if has_authoritative_reviewed_source:
+        if pinned_hybrid_ref is not None:
+            evidence["authoritative_source_ref"] = pinned_hybrid_ref
+            has_authoritative_reviewed_source = True
+        elif has_authoritative_reviewed_source:
             evidence["authoritative_source_ref"] = verified_refs[0]
         node["evidence"] = evidence
         node["source_paths"] = (
@@ -734,9 +887,30 @@ def _index_workflow_review(
     workflow_ids = application.setdefault("workflow_ids", [])
     if workflow_id not in workflow_ids:
         workflow_ids.append(workflow_id)
-    workflows[workflow_id] = {
+    workflows[workflow_id] = _workflow_review_registry_record(
+        identity=identity, workflow=workflow, destination=destination, node_count=node_count,
+        edge_count=edge_count, reviewed_node_revision_hashes=reviewed_node_revision_hashes,
+        reviewed_node_evidence_sha256=reviewed_node_evidence_sha256,
+    )
+    registry["registry_revision"] = int(registry.get("registry_revision") or 0) + 1
+    registry["artifact_is_authorization"] = False
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = registry_path.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps(registry, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(registry_path)
+
+
+def _workflow_review_registry_record(
+    *, identity: dict[str, Any], workflow: dict[str, Any], destination: Path,
+    node_count: int, edge_count: int, reviewed_node_revision_hashes: dict[str, str],
+    reviewed_node_evidence_sha256: dict[str, dict[str, str]], registry_path: Path | None = None,
+) -> dict[str, Any]:
+    return {
         "path": str(destination.resolve()),
-        "application_identity_key": identity_key,
+        "application_identity_key": str(identity["identity_key"]),
         "goal": str(workflow.get("goal") or ""),
         "node_count": node_count,
         "edge_count": edge_count,
@@ -748,15 +922,6 @@ def _index_workflow_review(
         "artifact_is_authorization": False,
         "execute_binding_enabled": False,
     }
-    registry["registry_revision"] = int(registry.get("registry_revision") or 0) + 1
-    registry["artifact_is_authorization"] = False
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = registry_path.with_suffix(".tmp")
-    temporary.write_text(
-        json.dumps(registry, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(registry_path)
 
 
 def _node_evidence_provenance(
@@ -958,6 +1123,490 @@ def _hierarchy_ownership_review(draft: dict[str, Any]) -> dict[str, Any]:
         if isinstance(review, dict)
         else {}
     )
+
+
+
+def _valid_sha256(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+        return ""
+    return normalized
+
+
+def _hybrid_review_source_record(review: dict[str, Any]) -> dict[str, Any] | None:
+    projection = review.get("hybrid_review_projection")
+    source = review.get("source")
+    if not isinstance(projection, dict) or not isinstance(source, dict):
+        return None
+    try:
+        from app.learn.hybrid.review_projection import validate_hybrid_review_projection
+
+        validated_projection = validate_hybrid_review_projection(projection)
+    except (TypeError, ValueError):
+        return None
+    if validated_projection.get("contract_version") != "hybrid_review_projection_v2":
+        return None
+    source_path = str(source.get("source_path") or "").strip()
+    source_sha256 = _valid_sha256(source.get("sha256"))
+    projection_id = str(validated_projection.get("projection_id") or "").strip()
+    projection_sha256 = _valid_sha256(validated_projection.get("content_sha256"))
+    if not source_path or not source_sha256 or not projection_id or not projection_sha256:
+        return None
+    return {
+        "source_path": source_path,
+        "source_sha256": source_sha256,
+        "projection_ref": {
+            "id": projection_id,
+            "content_sha256": projection_sha256,
+        },
+    }
+
+def _hybrid_review_source_provenance(
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
+    unique: dict[str, dict[str, Any]] = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            return {}
+        source_path = str(source.get("source_path") or "").strip()
+        if not source_path:
+            return {}
+        expected = {
+            "source_path": source_path,
+            "source_sha256": _valid_sha256(source.get("source_sha256")),
+            "projection_ref": deepcopy(source.get("projection_ref")),
+        }
+        reference = expected["projection_ref"]
+        if (
+            not expected["source_sha256"]
+            or not isinstance(reference, dict)
+            or not str(reference.get("id") or "").strip()
+            or not _valid_sha256(reference.get("content_sha256"))
+        ):
+            return {}
+        reference["content_sha256"] = _valid_sha256(reference["content_sha256"])
+        prior = unique.get(source_path)
+        if prior is not None and prior != expected:
+            raise ValueError("conflicting duplicate hybrid review source provenance")
+        unique[source_path] = expected
+    if not unique:
+        return {}
+    return {
+        "contract_version": "interface_hybrid_review_source_provenance_v1",
+        "sources": [unique[path] for path in sorted(unique)],
+    }
+
+
+def _merge_hybrid_review_source_provenance(
+    existing: object, additional: dict[str, Any] | None,
+) -> dict[str, Any]:
+    sources = []
+    if isinstance(existing, dict) and isinstance(existing.get("sources"), list):
+        sources.extend(existing["sources"])
+    if additional is not None:
+        sources.append(additional)
+    return _hybrid_review_source_provenance(sources)
+
+def _selection_replay_provenance(review: dict[str, Any]) -> dict[str, Any]:
+    """保留选择审核的只读来源，禁止把 replay 误写成实际模型证据。"""
+
+    projection = (
+        review.get("hybrid_review_projection")
+        if isinstance(review.get("hybrid_review_projection"), dict)
+        else {}
+    )
+    if projection.get("contract_version") != "hybrid_selection_review_v1":
+        return {}
+    origin = str(projection.get("execution_origin") or "").strip()
+    reference = (
+        review.get("hybrid_review_projection_ref")
+        if isinstance(review.get("hybrid_review_projection_ref"), dict)
+        else {}
+    )
+    reference_id = str(reference.get("id") or "").strip()
+    content_sha256 = str(reference.get("content_sha256") or "").strip().lower()
+    if (
+        origin not in {"replay", "actual_model"}
+        or not reference_id
+        or len(content_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in content_sha256)
+    ):
+        return {}
+    return {
+        "contract_version": "interface_selection_replay_provenance_v1",
+        "execution_origin": origin,
+        "simulated_offline": origin == "replay",
+        "projection_ref": {
+            "id": reference_id,
+            "content_sha256": content_sha256,
+        },
+    }
+
+
+def _selection_region_identity(region: dict[str, Any]) -> tuple[str, str] | None:
+    region_id = str(region.get("region_id") or "").strip()
+    candidate_id = str(region.get("candidate_id") or "").strip()
+    if not region_id or not candidate_id:
+        return None
+    return region_id, candidate_id
+
+
+def _selection_region_has_raw_evidence(region: dict[str, Any]) -> bool:
+    return any(
+        field_name in region
+        for field_name in (
+            "model_proposal",
+            "review_decisions",
+            "reviewed_geometry",
+            "reviewed_semantics",
+            "human_point_proposal",
+        )
+    )
+
+
+def _trusted_selection_regions(
+    review: dict[str, Any],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    draft = review.get("draft") if isinstance(review.get("draft"), dict) else {}
+    regions = draft.get("regions") if isinstance(draft.get("regions"), list) else []
+    trusted: dict[tuple[str, str], dict[str, Any]] = {}
+    for region in regions:
+        if (
+            not isinstance(region, dict)
+            or region.get("kind") != "hybrid_selection_review_candidate"
+        ):
+            continue
+        identity = _selection_region_identity(region)
+        if identity is None:
+            raise ValueError("verified selection source region is missing stable identity")
+        prior = trusted.get(identity)
+        if prior is not None and prior != region:
+            raise ValueError("verified selection source has conflicting region identity")
+        trusted[identity] = region
+    return trusted
+
+
+def _hybrid_review_provenance_indicated(node: dict[str, Any]) -> bool:
+    provenance = node.get("hybrid_review_source_provenance")
+    if isinstance(provenance, dict) and provenance:
+        return True
+    regions = node.get("regions") if isinstance(node.get("regions"), list) else []
+    return any(
+        isinstance(region, dict)
+        and region.get("kind") == "hybrid_review_candidate"
+        for region in regions
+    )
+
+
+def _selection_provenance_indicated(
+    node: dict[str, Any], *, verified_hybrid: bool = False,
+) -> bool:
+    provenance = node.get("selection_replay_provenance")
+    if isinstance(provenance, dict) and provenance:
+        return True
+    regions = node.get("regions") if isinstance(node.get("regions"), list) else []
+    for region in regions:
+        if not isinstance(region, dict):
+            continue
+        kind = str(region.get("kind") or "").strip()
+        if kind == "hybrid_selection_review_candidate":
+            return True
+        if kind == "hybrid_review_candidate" and verified_hybrid:
+            continue
+        if str(region.get("candidate_id") or "").strip() and _selection_region_has_raw_evidence(region):
+            return True
+    return False
+
+
+def _trusted_hybrid_review_regions(
+    review: dict[str, Any],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    draft = review.get("draft") if isinstance(review.get("draft"), dict) else {}
+    regions = draft.get("regions") if isinstance(draft.get("regions"), list) else []
+    trusted: dict[tuple[str, str], dict[str, Any]] = {}
+    for region in regions:
+        if not isinstance(region, dict) or region.get("kind") != "hybrid_review_candidate":
+            continue
+        identity = _selection_region_identity(region)
+        if identity is None:
+            raise ValueError("verified hybrid review source region is missing stable identity")
+        prior = trusted.get(identity)
+        if prior is not None and prior != region:
+            raise ValueError("verified hybrid review source has conflicting region identity")
+        trusted[identity] = region
+    return trusted
+
+
+def _normalized_hybrid_review_provenance(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if value.get("contract_version") != "interface_hybrid_review_source_provenance_v1":
+        return None
+    sources = value.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return None
+    normalized = _hybrid_review_source_provenance(sources)
+    if not normalized or normalized != value:
+        return None
+    return normalized
+
+
+def _validated_hybrid_review_source(
+    node: dict[str, Any], *, project_root: Path,
+) -> tuple[dict[str, Any], dict[tuple[str, str], dict[str, Any]]] | None:
+    indicated = _hybrid_review_provenance_indicated(node)
+    provenance = _normalized_hybrid_review_provenance(
+        node.get("hybrid_review_source_provenance")
+    )
+    source_paths = node.get("source_paths")
+    if not isinstance(source_paths, list):
+        if indicated:
+            raise ValueError("hybrid review source_paths are required")
+        return None
+    normalized_paths = [str(value or "").strip() for value in source_paths]
+    if any(not value for value in normalized_paths) or len(set(normalized_paths)) != len(normalized_paths):
+        if indicated:
+            raise ValueError("hybrid review source_paths are invalid")
+        return None
+    if not indicated:
+        return None
+    if provenance is None:
+        raise ValueError("hybrid review source provenance is missing or corrupt")
+    expected_sources = provenance["sources"]
+    if [item["source_path"] for item in expected_sources] != sorted(normalized_paths):
+        raise ValueError("hybrid review source_paths do not match provenance")
+    if len(expected_sources) != 1:
+        raise ValueError("hybrid review source requires one canonical source per node")
+
+    trusted: dict[tuple[str, str], dict[str, Any]] = {}
+    loaded_sources: list[dict[str, Any]] = []
+    for source_path in normalized_paths:
+        try:
+            from app.learn.draft_review import validate_reviewed_template_candidate_source
+            from app.learn.hybrid.review_projection import (
+                render_full_parent_hybrid_review_candidates,
+                validate_hybrid_review_projection,
+            )
+
+            verified_source = validate_reviewed_template_candidate_source(
+                source_path, project_root=project_root
+            )
+            candidate_path = (project_root / source_path).resolve()
+            if project_root != candidate_path and project_root not in candidate_path.parents:
+                raise ValueError("reviewed candidate source is outside project root")
+            candidate_bytes = candidate_path.read_bytes()
+            candidate_sha256 = hashlib.sha256(candidate_bytes).hexdigest()
+            if (
+                verified_source.get("id") != source_path
+                or verified_source.get("content_sha256") != candidate_sha256
+            ):
+                raise ValueError("reviewed candidate source changed during validation")
+            payload = json.loads(candidate_bytes.decode("utf-8-sig"))
+            draft = payload.get("draft") if isinstance(payload, dict) else None
+            projection = validate_hybrid_review_projection(
+                draft.get("hybrid_review_projection") if isinstance(draft, dict) else None
+            )
+            source = {
+                "source_path": source_path,
+                "source_sha256": candidate_sha256,
+                "projection_ref": {
+                    "id": str(projection.get("projection_id") or "").strip(),
+                    "content_sha256": _valid_sha256(projection.get("content_sha256")),
+                },
+            }
+            regions = render_full_parent_hybrid_review_candidates(projection)
+        except (OSError, TypeError, UnicodeError, ValueError, json.JSONDecodeError):
+            raise ValueError("hybrid review source is missing or corrupt") from None
+        if (
+            not source["projection_ref"]["id"]
+            or not source["projection_ref"]["content_sha256"]
+            or not regions
+        ):
+            raise ValueError("hybrid review source is missing or corrupt")
+        loaded_sources.append(source)
+        for region in regions:
+            identity = _selection_region_identity(region)
+            if identity is None:
+                raise ValueError("hybrid review source is missing or corrupt")
+            prior = trusted.get(identity)
+            if prior is not None and prior != region:
+                raise ValueError("hybrid review sources do not agree")
+            trusted[identity] = region
+    actual_provenance = _hybrid_review_source_provenance(loaded_sources)
+    if actual_provenance != provenance:
+        raise ValueError("hybrid review source provenance does not match a verified source review")
+    return provenance, trusted
+
+def _validate_hybrid_review_source_provenance(
+    nodes: list[dict[str, Any]], *, project_root: Path,
+) -> set[str]:
+    hybrid_node_ids: set[str] = set()
+    raw_fields = (
+        "model_proposal",
+        "review_decisions",
+        "reviewed_geometry",
+        "reviewed_semantics",
+        "human_point_proposal",
+    )
+    for node in nodes:
+        verified = _validated_hybrid_review_source(node, project_root=project_root)
+        if verified is None:
+            continue
+        _provenance, trusted_regions = verified
+        if isinstance(node.get("selection_replay_provenance"), dict) and node["selection_replay_provenance"]:
+            raise ValueError("mixed selection and hybrid review provenance is not allowed")
+        node_id = str(node.get("node_id") or "").strip()
+        if not node_id:
+            raise ValueError("hybrid review node is missing node_id")
+        hybrid_node_ids.add(node_id)
+        regions = node.get("regions") if isinstance(node.get("regions"), list) else []
+        seen: set[tuple[str, str]] = set()
+        for region in regions:
+            if not isinstance(region, dict):
+                raise ValueError("hybrid review regions must be objects")
+            kind = str(region.get("kind") or "").strip()
+            identity = _selection_region_identity(region)
+            has_raw_evidence = _selection_region_has_raw_evidence(region) or "human_point_proposal" in region
+            if kind == "hybrid_selection_review_candidate":
+                raise ValueError("mixed selection and hybrid review regions are not allowed")
+            if kind != "hybrid_review_candidate":
+                if has_raw_evidence or str(region.get("candidate_id") or "").strip():
+                    raise ValueError("hybrid review region is not present in verified source")
+                continue
+            if identity is None:
+                raise ValueError("hybrid review region is missing stable identity")
+            trusted = trusted_regions.get(identity)
+            if trusted is None:
+                raise ValueError("hybrid review region is not present in verified source")
+            if identity in seen:
+                raise ValueError("hybrid review region identity is duplicated")
+            seen.add(identity)
+            for field_name in raw_fields:
+                if region.get(field_name) != trusted.get(field_name):
+                    raise ValueError("hybrid review raw evidence does not match verified source")
+            if region != trusted:
+                raise ValueError("hybrid review region does not match verified source")
+        if seen != set(trusted_regions):
+            raise ValueError("hybrid review region identity set does not match verified source")
+    return hybrid_node_ids
+
+
+def _validated_selection_source(
+    node: dict[str, Any], *, project_root: Path
+) -> tuple[dict[str, Any], dict[tuple[str, str], dict[str, Any]]] | None:
+    source_paths = node.get("source_paths")
+    if not isinstance(source_paths, list):
+        if _selection_provenance_indicated(node):
+            raise ValueError("selection replay source_paths are required")
+        return None
+    normalized_paths = [str(value or "").strip() for value in source_paths]
+    if any(not value for value in normalized_paths):
+        if _selection_provenance_indicated(node):
+            raise ValueError("selection replay source_paths are invalid")
+        return None
+
+    verified: list[tuple[dict[str, Any], dict[tuple[str, str], dict[str, Any]]]] = []
+    source_failures = False
+    for source_path in normalized_paths:
+        try:
+            from app.learn.draft_review import load_learning_draft_review
+
+            loaded = load_learning_draft_review(
+                source_path,
+                project_root=project_root,
+                discover_related_sidecars=False,
+            )
+            provenance = _selection_replay_provenance(loaded)
+            regions = _trusted_selection_regions(loaded)
+        except (OSError, TypeError, UnicodeError, ValueError):
+            source_failures = True
+            continue
+        if provenance and regions:
+            verified.append((provenance, regions))
+
+    if not verified:
+        if _selection_provenance_indicated(node):
+            raise ValueError("selection replay source is missing or corrupt")
+        return None
+    if source_failures:
+        raise ValueError("selection replay source is missing or corrupt")
+
+    provenance, regions = verified[0]
+    for other_provenance, other_regions in verified[1:]:
+        if other_provenance != provenance or other_regions != regions:
+            raise ValueError("selection replay sources do not agree")
+    return provenance, regions
+
+
+def _validate_selection_replay_provenance(
+    nodes: list[dict[str, Any]], *, project_root: Path,
+    verified_hybrid_node_ids: set[str] | None = None,
+) -> set[str]:
+    """从已持久化的来源分类选择区域，并绑定其原始审核证据。"""
+
+    selection_node_ids: set[str] = set()
+    verified_hybrid_node_ids = verified_hybrid_node_ids or set()
+    raw_fields = (
+        "model_proposal",
+        "review_decisions",
+        "reviewed_geometry",
+        "reviewed_semantics",
+    )
+    for node in nodes:
+        node_id = str(node.get("node_id") or "").strip()
+        if node_id in verified_hybrid_node_ids and not _selection_provenance_indicated(
+            node, verified_hybrid=True
+        ):
+            continue
+        verified = _validated_selection_source(node, project_root=project_root)
+        if verified is None:
+            continue
+        provenance, trusted_regions = verified
+        if not node_id:
+            raise ValueError("selection replay node is missing node_id")
+        selection_node_ids.add(node_id)
+        if node.get("selection_replay_provenance") != provenance:
+            raise ValueError("selection replay provenance does not match a verified source review")
+
+        regions = node.get("regions") if isinstance(node.get("regions"), list) else []
+        for region in regions:
+            if not isinstance(region, dict):
+                raise ValueError("selection replay regions must be objects")
+            identity = _selection_region_identity(region)
+            has_raw_evidence = _selection_region_has_raw_evidence(region)
+            if identity not in trusted_regions:
+                if has_raw_evidence or str(region.get("candidate_id") or "").strip():
+                    raise ValueError("selection replay region identity is not present in verified source")
+                continue
+            if identity is None:
+                raise ValueError("selection replay region is missing stable identity")
+            trusted = trusted_regions[identity]
+            for field_name in raw_fields:
+                if region.get(field_name) != trusted.get(field_name):
+                    raise ValueError("selection replay raw evidence does not match verified source")
+    return selection_node_ids
+
+
+def _validate_selection_replay_apply_edges(
+    *, selection_node_ids: set[str], edges: list[dict[str, Any]]
+) -> None:
+    """选择 replay 生成的申请入口必须匹配运行时的确认风险契约。"""
+
+    for edge in edges:
+        if (
+            str(edge.get("source_node_id") or "").strip() not in selection_node_ids
+            or str(edge.get("action_type") or "").strip().lower()
+            != "open_apply_flow"
+        ):
+            continue
+        if (
+            str(edge.get("risk_level") or "").strip().lower()
+            not in {"medium", "high"}
+            or edge.get("requires_user_confirmation") is not True
+        ):
+            raise ValueError(
+                "selection replay open_apply_flow requires medium-or-high risk and explicit user confirmation"
+            )
 
 
 def build_blocked_interface_projection(
@@ -1555,6 +2204,12 @@ def _validate_workflow_structure(
     if normalized_declared_edge_ids != edge_ids:
         raise ValueError("workflow.edge_ids must match edges in display order")
 
+    for node in nodes:
+        for candidate in node.get("action_candidates") or []:
+            if isinstance(candidate, dict):
+                validate_scroll_review_subject(candidate)
+                validate_text_review_subject(candidate)
+
     for edge in edges:
         source_node_id = str(edge.get("source_node_id") or "").strip()
         target_node_id = str(edge.get("target_node_id") or "").strip()
@@ -1575,6 +2230,12 @@ def _validate_review_operation(edge: dict[str, Any]) -> None:
         raise ValueError(f"forbidden review action type: {action_type}")
     if action_type not in ALLOWED_REVIEW_ACTION_TYPES:
         raise ValueError(f"unsupported review action type: {action_type}")
+    validate_scroll_review_subject(edge)
+    validate_text_review_subject(edge)
+    if action_type in {SCROLL_SEMANTIC_ACTION, TEXT_SEMANTIC_ACTION} and (
+        edge.get("requires_user_confirmation") is not True or edge.get("risk_level") not in {"medium", "high"}
+    ):
+        raise ValueError("scroll/text requires explicit independent confirmation and medium-or-high risk")
 
     risk_level = str(edge.get("risk_level") or "low").strip().lower()
     if risk_level not in {"low", "medium", "high"}:
@@ -1608,9 +2269,9 @@ def _validate_review_operation(edge: dict[str, Any]) -> None:
 def _resolve_review_output_dir(project_root: Path, out_dir: str | Path) -> Path:
     candidate = Path(out_dir)
     resolved = (
-        candidate.resolve()
+        resolved_review_path(candidate)
         if candidate.is_absolute()
-        else (project_root / candidate).resolve()
+        else resolved_review_path(project_root / candidate)
     )
     try:
         resolved.relative_to(project_root)

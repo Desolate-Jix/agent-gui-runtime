@@ -71,6 +71,7 @@ class CaptureData(BaseModel):
     roi: Optional[dict[str, Any]] = None
     roi_adjusted: bool = False
     window_size: Optional[dict[str, int]] = None
+    capture_visibility: Optional[dict[str, Any]] = None
 
 
 class VisionResultData(BaseModel):

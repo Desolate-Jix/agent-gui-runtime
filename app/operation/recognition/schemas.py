@@ -14,6 +14,7 @@ class CandidateRankRequest:
     top_k: int = 5
     state_hint: str | None = None
     screen_reading: dict[str, Any] | None = None
+    control_target: dict[str, Any] | None = None
 
 
 @dataclass

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "hybrid_static_capture_bundle_v1",
+  "type": "object",
+  "required": [
+    "contract_version", "bundle_id", "run_id", "workflow_revision",
+    "capture_lineage_ref", "artifact_ref", "context_ref",
+    "artifact_is_authorization", "execute_binding_enabled", "final_submit_forbidden",
+    "real_action_requires_gate", "authorization_scope", "content_sha256"
+  ],
+  "properties": {
+    "contract_version": {"const": "hybrid_static_capture_bundle_v1"},
+    "bundle_id": {"type": "string", "pattern": "^hybrid-static-capture/", "minLength": 1, "maxLength": 512},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "workflow_revision": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "capture_lineage_ref": {"$ref": "#/$defs/ref"},
+    "artifact_ref": {"$ref": "#/$defs/ref"},
+    "context_ref": {"$ref": "#/$defs/ref"},
+    "artifact_is_authorization": {"const": false},
+    "execute_binding_enabled": {"const": false},
+    "final_submit_forbidden": {"const": true},
+    "real_action_requires_gate": {"const": true},
+    "authorization_scope": {"const": "display_and_review_only"},
+    "content_sha256": {"$ref": "#/$defs/sha"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ref": {
+      "type": "object", "required": ["id", "content_sha256"],
+      "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 512}, "content_sha256": {"$ref": "#/$defs/sha"}},
+      "additionalProperties": false
+    }
+  }
+}

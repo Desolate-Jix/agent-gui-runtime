@@ -6,6 +6,11 @@ memory、不执行动作，也不把历史截图坐标当作运行时授权。
 
 from __future__ import annotations
 
+from app.agent.action_semantics import ACTIVITY_ACTIONS
+from app.agent.scroll_parameters import ReviewedScrollParameters, SCROLL_SEMANTIC_ACTION
+from app.agent.text_parameters import ReviewedTextParameters, TEXT_SEMANTIC_ACTION
+from app.agent import workflow_versions
+
 import hashlib
 import json
 import os
@@ -38,6 +43,8 @@ _FORBIDDEN_ACTIONS = {
     "openexternalapply",
 }
 _ALLOWED_ACTIONS = {
+    *ACTIVITY_ACTIONS,
+    SCROLL_SEMANTIC_ACTION,
     "open_detail",
     "open_apply_flow",
     "back",
@@ -469,6 +476,15 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
         elif kind == "native":
             if not _text(application.get("executable") or application.get("product_identity")):
                 errors.append("native application executable/product identity is required")
+            executable_path = application.get("executable_path")
+            if executable_path is not None:
+                from app.agent.native_identity import normalize_windows_executable_path
+
+                if (
+                    not isinstance(executable_path, str)
+                    or normalize_windows_executable_path(executable_path) != executable_path
+                ):
+                    errors.append("native application executable_path must be a normalized absolute Windows path")
 
     lineage = canonical.get("source_review_lineage")
     if not isinstance(lineage, dict):
@@ -519,6 +535,8 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
     state_ids: set[str] = set()
     anchor_ids: set[str] = set()
     anchor_owner_by_id: dict[str, str] = {}
+    scroll_container_by_anchor_id: dict[str, str] = {}
+    text_field_by_anchor_id: dict[str, str] = {}
     reviewed_state_ids: set[str] = set()
     for index, state in enumerate(states):
         label = f"states[{index}]"
@@ -561,6 +579,10 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
             else:
                 anchor_ids.add(anchor_id)
                 anchor_owner_by_id[anchor_id] = state_id
+                if anchor.get("kind") == "region" and isinstance(anchor.get("scroll_container_id"), str):
+                    scroll_container_by_anchor_id[anchor_id] = anchor["scroll_container_id"]
+                if anchor.get("kind") in {"control", "region"} and isinstance(anchor.get("text_field_id"), str):
+                    text_field_by_anchor_id[anchor_id] = anchor["text_field_id"]
             if not _text(anchor.get("label") or anchor.get("value")):
                 errors.append(f"{anchor_label}.label is required")
         for transition_id in state.get("allowed_transition_ids") or []:
@@ -626,6 +648,20 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
             errors.append(f"forbidden semantic action: {action}")
         elif action not in _ALLOWED_ACTIONS:
             errors.append(f"unsupported semantic action: {action}")
+        if action == SCROLL_SEMANTIC_ACTION:
+            try:
+                ReviewedScrollParameters.from_payload(transition.get("scroll_parameters"))
+            except ValueError as error:
+                errors.append(f"{label}.scroll_parameters: {error}")
+        elif "scroll_parameters" in transition:
+            errors.append(f"{label}.non-scroll transition cannot carry scroll parameters")
+        if action == TEXT_SEMANTIC_ACTION:
+            try:
+                ReviewedTextParameters.from_payload(transition.get("text_parameters"))
+            except ValueError as error:
+                errors.append(f"{label}.text_parameters: {error}")
+        elif "text_parameters" in transition:
+            errors.append(f"{label}.non-text transition cannot carry text parameters")
         reference_fields = ("element_ref", "action_ref", "memory_ref", "locator_anchor")
         selected_references = [
             (reference_field, _text(transition.get(reference_field)))
@@ -634,6 +670,14 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
         ]
         if len(selected_references) != 1:
             errors.append(f"{label} must contain exactly one target reference")
+        if action == SCROLL_SEMANTIC_ACTION and len(selected_references) == 1:
+            parameters = transition.get("scroll_parameters")
+            if not isinstance(parameters, dict) or scroll_container_by_anchor_id.get(selected_references[0][1]) != parameters.get("target_container_id"):
+                errors.append(f"{label}.scroll container must match the reviewed region anchor")
+        if action == TEXT_SEMANTIC_ACTION and len(selected_references) == 1:
+            parameters = transition.get("text_parameters")
+            if not isinstance(parameters, dict) or text_field_by_anchor_id.get(selected_references[0][1]) != parameters.get("target_field_id"):
+                errors.append(f"{label}.text field must match the reviewed field anchor")
         for reference_field, reference in selected_references:
             if _contains_forbidden_semantic_reference(reference):
                 errors.append(
@@ -849,6 +893,13 @@ def _validate_asset_errors(asset: Mapping[str, Any]) -> tuple[dict[str, Any] | N
             errors.append(f"{label}.risk_policy safety gate is required")
         if isinstance(risk, dict):
             requires_confirmation = risk.get("requires_user_confirmation")
+            if action == SCROLL_SEMANTIC_ACTION and (requires_confirmation is not True or risk.get("risk_level") not in {"medium", "high"}):
+                errors.append(f"{label}.scroll requires independent user confirmation and medium-or-high risk")
+            if action in ACTIVITY_ACTIONS and (
+                requires_confirmation is not True
+                or risk.get("risk_level") not in {"medium", "high"}
+            ):
+                errors.append(f"{label}.activity requires independent user confirmation and medium-or-high risk")
             if type(requires_confirmation) is not bool:
                 errors.append(
                     f"{label}.risk_policy.requires_user_confirmation must be boolean"
@@ -1090,6 +1141,7 @@ class ReviewedWorkflowAssetStore:
         for key in ("objects", "active_by_asset", "events"):
             if not isinstance(registry.get(key), (dict if key != "events" else list)):
                 raise ValueError(f"invalid reviewed workflow asset registry {key}")
+        workflow_versions.validate_extension(registry)
         return registry
 
     def registry(self) -> dict[str, Any]:
@@ -1107,6 +1159,17 @@ class ReviewedWorkflowAssetStore:
         if candidate is None:
             raise ValueError("reviewed workflow asset is required")
         canonical = validate_reviewed_workflow_asset(candidate)
+        return self._publish_canonical(canonical, expected_registry_revision=expected_registry_revision)
+
+    def publish_version(self, asset: Mapping[str, Any], *, publication: dict[str, Any], expected_registry_revision: int) -> dict[str, Any]:
+        """原子登记审核拥有者提供的已验证绑定；此底层入口本身不批准图。"""
+        canonical = validate_reviewed_workflow_asset(asset)
+        version = workflow_versions.make_record(publication, canonical["asset_id"], content_sha256(canonical))
+        if isinstance(expected_registry_revision, bool) or not isinstance(expected_registry_revision, int) or expected_registry_revision < 0:
+            raise ValueError("expected_registry_revision must be a non-negative integer")
+        return self._publish_canonical(canonical, expected_registry_revision=expected_registry_revision, version=version)
+
+    def _publish_canonical(self, canonical: dict[str, Any], *, expected_registry_revision: int, version: dict[str, Any] | None = None) -> dict[str, Any]:
         object_bytes = canonical_json_bytes(canonical)
         object_sha = hashlib.sha256(object_bytes).hexdigest()
         asset_id = _text(canonical["asset_id"])
@@ -1120,8 +1183,14 @@ class ReviewedWorkflowAssetStore:
                 registry = self._load_registry()
                 revision = int(registry["registry_revision"])
                 active_sha = _text(registry.get("active_by_asset", {}).get(asset_id))
+                if version is not None and version["version_id"] in registry.get("workflow_versions", {}):
+                    stored = registry["workflow_versions"][version["version_id"]]
+                    if stored != version:
+                        raise ValueError("workflow version identity collision")
+                    verified = self._verify_object(object_path, object_sha, canonical)
+                    return workflow_versions.view(registry, stored, verified)
                 # 同一 hash 的重复 publish 是无副作用幂等操作，不消耗 CAS revision。
-                if active_sha == object_sha:
+                if version is None and active_sha == object_sha:
                     self._verify_object(object_path, object_sha, canonical)
                     return self._publish_result(
                         status="already_published",
@@ -1136,8 +1205,6 @@ class ReviewedWorkflowAssetStore:
                     )
                 if object_path.exists():
                     self._verify_object(object_path, object_sha, canonical)
-                else:
-                    _atomic_write(object_path, object_bytes)
                 next_revision = revision + 1
                 registry.setdefault("objects", {})[object_sha] = {
                     "asset_id": asset_id,
@@ -1146,15 +1213,20 @@ class ReviewedWorkflowAssetStore:
                     "status": "active",
                 }
                 registry.setdefault("active_by_asset", {})[asset_id] = object_sha
+                if version is not None:
+                    workflow_versions.add_version(registry, version)
+                if not object_path.exists():
+                    _atomic_write(object_path, object_bytes)
                 registry.setdefault("events", []).append(
                     {
                         "event_id": f"publish_{next_revision}",
-                        "event_type": "publish",
+                        "event_type": "publish_workflow_version" if version is not None else "publish",
                         "registry_revision": next_revision,
                         "asset_id": asset_id,
                         "content_sha256": object_sha,
                         "created_at": datetime.now(timezone.utc).isoformat(),
                         "artifact_is_authorization": False,
+                        **({"logical_workflow_id": version["logical_workflow_id"], "version_id": version["version_id"]} if version is not None else {}),
                     }
                 )
                 registry["registry_revision"] = next_revision
@@ -1167,6 +1239,8 @@ class ReviewedWorkflowAssetStore:
                         separators=(",", ":"),
                     ).encode("utf-8"),
                 )
+                if version is not None:
+                    return workflow_versions.view(registry, version, canonical)
         return self._publish_result(
             status="published",
             asset_id=asset_id,
@@ -1236,6 +1310,77 @@ class ReviewedWorkflowAssetStore:
 
     def load(self, asset_id: str) -> dict[str, Any]:
         return self.load_active(asset_id)
+
+    def load_workflow_version(self, logical_workflow_id: str, version_id: str | None = None) -> dict[str, Any]:
+        logical = workflow_versions.logical_id(logical_workflow_id)
+        if version_id is not None:
+            workflow_versions.version_id(version_id)
+        with _REGISTRY_LOCK:
+            registry = self._load_registry()
+            selected = version_id or registry.get("current_version_by_workflow", {}).get(logical)
+            record = registry.get("workflow_versions", {}).get(selected)
+            if not isinstance(record, dict) or record["logical_workflow_id"] != logical:
+                raise ValueError("selected workflow version was not found in the requested workflow")
+            object_sha = record["asset_sha256"]
+            asset = self._verify_object(self.objects_root / f"{object_sha}.json", object_sha)
+            if asset["asset_id"] != record["asset_id"]:
+                raise ValueError("workflow version asset identity mismatch")
+            return workflow_versions.view(registry, record, asset)
+
+    def set_current_version(self, logical_workflow_id: str, version_id: str, *, expected_registry_revision: int) -> dict[str, Any]:
+        return self._change_workflow_version(logical_workflow_id, version_id, expected_registry_revision, withdraw=False)
+
+    def withdraw_version(self, logical_workflow_id: str, version_id: str, *, expected_registry_revision: int) -> dict[str, Any]:
+        return self._change_workflow_version(logical_workflow_id, version_id, expected_registry_revision, withdraw=True)
+
+    def _change_workflow_version(self, logical_workflow_id: str, version_id: str, expected_revision: int, *, withdraw: bool) -> dict[str, Any]:
+        logical = workflow_versions.logical_id(logical_workflow_id)
+        version = workflow_versions.version_id(version_id)
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
+            raise ValueError("expected_registry_revision must be a non-negative integer")
+        with _REGISTRY_LOCK:
+            self._assert_storage_layout()
+            with _exclusive_file_lock(self.lock_path):
+                registry = self._load_registry()
+                record = registry.get("workflow_versions", {}).get(version)
+                if not isinstance(record, dict) or record["logical_workflow_id"] != logical:
+                    raise ValueError("selected workflow version was not found in the requested workflow")
+                current = registry["current_version_by_workflow"]
+                withdrawn = registry["withdrawn_workflow_versions"]
+                if not withdraw and version in withdrawn:
+                    raise ValueError("withdrawn workflow version cannot become current")
+                if not withdraw:
+                    # 重复选择也须验证资产；撤回损坏资产不应被缺文件拦住。
+                    sha = record["asset_sha256"]
+                    self._verify_object(self.objects_root / f"{sha}.json", sha)
+                repeated = version in withdrawn if withdraw else current.get(logical) == version
+                if not repeated:
+                    if registry["registry_revision"] != expected_revision:
+                        raise ValueError("registry revision mismatch")
+                    if withdraw:
+                        withdrawn.append(version)
+                        withdrawn.sort()
+                        if current.get(logical) == version:
+                            del current[logical]
+                    else:
+                        current[logical] = version
+                    registry["registry_revision"] += 1
+                    registry["events"].append({
+                        "event_id": f"workflow_version_{registry['registry_revision']}",
+                        "event_type": "withdraw_workflow_version" if withdraw else "select_workflow_version",
+                        "logical_workflow_id": logical, "version_id": version,
+                        "registry_revision": registry["registry_revision"],
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "artifact_is_authorization": False,
+                    })
+                    workflow_versions.validate_extension(registry)
+                    _atomic_write(self.registry_path, json.dumps(registry, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+                return {"contract_version": "reviewed_workflow_version_selection_v1",
+                        "logical_workflow_id": logical, "version_id": version,
+                        "status": "withdrawn" if withdraw else "current",
+                        "current_version_id": current.get(logical),
+                        "registry_revision": registry["registry_revision"],
+                        "artifact_is_authorization": False, "execute_binding_enabled": False}
 
     def load_published(self, asset_id: str) -> dict[str, Any]:
         return self.load_active(asset_id)

@@ -1,0 +1,15 @@
+{
+  "type":"object",
+  "required":["contract_version","projection_id","parent_evidence","review_projection","capture_lineage_ref","execution_origin","content_sha256"],
+  "properties":{
+    "contract_version":{"const":"hybrid_selection_review_record_v1"},
+    "projection_id":{"type":"string","minLength":1},
+    "parent_evidence":{"type":"object"},
+    "review_projection":{"type":"object"},
+    "capture_lineage_ref":{"type":"object","required":["id","content_sha256"],"properties":{"id":{"type":"string","minLength":1},"content_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"additionalProperties":false},
+    "execution_origin":{"enum":["replay","actual_model"]},
+    "actual_execution":{"type":["object","null"]},
+    "content_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}
+  },
+  "additionalProperties":false
+}

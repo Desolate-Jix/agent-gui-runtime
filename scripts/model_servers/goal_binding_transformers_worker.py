@@ -108,7 +108,11 @@ def _parse_phi(raw: object, *, width: int, height: int) -> dict[str, object]:
     try: x, y = float(match.group(1)), float(match.group(2))
     except ValueError as exc: raise ValueError("Phi-Ground-Any point is invalid") from exc
     if not all(math.isfinite(v) and 0 <= v <= 10000 for v in (x,y)): raise ValueError("Phi-Ground-Any point is out of range")
-    ratio = min(1680 / width, 1008 / height)
+    from scripts.model_servers.goal_binding_provider_runtimes import phi_image_geometry
+    geometry = phi_image_geometry(width, height)
+    ratio = geometry["reshape_ratio"]
+    if x / 10000 * 1680 >= geometry["resized_dimensions"][0] or y / 10000 * 1008 >= geometry["resized_dimensions"][1]:
+        raise ValueError("Phi-Ground-Any point falls in padding or outside capture")
     px, py = x / 10000 * 1680 / ratio, y / 10000 * 1008 / ratio
     if not all(math.isfinite(v) for v in (px,py)) or not (0 <= px < width and 0 <= py < height): raise ValueError("Phi-Ground-Any point falls in padding or outside capture")
     return {"point": [px, py]}
@@ -145,20 +149,26 @@ def _dispatch_provider(
 
 
 def _verify_code_identity(value: object) -> dict[str, str]:
-    if not isinstance(value, Mapping) or set(value) != {"worker_sha256", "provider_runtime_sha256", "worker_python_sha256"}:
+    fields = {"worker_sha256", "provider_runtime_sha256", "worker_python_sha256", "goal_binding_model_callers_sha256", "goal_binding_deployed_artifacts_sha256", "goal_binding_gui_actor_deployed_artifacts_sha256", "model_test_storage_sha256"}
+    if not isinstance(value, Mapping) or set(value) != fields:
         raise ValueError("worker code identity is unavailable")
     runtime_path = Path(__file__).with_name("goal_binding_provider_runtimes.py")
+    repository = Path(__file__).resolve().parents[2]
     observed = {
         "worker_sha256": _sha_file(Path(__file__)),
         "provider_runtime_sha256": _sha_file(runtime_path),
         "worker_python_sha256": _sha_file(Path(sys.executable)),
+        "goal_binding_model_callers_sha256": _sha_file(repository / "app/learn/hybrid/goal_binding_model_callers.py"),
+        "goal_binding_deployed_artifacts_sha256": _sha_file(repository / "app/learn/hybrid/goal_binding_deployed_artifacts.py"),
+        "goal_binding_gui_actor_deployed_artifacts_sha256": _sha_file(repository / "app/learn/hybrid/goal_binding_gui_actor_deployed_artifacts.py"),
+        "model_test_storage_sha256": _sha_file(repository / "app/learn/hybrid/model_test_storage.py"),
     }
     if dict(value) != observed:
         raise ValueError("worker code identity changed after request sealing")
     return observed
 
 
-def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | None = None) -> dict[str, object]:
+def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | None = None, dispatcher: Callable[..., object] | None = None, session_root: Path | None = None) -> dict[str, object]:
     allowed = {
         "image_path", "goal", "profile", "screenshot", "parent_identity_path",
         "incumbent_projection", "incumbent_request", "artifact_root", "listener_port",
@@ -168,14 +178,14 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
     image_path, goal, profile, screenshot = payload["image_path"], payload["goal"], payload["profile"], payload["screenshot"]
     if not isinstance(image_path, str) or not isinstance(goal, str) or not goal.strip() or len(goal) > 512 or not isinstance(profile, Mapping) or not isinstance(screenshot, Mapping): raise ValueError("worker request is invalid")
     path = Path(image_path)
-    if not path.is_file() or _sha(path.read_bytes()) != screenshot.get("sha256"): raise ValueError("worker screenshot copy/hash changed")
+    if not path.is_file() or path.stat().st_size > 32 * 1024 * 1024 or _sha(path.read_bytes()) != screenshot.get("sha256"): raise ValueError("worker screenshot copy/hash changed or exceeds byte bound")
     from PIL import Image
     try:
         with Image.open(path) as image:
             dimensions = (image.width, image.height)
     except (OSError, SyntaxError) as exc:
         raise ValueError("worker screenshot copy is not a readable image") from exc
-    if dimensions != (screenshot.get("width"), screenshot.get("height")):
+    if dimensions != (screenshot.get("width"), screenshot.get("height")) or dimensions[0] * dimensions[1] > 32 * 1024 * 1024:
         raise ValueError("worker screenshot dimensions changed")
     identity_path = payload["parent_identity_path"]
     if not isinstance(identity_path, str): raise ValueError("worker identity path is invalid")
@@ -185,8 +195,9 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
     if not isinstance(artifact_root_value, str):
         raise ValueError("worker artifact root is invalid")
     artifact_root = Path(artifact_root_value).resolve()
-    if not path.resolve().is_relative_to(artifact_root) or not Path(identity_path).resolve().is_relative_to(artifact_root):
-        raise ValueError("worker request artifacts escape the supplied artifact root")
+    request_root = session_root.resolve() if session_root is not None else artifact_root
+    if not path.resolve().is_relative_to(request_root) or not Path(identity_path).resolve().is_relative_to(request_root):
+        raise ValueError("worker request artifacts escape the verified request root")
     provider_id = profile.get("provider_id")
     has_incumbent = payload.get("incumbent_projection") is not None or payload.get("incumbent_request") is not None
     if provider_id == "qwen3_vl_8b_q4_k_m":
@@ -199,14 +210,20 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
         "worker_sha256": _sha_file(Path(__file__)),
         "provider_runtime_sha256": _sha_file(Path(__file__).with_name("goal_binding_provider_runtimes.py")),
         "worker_python_sha256": _sha_file(Path(sys.executable)),
+        "goal_binding_model_callers_sha256": _sha_file(Path(__file__).resolve().parents[2] / "app/learn/hybrid/goal_binding_model_callers.py"),
+        "goal_binding_deployed_artifacts_sha256": _sha_file(Path(__file__).resolve().parents[2] / "app/learn/hybrid/goal_binding_deployed_artifacts.py"),
+        "goal_binding_gui_actor_deployed_artifacts_sha256": _sha_file(Path(__file__).resolve().parents[2] / "app/learn/hybrid/goal_binding_gui_actor_deployed_artifacts.py"),
+        "model_test_storage_sha256": _sha_file(Path(__file__).resolve().parents[2] / "app/learn/hybrid/model_test_storage.py"),
     }
     started = time.perf_counter()
-    dispatched = _dispatch_provider(
+    dispatched = (dispatcher or _dispatch_provider)(
         profile=profile, image_path=path, goal=goal, artifact_root=artifact_root,
         incumbent_projection=payload.get("incumbent_projection"),
         incumbent_request=payload.get("incumbent_request"),
         listener_port=payload.get("listener_port") if isinstance(payload.get("listener_port"), int) else None,
     )
+    if _sha_file(path) != screenshot.get("sha256"):
+        raise ValueError("worker screenshot changed during inference")
     runtime_telemetry: dict[str, object] = {
         "generation_tokens": None, "peak_vram_bytes": None,
         "peak_vram_status": "unavailable", "provider_stdout_bytes": 0,
@@ -227,14 +244,13 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
     else:
         raw, dispatcher_parsed = dispatched, None
     kind = _native_kind_for_provider(str(profile.get("provider_id") or ""))
-    if kind == "ui_venus_point_v1": parsed, raw_text = _parse_ui_venus(raw), _parse_ui_venus(raw)
-    elif kind == "phi_ground_any_v1":
-        width, height = screenshot.get("width"), screenshot.get("height")
-        if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0: raise ValueError("worker screenshot dimensions are invalid")
-        raw_text, parsed = str(raw), _parse_phi(raw, width=width, height=height)
-    else:
-        raw_text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
-        parsed = dispatcher_parsed if dispatcher_parsed is not None else raw
+    raw_text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+    failure = None
+    try:
+        parsed = _project_native(kind, raw_text, screenshot=screenshot)
+    except (ValueError, TypeError) as exc:
+        parsed = None
+        failure = {"kind": "malformed_native_output", "message": str(exc), "attempted": True, "terminal": False}
     timeout = profile.get("timeout_seconds", 0)
     if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 0:
         raise ValueError("worker timeout identity is invalid")
@@ -255,17 +271,179 @@ def _run_provider_once(payload: Mapping[str, object], *, request_bytes: int | No
         "code_identity": verified_code,
         "child_cleanup": child_cleanup,
     }
-    return native_trace_envelope(
+    if kind == "phi_ground_any_v1":
+        from scripts.model_servers.goal_binding_provider_runtimes import phi_image_geometry
+        lineage["preprocessing_geometry"] = phi_image_geometry(screenshot["width"], screenshot["height"])
+    envelope = native_trace_envelope(
         profile_identity=_identity(profile), raw_native_output=raw_text,
         parsed_native=parsed, resource_metrics=metrics,
         worker_process_identity=identity, request_lineage=lineage,
     )
+    envelope.update(contract_version="goal_binding_native_trace_v2", outcome="provider_failure" if failure else "native_output", failure=failure)
+    return envelope
+
+
+def _reject_constant(value: str) -> None:
+    raise ValueError("native JSON contains a non-finite number")
+
+
+def _project_native(kind: str, raw: str, *, screenshot: Mapping[str, object]) -> object:
+    if kind == "ui_venus_point_v1":
+        return _parse_ui_venus(raw)
+    if kind == "phi_ground_any_v1":
+        return _parse_phi(raw, width=int(screenshot["width"]), height=int(screenshot["height"]))
+    if kind in {"gui_actor_topk_points_v1", "qwen_goal_binding_array_v1"}:
+        value = json.loads(raw, object_pairs_hook=_closed_object, parse_constant=_reject_constant)
+        if kind == "qwen_goal_binding_array_v1":
+            if not isinstance(value, list):
+                raise ValueError("incumbent native output must be a bare JSON array")
+            return value
+        if not isinstance(value, Mapping) or not isinstance(value.get("topk_points"), list):
+            raise ValueError("GUI-Actor native output must contain topk_points")
+        return {"topk_points": value["topk_points"]}
+    return raw
+
+
+def atomic_write(path: Path, body: bytes) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    if path.exists() or temporary.exists():
+        raise ValueError("mailbox path already exists")
+    with temporary.open("xb") as stream:
+        stream.write(body)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def write_json(path: Path, value: object) -> None:
+    atomic_write(path, json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+
+
+def read_json(path: Path, maximum: int = 1024 * 1024) -> object:
+    if path.stat().st_size > maximum:
+        raise ValueError("mailbox JSON exceeds byte bound")
+    return json.loads(path.read_bytes().decode("utf-8"), object_pairs_hook=_closed_object, parse_constant=_reject_constant)
+
+
+def provider_failure(exc: Exception, *, attempted: bool) -> dict[str, object]:
+    if isinstance(exc, TimeoutError):
+        kind = "provider_timeout"
+    elif "provider_platform_incompatible" in str(exc):
+        kind = "provider_platform_incompatible"
+    elif isinstance(exc, ImportError):
+        kind = "provider_dependency_failure"
+    elif "out of memory" in str(exc).casefold() or isinstance(exc, MemoryError):
+        kind = "provider_oom"
+    else:
+        kind = "provider_runtime_failure"
+    return {"kind": kind, "message": str(exc)[:4096], "attempted": attempted, "terminal": True}
+
+
+def failure_envelope(payload: Mapping[str, object], failure: Mapping[str, object], *, identity: Mapping[str, object], request_bytes: int) -> dict[str, object]:
+    screenshot, profile = payload["screenshot"], payload["profile"]
+    envelope = native_trace_envelope(
+        profile_identity=_identity(profile), raw_native_output="", parsed_native=None,
+        worker_process_identity=identity,
+        resource_metrics={"latency_ms": 0, "peak_vram_bytes": None, "peak_vram_status": "unavailable", "generation_tokens": None, "request_bytes": request_bytes, "provider_stdout_bytes": 0, "provider_stderr_bytes": 0, "timeout_seconds": profile["timeout_seconds"]},
+        request_lineage={"screenshot_sha256": screenshot["sha256"], "screenshot_dimensions": [screenshot["width"], screenshot["height"]], "capture_id": screenshot["capture_id"], "code_identity": payload["code_identity"], "child_cleanup": None},
+    )
+    envelope.update(contract_version="goal_binding_native_trace_v2", outcome="provider_failure", failure=dict(failure))
+    return envelope
+
+
+def _open_session(config: Mapping[str, object]) -> object:
+    profile = config["profile"]
+    module_name, _ = profile["runtime"]["entrypoint"].split(":", 1)
+    module = importlib.import_module(module_name)
+    return module.open_session(profile=profile, artifact_root=Path(config["artifact_root"]), session_root=Path(config["session_root"]), scope_name=config["scope_name"], listener_port=config["listener_port"])
+
+
+def serve_session(config_path: Path) -> None:
+    root = config_path.resolve().parent
+    config = read_json(config_path)
+    required = {"contract_version", "session_id", "run_id", "arm_id", "session_root", "scope_name", "profile", "artifact_root", "code_identity", "listener_port"}
+    if not isinstance(config, Mapping) or set(config) != required or config["contract_version"] != "goal_binding_provider_session_v1" or Path(config["session_root"]).resolve() != root:
+        raise ValueError("worker session identity is invalid")
+    identity = read_json(root / "parent-identity.json")
+    from app.learn.hybrid.windows_process_scope import _identity_for_pid, WindowsProcessScope
+    observed_identity = _identity_for_pid(os.getpid())
+    import psutil
+    ancestors = {process.pid for process in psutil.Process().parents()}
+    if identity != _identity_for_pid(identity["pid"]) or (identity != observed_identity and identity["pid"] not in ancestors):
+        raise ValueError("worker launcher identity/ancestry mismatch")
+    launcher_identity, identity = identity, observed_identity
+    scope = WindowsProcessScope(config["scope_name"], create=False)
+    try:
+        if not {os.getpid(), launcher_identity["pid"]} <= set(scope.pids()):
+            raise ValueError("worker is outside its exact Job")
+    finally:
+        scope.close()
+    _verify_code_identity(config["code_identity"])
+    write_json(root / "worker-identity.json", identity)
+    digest = _sha_file(config_path)
+    runtime = None
+    failure = None
+    try:
+        try:
+            runtime = _open_session(config)
+        except (ImportError, OSError, RuntimeError, ValueError, TypeError, AttributeError, MemoryError) as exc:
+            from scripts.model_servers.goal_binding_provider_runtimes import ProviderIntegrityError
+            if isinstance(exc, ProviderIntegrityError):
+                raise
+            failure = provider_failure(exc, attempted=False)
+        runtime_state = {"server_process_identity": getattr(runtime, "identity", None), "listener_port": getattr(runtime, "port", None)}
+        write_json(root / "ready.json", {"session_sha256": digest, "worker_process_identity": identity, "launcher_process_identity": launcher_identity, "runtime_state": runtime_state, "failure": failure})
+        while failure is not None and not (root / "stop.json").exists():
+            time.sleep(0.01)
+        sequence = 1
+        while sequence <= 25 and not (root / "stop.json").exists() and failure is None:
+            path = root / "requests" / f"{sequence:06d}.json"
+            if not path.exists():
+                time.sleep(0.01)
+                continue
+            request = read_json(path)
+            request_sha256 = _sha_file(path)
+            if not isinstance(request, Mapping) or set(request) != {"session_sha256", "sequence", "payload"} or request["session_sha256"] != digest or request["sequence"] != sequence:
+                raise ValueError("worker mailbox request identity mismatch")
+            payload = request["payload"]
+            if not isinstance(payload, Mapping) or payload.get("profile") != config["profile"] or payload.get("code_identity") != config["code_identity"] or payload.get("artifact_root") != config["artifact_root"] or Path(payload.get("parent_identity_path", "")).resolve() != root / "worker-identity.json" or Path(payload.get("image_path", "")).resolve() != root / "requests" / f"{sequence:06d}.png":
+                raise ValueError("worker mailbox payload identity mismatch")
+            def invoke(**kwargs):
+                nonlocal failure
+                try:
+                    return runtime(**kwargs)
+                except (ImportError, OSError, RuntimeError, ValueError, TypeError, AttributeError, MemoryError) as exc:
+                    from scripts.model_servers.goal_binding_provider_runtimes import ProviderIntegrityError
+                    if isinstance(exc, ProviderIntegrityError):
+                        raise
+                    failure = provider_failure(exc, attempted=True)
+                    return ""
+            envelope = _run_provider_once(payload, request_bytes=path.stat().st_size, dispatcher=invoke, session_root=root)
+            if failure:
+                envelope = failure_envelope(payload, failure, identity=identity, request_bytes=path.stat().st_size)
+            envelope["request_lineage"].update(session_id=config["session_id"], sequence=sequence, session_sha256=digest, request_sha256=request_sha256)
+            atomic_write(root / "raw" / f"{sequence:06d}.utf8", envelope["raw_native_output"].encode("utf-8"))
+            write_json(root / "responses" / f"{sequence:06d}.json", envelope)
+            sequence += 1
+    except (OSError, ValueError, RuntimeError) as exc:
+        write_json(root / "fatal.json", {"session_sha256": digest, "error": str(exc)[:4096]})
+        raise
+    finally:
+        cleanup = runtime.close() if runtime is not None else {"status": "not_loaded"}
+        write_json(root / "stopped.json", {"session_sha256": digest, "worker_process_identity": identity, "runtime_cleanup": cleanup})
 
 
 def main(argv: list[str] | None = None) -> int:
     parser=argparse.ArgumentParser(description="Run one bounded goal-binding provider request.")
     parser.add_argument("--execute", action="store_true"); parser.add_argument("--request-json", type=Path)
+    parser.add_argument("--session-json", type=Path)
     args=parser.parse_args(argv)
+    if args.execute and args.session_json is not None:
+        repository_root = str(Path(__file__).resolve().parents[2])
+        if repository_root not in sys.path:
+            sys.path.insert(0, repository_root)
+        serve_session(args.session_json)
+        return 0
     if not args.execute or args.request_json is None: parser.error("--execute and --request-json are required")
     try:
         request_raw = args.request_json.read_bytes()

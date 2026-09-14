@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.agent.action_semantics import ACTIVITY_ACTIONS
+
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
@@ -14,6 +16,7 @@ from app.learn.interface_assets import _merge_by_identifier, _project_human_desc
 AGENT_EVIDENCE_CONTRACT = "agent_evidence_context_v1"
 AGENT_EVIDENCE_MIGRATION_REPORT_CONTRACT = "agent_evidence_migration_report_v1"
 _SUPPORTED_AGENT_ACTION_TYPES = {
+    *ACTIVITY_ACTIONS,
     "back",
     "click",
     "close_modal",

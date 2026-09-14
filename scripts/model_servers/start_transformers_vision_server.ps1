@@ -1,5 +1,6 @@
 param(
     [string]$ModelPath = "",
+    [string]$PythonPath = "",
     [string]$ModelName = "inclusionAI/VISTA-4B",
     [Alias("Host")]
     [string]$HostName = "127.0.0.1",
@@ -14,11 +15,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$modelInput = if ($ModelPath) { $ModelPath } else { Join-Path $root "models\vista-4b-safetensors" }
+$modelInput = if ($ModelPath) { $ModelPath } else { Join-Path $root "models\vista-4b-safetensors-sharded" }
 $model = Resolve-Path $modelInput
-$serverScript = Resolve-Path (Join-Path $PSScriptRoot "vista_openai_server.py")
+$serverScript = Resolve-Path (Join-Path $root "app\vision\model_workers\vista_openai_server.py")
 $venvPython = Join-Path $root ".venv\Scripts\python.exe"
-$python = if (Test-Path $venvPython) { $venvPython } else { "python" }
+$python = if ($PythonPath) { (Resolve-Path $PythonPath).Path } elseif (Test-Path $venvPython) { $venvPython } else { "python" }
 
 & $python `
     $serverScript.Path `

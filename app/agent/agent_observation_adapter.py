@@ -1,6 +1,9 @@
-"""Web reference adapter from server-trusted reviewed evidence to AgentObservationV1."""
+"""把服务端可信的网页或原生审核证据投影为 AgentObservationV1。"""
 
 from __future__ import annotations
+
+from app.agent.action_semantics import READ_ONLY_REVIEW_ACTIONS
+from app.agent.action_parameters import reviewed_action_parameter_fields, validate_reviewed_action_grounding_geometry
 
 from collections.abc import Mapping
 import hashlib
@@ -11,6 +14,7 @@ from typing import Any
 
 from app.agent.reviewed_workflow_asset import content_sha256, validate_reviewed_workflow_asset
 from app.agent.reviewed_workflow_replay import resolve_current_state
+from app.agent.native_identity import asset_application_identity_key
 from app.agent.runtime_contracts import AgentObservationV1, validate_agent_observation_v1
 from app.learn.interface_workflow_review import load_interface_workflow_agent_context
 
@@ -26,11 +30,7 @@ def _as_list(value: object) -> list[Mapping[str, Any]]:
 
 
 def _expected_application_key(application: Mapping[str, Any]) -> str:
-    if application.get("kind") == "web":
-        domain = str(application.get("canonical_domain") or "").strip()
-        if domain:
-            return f"web:{domain}"
-    raise ValueError("reviewed asset application identity is unsupported")
+    return asset_application_identity_key(application)
 
 
 def _safe_stop_action() -> dict[str, object]:
@@ -68,6 +68,26 @@ def _stable_suffix(value: str, fallback: str) -> str:
     return normalized[:96] or fallback
 
 
+def _capture_evidence_ref(asset_sha: str, current_observation: Mapping[str, Any]) -> str:
+    capture_id = str(current_observation.get("capture_id") or "")
+    screenshot_sha = str(current_observation.get("screenshot_sha256") or "")
+    viewport = current_observation.get("viewport_size")
+    capture_parts = [
+        "capture",
+        capture_id,
+        screenshot_sha,
+        json.dumps(viewport, sort_keys=True, separators=(",", ":")),
+    ]
+    if "native_identity" in current_observation:
+        capture_parts.append(json.dumps(
+            current_observation.get("native_identity"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ))
+    return _content_ref(asset_sha, *capture_parts)
+
+
 def _capture_bound_refs(
     asset_sha: str,
     current_observation: Mapping[str, Any],
@@ -75,14 +95,7 @@ def _capture_bound_refs(
 ) -> tuple[str, str, list[str]]:
     capture_id = str(current_observation.get("capture_id") or "")
     screenshot_sha = str(current_observation.get("screenshot_sha256") or "")
-    viewport = current_observation.get("viewport_size")
-    capture_ref = _content_ref(
-        asset_sha,
-        "capture",
-        capture_id,
-        screenshot_sha,
-        json.dumps(viewport, sort_keys=True, separators=(",", ":")),
-    )
+    capture_ref = _capture_evidence_ref(asset_sha, current_observation)
     anchor_bindings = sorted(
         (
             str(item.get("anchor_id") or ""),
@@ -202,7 +215,7 @@ def _trusted_reviewed_blockers(
     ]
     if len(node_matches) != 1:
         raise ValueError("reviewed blocker node integrity mismatch")
-    raw = node_matches[0].get("blockers")
+    raw = node_matches[0].get("blockers", [])
     if not isinstance(raw, list):
         raise ValueError("reviewed blockers must be an array")
     blockers: list[Mapping[str, Any]] = []
@@ -216,6 +229,34 @@ def _trusted_reviewed_blockers(
     if len(projected_items) != len(blockers):
         raise ValueError("reviewed blocker projection integrity mismatch")
     return blockers
+
+
+def _verify_exact_compiled_runtime_projection(
+    *,
+    asset: Mapping[str, Any],
+    lineage: Mapping[str, Any],
+    project_root: Path,
+) -> None:
+    """仅接受可从当前人审源逐字节重编译出的运行时资产。"""
+
+    source_path = str(lineage.get("source_workflow_path") or "").strip()
+    source_sha256 = str(lineage.get("source_workflow_sha256") or "").strip()
+    if not source_path or not source_sha256:
+        raise ValueError("compiled runtime projection lineage is incomplete")
+    from app.agent.reviewed_workflow_compiler import compile_reviewed_workflow_asset_v2
+
+    compiled = compile_reviewed_workflow_asset_v2(
+        project_root=project_root,
+        source_workflow_path=source_path,
+        expected_source_workflow_sha256=source_sha256,
+    )
+    if compiled.get("status") != "compiled":
+        raise ValueError("compiled runtime projection source is no longer valid")
+    candidate = compiled.get("asset")
+    if not isinstance(candidate, Mapping):
+        raise ValueError("compiled runtime projection produced no asset")
+    if content_sha256(candidate) != content_sha256(asset):
+        raise ValueError("compiled runtime projection asset does not match current source")
 
 
 def adapt_reviewed_context_to_agent_observation_v1(
@@ -271,6 +312,7 @@ def adapt_reviewed_context_to_agent_observation_v1(
     state_id = str(expected_resolution.get("state_id") or "") if resolved else ""
     state = next((item for item in asset["states"] if item.get("state_id") == state_id), None)
     interface: Mapping[str, Any] | None = None
+    compiled_runtime_projection = False
     if state is not None and state.get("availability") == "reviewed":
         interface = _find_interface(context, workflow_id=workflow_id, source_node_id=str(state.get("source_node_id") or ""))
         if interface is not None:
@@ -280,8 +322,13 @@ def adapt_reviewed_context_to_agent_observation_v1(
             if str(interface.get("source_asset_sha256") or "") != str(lineage.get("source_workflow_sha256") or ""):
                 raise ValueError("source asset mismatch")
             if (interface.get("readiness") or {}).get("status") != "agent_usable":
-                raise ValueError("current interface is not agent_usable")
-            elif interface.get("artifact_is_authorization") is not False or interface.get("execute_binding_enabled") is not False:
+                _verify_exact_compiled_runtime_projection(
+                    asset=asset,
+                    lineage=lineage,
+                    project_root=Path(project_root),
+                )
+                compiled_runtime_projection = True
+            if interface.get("artifact_is_authorization") is not False or interface.get("execute_binding_enabled") is not False:
                 raise ValueError("current interface evidence must be non-authorizing")
             projection = _mapping(interface.get("projection_contract"), "interface projection contract")
             if (
@@ -331,24 +378,29 @@ def adapt_reviewed_context_to_agent_observation_v1(
             if safe_required:
                 safe_reason = "policy_blocked"
         allowed_ids = {str(item) for item in state.get("allowed_transition_ids") or []}
-        trusted_actions = [
-            item
-            for item in _as_list(interface.get("available_actions"))
-            if item.get("review_status") == "human_approved"
-        ]
         transitions = {str(item.get("transition_id") or ""): item for item in asset["transitions"]}
-        trusted_transition_ids = {
-            transition_id
-            for transition_id in allowed_ids
-            if transition_id in transitions
-            and any(
-                str(action.get("action_id") or "")
-                == str(transitions[transition_id].get("display_name") or "")
-                and str(action.get("action_type") or "")
-                == str(transitions[transition_id].get("semantic_action") or "")
-                for action in trusted_actions
-            )
-        }
+        if compiled_runtime_projection:
+            trusted_transition_ids = {
+                transition_id for transition_id in allowed_ids if transition_id in transitions
+            }
+        else:
+            trusted_actions = [
+                item
+                for item in _as_list(interface.get("available_actions"))
+                if item.get("review_status") == "human_approved"
+            ]
+            trusted_transition_ids = {
+                transition_id
+                for transition_id in allowed_ids
+                if transition_id in transitions
+                and any(
+                    str(action.get("action_id") or "")
+                    == str(transitions[transition_id].get("display_name") or "")
+                    and str(action.get("action_type") or "")
+                    == str(transitions[transition_id].get("semantic_action") or "")
+                    for action in trusted_actions
+                )
+            }
         for transition_id in sorted(trusted_transition_ids):
             transition = transitions.get(transition_id)
             if transition is None:
@@ -365,7 +417,7 @@ def adapt_reviewed_context_to_agent_observation_v1(
                 for item in transition["post_action_verification"]["semantic_success_rules"]
                 if isinstance(item, Mapping) and str(item.get("rule_id") or "")
             ]
-            if not rule_refs or semantic_action not in {"open_detail", "open_apply_flow", "back", "close_modal"}:
+            if not rule_refs or semantic_action not in READ_ONLY_REVIEW_ACTIONS:
                 continue
             target_state = str(transition.get("target_state_id") or "")
             actions.append({
@@ -376,6 +428,7 @@ def adapt_reviewed_context_to_agent_observation_v1(
                 "verification_rule_refs": rule_refs,
                 "risk_level": transition["risk_policy"].get("risk_level"),
                 "requires_user_confirmation": transition["risk_policy"].get("requires_user_confirmation"),
+                **reviewed_action_parameter_fields(transition),
             })
         if not actions and safe_reason is None:
             safe_reason = "no_available_action"
@@ -405,7 +458,10 @@ def adapt_reviewed_context_to_agent_observation_v1(
             readable = {"source_interface_id": state["source_node_id"], "display_name": state["display_name"], "surface_type": state["state_type"], "responsibility": "Stop at the reviewed terminal boundary."}
         elif interface is not None:
             meta = _mapping(interface["interface"], "interface evidence metadata")
-            readable = {"source_interface_id": meta["interface_id"], "display_name": meta["display_name"], "surface_type": meta["surface_type"], "responsibility": meta["responsibility"]}
+            responsibility = meta["responsibility"]
+            if compiled_runtime_projection and not responsibility:
+                responsibility = "Current reviewed runtime state."
+            readable = {"source_interface_id": meta["interface_id"], "display_name": meta["display_name"], "surface_type": meta["surface_type"], "responsibility": responsibility}
     payload = {
         "contract_version": "agent_observation_v1", "observation_id": observation_id,
         "session_id": session_id, "workflow": workflow,

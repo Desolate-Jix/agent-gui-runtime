@@ -43,7 +43,7 @@ from app.api.models.request import (
 )
 from app.api.models.response import APIResponse, ActionResultData, ErrorModel
 from app.trace.transition import TransitionRecord
-from app.seek.scroll_containers import (
+from app.application_profiles.seek.scroll_containers import (
     discover_seek_scroll_containers,
     get_scroll_container,
     seek_scroll_target_for_goal,
@@ -876,6 +876,8 @@ def _agent_execution_guidance(
                     "reason": "dry_run_plan_was_allowed_but_no_bound_window_was_available_to_save_an_approved_plan",
                 }
             )
+    elif status in {"executed", "executed_observed"}:
+        guidance.update({"next_action": "inspect_post_action_image", "task_effect_verified": False})
     elif status == "executed_verified":
         guidance.update({"next_action": "done"})
     elif status in {"blocked", "execution_failed", "verification_failed"}:
@@ -1608,6 +1610,8 @@ def _capture_pre_action_state_with_foreground_retry(
 @router.post("/execute_recognition_plan", response_model=APIResponse)
 def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIResponse:
     timer = RuntimeTimer()
+    from app.core.local_input_policy import require_local_operator_input
+    local_policy_off = require_local_operator_input(window_manager)
     bound = window_manager.get_bound_window()
     live_capture: Optional[dict[str, Any]] = None
     auto_observe_trace: dict[str, Any] | None = None
@@ -2273,6 +2277,18 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         plan = plan_response.data["result"]
         pre_click = plan.get("pre_click_decision") or {}
         selected_point = _extract_action_point(plan)
+        if local_policy_off:
+            from app.core.local_recognition_policy import local_recognition_selection
+            try:
+                pre_click = local_recognition_selection(plan, image_path=image_path,
+                    viewport_size=_coordinate_size_from_live_capture(live_capture))
+            except ValueError as error:
+                return APIResponse(success=False, message="Current recognition geometry is unavailable",
+                    data={"failure_reason": "local_recognition_invalid", "action_executed": False,
+                        "automatic_safety_interception": False, "automatic_retry_allowed": False,
+                        "recognition_plan": plan, "timings": timer.to_dict()},
+                    error=ErrorModel(code="local_recognition_invalid", details=str(error)))
+            selected_point = pre_click["selected_click_point"]
         plan_trace_path = plan.get("trace_path")
         if request.interface_memory_id and pre_click.get("allowed") and isinstance(selected_point, dict):
             local_target_validation = validate_current_target_text_anchor(
@@ -2372,6 +2388,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         )
     click_timing = _click_timing_options(low_risk_visual_fast_lane=low_risk_visual_fast_lane)
     if isinstance(execution_path, dict):
+        execution_path["phase"] = "execution"
         execution_path["low_risk_visual_fast_lane"] = low_risk_visual_fast_lane
         execution_path["click_timing_reason"] = click_timing["reason"]
         execution_path["recognition_plan_overlay_rendered"] = bool(overlay)
@@ -2392,6 +2409,9 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         "pre_click_decision": pre_click,
         "local_target_validation": local_target_validation,
         "selected_click_point": selected_point,
+        "selected_click_point_coordinate_space": "capture_image_pixels",
+        "automatic_safety_interception": not local_policy_off,
+        "automatic_policy_observation": plan.get("pre_click_decision"),
         "approved_plan_id": request.approved_plan_id,
         "approved_plan_reuse_validation": approval_reuse_validation,
         "capture_lineage_validation": capture_lineage_validation,
@@ -2434,7 +2454,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         plan=plan,
         pre_click=pre_click,
     )
-    if not base_result["final_submit_guard"]["allowed"]:
+    base_result["final_submit_guard"]["enforced"] = not local_policy_off
+    if not local_policy_off and not base_result["final_submit_guard"]["allowed"]:
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
         base_result["agent_execution_guidance"] = _agent_execution_guidance(
             request=request,
@@ -2530,7 +2551,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         )
 
     if request.dry_run:
-        if bound is not None and selected_point is not None:
+        if bound is not None and selected_point is not None and not local_policy_off:
             with timer.step("save_approved_plan"):
                 approval = _save_approved_plan(
                     request=request,
@@ -2593,12 +2614,16 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 if isinstance(navigation_policy, dict) and navigation_policy.get("required") is True:
                     navigation_before = probe_bound_browser(int(bound.handle))
                 with timer.step("click_point", attempt=attempt_index):
+                    target_box = target_bbox_from_recommended(plan.get("recommended_target") or {})
+                    visibility_options = ({"target_bbox": tuple(target_box[key] for key in ("x", "y", "width", "height"))}
+                                          if target_box is not None else {})
                     click_result = input_controller.click_point(
                         selected_point["x"],
                         selected_point["y"],
                         move_before_click=True,
                         settle_ms=int(click_timing["settle_ms"]),
                         hold_ms=int(click_timing["hold_ms"]),
+                        **visibility_options,
                     )
                 with timer.step("post_click_verification", attempt=attempt_index, enabled=request.enable_post_click_verification):
                     post_click_verification = (
@@ -2606,6 +2631,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                             "execute_recognition_plan",
                             before_state=before_state,
                             click_result=click_result,
+                            **({"judged_by_agent": True} if local_policy_off else {}),
                         )
                         if request.enable_post_click_verification
                         else {"verified": None, "verification_skipped": True}
@@ -2656,6 +2682,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 )
                 if not navigation_verification.get("verified"):
                     retry_allowed, retry_reason = False, "navigation_verification_failed"
+                if local_policy_off:
+                    # 即时模式只采集证据，效果交给 Agent；无变化也不能触发重复输入。
+                    post_click_verification = {**post_click_verification,
+                        "verified": None, "verification_status": "awaiting_agent_review",
+                        "judged_by": "agent", "automatic_retry_allowed": False}
+                    attempt_verified = None
+                    retry_allowed, retry_reason = False, "awaiting_agent_review"
             attempt = {
                 "attempt": attempt_index,
                 "pre_action_state": before_state,
@@ -2791,7 +2824,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     base_result["execution_path"]["semantic_post_click_verification_used"] = bool(semantic_post_click_verification.get("applicable"))
     attach_timings(base_result)
 
-    if not verified:
+    if not verified and not local_policy_off:
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="verification_failed")
         error_code = "semantic_post_click_verification_failed" if semantic_post_click_verification.get("applicable") else "post_click_verification_failed"
         base_result["fallback_plan"] = _execute_fallback_plan(
@@ -2877,17 +2910,27 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             base_result=base_result,
             verified=verified,
         )
+    # 即时模式只报告实际输入与观察，不把像素变化当成任务成功。
+    execution_status = ("executed_observed" if request.enable_post_click_verification else "executed") if local_policy_off else "executed_verified"
+    base_result["verification_scope"] = {
+        "input_dispatched": bool(click_result),
+        "post_click_check_enabled": bool(request.enable_post_click_verification),
+        "post_click_checks_passed": None if local_policy_off else (verified if request.enable_post_click_verification else None),
+        "target_hit_verified": False, "task_effect_verified": False,
+        "verification_status": "awaiting_agent_review" if local_policy_off else "legacy_checks_completed",
+        "judged_by": "agent" if local_policy_off else "legacy_verifier",
+    }
     base_result["agent_execution_guidance"] = _agent_execution_guidance(
         request=request,
-        status="executed_verified",
+        status=execution_status,
         result=base_result,
     )
     base_result["agent_step_result"] = _agent_step_result(
         request=request,
-        status="executed_verified",
+        status=execution_status,
         result=base_result,
     )
-    base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="executed_verified")
+    base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status=execution_status)
     attach_timings(base_result)
     base_result["trace_path"] = _write_execute_trace_if_enabled(
         request,
@@ -2900,13 +2943,13 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     _update_learned_instruction_action_trace(base_result)
     base_result["agent_step_result"] = _agent_step_result(
         request=request,
-        status="executed_verified",
+        status=execution_status,
         result=base_result,
     )
     _rewrite_execute_trace_result(trace_path=base_result.get("trace_path"), success=True, request=request, result=base_result)
 
     data = ActionResultData(action="execute_recognition_plan", result=base_result)
-    return APIResponse(success=True, message="Recognition-plan click executed and verified", data=data.model_dump(), error=None)
+    return APIResponse(success=True, message="Recognition-plan input dispatched; inspect observation to verify task effect", data=data.model_dump(), error=None)
 
 
 @router.post("/execute_confirmed_point", response_model=APIResponse)
@@ -3413,7 +3456,7 @@ def scroll(request: ScrollRequest) -> APIResponse:
     }
     if request.dry_run:
         result["scroll_effect_validation"] = {
-            "contract_version": "scroll_effect_validation_v1",
+            "contract_version": "scroll_effect_validation_v2",
             "status": "not_run_dry_run",
             "target_container_id": request.target_container_id,
             "target_pane": result.get("target_pane"),
@@ -3432,7 +3475,18 @@ def scroll(request: ScrollRequest) -> APIResponse:
 
     try:
         with timer.step("capture_pre_scroll_state", enabled=request.enable_verification):
-            before_state = verifier.capture_pre_action_state(action_name=action_name) if request.enable_verification else None
+            before_state = verifier.capture_pre_action_state(action_name=action_name, capture_scope_evidence=True) if request.enable_verification else None
+        if request.enable_verification and (not isinstance(before_state, dict) or before_state.get("capture_status") != "observed"):
+            result["pre_scroll_capture"] = before_state
+            result["outcome"] = {"status": "pre_scroll_evidence_unavailable", "should_retry_goal": False}
+            result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
+            result["timings"] = timer.to_dict()
+            result["trace_path"] = write_trace(
+                category="actions", operation="scroll", name_hint=action_name,
+                payload={"success": False, "request": request.model_dump(), "result": result},
+            )
+            return APIResponse(success=False, message="Scroll requires a valid current capture", data=result,
+                               error=ErrorModel(code="pre_scroll_evidence_unavailable", details=before_state))
         with timer.step("scroll_window"):
             result["scroll_result"] = input_controller.scroll_window(
                 direction=request.direction,
@@ -3448,6 +3502,7 @@ def scroll(request: ScrollRequest) -> APIResponse:
                     action_name,
                     before_state=before_state,
                     click_result=result["scroll_result"],
+                    capture_scope_evidence=True,
                 )
                 if request.enable_verification
                 else {"verified": None, "verification_skipped": True}
@@ -3459,11 +3514,8 @@ def scroll(request: ScrollRequest) -> APIResponse:
         )
         result["outcome"] = {
             "status": result["scroll_effect_validation"]["status"],
-            "should_retry_goal": True,
-            "next_after_success": {
-                "endpoint": "POST /action/execute_recognition_plan",
-                "reason": "rerun the same goal after container-aware scroll evidence is recorded",
-            },
+            "should_retry_goal": False,
+            "requires_fresh_review": True,
         }
         result["operation_trace_link"] = operation_trace_link(operation_context, result_status=result["scroll_effect_validation"]["status"])
         result["timings"] = timer.to_dict()

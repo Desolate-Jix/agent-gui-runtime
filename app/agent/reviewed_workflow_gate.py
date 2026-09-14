@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
+
+from app.agent.action_parameters import reviewed_action_parameter_fields, validate_reviewed_action_grounding_geometry
+from app.agent.scroll_parameters import SCROLL_SEMANTIC_ACTION
 
 from app.operation.recognition.decision import decide_pre_click
 from app.operation.recognition.schemas import (
@@ -39,6 +42,38 @@ class ReviewedWorkflowGateAdapter:
         local_grounding: LocalGroundingResult,
         expected_effect: dict[str, object] | None = None,
     ) -> dict[str, Any]:
+        return self._evaluate_with_binding(
+            selection=selection, grounding=grounding, candidates=candidates,
+            local_grounding=local_grounding, expected_effect=expected_effect,
+            binding_check=_binding_matches,
+        )
+
+    def evaluate_review(
+        self,
+        *,
+        selection: Mapping[str, Any],
+        grounding: Mapping[str, Any],
+        candidates: CandidateRankResult,
+        local_grounding: LocalGroundingResult,
+        expected_effect: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        """独立只读预检；不会让旧执行入口接受review合同。"""
+        return self._evaluate_with_binding(
+            selection=selection, grounding=grounding, candidates=candidates,
+            local_grounding=local_grounding, expected_effect=expected_effect,
+            binding_check=_review_binding_matches,
+        )
+
+    def _evaluate_with_binding(
+        self,
+        *,
+        selection: Mapping[str, Any],
+        grounding: Mapping[str, Any],
+        candidates: CandidateRankResult,
+        local_grounding: LocalGroundingResult,
+        expected_effect: dict[str, object] | None,
+        binding_check: Callable[..., bool],
+    ) -> dict[str, Any]:
         policy_decision = decide_pre_click(
             goal=candidates.goal,
             candidates=candidates,
@@ -49,7 +84,7 @@ class ReviewedWorkflowGateAdapter:
             allow_low_margin_when_grounded=self._allow_low_margin_when_grounded,
             expected_effect=expected_effect,
         )
-        binding_matches = _binding_matches(
+        binding_matches = binding_check(
             selection=selection,
             grounding=grounding,
             candidates=candidates,
@@ -63,6 +98,10 @@ class ReviewedWorkflowGateAdapter:
         capture_id = lineage.get("capture_id")
         capture_ref = capture_id if isinstance(capture_id, str) and capture_id else "unresolved"
         allowed = policy_decision.allowed and binding_matches
+        try:
+            parameter_fields = reviewed_action_parameter_fields(selection)
+        except ValueError:
+            parameter_fields, allowed = {}, False
         return {
             "contract_version": "pre_click_decision_v1",
             "allowed": allowed,
@@ -78,6 +117,7 @@ class ReviewedWorkflowGateAdapter:
             "evidence_refs": [
                 f"gate:pre-click:{capture_ref}:{candidate_ref}:{'allowed' if allowed else 'blocked'}"
             ],
+            **parameter_fields,
         }
 
 
@@ -92,7 +132,49 @@ def _binding_matches(
     if (
         selection.get("contract_version") != "verified_transition_selection_v1"
         or selection.get("status") != "selected"
-        or grounding.get("contract_version") != "reviewed_workflow_current_grounding_v1"
+    ):
+        return False
+    return _evidence_binding_matches(selection=selection, grounding=grounding,
+        candidates=candidates, local_grounding=local_grounding, policy_decision=policy_decision)
+
+
+def _review_binding_matches(*, selection, grounding, candidates, local_grounding, policy_decision) -> bool:
+    from app.agent.reviewed_workflow_replay import _review_selection_field_keys, _review_selection_hash
+
+    try:
+        expected_keys = _review_selection_field_keys(selection)
+    except ValueError:
+        return False
+
+    if (
+        set(selection) != expected_keys
+        or selection.get("contract_version") != "review_transition_selection_v1"
+        or selection.get("status") != "selected"
+        or selection.get("review_only") is not True
+        or selection.get("artifact_is_authorization") is not False
+        or selection.get("execute_binding_enabled") is not False
+        or selection.get("grants_action_authority") is not False
+    ):
+        return False
+    try:
+        expected_hash = _review_selection_hash(selection)
+    except (TypeError, ValueError):
+        return False
+    if selection.get("review_selection_sha256") != expected_hash or selection.get("selection_sha256") != expected_hash:
+        return False
+    return _evidence_binding_matches(selection=selection, grounding=grounding,
+        candidates=candidates, local_grounding=local_grounding, policy_decision=policy_decision)
+
+
+def _evidence_binding_matches(*, selection, grounding, candidates, local_grounding, policy_decision) -> bool:
+    try:
+        if reviewed_action_parameter_fields(selection) != reviewed_action_parameter_fields(grounding, semantic_action=selection.get("semantic_action")):
+            return False
+        validate_reviewed_action_grounding_geometry(selection, grounding)
+    except ValueError:
+        return False
+    if (
+        grounding.get("contract_version") != "reviewed_workflow_current_grounding_v1"
         or grounding.get("candidate_current") is not True
         or grounding.get("eligible") is not True
     ):

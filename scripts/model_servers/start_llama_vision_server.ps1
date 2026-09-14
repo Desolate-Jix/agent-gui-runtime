@@ -1,5 +1,8 @@
 param(
     [string]$ModelPath = "",
+    [string]$ModelName = "",
+    [Alias("Host")]
+    [string]$HostName = "127.0.0.1",
     [string]$MmprojPath = "",
     [string]$ServerPath = "",
     [int]$Port = 1234,
@@ -32,10 +35,13 @@ if ($mmprojInput) {
 if ($ChatTemplate) {
     $extraArgs += @("--chat-template", $ChatTemplate)
 }
+if ($ModelName) {
+    $extraArgs += @("--alias", $ModelName)
+}
 
 & $server.Path `
     -m $model.Path `
-    --host 127.0.0.1 `
+    --host $HostName `
     --port $Port `
     -ngl $GpuLayers `
     -c $ContextSize `
@@ -45,3 +51,4 @@ if ($ChatTemplate) {
     --reasoning off `
     --reasoning-budget 0 `
     @extraArgs
+exit $LASTEXITCODE

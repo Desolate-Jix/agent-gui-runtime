@@ -303,8 +303,18 @@ def load_and_verify_hybrid_capture_bundle(
     root = _project_root(project_root)
     run_id = _run_id(expected_run_id)
     revision = _workflow_revision(expected_workflow_revision)
+    static_reference = _immutable_ref(bundle_ref, name="bundle_ref")
+    if static_reference["id"].startswith("hybrid-static-capture/"):
+        from app.learn.hybrid.static_capture import load_static_capture_bundle
+
+        return load_static_capture_bundle(
+            project_root=root,
+            bundle_ref=static_reference,
+            expected_run_id=run_id,
+            expected_workflow_revision=revision,
+        )
     store = _store(root)
-    reference = _immutable_ref(bundle_ref, name="bundle_ref")
+    reference = static_reference
     bundle = store.get(reference, contract_version="hybrid_capture_bundle_v1")
     _require_non_authorizing(bundle, name="hybrid capture bundle")
     if bundle["run_id"] != run_id:

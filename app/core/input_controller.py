@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import ctypes
+from contextlib import contextmanager
+from contextvars import ContextVar
 from io import BytesIO
 from pathlib import Path
 import time
+from threading import get_ident
 from typing import Any, Optional
 
 from loguru import logger
@@ -54,6 +57,32 @@ CLIPBOARD_OPEN_RETRY_SECONDS = 0.03
 CLIPBOARD_OPEN_ATTEMPTS = 8
 CLIPBOARD_VERIFY_TIMEOUT_SECONDS = 0.5
 CLIPBOARD_VERIFY_RETRY_SECONDS = 0.03
+TASKBAR_ACTIVATION_SETTLE_SECONDS = 0.1
+TASKBAR_ACTIVATION_VERIFY_INTERVAL_SECONDS = 0.05
+TASKBAR_ACTIVATION_VERIFY_TIMEOUT_SECONDS = 1.0
+
+_CLICK_RELEASE = ContextVar("current_click_mouse_release", default=None)
+
+
+@contextmanager
+def _click_release_scope(controller, button):
+    # 只在同步点击的 finally 中清理同一按钮；不能用于下一次输入。
+    state = {"controller": controller, "thread": get_ident(), "down": controller._button_down_flag(button),
+             "up": controller._button_up_flag(button), "attempted": False, "releasing": False,
+             "used": False, "active": True}
+    token = _CLICK_RELEASE.set(state)
+    try:
+        yield state
+    finally:
+        state["active"] = False
+        _CLICK_RELEASE.reset(token)
+
+
+def _pending_click_release(controller, flags):
+    state = _CLICK_RELEASE.get()
+    return (state if state is not None and state["active"] and state["controller"] is controller
+            and state["thread"] == get_ident() and state["attempted"] and state["releasing"]
+            and not state["used"] and flags == state["up"] else None)
 
 
 class TargetPointOccludedError(RuntimeError):
@@ -130,8 +159,10 @@ class InputController:
         return {"button": button, "state": "down", "cursor": {"x": int(pos[0]), "y": int(pos[1])}}
 
     def mouse_up(self, button: str = "left") -> dict[str, Any]:
-        self._ensure_windows_input()
-        self._send_mouse_flags(self._button_up_flag(button))
+        flag = self._button_up_flag(button)
+        if _pending_click_release(self, flag) is None:
+            self._ensure_windows_input()
+        self._send_mouse_flags(flag)
         pos = win32api.GetCursorPos()  # type: ignore[union-attr]
         return {"button": button, "state": "up", "cursor": {"x": int(pos[0]), "y": int(pos[1])}}
 
@@ -144,10 +175,26 @@ class InputController:
         move_before_click: bool = True,
         settle_ms: int = 100,
         hold_ms: int = 60,
+        popup_guard: Any | None = None,
+        target_bbox: tuple[float, float, float, float] | None = None,
     ) -> dict[str, Any]:
         """Click a point relative to the bound window using a realistic pointer sequence."""
         self._ensure_windows_input()
         bound = self._require_bound_window()
+        if popup_guard is not None:
+            from app.agent.popup_click_guard import PopupClickGuard
+
+            if type(popup_guard) is not PopupClickGuard:
+                raise ValueError("popup_guard must be a PopupClickGuard")
+            popup_guard.validate_command(window_handle=int(bound.handle), click_point=(x, y))
+            expectation = popup_guard.expectation
+            rect = bound.rect
+            if (
+                int(bound.handle) != expectation.popup_handle
+                or getattr(bound, "process_id", None) != expectation.process_id
+                or (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)) != expectation.popup_rect
+            ):
+                raise ValueError("popup guard does not match bound popup")
         point = self._resolve_window_and_screen_point(bound=bound, x=x, y=y)
 
         logger.info(
@@ -164,7 +211,11 @@ class InputController:
         )
 
         foreground_before = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
-        set_foreground_ok = self._focus_window(bound.handle)
+        if popup_guard is not None:
+            popup_guard.verify_current()
+            set_foreground_ok = None
+        else:
+            set_foreground_ok = self._focus_window(bound.handle)
         cursor_before = win32api.GetCursorPos()  # type: ignore[union-attr]
 
         if move_before_click:
@@ -186,11 +237,57 @@ class InputController:
         )
         if not point_visibility.get("allowed"):
             raise TargetPointOccludedError(point_visibility)
+        if target_bbox is not None:
+            region_visibility = window_manager.validate_bound_region_visibility(bound=bound, bbox=target_bbox)
+            if region_visibility.get("allowed") is not True:
+                raise TargetPointOccludedError(region_visibility)
+        if popup_guard is not None:
+            hit_window = point_visibility.get("hit_window")
+            if not isinstance(hit_window, dict) or hit_window.get("root_handle") != popup_guard.expectation.popup_handle:
+                raise TargetPointOccludedError({
+                    **point_visibility,
+                    "allowed": False,
+                    "reason": "target_point_not_owned_by_exact_popup_root",
+                })
 
-        down_result = self.mouse_down(button)
-        if hold_ms > 0:
-            time.sleep(hold_ms / 1000.0)
-        up_result = self.mouse_up(button)
+        # 按下前最后核对窗口与鼠标，拒绝等待期间发生的漂移。
+        current_bound = window_manager.get_bound_window()
+        if popup_guard is not None:
+            popup_guard.verify_current()
+        expected_foreground_handle = (
+            popup_guard.expectation.parent_handle if popup_guard is not None else int(bound.handle)
+        )
+        if (
+            current_bound is None
+            or current_bound.handle != bound.handle
+            or current_bound.process_id != bound.process_id
+            or current_bound.rect != bound.rect
+            or int(win32gui.GetForegroundWindow()) != expected_foreground_handle
+        ):
+            raise RuntimeError("Bound window changed immediately before mouse down")
+        current_cursor = tuple(win32api.GetCursorPos())
+        if current_cursor != (point["screen_x"], point["screen_y"]):
+            raise RuntimeError("Mouse cursor position changed immediately before mouse down")
+
+        # 按下结果未知或等待被中断时也尝试松开，不能留下按住状态。
+        primary_error = None
+        with _click_release_scope(self, button) as release:
+            try:
+                down_result = self.mouse_down(button)
+                if hold_ms > 0:
+                    time.sleep(hold_ms / 1000.0)
+            except BaseException as error:
+                primary_error = error
+                raise
+            finally:
+                release["releasing"] = True
+                try:
+                    up_result = self.mouse_up(button)
+                except Exception as release_error:
+                    if primary_error is None:
+                        raise RuntimeError("Mouse button release failed; input outcome unknown") from release_error
+                    primary_error.add_note("Mouse button release also failed; input outcome unknown")
+                    primary_error.mouse_release_error = str(release_error)
 
         cursor_after = win32api.GetCursorPos()  # type: ignore[union-attr]
         foreground_after = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
@@ -219,6 +316,84 @@ class InputController:
         logger.info("Click result: {}", result)
         return result
 
+    def activate_taskbar_item(self, *, guard: Any) -> dict[str, Any]:
+        """点击已严格固定的系统任务栏按钮，不改变普通窗口前台规则。"""
+
+        from app.agent.taskbar_activation_guard import TaskbarActivationGuard
+
+        self._ensure_windows_input()
+        if type(guard) is not TaskbarActivationGuard:
+            raise ValueError("guard must be a TaskbarActivationGuard")
+        expectation = guard.expectation
+        guard.validate_command(
+            window_handle=expectation.taskbar_handle,
+            click_point=expectation.window_point,
+        )
+        guard.verify_current()
+        cursor_before = tuple(win32api.GetCursorPos())  # type: ignore[union-attr]
+        self._send_move(*expectation.screen_point)
+        if TASKBAR_ACTIVATION_SETTLE_SECONDS > 0:
+            time.sleep(TASKBAR_ACTIVATION_SETTLE_SECONDS)
+        guard.verify_current()
+        if tuple(win32api.GetCursorPos()) != expectation.screen_point:  # type: ignore[union-attr]
+            raise RuntimeError("Taskbar activation cursor changed before mouse down")
+
+        primary_error = None
+        try:
+            down_result = self.mouse_down("left")
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            try:
+                up_result = self.mouse_up("left")
+            except Exception as release_error:
+                if primary_error is None:
+                    raise RuntimeError(
+                        "Mouse button release failed; taskbar activation outcome unknown"
+                    ) from release_error
+                primary_error.add_note(
+                    "Mouse button release also failed; taskbar activation outcome unknown"
+                )
+                primary_error.mouse_release_error = str(release_error)
+
+        deadline = time.monotonic() + TASKBAR_ACTIVATION_VERIFY_TIMEOUT_SECONDS
+        verification_attempts = 0
+        activation_verified = False
+        while True:
+            verification_attempts += 1
+            if guard.verify_destination() is True:
+                activation_verified = True
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(TASKBAR_ACTIVATION_VERIFY_INTERVAL_SECONDS, remaining))
+
+        cursor_after = tuple(win32api.GetCursorPos())  # type: ignore[union-attr]
+        return {
+            "clicked": True,
+            "activation_verified": activation_verified,
+            "input_backend": "SendInput",
+            "button": "left",
+            "taskbar_handle": expectation.taskbar_handle,
+            "destination_handle": expectation.destination_handle,
+            "window_point": {
+                "x": expectation.window_point[0], "y": expectation.window_point[1]
+            },
+            "screen_point": {
+                "x": expectation.screen_point[0], "y": expectation.screen_point[1]
+            },
+            "capture_id": expectation.capture_id,
+            "candidate_id": expectation.candidate_id,
+            "source_sha256": expectation.source_sha256,
+            "cursor_before": {"x": cursor_before[0], "y": cursor_before[1]},
+            "cursor_after": {"x": cursor_after[0], "y": cursor_after[1]},
+            "verification_attempts": verification_attempts,
+            "down": down_result,
+            "up": up_result,
+        }
+
     def type_text(
         self,
         text: str,
@@ -229,46 +404,59 @@ class InputController:
         clear_existing: bool = False,
         submit: bool = False,
         restore_clipboard: bool = True,
+        field_guard: Any | None = None,
     ) -> dict[str, Any]:
-        """Type text into the bound window using clipboard paste plus real key events."""
+        """先保存剪贴板，再校验当前输入目标并单次粘贴；异常出口也恢复。"""
         self._ensure_windows_input()
         bound = self._require_bound_window()
+        snapshot = self._text_target_snapshot(bound)
         click_result = None
-        if click_before_typing:
-            if x is None or y is None:
-                raise ValueError("x and y are required when click_before_typing=true")
-            click_result = self.click_point(x, y, move_before_click=True, settle_ms=100, hold_ms=50)
-        else:
-            self._focus_window(bound.handle)
+        if click_before_typing and (type(x) is not int or type(y) is not int):
+            raise ValueError("integer x and y are required when click_before_typing=true")
+        if field_guard is not None:
+            from app.agent.text_input_guard import TextInputGuard
 
-        clipboard_before = self._get_clipboard_text()
-        if clear_existing:
-            self._press_chord([VK_CONTROL, VK_A])
-            time.sleep(0.03)
-        self._set_clipboard_text(text)
-        clipboard_after_set = None
-        verify_attempts = 0
-        verify_deadline = time.monotonic() + CLIPBOARD_VERIFY_TIMEOUT_SECONDS
-        while True:
-            verify_attempts += 1
-            clipboard_after_set = self._get_clipboard_text()
-            if clipboard_after_set == text:
-                break
-            if time.monotonic() >= verify_deadline:
-                break
-            time.sleep(CLIPBOARD_VERIFY_RETRY_SECONDS)
-        if clipboard_after_set != text:
-            raise RuntimeError(
-                "Clipboard write verification failed before paste: "
-                f"expected {len(text)} chars, got {len(clipboard_after_set or '')} chars"
+            if type(field_guard) is not TextInputGuard:
+                raise ValueError("field_guard must be a TextInputGuard")
+            if type(x) is not int or type(y) is not int:
+                raise ValueError("integer x and y are required when field_guard is present")
+            field_guard.validate_command(
+                text=text,
+                clear_existing=clear_existing,
+                window_handle=int(bound.handle),
+                click_point=(x, y),
             )
-        self._press_chord([VK_CONTROL, VK_V])
-        time.sleep(CLIPBOARD_PASTE_SETTLE_SECONDS)
-        if submit:
-            time.sleep(0.03)
-            self._press_key(VK_RETURN)
-        if restore_clipboard:
-            self._set_clipboard_text(clipboard_before or "")
+        with self._clipboard_text_transaction(text, restore=restore_clipboard) as clipboard:
+            if self._text_target_snapshot(self._require_bound_window()) != snapshot:
+                raise RuntimeError("Text target window changed before focus/click")
+            if click_before_typing:
+                click_result = self.click_point(x, y, move_before_click=True, settle_ms=100, hold_ms=50)
+            else:
+                self._focus_window(bound.handle)
+            self._verify_text_target(snapshot, x=x, y=y)
+            if field_guard is not None:
+                self._verify_text_region(bound, field_guard)
+            clipboard.verify_current_text()
+            if field_guard is not None:
+                field_guard.verify_before_selection()
+            if clear_existing:
+                self._press_chord([VK_CONTROL, VK_A])
+                time.sleep(0.03)
+            # 选择文字与粘贴之间窗口或剪贴板都可能变化，不能复用前一次检查。
+            self._verify_text_target(snapshot, x=x, y=y)
+            if field_guard is not None:
+                self._verify_text_region(bound, field_guard)
+            verify_attempts = clipboard.verify_current_text()
+            if field_guard is not None:
+                field_guard.verify_before_paste()
+            self._press_chord([VK_CONTROL, VK_V])
+            time.sleep(CLIPBOARD_PASTE_SETTLE_SECONDS)
+            if submit:
+                time.sleep(0.03)
+                self._verify_text_target(snapshot, x=x, y=y)
+                if field_guard is not None:
+                    self._verify_text_region(bound, field_guard)
+                self._press_key(VK_RETURN)
 
         return {
             "typed": True,
@@ -281,10 +469,50 @@ class InputController:
             "clear_existing": bool(clear_existing),
             "submit": bool(submit),
             "restore_clipboard": bool(restore_clipboard),
+            "clipboard_restore_status": clipboard.status,
             "clipboard_verified_before_paste": True,
             "clipboard_verify_attempts": verify_attempts,
             "clipboard_paste_settle_ms": int(CLIPBOARD_PASTE_SETTLE_SECONDS * 1000),
         }
+
+    def press_key(self, key: str, *, x: int, y: int) -> dict[str, Any]:
+        """只向当前前台输入区域发送回车，不重新填写或聚焦其他窗口。"""
+        if key != "Enter" or type(x) is not int or type(y) is not int:
+            raise ValueError("press_key requires Enter and an observed field point")
+        self._ensure_windows_input()
+        bound = self._require_bound_window()
+        self._verify_text_target(self._text_target_snapshot(bound), x=x, y=y)
+        self._press_chord([VK_RETURN])
+        return {"pressed": True, "key": key, "window_handle": bound.handle,
+            "input_backend": "SendInput", "text_retyped": False}
+
+    @staticmethod
+    def _verify_text_region(bound, field_guard) -> None:
+        evidence = window_manager.validate_bound_region_visibility(
+            bound=bound, bbox=field_guard.expectation.before.identity.control_bbox)
+        if evidence.get("allowed") is not True:
+            raise TargetPointOccludedError(evidence)
+
+    def _clipboard_text_transaction(self, text: str, *, restore: bool) -> Any:
+        from app.core.clipboard_transaction import ClipboardTextTransaction
+
+        return ClipboardTextTransaction(text, restore=restore)
+
+    @staticmethod
+    def _text_target_snapshot(bound: Any) -> tuple[Any, ...]:
+        return (int(bound.handle), getattr(bound, "process_id", None),
+                bound.rect.left, bound.rect.top, bound.rect.right, bound.rect.bottom)
+
+    def _verify_text_target(self, snapshot: tuple[Any, ...], *, x: int | None, y: int | None) -> None:
+        current = self._require_bound_window()
+        if self._text_target_snapshot(current) != snapshot:
+            raise RuntimeError("Text target window changed before keyboard dispatch")
+        if int(win32gui.GetForegroundWindow()) != snapshot[0]:
+            raise RuntimeError("Text target is not the foreground window before keyboard dispatch")
+        if x is not None and y is not None:
+            evidence = window_manager.validate_bound_point_visibility(bound=current, x=x, y=y)
+            if evidence.get("allowed") is not True:
+                raise TargetPointOccludedError(evidence)
 
     def paste_image(
         self,
@@ -336,7 +564,12 @@ class InputController:
     ) -> dict[str, Any]:
         """Scroll the bound window with a real mouse wheel event."""
         self._ensure_windows_input()
+        if type(wheel_clicks) is not int or not 1 <= wheel_clicks <= 20:
+            raise ValueError("wheel_clicks must be an integer from 1 through 20")
         bound = self._require_bound_window()
+        bound_handle = int(bound.handle)
+        bound_process_id = getattr(bound, "process_id", None)
+        bound_geometry = (bound.rect.left, bound.rect.top, bound.rect.right, bound.rect.bottom)
         rect_width = max(1, int(bound.rect.right) - int(bound.rect.left))
         rect_height = max(1, int(bound.rect.bottom) - int(bound.rect.top))
         window_x = int(x) if x is not None else rect_width // 2
@@ -345,7 +578,7 @@ class InputController:
         normalized_direction = str(direction or "down").strip().lower()
         if normalized_direction not in {"down", "up"}:
             raise ValueError(f"Unsupported scroll direction: {direction}")
-        click_count = max(1, int(wheel_clicks))
+        click_count = wheel_clicks
         wheel_delta = (120 * click_count) if normalized_direction == "up" else (-120 * click_count)
 
         foreground_before = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
@@ -354,6 +587,17 @@ class InputController:
         self._send_move(point["screen_x"], point["screen_y"])
         if settle_ms > 0:
             time.sleep(settle_ms / 1000.0)
+        current = self._require_bound_window()
+        current_geometry = (current.rect.left, current.rect.top, current.rect.right, current.rect.bottom)
+        if int(current.handle) != bound_handle or getattr(current, "process_id", None) != bound_process_id or current_geometry != bound_geometry:
+            raise RuntimeError("Scroll target window changed before wheel dispatch")
+        if int(win32gui.GetForegroundWindow()) != bound_handle:  # type: ignore[union-attr]
+            raise RuntimeError("Scroll target is not the foreground window before wheel dispatch")
+        if tuple(win32api.GetCursorPos()) != (point["screen_x"], point["screen_y"]):  # type: ignore[union-attr]
+            raise RuntimeError("Scroll pointer changed before wheel dispatch")
+        point_visibility = window_manager.validate_bound_point_visibility(bound=current, x=window_x, y=window_y)
+        if point_visibility.get("allowed") is not True:
+            raise TargetPointOccludedError(point_visibility)
         self._send_mouse_input(dx=0, dy=0, flags=MOUSEEVENTF_WHEEL, mouse_data=wheel_delta)
         cursor_after = win32api.GetCursorPos()  # type: ignore[union-attr]
         foreground_after = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
@@ -365,6 +609,7 @@ class InputController:
             "direction": normalized_direction,
             "wheel_clicks": click_count,
             "wheel_delta": wheel_delta,
+            "point_visibility": point_visibility,
             "window_point": {"x": point["window_x"], "y": point["window_y"]},
             "screen_point": {"x": point["screen_x"], "y": point["screen_y"]},
             "foreground_before": foreground_before,
@@ -423,7 +668,11 @@ class InputController:
         self._send_mouse_input(dx=0, dy=0, flags=flags)
 
     def _send_mouse_input(self, *, dx: int, dy: int, flags: int, mouse_data: int = 0) -> None:
-        self._ensure_windows_input()
+        release = _pending_click_release(self, flags) if dx == 0 and dy == 0 and mouse_data == 0 else None
+        if release is None:
+            self._ensure_windows_input()
+        else:
+            release["used"] = True
         input_struct = INPUT(
             type=INPUT_MOUSE,
             union=INPUT_UNION(
@@ -437,15 +686,37 @@ class InputController:
                 )
             ),
         )
+        state = _CLICK_RELEASE.get()
+        if (state is not None and state["active"] and state["controller"] is self
+                and state["thread"] == get_ident() and flags == state["down"] and not state["releasing"]):
+            # 系统可能派发后才报错，因此以尝试 SendInput 为清理边界。
+            state["attempted"] = True
         sent = ctypes.windll.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
         if sent != 1:
             raise RuntimeError(f"SendInput failed, sent={sent}, flags={flags}")
 
     def _press_chord(self, keys: list[int]) -> None:
-        for key in keys:
-            self._send_key(key, key_up=False)
-        for key in reversed(keys):
-            self._send_key(key, key_up=True)
+        attempted: list[int] = []
+        primary: BaseException | None = None
+        try:
+            for key in keys:
+                attempted.append(key)
+                self._send_key(key, key_up=False)
+        except BaseException as error:
+            primary = error
+        release_error: BaseException | None = None
+        for key in reversed(attempted):
+            try:
+                self._send_key(key, key_up=True)
+            except BaseException as error:
+                if release_error is None:
+                    release_error = error
+        if primary is not None:
+            if release_error is not None:
+                primary.add_note("Keyboard release also failed; key state is unknown")
+            raise primary
+        if release_error is not None:
+            raise release_error
 
     def _press_key(self, key: int) -> None:
         self._send_key(key, key_up=False)
@@ -549,7 +820,8 @@ class InputController:
         ) from last_exc
 
     def _ensure_windows_input(self) -> None:
-        if not runtime_backend_input_is_active():
+        from app.core.local_input_policy import require_local_operator_input
+        if not runtime_backend_input_is_active() and not require_local_operator_input(window_manager):
             raise PermissionError(
                 "Windows input requires one-time LiveController authority via DesktopBackend"
             )
