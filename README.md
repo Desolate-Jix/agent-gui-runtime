@@ -1,3 +1,15 @@
+## Agent Review Instant v0.1.0-test.1 — 首个公开测试版 / First public test release
+
+[下载与发布说明 / Download & release notes](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.0-test.1) · [即时版 README / Instant README](https://github.com/Desolate-Jix/agent-gui-runtime/tree/codex/release-instant-test-1) · [安装、模型下载与配置 / Setup & models](https://github.com/Desolate-Jix/agent-gui-runtime/blob/codex/release-instant-test-1/FRIEND_SETUP.md)
+
+这是提供给外部 Agent 的 Windows MCP 即时操作源码测试包，不是正式稳定版、完整审核工作台或学习模式交付。快捷配置采用管理员宿主并关闭自动风险拦截，会真实操作键盘鼠标；请仅在本人看护下进行低风险测试。模型和依赖另行安装，包内不含私人配置或数据。
+
+This is a Windows MCP instant-operation source test bundle, not a stable release or the full workbench/learning product. Quick setup uses an administrator host with automatic risk interception disabled and real desktop input. Supervise low-risk tests only. Install models/dependencies separately; private configuration/data are excluded.
+
+以下内容为完整产品开发资料，与该测试包的交付范围区分。 / The remaining documentation concerns full-product development, separate from this test bundle.
+
+---
+
 # agent-gui-runtime
 
 **Version 0.3.0 · Windows GUI Agent Runtime · Portfolio v1 frozen · bounded Quick Apply-only release**
