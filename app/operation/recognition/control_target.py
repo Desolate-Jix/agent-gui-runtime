@@ -25,11 +25,11 @@ def control_target_matches(label: object, role: object, target: Mapping[str, obj
         and (role == target["role"] or target["role"] == "control" and role in ROLES))
 
 def control_target_ocr_matches(label: object, role: object, target: Mapping[str, object], *, candidate_label: object) -> bool:
-    if control_target_matches(label, role, target):
-        return True
-    # 仅在候选身份已严格匹配时容忍局部 OCR 丢失空白；不改写原文或放宽字符匹配。
+    # 精确文字也不能代替候选身份；先绑定控件，再容忍 OCR 丢失空白。
     if not isinstance(label, str) or not control_target_matches(candidate_label, role, target):
         return False
+    if control_target_matches(label, role, target):
+        return True
     observed = "".join(unicodedata.normalize("NFC", label).split()).casefold()
     expected = "".join(unicodedata.normalize("NFC", str(target["label"])).split()).casefold()
     return bool(observed) and observed == expected

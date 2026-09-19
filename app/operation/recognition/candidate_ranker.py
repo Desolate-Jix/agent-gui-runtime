@@ -7,6 +7,7 @@ from typing import Any, Iterable
 from app.operation.page_structure.schemas import InteractionPolicy, PageElement, PageText, VerificationHints
 from app.operation.recognition.schemas import CandidateRankRequest, CandidateRankResult, RecognitionCandidate, ScoreBreakdown
 from app.operation.recognition.control_target import control_target_matches, validate_control_target
+from app.operation.recognition.text_match import explicit_target_label
 from app.vision.schemas import BBox, ImageSize
 
 
@@ -301,7 +302,10 @@ def _goal_requests_text_entry(goal: str) -> bool:
 
 
 def _explicit_goal_action_terms(goal: str) -> set[str]:
-    goal_text = _normalize_text(goal)
+    target_label = explicit_target_label(goal)
+    if target_label and _goal_label_match(goal, [target_label], negated=True):
+        return set()
+    goal_text = _normalize_text(target_label or goal)
     term_groups = {
         "apply": ["apply", "quick apply", "申请"],
         "continue": ["continue", "next", "下一步", "继续"],
@@ -350,6 +354,8 @@ def _element_action_terms(element: PageElement) -> set[str]:
 
 
 def _goal_explicitly_requests_action_label(goal: str, element: PageElement) -> bool:
+    if explicit_target_label(goal) is not None:
+        return _goal_label_match(goal, [element.label, element.text], negated=False)
     goal_text = _normalize_text(goal)
     for label in (element.label, element.text):
         label_text = _normalize_text(label)
@@ -446,7 +452,7 @@ def _screen_reading_text_values(screen_evidence: dict[str, Any] | None) -> list[
 
 
 def _best_text_similarity(goal: str, candidates: Iterable[str]) -> float:
-    normalized_goal = _normalize_text(goal)
+    normalized_goal = _normalize_text(explicit_target_label(goal) or goal)
     if not normalized_goal:
         return 0.0
     return round(max((_text_similarity(normalized_goal, _normalize_text(item)) for item in candidates), default=0.0), 4)
@@ -486,6 +492,15 @@ def _goal_negates_element_label(goal: str, element: PageElement) -> bool:
 
 
 def _goal_label_match(goal: str, labels: Iterable[str], *, negated: bool) -> bool:
+    target_label = explicit_target_label(goal)
+    if target_label is not None:
+        # 候选须包含完整目标词段；允许 UIA 名称附带网址，但不反向匹配短词。
+        marker = re.search(r"\b(?:labelled|labeled|named|titled)\s+", goal, re.I)
+        is_negated = _negates_next_click_target(_normalize_text(goal[:marker.start()]))
+        target_text = _normalize_text(target_label)
+        return bool(target_text) and is_negated is negated and any(
+            re.search(rf"(?<!\w){re.escape(target_text)}(?!\w)", _normalize_text(label))
+            for label in labels)
     goal_text = _normalize_text(goal)
     if not goal_text:
         return False

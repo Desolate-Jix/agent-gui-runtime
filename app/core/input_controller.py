@@ -12,6 +12,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from app.core.runtime_input_authority import runtime_backend_input_is_active
+from app.core.editing_keys import EDITING_KEY_CHORDS, EXTENDED_EDITING_KEYS
 from app.core.window_manager import window_manager
 from modules.click.geometry import resolve_window_and_screen_point
 
@@ -476,13 +477,15 @@ class InputController:
         }
 
     def press_key(self, key: str, *, x: int, y: int) -> dict[str, Any]:
-        """只向当前前台输入区域发送回车，不重新填写或聚焦其他窗口。"""
-        if key != "Enter" or type(x) is not int or type(y) is not int:
-            raise ValueError("press_key requires Enter and an observed field point")
+        """向当前焦点派发编辑键；不点击坐标、不重填、不改变窗口焦点。"""
+        if not isinstance(key, str) or key not in EDITING_KEY_CHORDS:
+            raise ValueError(f"Unsupported editing key; supported keys: {', '.join(EDITING_KEY_CHORDS)}")
+        if type(x) is not int or type(y) is not int:
+            raise ValueError("press_key requires an observed window point")
         self._ensure_windows_input()
         bound = self._require_bound_window()
         self._verify_text_target(self._text_target_snapshot(bound), x=x, y=y)
-        self._press_chord([VK_RETURN])
+        self._press_chord(list(EDITING_KEY_CHORDS[key]))
         return {"pressed": True, "key": key, "window_handle": bound.handle,
             "input_backend": "SendInput", "text_retyped": False}
 
@@ -730,7 +733,7 @@ class InputController:
                 ki=KEYBDINPUT(
                     wVk=int(key),
                     wScan=0,
-                    dwFlags=KEYEVENTF_KEYUP if key_up else 0,
+                    dwFlags=(KEYEVENTF_KEYUP if key_up else 0) | (0x0001 if key in EXTENDED_EDITING_KEYS else 0),
                     time=0,
                     dwExtraInfo=None,
                 )

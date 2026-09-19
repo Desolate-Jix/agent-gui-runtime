@@ -3,6 +3,45 @@ from copy import deepcopy
 from pathlib import Path
 
 
+def local_recognition_diagnostics(plan, *, image_path, viewport_size):
+    """返回可读的候选摘要；诊断坐标不是可直接执行的授权。"""
+    plan = plan if isinstance(plan, dict) else {}
+    parsed = plan.get("parse_result") or {}
+    regions = parsed.get("vision_regions") if isinstance(parsed, dict) else None
+    bound = (isinstance(plan.get("image_path"), str)
+             and Path(plan["image_path"]).resolve() == Path(image_path).resolve()
+             and isinstance(regions, dict) and regions.get("image_size") == viewport_size)
+    ranking = plan.get("candidate_result") or {}
+    ranking = ranking if isinstance(ranking, dict) else {}
+    candidates, rejected = ranking.get("candidates"), ranking.get("rejected")
+    candidates = candidates if isinstance(candidates, list) else []
+    rejected = rejected if isinstance(rejected, list) else []
+    summaries = []
+    for group, items in (("candidates", candidates), ("rejected", rejected)):
+        for c in items:
+            if not isinstance(c, dict) or len(summaries) >= 20:
+                continue
+            element = c.get("element") or {}
+            element = element if isinstance(element, dict) else {}
+            summaries.append({"candidate_id": c.get("candidate_id"), "group": group,
+                "text": c.get("text") or c.get("label") or element.get("text"),
+                "bbox": deepcopy(c.get("refined_bbox") or element.get("bbox")) if bound else None,
+                "bbox_source": c.get("bbox_refine_reason"), "score": c.get("score"),
+                "eligible": group == "candidates" and c.get("eligible") is not False,
+                "reasons": deepcopy(c.get("reasons", []))})
+    return {"contract_version": "local_recognition_diagnostics_v1", "current_capture_bound": bound,
+            "coordinate_space": "capture_image_pixels" if bound else None,
+            "image_path": plan.get("image_path"), "viewport_size": deepcopy(viewport_size),
+            "candidate_count": len(candidates), "rejected_count": len(rejected),
+            "recommended_candidate_id": ranking.get("recommended_candidate_id"),
+            "selection_status": "no_eligible_candidates" if not candidates else "selection_unresolved",
+            "candidates": summaries, "truncated": len(candidates) + len(rejected) > 20,
+            "executable": False, "automatic_retry_allowed": False,
+            "next": "Inspect the current screenshot and rejection reasons. Specify the exact visible label "
+                    "and surrounding context/region; distinguish no eligible candidate from ambiguous selection. "
+                    "Request a new recognition only after review. Do not click these diagnostic boxes directly."}
+
+
 def local_recognition_selection(plan, *, image_path, viewport_size):
     if not isinstance(plan, dict) or not isinstance(plan.get("image_path"), str):
         raise ValueError("local recognition plan invalid")

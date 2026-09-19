@@ -2278,7 +2278,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         pre_click = plan.get("pre_click_decision") or {}
         selected_point = _extract_action_point(plan)
         if local_policy_off:
-            from app.core.local_recognition_policy import local_recognition_selection
+            from app.core.local_recognition_policy import local_recognition_selection, local_recognition_diagnostics
             try:
                 pre_click = local_recognition_selection(plan, image_path=image_path,
                     viewport_size=_coordinate_size_from_live_capture(live_capture))
@@ -2286,7 +2286,9 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 return APIResponse(success=False, message="Current recognition geometry is unavailable",
                     data={"failure_reason": "local_recognition_invalid", "action_executed": False,
                         "automatic_safety_interception": False, "automatic_retry_allowed": False,
-                        "recognition_plan": plan, "timings": timer.to_dict()},
+                        "recognition_plan": plan, "timings": timer.to_dict(),
+                        "recognition_diagnostics": local_recognition_diagnostics(plan, image_path=image_path,
+                            viewport_size=_coordinate_size_from_live_capture(live_capture))},
                     error=ErrorModel(code="local_recognition_invalid", details=str(error)))
             selected_point = pre_click["selected_click_point"]
         plan_trace_path = plan.get("trace_path")

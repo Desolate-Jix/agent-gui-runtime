@@ -12,8 +12,9 @@ from uuid import uuid4
 from app.agent.native_identity import WindowsNativeIdentityReader, validate_native_identity_fact
 from app.core.local_input_policy import _local_operator_input_scope, _local_operator_step_scope, _window_rect
 from app.core.runtime_artifacts import RuntimeTimer
-from app.core.screenshot import ScreenshotService
+from app.core.screenshot import ScreenshotService, CaptureVisibilityError
 from app.core.observation_policy import local_action_observation_kind, resolve_render_grace_ms
+from .local_action_contract import LocalActionFieldsError, _validated_request
 
 
 class LocalDirectStepMixin:
@@ -210,6 +211,8 @@ class LocalDirectStepMixin:
                     except Exception as error:
                         report["phase"] = "result_unknown"
                         report["observation"] = {"status": "unavailable", "error_type": type(error).__name__,
+                            "error_code": error.reason if isinstance(error, CaptureVisibilityError) else "post_action_observation_failed",
+                            "next_action": "capture_current_state_without_replaying_input",
                             "authorizes_action": False, "readiness": "unknown", "automatic_retry_allowed": False}
             return report
         except Exception as error:
@@ -278,45 +281,6 @@ def _persist_invocation(root, context, timer, operation, failure):
         output.mkdir(parents=True, exist_ok=False)
         (output / "invocation.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _validated_request(operation, request):
-    from app.api.models.request import ExecuteRecognitionPlanRequest, ScrollRequest, TypeTextRequest, ROIModel
-    from .local_keyboard_action import LocalKeyRequest
-    models = {"execute_recognition_plan": ExecuteRecognitionPlanRequest, "type_text": TypeTextRequest,
-              "scroll": ScrollRequest, "press_key": LocalKeyRequest}
-    if operation not in models or type(request) is not dict:
-        raise ValueError("unsupported local non-learning action")
-    model = models[operation]
-    extra_fields = {"capture_roi"} if operation == "type_text" else set()
-    if set(request) - set(model.model_fields) - extra_fields:
-        raise ValueError("unknown local action fields; safety policy is not a request parameter")
-    value = deepcopy(request)
-    if operation == "execute_recognition_plan":
-        if any(value.get(key) is not None for key in (
-                "approved_plan_id", "learned_instruction_id", "interface_memory_id", "interface_memory_action_id",
-                "learning_mode", "observe_trace_path", "image_path")):
-            raise ValueError("local non-learning actions cannot load learning or saved action sources")
-        value.update(agent_mode="execute", learning_mode=None, capture_live=True,
-                     auto_observe_learning_artifacts=False, allow_saved_image_execution=False,
-                     write_policy={"path_graph": False, "element_memory": False, "trace": True},
-                     max_execution_attempts=1)
-    elif operation == "type_text":
-        if value.get("submit", False) is not False or value.get("clear_existing", False) is not False:
-            raise ValueError("local text entry does not submit or replace existing content")
-        if value.get("click_before_typing") is not True or value.get("x") is None or value.get("y") is None:
-            raise ValueError("local text entry requires an explicit current field point")
-    metadata = value.get("metadata", {})
-    if not isinstance(metadata, dict):
-        raise ValueError("local action metadata must be an object")
-    if "auto_observe_learning_artifacts" in metadata or "learning_artifacts" in metadata:
-        raise ValueError("local non-learning actions cannot request learning artifacts")
-    if metadata.get("path_graph_action_context") is not None:
-        raise ValueError("local non-learning actions cannot update a path graph")
-    validated = model.model_validate(value).model_dump()
-    if operation == "type_text" and value.get("capture_roi") is not None:
-        validated["capture_roi"] = ROIModel.model_validate(value["capture_roi"]).model_dump()
-    return validated
 
 
 def _validate_coordinates(request, capture):

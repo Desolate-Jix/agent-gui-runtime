@@ -1,0 +1,92 @@
+{
+  "version": "0.1.0-test.2",
+  "date": "2026-09-19",
+  "is_stable_release": false,
+  "regression": {
+    "passed": 550,
+    "modules": 23,
+    "warnings": 2,
+    "scope": "selected execution-mode modules, not all repository tests"
+  },
+  "mcp_noinput": {
+    "actual_input_executed": false,
+    "model_inference_tested": false,
+    "administrator_requested": false,
+    "server_version": "0.1.0-test.2",
+    "tools": [
+      "instant_start",
+      "instant_status",
+      "instant_submit",
+      "instant_result",
+      "instant_image",
+      "instant_stop"
+    ],
+    "host_is_admin": false,
+    "validation_error_recovery": {
+      "error_status": "validation_rejected",
+      "unknown_fields": [
+        "unexpected_field"
+      ],
+      "input_value_redacted": true,
+      "rejected_before_queue": true,
+      "same_host_identity": true,
+      "same_connection": true
+    },
+    "same_id_returned_same_receipt": true,
+    "cleanup_verified": true,
+    "stopped_host_rejection_returned_over_stdio": true,
+    "reconnect_preserved_original_receipt": true
+  },
+  "source_form_repetition": {
+    "completed_rounds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "last_request_number": 444,
+    "wall_seconds": 187.613,
+    "all_ten_passed": true,
+    "inputs": 220,
+    "frame_pair_hashes_verified": 440,
+    "returned_image_hashes_verified": 220,
+    "cleanup_verified": true,
+    "learning_enabled": false,
+    "models_used": false,
+    "scope": "One local Edge form, 10 sequential rounds; not 220 independent tasks. Original capture failure not reproduced or proven fixed."
+  },
+  "candidate_form": {
+    "completed_rounds": [
+      1
+    ],
+    "last_request_number": 48,
+    "wall_seconds": 17.691,
+    "candidate_round_passed": true,
+    "inputs": 22,
+    "frame_pair_hashes_verified": 44,
+    "returned_image_hashes_verified": 22,
+    "cleanup_verified": true,
+    "learning_enabled": false,
+    "models_used": false,
+    "scope": "One local Edge form, one candidate round of 22 inputs. Original capture failure not reproduced or proven fixed."
+  },
+  "limitations": [
+    "One machine and local Edge fixture; not cross-device acceptance.",
+    "Original post-capture failure remains unproven; diagnostic preservation improved.",
+    "Vision model cold-start/performance and elevated target increments not retested in this candidate.",
+    "Auxiliary full collection failed; see FIXES.md for scope/baseline classification."
+  ],
+  "distribution": {
+    "shipped_tests_passed": 110,
+    "mcp_smoke_passed": true,
+    "entrypoints_passed": true,
+    "same_runtime_source_as_live_candidate": true,
+    "public_raw_desktop_artifacts": false
+  }
+}

@@ -22,7 +22,7 @@ async def run(root, model, data, administrator=False):
         async with ClientSession(*streams) as client:
             initialized = await client.initialize()
             evidence["server_version"] = initialized.server_info.version
-            assert evidence["server_version"] == "0.1.0-test.1"
+            assert evidence["server_version"] == "0.1.0-test.2"
             tools = await client.list_tools()
             evidence["tools"] = [t.name for t in tools.tools]
             assert len(evidence["tools"]) == 6
@@ -47,6 +47,30 @@ async def run(root, model, data, administrator=False):
                 evidence["host_is_admin"] = status.get("host_is_admin")
                 if administrator:
                     assert evidence["host_is_admin"] is True, status
+                # 故意缺少输入必填项，只验入队前错误；随后复用同一 ID 读取目录。
+                session_directory = Path(status["session_directory"])
+                initial_identity = json.loads((data / "latest-session.json").read_text(encoding="utf-8"))["host_identity"]
+                invalid = await client.call_tool("instant_submit", {"request_id": "discovery-smoke",
+                    "command": {"kind": "step", "operation": "type_text",
+                                "request": {"unexpected_field": "REDACTION_TEST_SENTINEL"}}})
+                assert invalid.is_error
+                error_text = next(b.text for b in invalid.content if b.type == "text")
+                rejected = json.loads(error_text)
+                assert rejected["status"] == "validation_rejected" and rejected["accepted"] is False
+                assert rejected["action_executed"] is False
+                assert rejected["error"]["unknown_fields"] == ["unexpected_field"]
+                assert "REDACTION_TEST_SENTINEL" not in error_text
+                assert not list((session_directory / "commands").glob("*.json"))
+                error_log = (session_directory / "validation-errors.jsonl").read_text(encoding="utf-8")
+                assert "unexpected_field" in error_log and "REDACTION_TEST_SENTINEL" not in error_log
+                recovered = await call("instant_status")
+                assert recovered["host_alive"] and recovered["phase"] == "ready"
+                assert recovered["session_directory"] == str(session_directory) and not recovered["pending_ids"]
+                assert json.loads((data / "latest-session.json").read_text(encoding="utf-8"))["host_identity"] == initial_identity
+                evidence["validation_error_recovery"] = {
+                    "error_status": rejected["status"], "unknown_fields": rejected["error"]["unknown_fields"],
+                    "input_value_redacted": True, "rejected_before_queue": True,
+                    "same_host_identity": True, "same_connection": True}
                 sent = await call("instant_submit", {"request_id": "discovery-smoke", "command": {"kind": "discover"}})
                 assert sent["status"] == "pending"
                 deadline = time.monotonic() + 60
@@ -74,6 +98,17 @@ async def run(root, model, data, administrator=False):
                         raise TimeoutError("cleanup not verified: " + str(status))
                     await asyncio.sleep(1)
                 evidence["cleanup_verified"] = True
+                # 已停止宿主上的新查询必须明确拒绝，而不是触发 SDK 内部异常。
+                stopped_request = await client.call_tool("instant_submit", {
+                    "request_id": "after-stop", "command": {"kind": "discover"}})
+                assert stopped_request.is_error
+                stopped_value = json.loads(next(b.text for b in stopped_request.content if b.type == "text"))
+                assert stopped_value["status"] == "state_rejected"
+                assert stopped_value["error"]["code"] == "host_not_ready"
+                assert stopped_value["accepted"] is False and stopped_value["action_executed"] is False
+                assert stopped_value["next"] == {"tool": "instant_status", "arguments": {}}
+                assert not (session_directory / "commands" / "after-stop.json").exists()
+                evidence["stopped_host_rejection_returned_over_stdio"] = True
     # 重连只读取旧回执，不启动第二个宿主或重放命令。
     async with stdio_client(params) as streams:
         async with ClientSession(*streams) as client:

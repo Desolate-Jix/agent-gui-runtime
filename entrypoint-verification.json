@@ -35,6 +35,7 @@
     "app.api": "app/api/__init__.py",
     "app.core": "app/core/__init__.py",
     "app.core.runtime_input_authority": "app/core/runtime_input_authority.py",
+    "app.core.editing_keys": "app/core/editing_keys.py",
     "app.core.window_manager": "app/core/window_manager.py",
     "modules": "modules/__init__.py",
     "modules.click.geometry": "modules/click/geometry.py",
@@ -158,6 +159,7 @@
     "app.desktop_review": "app/desktop_review/__init__.py",
     "app.core.local_input_policy": "app/core/local_input_policy.py",
     "app.core.observation_policy": "app/core/observation_policy.py",
+    "app.desktop_review.local_action_contract": "app/desktop_review/local_action_contract.py",
     "app.desktop_review.local_direct_step": "app/desktop_review/local_direct_step.py",
     "app.desktop_review.local_keyboard_action": "app/desktop_review/local_keyboard_action.py"
   },

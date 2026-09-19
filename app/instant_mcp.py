@@ -13,9 +13,18 @@ import time
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-INSTANT_VERSION = "0.1.0-test.1"
+INSTANT_VERSION = "0.1.0-test.2"
+
+
+class InstantAdmissionError(ValueError):
+    """仅用于尚未写入命令队列的可预期状态拒绝。"""
+
+    def __init__(self, code, message, next_tool, next_arguments=None):
+        super().__init__(message)
+        self.code = code
+        self.next = {"tool": next_tool, "arguments": next_arguments or {}}
 
 
 class InstantCommand(BaseModel):
@@ -41,7 +50,7 @@ class InstantCommand(BaseModel):
         if not required <= present or present - allowed:
             raise ValueError("command fields do not match kind")
         if self.kind == "step":
-            from app.desktop_review.local_direct_step import _validated_request
+            from app.desktop_review.local_action_contract import _validated_request
             # 只验证，运行时再次验证；不在桥接层重写执行请求。
             _validated_request(self.operation, self.request)
         return value
@@ -186,11 +195,13 @@ class InstantSession:
                 return self.result(request_id)
             status = self.status()
             if status["phase"] != "ready" or not status["host_alive"]:
-                raise ValueError("host is not ready; poll instant_status")
+                raise InstantAdmissionError("host_not_ready", "host is not ready; poll instant_status", "instant_status")
             if status["pending_ids"]:
-                raise ValueError("one command is still pending; query its original ID, do not queue input")
+                raise InstantAdmissionError("command_pending",
+                    "one command is still pending; query its original ID, do not queue input",
+                    "instant_result", {"request_id": status["pending_ids"][0]})
             if (self.session / "closing.json").exists():
-                raise ValueError("session is closing")
+                raise InstantAdmissionError("session_closing", "session is closing", "instant_status")
             write_json(path, command)
             return {"request_id": request_id, "status": "pending", "automatic_retry_allowed": False,
                     "next": "Poll instant_result with this exact request_id"}
@@ -295,7 +306,7 @@ class InstantSession:
 
 def build_server(session):
     from mcp.server import MCPServer
-    from mcp.types import CallToolResult, ImageContent
+    from mcp.types import CallToolResult, ImageContent, TextContent
     server = MCPServer(name="agent-review-instant", version=INSTANT_VERSION, description="Windows instant-mode preview. Local operator input; no learning. Start explicitly, submit ONE command, poll its ID, inspect image before next action. No automatic retries.")
 
     def instant_start(new_session: bool = False) -> dict:
@@ -304,8 +315,43 @@ def build_server(session):
     def instant_status() -> dict:
         return session.status()
 
-    def instant_submit(request_id: str, command: InstantCommand) -> dict:
-        return session.submit(request_id, command.command())
+    def instant_submit(request_id: str, command: InstantCommand) -> CallToolResult:
+        try:
+            validated = command.command()
+        except ValueError as error:
+            # 只捕获入队前校验，日志不写输入值，执行异常不能伪装成未执行。
+            detail = {"code": "invalid_command", "message": str(error)}
+            if isinstance(error, ValidationError):
+                detail = {"code": "invalid_command", "message": "Invalid action field values",
+                          "issues": [{"field": list(e["loc"]), "type": e["type"]}
+                                     for e in error.errors(include_input=False, include_context=False)]}
+            for key in ("unknown_fields", "invalid_fields", "allowed_fields"):
+                if hasattr(error, key):
+                    detail[key] = getattr(error, key)
+            value = {"request_id": request_id, "status": "validation_rejected", "accepted": False,
+                     "action_executed": False, "automatic_retry_allowed": False, "error": detail,
+                     "next": "Correct the listed fields and submit again; this command was not queued. "
+                             "Keep the current connection and host; no model restart is required."}
+            with session.guard:
+                try:
+                    root = session.session or session.data_root
+                    root.mkdir(parents=True, exist_ok=True)
+                    with (root / "validation-errors.jsonl").open("a", encoding="utf-8") as log:
+                        log.write(json.dumps({"timestamp_unix": time.time(), **value}, ensure_ascii=False) + "\n")
+                except OSError as log_error:
+                    value["diagnostic_log_error"] = type(log_error).__name__
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))])
+        try:
+            value = session.submit(request_id, validated)
+        except InstantAdmissionError as error:
+            # 只转换确定未入队的状态；磁盘写入或执行异常仍不能谎报零输入。
+            value = {"request_id": request_id, "status": "state_rejected", "accepted": False,
+                     "action_executed": False, "automatic_retry_allowed": False,
+                     "error": {"code": error.code, "message": str(error)}, "next": error.next}
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+                                  structuredContent=value)
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+                              structuredContent=value)
 
     def instant_result(request_id: str) -> dict:
         return session.result(request_id)
@@ -319,7 +365,7 @@ def build_server(session):
     descriptions = {
         "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option.",
         "instant_status": "Read host, target, pending IDs and cleanup status; no screenshot or input.",
-        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal}; type_text={text,x,y,click_before_typing:true}; press_key={key:'Enter',x,y}; scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No clear_existing, general hotkeys, learning, or arbitrary shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
+        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal}; type_text={text,x,y,click_before_typing:true,clear_existing:false} (set clear_existing:true to replace; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
         "instant_result": "Read original response without executing again. pending means wait; result_unknown means inspect, never retry blindly. operation_succeeded is not proof of task outcome.",
         "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Compare both against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
         "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. Does not close user apps.",

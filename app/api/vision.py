@@ -2182,8 +2182,9 @@ def _corroborate_vista_direct_point(
             "w": text_bbox["width"], "h": text_bbox["height"],
         }
     box = result.matched_text_bbox
-    # 合成框仅用于局部搜索；明确标签的本帧文字中心才提供独立坐标证据。
+    # 合成框仅用于局部搜索；带类型的身份必须继续核对原点，不能从文字中心快捷返回。
     if (semantic_action != "fill_field"
+            and control_target is None
             and candidate.bbox_refine_reason == "synthetic_bbox_around_vista_direct_point"
             and result.status == "grounded" and target_label and box
             and normalize_text(result.matched_text) == normalize_text(target_label)
@@ -2464,7 +2465,7 @@ def _vista_direct_uia_conflicts(
     point: dict[str, int],
     candidates: list[RecognitionCandidate],
 ) -> list[str]:
-    normalized_goal = re.sub(r"\s+", " ", str(goal or "").strip().casefold())
+    from app.operation.recognition.candidate_ranker import _goal_label_match
     normalized_target_text = re.sub(r"\s+", " ", str(target_text or "").strip().casefold())
     exact_uia_candidates: list[RecognitionCandidate] = []
     for candidate in candidates:
@@ -2480,7 +2481,7 @@ def _vista_direct_uia_conflicts(
                 or normalized_target_text in normalized_label
             )
         else:
-            target_matches = normalized_label in normalized_goal
+            target_matches = _goal_label_match(goal, [candidate.label], negated=False)
         if not target_matches:
             continue
         exact_uia_candidates.append(candidate)

@@ -1,4 +1,4 @@
-# Agent 接入与操作 / Agent usage — v0.1.0-test.1
+# Agent 接入与操作 / Agent usage — v0.1.0-test.2
 
 本包只提供即时操作，不是学习桥。按用户指定的低风险任务使用本包接口，不使用另一套鼠标工具冒充本包测试。快捷入口使用管理员宿主且自动风险拦截关闭；一次只允许一个 Agent 控制桌面。付款、发送、删除、最终提交等不可逆操作不在本次测试范围。
 
@@ -29,7 +29,7 @@ Submit one action at a time, await the receipt and inspect images before proceed
 ```
 
 ```json
-{"request_id":"type-001","command":{"kind":"step","operation":"type_text","request":{"text":"Google Maps","x":500,"y":300,"click_before_typing":true}}}
+{"request_id":"type-001","command":{"kind":"step","operation":"type_text","request":{"text":"Google Maps","x":500,"y":300,"click_before_typing":true,"clear_existing":true}}}
 ```
 
 ```json
@@ -40,7 +40,22 @@ Submit one action at a time, await the receipt and inspect images before proceed
 {"request_id":"scroll-001","command":{"kind":"step","operation":"scroll","request":{"direction":"down","wheel_clicks":3,"x":500,"y":400}}}
 ```
 
-不支持 clear_existing、任意快捷键或 shell 命令。不得在失败时悄悄换成其他工具重复输入。 / No clear_existing, arbitrary hotkeys or shell commands. Do not silently repeat failed input through another backend.
+`type_text.clear_existing=true` 显式替换已有内容，默认 false；不会自动回车或提交。`press_key.key` 精确支持：
+
+`Enter`, `Tab`, `Shift+Tab`, `Escape`, `Backspace`, `Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`, `Ctrl+A`, `Ctrl+Z`, `Ctrl+Y`。
+
+按键发给当前焦点；其 x/y 只用于窗口点校验，**不会点击或重新聚焦**。先通过截图确认焦点；切字段用 Tab/Shift+Tab。应用可能不支持撤销/重做，不把按键派发当作生效。不支持任意组合键、shell 或隐式 submit。
+
+Explicit clear_existing replaces text; default false, without implicit Enter/submit. Keys above go to current focus. Their x/y do not click or refocus. Confirm focus, use Tab/Shift+Tab to change fields, and inspect results. Undo/redo support depends on the app. Arbitrary chords and shell commands are unsupported.
+
+## 可恢复错误 / Actionable errors
+
+- 非法字段返回 validation_rejected，包含字段位置/允许字段；原填写值不回显。修正参数后再提交，不退出连接或重复加载模型。
+- 宿主未就绪、已有命令处理中或正在关闭时返回 state_rejected 和 next 查询指引，不把被拒请求写入执行队列。
+- 多候选或无有效坐标会返回候选诊断；使用当前证据明确目标，不凭候选列表盲点。
+- 已输入但后图采集失败时，回执保留 error_code 和 capture_current_state_without_replaying_input 指引；先单独 capture，不能假定尚未输入。
+
+Malformed fields return structured validation errors without echoing input values. State rejections include the next status/result query and do not enqueue input. Ambiguous targeting returns candidate diagnostics. A post-input capture error calls for a separate capture, not another input attempt.
 
 ## Agent 判断结果 / Judge the outcome
 

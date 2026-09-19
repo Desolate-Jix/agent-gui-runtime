@@ -1,13 +1,13 @@
-"""本地无学习回车适配，不新增网络授权或通用系统快捷键。"""
-from typing import Literal
+"""本地无学习编辑键适配，复用现有键盘后端。"""
 from pydantic import BaseModel, Field
 
 from app.api.models.request import ROIModel
 from app.api.models.response import APIResponse, ErrorModel
+from app.core.editing_keys import EditingKey
 
 
 class LocalKeyRequest(BaseModel):
-    key: Literal["Enter"]
+    key: EditingKey
     x: int = Field(ge=0)
     y: int = Field(ge=0)
     capture_roi: ROIModel | None = None
