@@ -1,3 +1,26 @@
+## Agent Review Instant v0.1.0-test.3 — 执行模式测试版 / Execution-mode test release
+
+[下载与校验和 / Download & checksum](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.0-test.3) · [已交付源码 / Released source](https://github.com/Desolate-Jix/agent-gui-runtime/tree/instant-v0.1.0-test.3) · [安装、模型下载与配置 / Setup & models](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.0-test.3/FRIEND_SETUP.md) · [Agent 操作说明 / Agent guide](docs/INSTANT_PUBLIC_AGENT_GUIDE.md)
+
+当前提供给外部 Agent 的是 Windows MCP **执行模式源码测试包**，不是正式稳定版或学习模式交付。支持窗口发现/启动/选择/切换/最大化、识别单击/右击/双击、文本填写与替换、15 种编辑键、上下滚动、当前截图 OCR 读文，以及正常关闭本会话启动的窗口。通过六个 `instant_*` MCP 工具接入；结果由 Agent 查看原始前后截图判断。
+
+The current public delivery is a Windows MCP **execution-mode source test bundle**, not a stable release or learning-mode delivery. It supports window discovery/launch/selection/focus/maximization, recognition-based single/right/double clicks, typing/replacement, 15 editing keys, vertical scrolling, visible-image OCR and closing session-launched windows. Six `instant_*` tools expose these operations; the Agent judges outcomes from original before/after images.
+
+**仅用于有人看护的低风险测试。** 快捷配置使用管理员宿主、关闭框架自动风险拦截，会真实操作键盘鼠标。UAC 由本人确认；一个桌面同时只让一个 Agent 操作。模型与 Python 环境另行安装，不包含私人数据。 / **Supervised low-risk testing only.** Quick setup uses an administrator host with automatic risk interception disabled and real input. Confirm UAC yourself and use one desktop controller at a time. Models/Python dependencies are separate; private data is excluded.
+
+### 当前进度 / Current progress — 2026-09-20
+
+- test.3 已发布：438 项源码相关检查、270 项隔离交付检查（集合重叠，不相加）；Codex 实测后，AionUi 同冻结候选完成 22 项 Google 检查，原图摘要与清理已复核。 / Released after scoped source/isolation checks and Codex-first, independent AionUi Google acceptance; counts overlap.
+- 新增 Wikipedia 覆盖：搜索 Wellington → 进入文章 → 读取 → 下滚重读 → 返回顶部 → 关闭清理；Codex 核对 13 条操作回执、26 项图片摘要。AionUi 报告修正客户端后 19 项通过，**最新原始证据尚待维护者独立复核**，不算首次全通过或长期稳定。 / Additional Wikipedia coverage reviewed by Codex; AionUi reports 19 passing checks after tester corrections, with maintainer evidence review still pending.
+- 识别点击约 16.7 秒、读文约 6–10 秒、滚动约 2.1 秒，仅为该次 Wikipedia 命令耗时，不是通用性能保证。历史偶发双击/缺帧、跨设备与首次安装验证仍开放。 / Single-run command timings only; intermittent double-click/missing-frame and broader device/install validation remain open.
+- 顺序：**稳定性和补齐操作 → 速度优化 → 学习模式**。新候选先由 Codex 使用框架在真实网站/应用测试，再交 AionUi 独立复测；累计验证后发布，不为每次文档/测试变更重新打包，本阶段不新增安全功能。 / **Stability and operations → speed → learning.** Codex tests real targets through the framework before AionUi independently checks the frozen candidate; batch releases follow evidence, not every edit. No new safety features in this phase.
+
+[本轮覆盖、失败与边界 / Coverage, failures and limits](docs/EXECUTION_CROSS_SITE_TEST3.md)
+
+以下为历史完整产品资料，不代表当前执行模式测试包的交付范围。此处文档更新不改动 test.3 标签、ZIP、校验和或已安装客户端。 / Historical full-product material follows, separate from the current test bundle. This documentation update does not change the test.3 tag, ZIP, checksum or installed clients.
+
+---
+
 # agent-gui-runtime
 
 **版本 0.3.0 · Windows GUI Agent Runtime · Portfolio v1 已冻结 · 受限 Quick Apply-only release**
