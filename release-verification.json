@@ -1,18 +1,24 @@
 {
-  "version": "0.1.0-test.2",
-  "date": "2026-09-19",
+  "version": "0.1.0-test.3",
+  "date": "2026-09-20",
   "is_stable_release": false,
-  "regression": {
-    "passed": 550,
-    "modules": 23,
+  "accepted_candidate_manifest_sha256": "832c373aadb7f30548fa2034b91763c3945dcf3ed72e5f434fcff5b4db84e4e6",
+  "source_regression": {
+    "passed": 438,
+    "modules": 24,
     "warnings": 2,
-    "scope": "selected execution-mode modules, not all repository tests"
+    "scope": "Selected execution modules, not all repository tests"
+  },
+  "candidate_isolated_tests": {
+    "passed": 270,
+    "worktree_runtime_imports": 0,
+    "input_executed": false
   },
   "mcp_noinput": {
     "actual_input_executed": false,
     "model_inference_tested": false,
     "administrator_requested": false,
-    "server_version": "0.1.0-test.2",
+    "server_version": "0.1.0-test.3",
     "tools": [
       "instant_start",
       "instant_status",
@@ -32,61 +38,70 @@
       "same_host_identity": true,
       "same_connection": true
     },
+    "discovery": {
+      "applications": 4,
+      "windows": 7
+    },
     "same_id_returned_same_receipt": true,
     "cleanup_verified": true,
     "stopped_host_rejection_returned_over_stdio": true,
     "reconnect_preserved_original_receipt": true
   },
-  "source_form_repetition": {
-    "completed_rounds": [
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-      7,
-      8,
-      9,
-      10
-    ],
-    "last_request_number": 444,
-    "wall_seconds": 187.613,
-    "all_ten_passed": true,
-    "inputs": 220,
-    "frame_pair_hashes_verified": 440,
-    "returned_image_hashes_verified": 220,
-    "cleanup_verified": true,
-    "learning_enabled": false,
-    "models_used": false,
-    "scope": "One local Edge form, 10 sequential rounds; not 220 independent tasks. Original capture failure not reproduced or proven fixed."
+  "codex_real_site": {
+    "site": "Google search",
+    "continuous_rounds": 1,
+    "commands": 14,
+    "image_hash_checks": 37,
+    "cleanup_verified": true
   },
-  "candidate_form": {
-    "completed_rounds": [
-      1
-    ],
-    "last_request_number": 48,
-    "wall_seconds": 17.691,
-    "candidate_round_passed": true,
-    "inputs": 22,
-    "frame_pair_hashes_verified": 44,
-    "returned_image_hashes_verified": 22,
+  "aionui_real_site": {
+    "site": "Google search",
+    "continuous_rounds": 1,
+    "counts": {
+      "PASS": 22,
+      "FAIL": 0,
+      "INCONCLUSIVE": 0
+    },
+    "commands": 14,
+    "image_hash_checks": 44,
     "cleanup_verified": true,
-    "learning_enabled": false,
-    "models_used": false,
-    "scope": "One local Edge form, one candidate round of 22 inputs. Original capture failure not reproduced or proven fixed."
+    "command_wall_ms": {
+      "ws-close": 62.66,
+      "ws-double": 13938.849,
+      "ws-enter1": 2268.002,
+      "ws-enter2": 2483.513,
+      "ws-launch": 6364.746,
+      "ws-maximize": 387.818,
+      "ws-read1": 6846.66,
+      "ws-read2": 6248.31,
+      "ws-right": 19143.013,
+      "ws-scroll": 1123.387,
+      "ws-select": 211.148,
+      "ws-selectall": 13326.915,
+      "ws-type1": 486.109,
+      "ws-type2": 418.16
+    }
+  },
+  "whole_image_ocr": {
+    "source_image_sha256": "a8e76a5704f466f40994ae18b4b3cdec88e42b245066d0225176e2ed3069baff",
+    "expected_ocr": "rapidocr-onnxruntime==1.4.4",
+    "independent_repeats_passed": 3,
+    "words": 301,
+    "crop_or_tiling": false,
+    "wrong_interpreter_probe": "OCR1.2.3 returned3fields; preserved as client environment deviation, not weakened validation"
   },
   "limitations": [
-    "One machine and local Edge fixture; not cross-device acceptance.",
-    "Original post-capture failure remains unproven; diagnostic preservation improved.",
-    "Vision model cold-start/performance and elevated target increments not retested in this candidate.",
-    "Auxiliary full collection failed; see FIXES.md for scope/baseline classification."
+    "One machine/real-site chain, not sustained or cross-device stability",
+    "Historical intermittent double-click/missing-frame causes remain open",
+    "No repeated fresh install/download or elevated-target acceptance",
+    "OCR reads visible pixels only",
+    "No private raw screenshots/receipts distributed"
   ],
   "distribution": {
-    "shipped_tests_passed": 110,
-    "mcp_smoke_passed": true,
-    "entrypoints_passed": true,
-    "same_runtime_source_as_live_candidate": true,
-    "public_raw_desktop_artifacts": false
+    "same_runtime_as_live_candidate": true,
+    "final_directory_tests_pending": false,
+    "shipped_tests_passed": 270,
+    "isolated_worktree_imports": 0,
+    "mcp_smoke_passed": true
   }
 }

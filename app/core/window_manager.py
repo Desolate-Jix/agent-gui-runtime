@@ -202,6 +202,11 @@ class WindowManager:
                                 for x1, y1, x2, y2 in sorted(regions)]}
                 seen.add(current)
                 if win32gui.IsWindowVisible(current) and not win32gui.IsIconic(current):
+                    # 绑定窗口拥有的原生弹出菜单属于同一可见表面，不应被截图遮罩。
+                    # 无法验证 owner 链时保持原处理，避免把不明窗口误判为内部内容。
+                    if current != bound.handle and self._is_owned_popup(current, bound.handle):
+                        current = int(win32gui.GetWindow(current, win32con.GW_HWNDNEXT) or 0)
+                        continue
                     other_left, other_top, other_right, other_bottom = win32gui.GetWindowRect(current)
                     if (max(left, other_left) < min(right, other_right)
                             and max(top, other_top) < min(bottom, other_bottom)):
@@ -215,6 +220,17 @@ class WindowManager:
             return base
         except Exception as error:
             return {**base, "error_type": type(error).__name__}
+
+    @staticmethod
+    def _is_owned_popup(candidate_handle: int, bound_handle: int) -> bool:
+        """仅按可验证的 GA_ROOTOWNER 关系识别绑定窗口的原生 popup。"""
+        try:
+            get_ancestor = getattr(win32gui, "GetAncestor")
+            root_owner_flag = getattr(win32con, "GA_ROOTOWNER", 3)
+            root_owner = int(get_ancestor(candidate_handle, root_owner_flag) or candidate_handle)
+            return root_owner == int(bound_handle)
+        except Exception:
+            return False
 
     @staticmethod
     def _occluded_union_area(regions: set[tuple[int, int, int, int]]) -> int:
@@ -237,6 +253,7 @@ class WindowManager:
         bound: BoundWindow,
         x: int,
         y: int,
+        expected_owned_popup_handle: int | None = None,
     ) -> dict[str, object]:
         """验证窗口坐标点当前是否仍由绑定窗口拥有。"""
         self._ensure_windows_backend()
@@ -288,10 +305,19 @@ class WindowManager:
             or is_child
             or hit_root == int(bound.handle)
         )
+        # 原生菜单是 owned 顶层窗而非 child；同进程且根 owner 匹配才属于当前目标。
+        owned_popup = bool(type(expected_owned_popup_handle) is int and expected_owned_popup_handle > 0
+                           and hit_root == expected_owned_popup_handle and hit_root_owner == int(bound.handle)
+                           and bound.process_id and process_id == bound.process_id)
+        if expected_owned_popup_handle is not None:
+            return {**base, "allowed": owned_popup,
+                    "reason": "target_point_owned_by_bound_popup" if owned_popup else "expected_popup_target_changed",
+                    "expected_owned_popup_handle": expected_owned_popup_handle, "hit_window": hit_window}
         return {
             **base,
-            "allowed": owned,
-            "reason": "target_point_owned_by_bound_window" if owned else "target_point_occluded",
+            "allowed": owned or owned_popup,
+            "reason": ("target_point_owned_by_bound_window" if owned else
+                       "target_point_owned_by_bound_popup" if owned_popup else "target_point_occluded"),
             "hit_window": hit_window,
         }
 
@@ -476,18 +502,26 @@ class WindowManager:
         if not WINDOWS_BACKEND_AVAILABLE:
             return False
 
+        def rejected(reason: str, **details) -> bool:
+            # 只记录当前绑定的失败，不输出标题内容，也不刷屏记录枚举中的无关窗口。
+            if self._bound_window is not None and wrapper.handle == self._bound_window.handle:
+                logger.warning("Bound window candidate rejected: handle={} reason={} details={}",
+                               wrapper.handle, reason, details)
+            return False
+
         try:
             handle = wrapper.handle
             if not win32gui.IsWindowVisible(handle):  # type: ignore[union-attr]
-                return False
+                return rejected("not_visible")
             # GetParent 也返回弹窗 owner；只沿父子链判断，保留独立弹窗身份。
             if win32gui.GetAncestor(handle, win32con.GA_ROOT) != handle:  # type: ignore[union-attr]
-                return False
+                return rejected("not_top_level")
             if not wrapper.window_text().strip():
-                return False
+                return rejected("empty_title")
             return True
-        except Exception:
-            return False
+        except Exception as error:
+            return rejected("candidate_query_failed", error_type=type(error).__name__,
+                            winerror=getattr(error, "winerror", None))
 
     def _is_bound_handle_valid(self, handle: int) -> bool:
         """Return whether the bound handle still points to a visible top-level window."""

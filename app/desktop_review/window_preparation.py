@@ -14,6 +14,7 @@ from app.agent.native_identity import (
     validate_native_identity_fact,
 )
 from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore, content_sha256
+from app.core.window_close import post_window_close, window_handle_exists
 
 
 class WindowPreparationMixin:
@@ -199,6 +200,54 @@ class WindowPreparationMixin:
         self._unverified_window_launch = deepcopy(result) if result["status"] != "launched_window_ready" else None
         return result
 
+    def close_launched_window(self, *, target_window_handle: int, target_process_id: int) -> dict[str, Any]:
+        """仅关闭本协调器通过 launch 新增且身份仍一致的窗口。"""
+        self._begin("idle", preserve_window_preparation=True)
+        try:
+            self._require_host_ready()
+            return self._owner.call(lambda: self._close_launched_window_on_owner(
+                target_window_handle=target_window_handle, target_process_id=target_process_id))
+        finally:
+            self._end()
+
+    def _close_launched_window_on_owner(self, *, target_window_handle: int, target_process_id: int) -> dict[str, Any]:
+        if type(target_window_handle) is not int or target_window_handle <= 0 or type(target_process_id) is not int or target_process_id <= 0:
+            raise self._error("window_close_identity_invalid", "window close requires a valid handle and process id")
+        identity = getattr(self, "_launched_window_identities", {}).get((target_window_handle, target_process_id))
+        if identity is None:
+            raise self._error("window_close_not_launched", "window was not launched by this coordinator")
+        close_state = getattr(self, "_launched_window_close_state", {})
+        # 已发关闭请求后只补确认，窗口消失时不能再绑定它。
+        if close_state.get((target_window_handle, target_process_id)) and not window_handle_exists(target_window_handle):
+            self._launched_window_identities.pop((target_window_handle, target_process_id), None)
+            close_state.pop((target_window_handle, target_process_id), None)
+            return {"status": "window_closed", "success": True, "close_requested": True,
+                    "automatic_retry_allowed": False}
+        try:
+            self._windows().bind_window_by_handle(target_window_handle)
+            current = validate_native_identity_fact(
+                WindowsNativeIdentityReader(window_manager=self._windows()).read_identity(target_window_handle),
+                target_window_handle=target_window_handle, expected_process_id=target_process_id,
+            )
+        except Exception as error:
+            raise self._error("window_close_identity_unavailable", "launched window identity is unavailable") from error
+        if current != identity:
+            raise self._error("window_close_identity_changed", "launched window identity changed")
+        if not close_state.get((target_window_handle, target_process_id), False):
+            post_window_close(target_window_handle)
+            close_state[(target_window_handle, target_process_id)] = True
+            self._launched_window_close_state = close_state
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if not window_handle_exists(target_window_handle):
+                getattr(self, "_launched_window_identities", {}).pop((target_window_handle, target_process_id), None)
+                close_state.pop((target_window_handle, target_process_id), None)
+                return {"status": "window_closed", "success": True, "close_requested": True,
+                        "automatic_retry_allowed": False}
+            self._cancel_wait.wait(min(0.05, max(0.0, deadline - time.monotonic())))
+        return {"status": "window_close_pending", "success": False, "close_requested": True,
+                "automatic_retry_allowed": False}
+
     def _cache_prepared_identity(self, intent, identity):
         if intent.get("source") in {"app_catalog", "selected_window"}:
             # 首次启动/聚焦没有旧资产，不凭窗口回执授予资产或操作权限。
@@ -311,6 +360,9 @@ class WindowPreparationMixin:
                 if self._cancel_wait.is_set():
                     return _launch_unavailable(process_id, "launch_effect_not_undone_after_cancel")
                 self._cache_prepared_identity(intent, matched)
+                if not hasattr(self, "_launched_window_identities"):
+                    self._launched_window_identities = {}
+                self._launched_window_identities[(matched["target_window_handle"], matched["process_id"])] = deepcopy(matched)
                 return {"status": "launched_window_ready", "process_id": process_id, "window": _bound(bound)}
             self._cancel_wait.wait(min(0.05, max(0, deadline - time.monotonic())))
         return _launch_unavailable(process_id, "launched_window_timeout")

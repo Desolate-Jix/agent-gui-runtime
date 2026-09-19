@@ -57,6 +57,36 @@ def uia_control_is_action_identity(control: Mapping[str, object]) -> bool:
     }
 
 
+def explicit_menu_item_goal(goal: str) -> bool:
+    """识别菜单项为动作目标，不能因上下文提到菜单就改用菜单子树。"""
+    action = re.match(r"\s*(?:(?:(?:left|right|double|single)[ -]?)?click|select|choose)\s+(?:the\s+)?", goal, re.I)
+    if action is None:
+        return False
+    tail = goal[action.end():]
+    menu = r"(?:right[ -]click\s+)?(?:context\s+)?menu"
+    if re.match(menu + r"\s+(?:item|option)\b", tail, re.I):
+        return True
+    # 标签在前的同义语序；排除先操作字段、随后再选菜单的多步指令。
+    target = re.match(r"(?P<label>[^,;.!?\n]+?)\s+(?:item|option)\s+(?:in|on|from)\s+(?:the\s+)?" + menu + r"\b", tail, re.I)
+    return bool(target and not re.search(r"\b(?:then|inside|within|button|input|field|box|word)\b", target.group("label"), re.I))
+
+
+def generic_field_target(goal, *, control_target=None, target_text=None):
+    """只识别直接指向字段的动作，不把框内单词、按钮或明确标签泛化。"""
+    from app.operation.recognition.text_match import explicit_target_marker
+    if control_target is not None or target_text or explicit_target_marker(goal):
+        return False
+    # 动作后的方位介词仍指字段本身；框内单词/按钮由下方目标边界排除。
+    action = re.match(r"\s*(?:right[ -]?click|double[ -]?click|click|focus|locate)\b\s*(?:(?:on|inside|within|in)\s+)?", goal, re.I)
+    if action is None:
+        return False
+    tail = goal[action.end():]
+    field = re.search(r"\b(?:input\s+(?:box|field)|search\s+(?:box|field)|text\s+(?:box|field|area)|textbox|textarea|combobox)\b", tail, re.I)
+    if field is None:
+        return False
+    return re.search(r"\b(?:inside|within|in|on|word|button|link|label|icon|menu|checkbox|radio)\b", tail[:field.start()], re.I) is None
+
+
 def uia_action_identity_matches(control, *, goal, control_target=None, target_text=None):
     """生产者与消歧消费者共用原始匹配集合，不用选中标签缩小候选集合。"""
     from app.operation.recognition.candidate_ranker import _goal_label_match
@@ -65,6 +95,12 @@ def uia_action_identity_matches(control, *, goal, control_target=None, target_te
         return False
     if control_target is not None:
         return uia_control_matches(control, control_target)
+    if generic_field_target(goal, target_text=target_text):
+        # 动态值不是字段标签；这里只限定角色，唯一几何与状态由当前树消费者核验。
+        kind = str(control.get("control_type") or "").casefold()
+        patterns = {str(item).casefold() for item in control.get("patterns") or []}
+        return (kind in {"edit", "textbox", "text box"} and bool(patterns & {"value", "text"})
+                or kind in {"combobox", "combo box"} and {"value", "text"} <= patterns)
     target_key = re.sub(r'\s+', ' ', str(target_text or '').strip().casefold())
     label_key = re.sub(r'\s+', ' ', str(control.get('name') or '').strip().casefold())
     return ((not target_key or label_key == target_key)

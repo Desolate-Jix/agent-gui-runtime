@@ -31,6 +31,39 @@
       "handler_executed": false
     }
   ],
+  "observation_operations": [
+    {
+      "operation": "read_text",
+      "handler_imported": true,
+      "request_validated": true,
+      "handler_executed": false
+    }
+  ],
+  "recognition_click_variants": [
+    {
+      "click_kind": "single",
+      "request_validated": true,
+      "handler_executed": false
+    },
+    {
+      "click_kind": "double",
+      "request_validated": true,
+      "handler_executed": false
+    },
+    {
+      "click_kind": "right",
+      "request_validated": true,
+      "handler_executed": false
+    }
+  ],
+  "window_operations": [
+    {
+      "operation": "close_launched_window",
+      "handler_imported": true,
+      "request_validated": true,
+      "handler_executed": false
+    }
+  ],
   "local_module_sources": {
     "app.api": "app/api/__init__.py",
     "app.core": "app/core/__init__.py",
@@ -161,7 +194,20 @@
     "app.core.observation_policy": "app/core/observation_policy.py",
     "app.desktop_review.local_action_contract": "app/desktop_review/local_action_contract.py",
     "app.desktop_review.local_direct_step": "app/desktop_review/local_direct_step.py",
-    "app.desktop_review.local_keyboard_action": "app/desktop_review/local_keyboard_action.py"
+    "app.desktop_review.local_keyboard_action": "app/desktop_review/local_keyboard_action.py",
+    "app.vision.schemas": "app/vision/schemas.py",
+    "app.operation.page_structure.schemas": "app/operation/page_structure/schemas.py",
+    "app.operation.page_structure.fusion": "app/operation/page_structure/fusion.py",
+    "app.operation.page_structure": "app/operation/page_structure/__init__.py",
+    "app.operation.screen_reading.uia_provider": "app/operation/screen_reading/uia_provider.py",
+    "app.operation.screen_reading.builder": "app/operation/screen_reading/builder.py",
+    "app.operation.screen_reading": "app/operation/screen_reading/__init__.py",
+    "app.operation.screen_reading.captured_text": "app/operation/screen_reading/captured_text.py",
+    "app.instant_mcp": "app/instant_mcp.py",
+    "app.agent.workflow_versions": "app/agent/workflow_versions.py",
+    "app.agent.reviewed_workflow_asset": "app/agent/reviewed_workflow_asset.py",
+    "app.core.window_close": "app/core/window_close.py",
+    "app.desktop_review.window_preparation": "app/desktop_review/window_preparation.py"
   },
   "limitation": "Dependency and request validation only, not real input or end-to-end acceptance"
 }

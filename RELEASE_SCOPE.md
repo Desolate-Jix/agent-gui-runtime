@@ -1,23 +1,7 @@
-# test.2 候选范围 / Candidate scope
+# test.3 发布范围 / Release scope
 
-此目录从 `instant-v0.1.0-test.1` 建立，合入 13 个经核对的源码文件，以及双语说明和无输入回归子集；未复制主开发工作树的其他学习/UI 改动、用户数据或模型。版本为 `0.1.0-test.2`，是否公开以 GitHub Release 为准。
+从test.2干净发布分支增量更新；运行代码取自已完成Codex实机及AionUi独立复验的冻结候选06，最终目录只另改公开文档和验收摘要。未从脏开发树重新生成运行时、未复制学习/UI工作区变更、模型、环境或用户数据。 / Incremental on the clean test.2 release branch. Runtime bytes match frozen candidate06, tested first by Codex then AionUi; only public documentation/evidence summaries change afterward. No fresh runtime copy from the dirty development tree, models, environments or user data.
 
-Based on `instant-v0.1.0-test.1`, with 13 reviewed source files, bilingual documentation and a no-input regression subset. No unrelated learning/UI changes, user data or weights are included. Version is `0.1.0-test.2`; publication is determined by its GitHub Release.
+分支 `codex/release-instant-test-3` 用于即时执行第三批测试版，不替代完整产品开发分支。新增右击/双击、当前截图读文和本次启动窗口正常关闭，修复公共字段/菜单/词几何问题；不新增学习或审批功能。 / Instant execution test.3 branch, separate from full-product development; right/double click, visible-text reading, owned-window closure and shared targeting/OCR fixes, not new learning/approval features.
 
-## 功能增量 / Changes
-
-- 15 种编辑键、显式文本替换；保持原输入后端，不隐式提交。 / Fifteen editing keys and explicit text replacement, using the existing backend without implicit submission.
-- 请求字段/状态错误结构化；参数校验不加载 Windows COM。 / Structured field/state errors and COM-free parameter validation.
-- 明确目标标签用于候选身份匹配，返回候选失败诊断。 / Explicit target labels guide candidate identity, with actionable selection diagnostics.
-- 事后截图异常保留固定原因；结果未知不等于未输入。 / Post-action capture errors preserve typed reasons; unknown outcomes do not mean no input.
-
-## 当前证据 / Current evidence
-
-- 隔离候选 550 项相关回归通过；独立编辑键审查 118 项通过（有重叠，不相加）。 / 550 isolated-candidate checks pass; independent key review passes 118 overlapping checks, not additive.
-- 全新本机表单连续 10 轮、220 次输入通过；440 个前后图摘要及 220 个返回图摘要一致，宿主清理通过。 / Ten sequential local-form rounds and 220 inputs pass, with 440 frame-pair and 220 returned-image digests verified and host cleanup confirmed.
-- 首轮 23 次输入有一次已输入但后图失败；后续补图确认，未重放。另一次重复测试在第六轮被验收记录器的并发写入错误中断；记录器已加锁/原子替换并以失败回归验证。 / Initial 23-input run lost one after-frame after dispatch, then recovered by separate observation without replay. Another repetition campaign stopped in round six due to a test-recorder write race; locking/atomic replacement now has regression coverage.
-- 原始缺帧尚未确定具体原因；十轮未复现不等于已修复。 / The original missing-frame cause remains uncertain; no recurrence is not proof of a fix.
-
-## 候选复验与边界 / Candidate checks and limits
-
-隔离真实入口、MCP stdio 生命周期及一轮 22 次输入通过，截图摘要与清理通过。辅助测试扩展运行中的 48 项失败分类见 FIXES.md；不是全仓通过。归档使用精确清单与 SHA-256；不会改变外部 Agent 配置。 / Isolated functional imports, real MCP lifecycle and one 22-input round pass, including image hashes and cleanup. See FIXES.md for the 48 auxiliary failures; this is not an all-suite pass. Distribution uses an exact manifest and SHA-256 without changing external Agent configurations.
+依赖导入、无输入测试、真实MCP和真实网页效果分别记录。438项源码、270项交付子集有重叠，不相加；独立22项只代表一轮真实网页，不是长期稳定证明。历史偶发双击/缺帧与跨设备验收仍开放。详见FIXES.md及release-verification.json。 / Import, no-input, stdio and real-page evidence are separate; overlapping checks are not additive. One live round does not close historical intermittency or cross-device acceptance.

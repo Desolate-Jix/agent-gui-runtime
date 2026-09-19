@@ -495,7 +495,8 @@ def _goal_label_match(goal: str, labels: Iterable[str], *, negated: bool) -> boo
     target_label = explicit_target_label(goal)
     if target_label is not None:
         # 候选须包含完整目标词段；允许 UIA 名称附带网址，但不反向匹配短词。
-        marker = re.search(r"\b(?:labelled|labeled|named|titled)\s+", goal, re.I)
+        from app.operation.recognition.text_match import explicit_target_marker
+        marker = explicit_target_marker(goal)
         is_negated = _negates_next_click_target(_normalize_text(goal[:marker.start()]))
         target_text = _normalize_text(target_label)
         return bool(target_text) and is_negated is negated and any(

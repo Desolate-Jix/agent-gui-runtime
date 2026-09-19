@@ -21,9 +21,16 @@ def text_similarity(left: str, right: str) -> float:
     return max(len(a & b) / len(a | b), SequenceMatcher(None, left, right).ratio())
 
 
+def explicit_target_marker(goal: str):
+    return re.search(
+        r"\b(labelled|labeled|named|titled)\s+|"
+        r"\b(?:double[ -]?click|click|select)\s+(?:the\s+)?(?P<word>word)\s+",
+        goal, re.I)
+
+
 def explicit_target_label(goal: str) -> str | None:
     # 仅抽取明确标记的标签，不猜测任意自然语言中的目标。
-    marker = re.search(r"\b(labelled|labeled|named|titled)\s+", goal, re.I)
+    marker = explicit_target_marker(goal)
     if marker is None:
         return None
     tail = goal[marker.end():].strip()
@@ -35,11 +42,23 @@ def explicit_target_label(goal: str) -> str | None:
         end = tail.find(closing, 1)
         return (tail[1:end].strip() or None) if end > 0 else None
     # titled 的括号可为正式标题缩写；保留 labelled 的历史括号说明语法。
+    kind = (marker.group(1) or marker.group("word")).casefold()
     boundary = r"\s+(?:whose|in|on)\b"
-    if marker.group(1).casefold() != "titled":
+    if kind == "word":
+        boundary = r"\s+(?:inside|within|in|on|to|for)\b"
+    if kind != "titled":
         boundary += r"|\s*\("
     label = re.split(boundary, tail, maxsplit=1, flags=re.I)[0].strip()
     # 未加引号的多个备选标签不是单一身份，继续走原有多候选判断。
     if re.search(r"\s+or\s+", label, re.I):
         return None
+    # 未加引号的单词目标只接受一个明确词，不把容器描述当作标签。
+    if kind == "word" and (not re.fullmatch(r"[\w'-]+", label)
+                           or label.casefold() in {"in", "inside", "within", "on", "to", "for"}):
+        return None
     return label or None
+
+
+def explicit_word_target(goal: str) -> str | None:
+    marker = explicit_target_marker(goal)
+    return explicit_target_label(goal) if marker and marker.group("word") else None

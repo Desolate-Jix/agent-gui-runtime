@@ -1,6 +1,6 @@
 # Agent Review Instant
 
-**v0.1.0-test.2 · 执行模式第二批测试版 / Execution-mode test release 2**
+**v0.1.0-test.3 · 执行模式第三批测试版 / Execution-mode test release 3**
 
 让支持 MCP 的 Agent 通过同一套 Windows 框架识别界面、点击、填写、编辑按键和滚动，并读取原始截图判断结果。
 
@@ -12,8 +12,8 @@ A Windows automation runtime for MCP-compatible agents: recognize controls, clic
 
 ## 下载 / Download
 
-- [下载测试包 / Download ZIP](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.2/AgentReviewInstant-v0.1.0-test.2.zip)
-- [发布页与 SHA-256 / Release and checksum](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.0-test.2)
+- [下载测试包 / Download ZIP](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.3/AgentReviewInstant-v0.1.0-test.3.zip)
+- [发布页与 SHA-256 / Release and checksum](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.0-test.3)
 - [安装、模型下载与配置 / Setup, models and configuration](FRIEND_SETUP.md)
 - [给 Agent 的操作说明 / Agent instructions](AGENT_GUIDE.md)
 - [测试范围与限制 / Test scope and limitations](FIXES.md)
@@ -27,9 +27,10 @@ This is a small **source bundle**, not a standalone installer. Python dependenci
 | 功能 / Capability | 本版范围 / Scope |
 | --- | --- |
 | Agent 连接 / Connection | MCP stdio；六个工具 / Six tools |
-| 窗口 / Windows | 发现、启动目录内应用、选择、前台切换、最大化 / Discover, catalog launch, select, focus, maximize |
-| 识别点击 / Recognition click | 根据明确目标定位；保留原图、模型点与 OCR 证据 / Goal-based targeting with image/model/OCR evidence |
+| 窗口 / Windows | 发现、目录启动、选择、前台切换、最大化、正常关闭本会话启动的窗口 / Discover, catalog launch, select, focus, maximize, close session-launched windows |
+| 识别点击 / Recognition click | 单击、右击、双击；字段、菜单项和单词定位，保留原图和几何来源 / Single/right/double click with field/menu/word targeting and original evidence |
 | 输入 / Input | 文本填写/替换、15 种编辑键、上下滚动 / Type/replace, 15 editing keys, vertical scroll |
+| 读取 / Reading | 每次从当前可见原图读取OCR文字及行框；不是全页或DOM提取 / Fresh visible-image OCR and line boxes, not full-page/DOM extraction |
 | 结果判断 / Outcome | Agent 查看前后原图判断；框架不将像素变化冒充任务成功 / Agent judges original images; pixel change is not task success |
 | 会话 / Sessions | 一次一个命令、同 ID 不重放、重连取回执、停止清理 / Serial commands, no ID replay, reconnect receipts, cleanup |
 
@@ -48,7 +49,7 @@ This is a small **source bundle**, not a standalone installer. Python dependenci
 
 3. 脚本安装依赖、下载 [VISTA-4B 官方模型](https://huggingface.co/inclusionAI/VISTA-4B)，生成本机 MCP 配置。模型约 9.1 GB，环境另占空间。不要复制别人的绝对路径配置。
 4. 将生成的 `mcp-config.local.json` 中的服务器配置导入 Agent，重新连接。UAC 弹窗由本人确认；本包不自动确认 UAC。
-5. 把 [AGENT_GUIDE.md](AGENT_GUIDE.md) 给 Agent，先验连接，再在专用低风险窗口测试。结束后 `instant_stop`，轮询 `instant_status`，直到 `cleanup_verified=true`。
+5. 把 [AGENT_GUIDE.md](AGENT_GUIDE.md) 给 Agent，先验连接，再在专用低风险窗口测试。同一任务保持连接；结束前 `close_launched_window` 关闭本会话测试窗口，然后 `instant_stop` 并轮询 `instant_status` 至 `cleanup_verified=true`，最后断连。
 
 Use Windows x64 and Python 3.11 with uv. Extract the ZIP, review and run the setup command above, then import the generated local MCP configuration into your Agent. Confirm UAC yourself. Follow AGENT_GUIDE.md, test a dedicated low-risk target, and poll cleanup after stopping. Setup does not alter global Agent configuration or download unrelated models.
 
@@ -60,19 +61,21 @@ Use Windows x64 and Python 3.11 with uv. Extract the ZIP, review and run the set
 
 ## 已验证与边界 / Verification and limits
 
-- 本批在首个公开测试版基础上增量更新：550 项相关回归、真实 MCP 无输入生命周期与隔离功能入口检查通过。源码实机表单连续 10 轮/220 次输入通过；隔离候选另跑 1 轮/22 次输入，截图摘要和清理均通过。这不是跨设备成功保证。
-- 回归范围和未通过的辅助测试分类见 FIXES.md。曾出现已输入但后图失败，已补全原因诊断；具体原因尚未证实，后续未复现不代表已修复。首次安装、模型加载、管理员目标和其他设备仍需接收者实测。
+- 本批在test.2基础上补充操作和图文取证：438项源码相关检查、270项候选隔离检查通过（集合重叠，不相加）。同一冻结运行时已先由Codex实机验证，再由AionUi独立完成22项真实Google检查；原图摘要、关窗和清理已复核。范围及历史问题见FIXES.md。
+- 历史偶发双击未选中和已输入但后图失败尚未证明根因关闭；单轮通过不代表长期稳定。首次安装、模型加载、管理员目标和其他设备仍需接收者实测。
 - 小目标与不完整 OCR 仍可能定位不准；冷启动较慢。`verified=null` 表示待 Agent 判断，不代表成功或失败。
 - Agent 主图与内部即时诊断帧分别标记，不能混用其差分。等待后图不保证页面已渲染完成；缺图时不自动重放。
 - 一个桌面同时只让一个 Agent 操作；程序、模型和数据目录分开。提供源码清单与 SHA-256，升级不要覆盖模型或历史。
 
-Incremental release on test.1: 550 targeted regressions, real no-input MCP lifecycle and isolated functional imports pass. Ten source-form rounds (220 inputs) and one isolated-candidate round (22 inputs) pass with image hashes and cleanup checked. A previous missing after-frame remains unexplained; improved diagnostics and no recurrence are not a proven fix. See FIXES.md for scope and auxiliary-test failures. This is not a cross-device, elevated-target or small-target guarantee. Null verification means unassessed; inspect images instead of replaying input.
+Incremental execution batch on test.2: 438 scoped source checks and 270 isolated shipped checks pass (overlapping, not additive). Codex and AionUi independently completed the real Google action chain on the same frozen runtime; AionUi recorded 22 passing checks. Original image hashes and cleanup were checked. Historical intermittent double-click/missing-frame causes remain open. No cross-device or small-target guarantee; null verification means unassessed.
+
+**依赖不要混用 / Keep the interpreter consistent:** 本包锁定 Python 3.11 与 `rapidocr-onnxruntime==1.4.4`。MCP服务与辅助OCR脚本都使用安装脚本生成的 `.venv\Scripts\python.exe`，不要随手用PATH里的 `python`。实测旧版1.2.3不返回词级几何，出现 `OCR word output is missing character metadata` 时先核对解释器和依赖，不要跳过校验或把整行框伪装成词框。 / Use the package venv for both MCP and OCR helpers. Version 1.2.3 lacks the required word metadata; check interpreter/dependencies rather than fabricating word boxes.
 
 ## 维护者检查 / Maintainer checks
 
-包内带有编辑键、文本输入和 MCP 的无输入回归子集。安装开发依赖后执行 `python -m pytest tests -q`；它不等于完整开发仓库的 550 项相关验收。真实连接检查可运行 `scripts/smoke_instant_mcp.py`（参数见安装说明）。不要把单元测试通过当作已执行桌面动作。
+包内带有编辑键、MCP、读文、鼠标序列、菜单和词框的无输入回归子集。安装开发依赖后执行 `python -m pytest tests -q`；它不等于完整开发仓库验收。真实连接检查可运行 `scripts/smoke_instant_mcp.py`（参数见安装说明）。不要把单元测试通过当作已执行桌面动作。
 
-The bundle includes a no-input regression subset for editing keys, text input and MCP. After installing dev dependencies, run `python -m pytest tests -q`. This subset is not the full 550-check development validation. The stdio smoke script separately checks connectivity; neither substitutes for real desktop testing.
+The shipped no-input subset covers keys, MCP, reading, mouse sequences, menus and word geometry. Run `python -m pytest tests -q` after installing dev dependencies. This is not full-repository validation; the separate stdio smoke also does not substitute for live input.
 
 ## 反馈 / Feedback
 
@@ -82,6 +85,6 @@ Include version, Windows/GPU, target application, reproduction steps, redacted r
 
 ## 源码分支与许可 / Source branch and license
 
-`codex/release-instant-test-2`：用于第二批执行模式测试版的可复现源码快照；不替代完整桌面产品开发分支。 / A clean source snapshot for this instant-mode test release, separate from full-product development.
+`codex/release-instant-test-3`：用于第三批执行模式测试版的可复现源码快照；不替代完整桌面产品开发分支。 / A clean source snapshot for this instant-mode test release, separate from full-product development.
 
 [ISC License](LICENSE)。依赖与模型受各自许可证约束，模型从官方来源另行下载。 / Dependencies and models retain their respective licenses and are downloaded separately.

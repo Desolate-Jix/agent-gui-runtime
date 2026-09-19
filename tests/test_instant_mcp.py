@@ -28,6 +28,37 @@ def test_server_schema_builds(session):
     assert build_server(session).name == "agent-review-instant"
 
 
+def test_close_launched_window_requires_explicit_identity_and_queues_once(session):
+    import asyncio
+    server = build_server(session)
+    command = {'kind': 'close_launched_window', 'handle': 123, 'process_id': 456}
+    result = asyncio.run(server.call_tool('instant_submit', {'request_id': 'close-app', 'command': command}))
+    assert not result.is_error
+    assert json.loads(result.content[0].text)['status'] == 'pending'
+    assert json.loads(session._path('close-app', 'commands').read_text(encoding='utf-8')) == command
+    assert not (session.session / 'closing.json').exists()
+
+
+@pytest.mark.parametrize('command', [
+    {'kind': 'close_launched_window'},
+    {'kind': 'close_launched_window', 'handle': 123},
+    {'kind': 'close_launched_window', 'handle': 123, 'process_id': 456, 'url': 'https://example.org'},
+])
+def test_close_launched_window_invalid_shape_never_queues(session, command):
+    import asyncio
+    result = asyncio.run(build_server(session).call_tool('instant_submit', {
+        'request_id': 'close-invalid', 'command': command}))
+    assert result.is_error
+    assert json.loads(result.content[0].text)['status'] == 'validation_rejected'
+    assert not list((session.session / 'commands').glob('*.json'))
+
+
+def test_close_pending_is_not_reported_as_completed(session):
+    write_json(session._path('close-app', 'responses'), {'status': 'returned', 'result': {
+        'status': 'window_close_pending', 'success': False, 'close_requested': True}})
+    assert session.result('close-app')['operation_succeeded'] is False
+
+
 def test_protocol_validation_does_not_initialize_windows_com_in_worker():
     import os
     import subprocess
@@ -384,6 +415,57 @@ def test_agent_review_missing_after_never_substitutes_immediate_frame(session):
     assert result['operation_succeeded'] is False
     with pytest.raises(ValueError, match='no recorded image'):
         session.image('missing-after', 'after')
+
+
+@pytest.mark.parametrize('case,code', [
+    ('unknown', 'image_request_unknown'),
+    ('pending', 'image_request_pending'),
+    ('host_gone', 'image_result_unknown'),
+    ('missing', 'image_frame_unavailable'),
+    ('digest', 'image_digest_mismatch'),
+    ('invalid_png', 'image_format_invalid'),
+])
+def test_image_failure_is_actionable_without_replaying_input(session, case, code):
+    import asyncio
+    if case in {'pending', 'host_gone'}:
+        write_json(session._path('image-error', 'commands'), {'kind': 'capture'})
+        if case == 'host_gone':
+            session.process = None
+    elif case != 'unknown':
+        frame = session.session / 'recorded.png'
+        raw = b'\x89PNG\r\n\x1a\nrecorded' if case != 'invalid_png' else b'not a PNG'
+        frame.write_bytes(raw)
+        capture = {} if case == 'missing' else {
+            'image_path': str(frame),
+            'sha256': 'bad' if case == 'digest' else hashlib.sha256(raw).hexdigest()}
+        write_json(session._path('image-error', 'responses'), {
+            'status': 'returned', 'observation': capture})
+    before = {p.name: p.read_bytes() for p in (session.session / 'commands').glob('*.json')}
+    server = build_server(session)
+    result = asyncio.run(server.call_tool('instant_image', {'request_id': 'image-error'}))
+    assert result.is_error
+    value = json.loads(result.content[0].text)
+    assert value['error']['code'] == code
+    assert value['request_id'] == 'image-error' and value['view'] == 'after'
+    assert value['automatic_retry_allowed'] is False
+    assert value['read_only'] is True and value['next']
+    assert 'action_executed' not in value
+    assert str(session.session) not in result.content[0].text
+    assert before == {p.name: p.read_bytes() for p in (session.session / 'commands').glob('*.json')}
+    assert not asyncio.run(server.call_tool('instant_status', {})).is_error
+
+
+@pytest.mark.parametrize('request_id,started,code', [
+    ('../private', True, 'invalid_request_id'),
+    ('valid', False, 'image_session_unavailable'),
+])
+def test_image_request_errors_are_readable_before_loading_evidence(session, request_id, started, code):
+    import asyncio
+    if not started:
+        session.session = None
+    result = asyncio.run(build_server(session).call_tool('instant_image', {'request_id': request_id}))
+    assert result.is_error
+    assert json.loads(result.content[0].text)['error']['code'] == code
 
 
 def test_python_print_does_not_pollute_stdio(tmp_path):

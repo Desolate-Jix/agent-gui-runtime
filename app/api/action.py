@@ -909,6 +909,19 @@ def _latest_attempt(result: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _click_sequence_execution_state(sequence: dict[str, Any]) -> bool | None:
+    if sequence.get("completed_clicks", 0) > 0:
+        return True
+    return None if sequence.get("input_attempted") else False
+
+
+def _record_click_sequence_failure(result: dict[str, Any], error: Exception) -> None:
+    sequence = getattr(error, "click_sequence", None)
+    if isinstance(sequence, dict):
+        result["click_sequence"] = dict(sequence)
+        result["execution_path"]["action_executed"] = _click_sequence_execution_state(sequence)
+
+
 def _agent_step_result(
     *,
     request: ExecuteRecognitionPlanRequest,
@@ -941,7 +954,9 @@ def _agent_step_result(
         "goal": request.goal,
         "status": status,
         "dry_run": bool(request.dry_run),
-        "action_executed": bool(execution_path.get("action_executed") or attempt.get("click_result")),
+        "action_executed": (_click_sequence_execution_state(result["click_sequence"])
+                            if isinstance(result.get("click_sequence"), dict)
+                            else bool(execution_path.get("action_executed") or attempt.get("click_result"))),
         "failure_reason": failure_reason,
         "approved_plan_id": result.get("approved_plan_id") or request.approved_plan_id,
         "selected_click_point": selected_point,
@@ -2397,6 +2412,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
 
     base_result: dict[str, Any] = {
         "contract_version": "execute_recognition_plan_v1",
+        "click_kind": request.click_kind,
         "agent_mode": request.agent_mode,
         "learn_depth": request.learn_depth,
         "mode_contract_version": "execute_plan_v1" if request.agent_mode == "execute" else ("learn_screen_deep_v1" if request.learn_depth == "deep" else "learn_screen_fast_v1"),
@@ -2619,12 +2635,26 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     target_box = target_bbox_from_recommended(plan.get("recommended_target") or {})
                     visibility_options = ({"target_bbox": tuple(target_box[key] for key in ("x", "y", "width", "height"))}
                                           if target_box is not None else {})
+                    menu_layer = ((plan.get("parse_result") or {}).get("screen_reading") or {}).get("source_layers", {}).get("windows_uia", {})
+                    if menu_layer.get("scan_scope") == "menu_subtree" and menu_layer.get("scan_complete") is True:
+                        # 仅当前菜单内明确命中的项目允许 owned popup；普通父窗口目标保持原遮挡语义。
+                        for control in menu_layer.get("controls", []):
+                            box = control.get("bbox") or {}
+                            if (control.get("control_type") == "MenuItem" and control.get("visible") is True
+                                    and control.get("enabled") is True and all(type(box.get(k)) is int for k in ("x", "y", "w", "h"))
+                                    and box["x"] <= selected_point["x"] < box["x"] + box["w"]
+                                    and box["y"] <= selected_point["y"] < box["y"] + box["h"]):
+                                popup_handle = menu_layer.get("owned_popup_handle")
+                                if type(popup_handle) is int and popup_handle > 0:
+                                    visibility_options["expected_owned_popup_handle"] = popup_handle
+                                break
                     click_result = input_controller.click_point(
                         selected_point["x"],
                         selected_point["y"],
                         move_before_click=True,
                         settle_ms=int(click_timing["settle_ms"]),
                         hold_ms=int(click_timing["hold_ms"]),
+                        **request.click_options,
                         **visibility_options,
                     )
                 with timer.step("post_click_verification", attempt=attempt_index, enabled=request.enable_post_click_verification):
@@ -2709,6 +2739,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     except TargetPointOccludedError as exc:
         failure_reason = str(exc.evidence.get("reason") or "target_point_occluded")
         base_result["execution_path"]["action_executed"] = False
+        _record_click_sequence_failure(base_result, exc)
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
         base_result["attempts"] = attempts
         base_result["point_visibility"] = exc.evidence
@@ -2751,6 +2782,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         )
     except Exception as exc:
         base_result["execution_path"]["action_executed"] = bool(attempts)
+        _record_click_sequence_failure(base_result, exc)
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="execution_failed")
         base_result["attempts"] = attempts
         base_result["fallback_plan"] = _execute_fallback_plan(

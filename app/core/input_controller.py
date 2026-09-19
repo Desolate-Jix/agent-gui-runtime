@@ -155,9 +155,10 @@ class InputController:
 
     def mouse_down(self, button: str = "left") -> dict[str, Any]:
         self._ensure_windows_input()
-        self._send_mouse_flags(self._button_down_flag(button))
+        dispatched = self._send_mouse_flags(self._button_down_flag(button))
         pos = win32api.GetCursorPos()  # type: ignore[union-attr]
-        return {"button": button, "state": "down", "cursor": {"x": int(pos[0]), "y": int(pos[1])}}
+        return {"button": button, "state": "down", "cursor": {"x": int(pos[0]), "y": int(pos[1])},
+                "dispatched_monotonic_ns": dispatched}
 
     def mouse_up(self, button: str = "left") -> dict[str, Any]:
         flag = self._button_up_flag(button)
@@ -178,8 +179,12 @@ class InputController:
         hold_ms: int = 60,
         popup_guard: Any | None = None,
         target_bbox: tuple[float, float, float, float] | None = None,
+        click_count: int = 1,
+        expected_owned_popup_handle: int | None = None,
     ) -> dict[str, Any]:
         """Click a point relative to the bound window using a realistic pointer sequence."""
+        if type(click_count) is not int or click_count not in (1, 2):
+            raise ValueError("click_count must be an integer of 1 or 2")
         self._ensure_windows_input()
         bound = self._require_bound_window()
         if popup_guard is not None:
@@ -235,6 +240,7 @@ class InputController:
             bound=bound,
             x=point["window_x"],
             y=point["window_y"],
+            **({"expected_owned_popup_handle": expected_owned_popup_handle} if expected_owned_popup_handle is not None else {}),
         )
         if not point_visibility.get("allowed"):
             raise TargetPointOccludedError(point_visibility)
@@ -270,28 +276,96 @@ class InputController:
         if current_cursor != (point["screen_x"], point["screen_y"]):
             raise RuntimeError("Mouse cursor position changed immediately before mouse down")
 
-        # 按下结果未知或等待被中断时也尝试松开，不能留下按住状态。
-        primary_error = None
-        with _click_release_scope(self, button) as release:
+        double_click_time_ms = self._double_click_time_ms() if click_count == 2 else None
+        effective_hold_ms = int(max(0, hold_ms))
+        inter_click_gap_ms = 0
+        if double_click_time_ms is not None:
+            # Keep the complete press interval within the Windows double-click window.
+            effective_hold_ms = min(effective_hold_ms, double_click_time_ms)
+            inter_click_gap_ms = min(50, max(0, double_click_time_ms - effective_hold_ms))
+
+        click_events: list[dict[str, Any]] = []
+        completed_clicks = 0
+        input_attempted = False
+        try:
+            for index in range(click_count):
+                if index:
+                    if inter_click_gap_ms > 0:
+                        time.sleep(inter_click_gap_ms / 1000.0)
+                    current = window_manager.get_bound_window()
+                    if popup_guard is not None:
+                        popup_guard.verify_current()
+                    if (
+                        current is None
+                        or current.handle != bound.handle
+                        or current.process_id != bound.process_id
+                        or current.rect != bound.rect
+                        or int(win32gui.GetForegroundWindow()) != expected_foreground_handle
+                    ):
+                        raise RuntimeError("Bound window changed before second click")
+                    if tuple(win32api.GetCursorPos()) != (point["screen_x"], point["screen_y"]):
+                        raise RuntimeError("Mouse cursor position changed before second click")
+                    second_visibility = window_manager.validate_bound_point_visibility(
+                        bound=current, x=point["window_x"], y=point["window_y"],
+                        **({"expected_owned_popup_handle": expected_owned_popup_handle} if expected_owned_popup_handle is not None else {}))
+                    if not second_visibility.get("allowed"):
+                        raise TargetPointOccludedError(second_visibility)
+
+                primary_error = None
+                down_result = None
+                up_result = None
+                with _click_release_scope(self, button) as release:
+                    try:
+                        input_attempted = True
+                        down_result = self.mouse_down(button)
+                        if effective_hold_ms > 0:
+                            time.sleep(effective_hold_ms / 1000.0)
+                    except BaseException as error:
+                        primary_error = error
+                        raise
+                    finally:
+                        release["releasing"] = True
+                        try:
+                            up_result = self.mouse_up(button)
+                        except Exception as release_error:
+                            if primary_error is None:
+                                raise RuntimeError("Mouse button release failed; input outcome unknown") from release_error
+                            primary_error.add_note("Mouse button release also failed; input outcome unknown")
+                            primary_error.mouse_release_error = str(release_error)
+                completed_clicks += 1
+                click_events.append({
+                    "index": index + 1,
+                    "down": down_result,
+                    "up": up_result,
+                    "hold_ms": effective_hold_ms,
+                    "gap_before_ms": inter_click_gap_ms if index else 0,
+                })
+        except BaseException as error:
+            sequence = {
+                "requested_click_count": click_count,
+                "completed_clicks": completed_clicks,
+                "input_attempted": input_attempted,
+                "button": button,
+            }
+            # 保留原始异常类型；标准异常支持属性时附加部分输入诊断。
             try:
-                down_result = self.mouse_down(button)
-                if hold_ms > 0:
-                    time.sleep(hold_ms / 1000.0)
-            except BaseException as error:
-                primary_error = error
-                raise
-            finally:
-                release["releasing"] = True
-                try:
-                    up_result = self.mouse_up(button)
-                except Exception as release_error:
-                    if primary_error is None:
-                        raise RuntimeError("Mouse button release failed; input outcome unknown") from release_error
-                    primary_error.add_note("Mouse button release also failed; input outcome unknown")
-                    primary_error.mouse_release_error = str(release_error)
+                error.click_sequence = sequence
+                if completed_clicks:
+                    error.completed_click_count = completed_clicks
+                    error.add_note(f"Partial click sequence: {completed_clicks}/{click_count} click(s) dispatched")
+            except Exception:
+                pass
+            raise
 
         cursor_after = win32api.GetCursorPos()  # type: ignore[union-attr]
         foreground_after = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
+
+        # 记录实际下发间隔；请求的 sleep 不包含身份读取和调度开销。
+        dispatch_interval_ms = None
+        if len(click_events) == 2:
+            stamps = [event["down"].get("dispatched_monotonic_ns") for event in click_events]
+            if all(type(stamp) is int for stamp in stamps):
+                dispatch_interval_ms = (stamps[1] - stamps[0]) / 1_000_000
 
         result = {
             "clicked": True,
@@ -301,6 +375,7 @@ class InputController:
             "window_handle": int(bound.handle),
             "window_title": bound.title,
             "button": button,
+            "click_count": click_count,
             "foreground_before": foreground_before,
             "foreground_after": foreground_after,
             "set_foreground_ok": set_foreground_ok,
@@ -308,11 +383,19 @@ class InputController:
             "cursor_after": {"x": int(cursor_after[0]), "y": int(cursor_after[1])},
             "move_before_click": move_before_click,
             "settle_ms": int(settle_ms),
-            "hold_ms": int(hold_ms),
+            "hold_ms": effective_hold_ms,
+            "requested_hold_ms": int(hold_ms),
+            "double_click_time_ms": double_click_time_ms,
+            "double_click_gap_ms": inter_click_gap_ms,
+            "double_click_dispatch_interval_ms": dispatch_interval_ms,
+            "double_click_within_system_interval": (
+                dispatch_interval_ms < double_click_time_ms if dispatch_interval_ms is not None else None),
             "move": move_result,
             "point_visibility": point_visibility,
-            "down": down_result,
-            "up": up_result,
+            "click_events": click_events,
+            # Existing callers consume these fields for a single click.
+            "down": click_events[0]["down"],
+            "up": click_events[0]["up"],
         }
         logger.info("Click result: {}", result)
         return result
@@ -642,6 +725,12 @@ class InputController:
             logger.warning("SetForegroundWindow failed for handle {}: {}", handle, exc)
         return set_foreground_ok
 
+    @staticmethod
+    def _double_click_time_ms() -> int:
+        """Read Windows' current double-click interval without changing system settings."""
+        value = int(ctypes.windll.user32.GetDoubleClickTime())
+        return max(1, value)
+
     def _button_down_flag(self, button: str) -> int:
         if button == "left":
             return MOUSEEVENTF_LEFTDOWN
@@ -667,10 +756,10 @@ class InputController:
         absolute_y = int(screen_y * 65535 / max(1, screen_height - 1))
         self._send_mouse_input(dx=absolute_x, dy=absolute_y, flags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)
 
-    def _send_mouse_flags(self, flags: int) -> None:
-        self._send_mouse_input(dx=0, dy=0, flags=flags)
+    def _send_mouse_flags(self, flags: int) -> int:
+        return self._send_mouse_input(dx=0, dy=0, flags=flags)
 
-    def _send_mouse_input(self, *, dx: int, dy: int, flags: int, mouse_data: int = 0) -> None:
+    def _send_mouse_input(self, *, dx: int, dy: int, flags: int, mouse_data: int = 0) -> int:
         release = _pending_click_release(self, flags) if dx == 0 and dy == 0 and mouse_data == 0 else None
         if release is None:
             self._ensure_windows_input()
@@ -694,9 +783,11 @@ class InputController:
                 and state["thread"] == get_ident() and flags == state["down"] and not state["releasing"]):
             # 系统可能派发后才报错，因此以尝试 SendInput 为清理边界。
             state["attempted"] = True
+        dispatched = time.perf_counter_ns()
         sent = ctypes.windll.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
         if sent != 1:
             raise RuntimeError(f"SendInput failed, sent={sent}, flags={flags}")
+        return dispatched
 
     def _press_chord(self, keys: list[int]) -> None:
         attempted: list[int] = []

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Optional
 
@@ -95,6 +96,63 @@ class OCRService:
 
         raise RuntimeError(f"All OCR backends failed for {path.name}: {' | '.join(errors)}")
 
+    def scan_words(self, image_path: str) -> OCRResult:
+        """复用 RapidOCR 的字符几何，输出独立词框而非整行框。"""
+        import numpy as np
+        from PIL import Image
+
+        path = Path(image_path)
+        if not path.exists():
+            raise ValueError(f"OCR image path not found: {path}")
+
+        # 小字号局部图先放大再识别，避免丢空格；不按字符串猜词框、不改源图。
+        with Image.open(path) as image:
+            width, height = image.size
+            scale = 2 if max(width, height) <= 1024 else 1
+            prepared = image.convert("RGB")
+            if scale != 1:
+                prepared = prepared.resize((width * scale, height * scale), Image.Resampling.LANCZOS)
+            pixels = np.asarray(prepared)[:, :, ::-1].copy()
+        engine = self._get_rapidocr_engine()
+        # RapidOCR 接受任意 kwargs 时会重置阈值，因此显式保留现值。
+        detector = getattr(getattr(engine, "text_det", None), "postprocess_op", None)
+        raw_result = engine(pixels, return_word_box=True,
+            text_score=getattr(engine, "text_score", .5),
+            box_thresh=getattr(detector, "box_thresh", .5),
+            unclip_ratio=getattr(detector, "unclip_ratio", 1.6))
+        if isinstance(raw_result, tuple) and raw_result:
+            raw_result = raw_result[0]
+        if raw_result is None:
+            lines: list[Any] = []
+        elif isinstance(raw_result, list):
+            lines = raw_result
+        else:
+            raise ValueError("OCR output must contain a list of recognized rows")
+
+        matches: list[OCRTextMatch] = []
+        for item in lines:
+            matches.extend(self._parse_word_line(item))
+        if scale != 1:
+            for match in matches:
+                box = match.bbox
+                left, top = math.floor(box.x / scale), math.floor(box.y / scale)
+                right = math.ceil((box.x + box.width) / scale)
+                bottom = math.ceil((box.y + box.height) / scale)
+                match.bbox = OCRBoundingBox(left, top, right - left, bottom - top)
+        return OCRResult(
+            image_path=str(path.resolve()),
+            matches=matches,
+            metadata={
+                "engine": "rapidocr_onnxruntime",
+                "provider": "rapidocr_onnxruntime",
+                "granularity": "word",
+                "recognition_scale": scale,
+                "source_image_size": {"width": width, "height": height},
+                "coordinate_space": "source_image_pixels",
+                "match_count": len(matches),
+            },
+        )
+
     def _scan_with_rapidocr(self, path: Path) -> Any:
         engine = self._get_rapidocr_engine()
         raw_result, _ = engine(str(path))
@@ -184,6 +242,88 @@ class OCRService:
             height=max(ys) - min(ys),
         )
         return OCRTextMatch(text=text, score=score, bbox=bbox)
+
+    def _parse_word_line(self, item: Any) -> list[OCRTextMatch]:
+        if not isinstance(item, (list, tuple)) or len(item) < 6:
+            raise ValueError("OCR word output is missing character metadata")
+        # 先验证整行结构，再读取独立字符的几何信息。
+        self._parse_line(item[:3])
+        text, chunks, quads, scores = item[1], item[4], item[3], item[5]
+        if not isinstance(text, str) or not isinstance(chunks, (list, tuple)):
+            raise ValueError("OCR word output has invalid character strings")
+        if not isinstance(quads, (list, tuple)) or not isinstance(scores, (list, tuple)):
+            raise ValueError("OCR word output is missing character metadata")
+        if len(chunks) != len(quads) or len(chunks) != len(scores):
+            raise ValueError("OCR character metadata lengths do not align")
+        if "".join(str(chunk) for chunk in chunks) != text:
+            raise ValueError("OCR character strings do not concatenate to line text")
+
+        words: list[OCRTextMatch] = []
+        current_text: list[str] = []
+        current_boxes: list[OCRBoundingBox] = []
+        current_scores: list[float] = []
+
+        def flush() -> None:
+            if not current_text:
+                return
+            words.append(OCRTextMatch(
+                text="".join(current_text),
+                score=sum(current_scores) / len(current_scores),
+                bbox=self._union_boxes(current_boxes),
+            ))
+            current_text.clear()
+            current_boxes.clear()
+            current_scores.clear()
+
+        for chunk, quad, score in zip(chunks, quads, scores):
+            if not isinstance(chunk, str) or not chunk:
+                raise ValueError("OCR returned invalid character text")
+            # 分隔符只断词、不提供点击几何；后端可能把末尾标点压成零宽。
+            separator = all(not self._is_word_char(char) for char in chunk)
+            bbox = self._polygon_bbox(quad, allow_degenerate=separator)
+            numeric_score = float(score)
+            if not math.isfinite(numeric_score) or not 0 <= numeric_score <= 1:
+                raise ValueError("OCR returned invalid character confidence")
+            # 多字符片段只能整体使用，禁止按字符数量估算并拆分词框。
+            if all(self._is_word_char(char) for char in chunk):
+                current_text.append(chunk)
+                current_boxes.append(bbox)
+                current_scores.append(numeric_score)
+            else:
+                flush()
+        flush()
+        return words
+
+    @staticmethod
+    def _is_word_char(value: str) -> bool:
+        return value == "_" or unicodedata.category(value).startswith(("L", "M", "N"))
+
+    def _polygon_bbox(self, polygon: Any, *, allow_degenerate: bool = False) -> OCRBoundingBox:
+        if not isinstance(polygon, (list, tuple)) or len(polygon) != 4:
+            raise ValueError("OCR returned an invalid quadrilateral")
+        xs: list[int] = []
+        ys: list[int] = []
+        for point in polygon:
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                raise ValueError("OCR returned invalid point coordinates")
+            x, y = float(point[0]), float(point[1])
+            if not math.isfinite(x) or not math.isfinite(y):
+                raise ValueError("OCR returned non-finite point coordinates")
+            xs.append(int(round(x)))
+            ys.append(int(round(y)))
+        if not allow_degenerate and (max(xs) <= min(xs) or max(ys) <= min(ys)):
+            raise ValueError("OCR returned a degenerate bounding box")
+        return OCRBoundingBox(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+
+    @staticmethod
+    def _union_boxes(boxes: list[OCRBoundingBox]) -> OCRBoundingBox:
+        if not boxes:
+            raise ValueError("OCR word has no character geometry")
+        x1 = min(box.x for box in boxes)
+        y1 = min(box.y for box in boxes)
+        x2 = max(box.x + box.width for box in boxes)
+        y2 = max(box.y + box.height for box in boxes)
+        return OCRBoundingBox(x1, y1, x2 - x1, y2 - y1)
 
 
 ocr_service = OCRService()

@@ -38,8 +38,9 @@ def _validated_request(operation, request):
             error.invalid_fields = ["submit"]
             error.allowed_fields = sorted(allowed_fields)
             raise error
-        if value.get("click_before_typing") is not True or value.get("x") is None or value.get("y") is None:
-            raise ValueError("local text entry requires an explicit current field point")
+        # 显式 false 沿用当前焦点与选区；坐标仍用于核对当前窗口，不隐式再次点击。
+        if type(value.get("click_before_typing")) is not bool or value.get("x") is None or value.get("y") is None:
+            raise ValueError("local text entry requires explicit click_before_typing and a current field point")
     metadata = value.get("metadata", {})
     if not isinstance(metadata, dict):
         raise ValueError("local action metadata must be an object")

@@ -1,4 +1,4 @@
-"""隔离检查交付包的真实输入入口依赖；不调用输入、窗口、模型或截图函数。"""
+"""隔离检查交付包的输入和读取入口依赖；不调用输入、窗口、模型或截图函数。"""
 import argparse
 import importlib
 import json
@@ -36,6 +36,32 @@ def check(root):
     for operation in ("execute_recognition_plan", "type_text", "scroll"):
         if "/action/" + operation not in routes:
             raise ValueError("action route not registered: " + operation)
+    # 读取入口延迟加载 OCR，预检必须显式覆盖，避免漏包被握手成功掩盖。
+    reader = importlib.import_module("app.operation.screen_reading.captured_text")
+    ocr = importlib.import_module("app.core.ocr_service")
+    instant = importlib.import_module("app.instant_mcp")
+    if not callable(reader.read_captured_text) or not callable(ocr.ocr_service.scan_image):
+        raise ValueError("observation handler is not callable: read_text")
+    instant.InstantCommand.model_validate({"kind": "read_text", "max_chars": 10000})
+    observation_checked = [{"operation": "read_text", "handler_imported": True,
+                            "request_validated": True, "handler_executed": False}]
+    # 新操作也走真实参数链，不能仅因旧单击入口可导入就宣称完整。
+    click_variants = []
+    for kind in ("single", "double", "right"):
+        request = {"goal": "dependency preflight only", "click_kind": kind, "dry_run": True}
+        instant.InstantCommand.model_validate({"kind": "step", "operation": "execute_recognition_plan",
+                                              "request": request})
+        validated = local._validated_request("execute_recognition_plan", request)
+        if validated["click_kind"] != kind:
+            raise ValueError("click kind changed during validation: " + kind)
+        click_variants.append({"click_kind": kind, "request_validated": True, "handler_executed": False})
+    preparation = importlib.import_module("app.desktop_review.window_preparation")
+    close = importlib.import_module("app.core.window_close")
+    if not callable(preparation.WindowPreparationMixin.close_launched_window) or not callable(close.post_window_close):
+        raise ValueError("window handler is not callable: close_launched_window")
+    instant.InstantCommand.model_validate({"kind": "close_launched_window", "handle": 1, "process_id": 1})
+    window_checked = [{"operation": "close_launched_window", "handler_imported": True,
+                       "request_validated": True, "handler_executed": False}]
     sources = {}
     for name, module in list(sys.modules.items()):
         if name == "app" or name.startswith("app.") or name == "modules" or name.startswith("modules."):
@@ -47,7 +73,9 @@ def check(root):
                 sources[name] = path.relative_to(root).as_posix()
     return {"passed": True, "check": "isolated_real_input_entrypoint_imports_v1", "bundle_root": ".",
             "input_executed": False, "screenshots_taken": False, "model_inference_tested": False,
-            "operations": checked, "local_module_sources": sources,
+            "operations": checked, "observation_operations": observation_checked,
+            "recognition_click_variants": click_variants, "window_operations": window_checked,
+            "local_module_sources": sources,
             "limitation": "Dependency and request validation only, not real input or end-to-end acceptance"}
 
 

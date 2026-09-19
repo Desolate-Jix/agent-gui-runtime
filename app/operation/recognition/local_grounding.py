@@ -52,7 +52,9 @@ def _ground_candidate(
     request: LocalGroundingRequest,
     candidate: RecognitionCandidate,
 ) -> LocalGroundingCandidateResult:
-    crop_bbox = _crop_bbox(_candidate_crop_bbox(candidate), image_size=image_size, padding=request.crop_padding)
+    word_mode = request.text_granularity == "word"
+    crop_bbox = _crop_bbox(_candidate_crop_bbox(candidate), image_size=image_size, padding=request.crop_padding,
+        minimum_width=max(320, min(768, len(request.goal) * 32)) if word_mode else 0)
     crop_path = build_recognition_crop_path(name_hint=request.app_name or image_path.stem, candidate_id=candidate.candidate_id)
     crop = image.crop((crop_bbox["x"], crop_bbox["y"], crop_bbox["x"] + crop_bbox["width"], crop_bbox["y"] + crop_bbox["height"]))
     crop.save(crop_path)
@@ -62,6 +64,7 @@ def _ground_candidate(
         ocr_result.matches,
         goal=request.goal,
         candidate_texts=[candidate.label, candidate.text, candidate.element.description],
+        exact=word_mode,
     )
     if match is None:
         from app.operation.recognition.native_control_ocr_observation import KEY, record_native_ocr
@@ -134,12 +137,17 @@ def _ocr_outside_target(matches, crop, target) -> bool:
     return True
 
 
-def _crop_bbox(bbox: BBox, *, image_size: tuple[int, int], padding: int) -> dict[str, int]:
+def _crop_bbox(bbox: BBox, *, image_size: tuple[int, int], padding: int, minimum_width: int = 0) -> dict[str, int]:
     image_width, image_height = image_size
     x1 = max(0, int(bbox.x) - int(padding))
     y1 = max(0, int(bbox.y) - int(padding))
     x2 = min(image_width, int(bbox.x + bbox.w) + int(padding))
     y2 = min(image_height, int(bbox.y + bbox.h) + int(padding))
+    if minimum_width > x2 - x1:
+        # 扩大单词的横向上下文，不改变原点或凭字符数量猜词框。
+        width = min(image_width, minimum_width)
+        x1 = max(0, min(image_width - width, int(bbox.x + bbox.w / 2) - width // 2))
+        x2 = x1 + width
     return {
         "x": x1,
         "y": y1,
@@ -160,9 +168,15 @@ def _candidate_crop_bbox(candidate: RecognitionCandidate) -> BBox:
     )
 
 
-def _best_match(matches: list[OCRTextMatch], *, goal: str, candidate_texts: list[str]) -> OCRTextMatch | None:
+def _best_match(matches: list[OCRTextMatch], *, goal: str, candidate_texts: list[str], exact: bool = False) -> OCRTextMatch | None:
     if not matches:
         return None
+    if exact:
+        # 单词必须独立命中；近似拼写或重复词不能靠分数和列表顺序决定落点。
+        exact_matches = [match for match in matches if _normalize_text(match.text) == _normalize_text(goal)]
+        if len(exact_matches) != 1:
+            return None
+        return exact_matches[0]
     target_values = [_normalize_text(goal), *[_normalize_text(value) for value in candidate_texts]]
     scored: list[tuple[float, OCRTextMatch]] = []
     for match in matches:
@@ -181,5 +195,3 @@ def _best_match(matches: list[OCRTextMatch], *, goal: str, candidate_texts: list
            and other.bbox != best_match.bbox for _, other in scored[1:]):
         return None
     return best_match if best_score >= 0.45 else None
-
-

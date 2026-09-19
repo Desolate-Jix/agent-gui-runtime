@@ -105,7 +105,8 @@ class WindowsUIAProvider:
             control_budget = max(1, min(int(max_controls), HARD_UIA_MAX_CONTROLS))
             from pywinauto import Desktop
 
-            root = Desktop(backend="uia").window(handle=bound.handle).wrapper_object()
+            desktop = Desktop(backend="uia")
+            root = desktop.window(handle=bound.handle).wrapper_object()
             # 先固定根 wrapper，再按深度优先顺序只拉取预算内控件，避免全树枚举后截断。
             wrappers = [root, *islice(root.iter_descendants(), control_budget - 1)]
             # 到达预算即保守标为截断，不额外读取可能阻塞的下一个节点来猜完整性。
@@ -123,7 +124,7 @@ class WindowsUIAProvider:
                 replace(control, ancestor_control_ids=ancestors.get(id(wrapper), ())).to_dict()
                 for wrapper, control in observed
             ]
-            return {
+            snapshot = {
                 "provider": self.provider_id,
                 "provider_version": self.version,
                 "status": "ok",
@@ -147,8 +148,110 @@ class WindowsUIAProvider:
                 "control_count": len(controls),
                 "controls": controls,
             }
+            try:
+                popup_handles = self._owned_popup_handles(bound)
+                snapshot["owned_popup_probe"] = {"status": "ok", "count": len(popup_handles)}
+            except ImportError as exc:
+                # UIA 快照与可选 Win32 浮窗补采分开报告，不能抹掉已取得的主树证据。
+                popup_handles = []
+                snapshot["owned_popup_probe"] = {"status": "unavailable", "reason": "win32_backend_unavailable", "message": str(exc)}
+            scopes = self._popup_menu_scopes(popup_handles, desktop=desktop, bound=bound, window=snapshot["window"])
+            main_scopes = self._complete_menu_scopes(observed, controls=controls, bound=bound, window=snapshot["window"])
+            for scope in main_scopes:
+                identity = (scope.get("controls") or [{}])[0].get("runtime_id")
+                if not identity or not any(identity == (item.get("controls") or [{}])[0].get("runtime_id") for item in scopes):
+                    scopes.append(scope)
+            snapshot["menu_scopes"] = scopes
+            return snapshot
         except Exception as exc:
             return self._unavailable("uia_scan_failed", str(exc))
+
+    def _complete_menu_scopes(self, observed, *, controls, bound, window, root_is_owned_popup=False):
+        """只补采当前树已证实归属的唯一可见菜单，不扩大全窗口扫描预算。"""
+        by_id = {control["control_id"]: control for control in controls}
+        root_id = observed[0][1].control_id if observed else None
+        menus = [(wrapper, control) for wrapper, control in observed
+                 if control.control_type == "Menu" and control.visible is True and control.enabled is True
+                 and (root_id in by_id[control.control_id].get("ancestor_control_ids", [])
+                      or root_is_owned_popup and control.control_id == root_id)]
+        if len(menus) > 1:
+            return [{"status": "unavailable", "reason": "multiple_visible_menus", "scan_complete": False}]
+        if not menus:
+            return []
+        wrapper, original = menus[0]
+        budget = 128
+        try:
+            wrappers = [wrapper, *islice(wrapper.iter_descendants(), budget - 1)]
+            zero_ids = set()
+            items = []
+            for index, current in enumerate(wrappers):
+                control = self._control_from_wrapper(current, bound=bound, index=index,
+                    zero_area_structural_ids=zero_ids)
+                if control is not None:
+                    items.append((current, control))
+            if (not items or items[0][1].runtime_id != original.runtime_id
+                    or not original.runtime_id or items[0][1].bbox != original.bbox):
+                return []
+            ancestors = _confirmed_ancestor_control_ids(items, traversed_wrappers=wrappers,
+                zero_area_structural_ids=zero_ids)
+            scoped = [replace(control, ancestor_control_ids=ancestors.get(id(current), ())).to_dict()
+                      for current, control in items]
+            return [{"provider": self.provider_id, "provider_version": self.version, "status": "ok",
+                     "scan_scope": "menu_subtree",
+                     "source_menu_control_id": original.control_id,
+                     "scan_budget": budget, "scan_visited_count": len(wrappers),
+                     "scan_complete": len(wrappers) < budget, "truncated": len(wrappers) == budget,
+                     "window": dict(window), "control_count": len(scoped), "controls": scoped}]
+        except Exception as exc:
+            return [{"status": "unavailable", "scan_scope": "menu_subtree",
+                     "reason": "menu_subtree_scan_failed", "message": str(exc), "scan_complete": False}]
+
+    @staticmethod
+    def _owned_popup_handles(bound):
+        """按窗口归属找原生浮窗，避免菜单在长网页末尾而永远无法被预算内扫描发现。"""
+        import win32gui
+        import win32process
+        if not win32gui.IsWindow(bound.handle):
+            return []
+        handles = []
+        def collect(handle, _):
+            if (handle != bound.handle and win32gui.IsWindowVisible(handle)
+                    and win32gui.GetAncestor(handle, 3) == bound.handle
+                    and win32process.GetWindowThreadProcessId(handle)[1] == bound.process_id):
+                handles.append(handle)
+        win32gui.EnumWindows(collect, None)
+        return handles
+
+    def _popup_menu_scopes(self, handles, *, desktop, bound, window):
+        scopes = []
+        if len(handles) > 4:
+            return [{"status": "unavailable", "reason": "owned_popup_count_exceeds_budget", "scan_complete": False}]
+        for handle in handles:
+            try:
+                root = desktop.window(handle=handle).wrapper_object()
+                wrappers = [root, *islice(root.iter_descendants(), 127)]
+                if len(wrappers) == 128:
+                    scopes.append({"status": "unavailable", "reason": "owned_popup_scan_incomplete", "scan_complete": False})
+                    continue
+                zero_ids, observed = set(), []
+                for index, wrapper in enumerate(wrappers):
+                    control = self._control_from_wrapper(wrapper, bound=bound, index=index,
+                        zero_area_structural_ids=zero_ids)
+                    if control is not None:
+                        observed.append((wrapper, control))
+                ancestors = _confirmed_ancestor_control_ids(observed, traversed_wrappers=wrappers,
+                    zero_area_structural_ids=zero_ids)
+                controls = [replace(control, ancestor_control_ids=ancestors.get(id(wrapper), ())).to_dict()
+                            for wrapper, control in observed]
+                found = self._complete_menu_scopes(observed, controls=controls, bound=bound, window=window,
+                    root_is_owned_popup=True)
+                for scope in found:
+                    scope["owned_popup_handle"] = handle
+                scopes.extend(found)
+            except Exception as exc:
+                scopes.append({"status": "unavailable", "reason": "owned_popup_scan_failed",
+                               "message": str(exc), "scan_complete": False})
+        return scopes
 
     def _control_from_wrapper(self, wrapper: Any, *, bound: BoundWindow, index: int,
                               zero_area_structural_ids: set[int] | None = None) -> UIAControl | None:

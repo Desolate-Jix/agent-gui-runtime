@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-INSTANT_VERSION = "0.1.0-test.2"
+INSTANT_VERSION = "0.1.0-test.3"
 
 
 class InstantAdmissionError(ValueError):
@@ -27,9 +27,18 @@ class InstantAdmissionError(ValueError):
         self.next = {"tool": next_tool, "arguments": next_arguments or {}}
 
 
+class InstantImageError(ValueError):
+    """只读证据错误，不判断原动作是否执行，也不触发重放。"""
+
+    def __init__(self, code, message, next_step):
+        super().__init__(message)
+        self.code = code
+        self.next = next_step
+
+
 class InstantCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["discover", "launch", "select", "maximize", "capture", "prepare_models", "release_models", "step"]
+    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "close_launched_window"]
     app_id: str | None = None
     url: str | None = None
     handle: int | None = Field(default=None, gt=0)
@@ -37,13 +46,16 @@ class InstantCommand(BaseModel):
     operation: Literal["execute_recognition_plan", "type_text", "scroll", "press_key"] | None = None
     request: dict | None = None
     observation_wait_ms: int | None = Field(default=None, ge=0, le=2000)
+    max_chars: int | None = Field(default=None, ge=1, le=20000)
 
     def command(self):
         value = self.model_dump(exclude_none=True)
         fields = {
             "launch": ({"app_id"}, {"app_id", "url"}),
             "select": ({"handle", "process_id"}, {"handle", "process_id"}),
+            "close_launched_window": ({"handle", "process_id"}, {"handle", "process_id"}),
             "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms"}),
+            "read_text": (set(), {"max_chars"}),
         }
         required, allowed = fields.get(self.kind, (set(), set()))
         present = set(value) - {"kind"}
@@ -260,7 +272,25 @@ class InstantSession:
     def image(self, request_id, view="after"):
         if view not in {"before", "after"}:
             raise ValueError("image view must be before or after")
+        if self.session is None:
+            raise InstantImageError("image_session_unavailable", "start or reattach a session first",
+                                    "Use instant_start to attach the intended session; do not replay its actions.")
+        try:
+            self._path(request_id, "responses")
+        except ValueError as error:
+            raise InstantImageError("invalid_request_id", str(error),
+                                    "Use the exact request_id returned by instant_submit.") from error
         response = self.result(request_id)
+        status = response.get("status")
+        if status == "not_found":
+            raise InstantImageError("image_request_unknown", "no recorded request or response for this ID",
+                                    "Check the request ID, session, and submission receipt. A rejected command has no image; do not replay automatically.")
+        if status == "pending":
+            raise InstantImageError("image_request_pending", "the request has not returned its evidence yet",
+                                    "Poll instant_result with the same request_id, then request its image; do not resubmit.")
+        if status == "result_unknown":
+            raise InstantImageError("image_result_unknown", "the request has no completed receipt and its host is not alive",
+                                    "Inspect instant_status and the original request receipt; input may have occurred. Do not replay automatically.")
         if view == "before":
             capture = (response.get("result") or {}).get("capture") or {}
         else:
@@ -269,12 +299,19 @@ class InstantSession:
                 capture = ((response.get("result") or {}).get("observation") or {}).get("capture") or {}
         path = Path(capture.get("image_path", "")).resolve()
         if self.session is None or not path.is_relative_to(self.session.resolve()) or not path.is_file():
-            raise ValueError("no recorded image for this response")
-        data = path.read_bytes()
+            raise InstantImageError("image_frame_unavailable", "no recorded image for this response",
+                                    "Inspect instant_result and agent_review availability. A new capture is a separate observation, not replacement evidence or permission to replay.")
+        try:
+            data = path.read_bytes()
+        except OSError as error:
+            raise InstantImageError("image_read_failed", "recorded image could not be read",
+                                    "Check local evidence storage and permissions; preserve the receipt and do not replay the action.") from error
         if len(data) > 32 * 1024 * 1024 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise ValueError("recorded image is not a supported PNG")
+            raise InstantImageError("image_format_invalid", "recorded image is not a supported PNG",
+                                    "Preserve the invalid evidence for diagnosis; do not use it to judge or replay the action.")
         if capture.get("sha256") != hashlib.sha256(data).hexdigest():
-            raise ValueError("recorded image digest mismatch")
+            raise InstantImageError("image_digest_mismatch", "recorded image digest mismatch",
+                                    "Preserve the receipt and mismatched frame for diagnosis; do not substitute another frame or replay the action.")
         return data
 
     def stop(self):
@@ -357,7 +394,15 @@ def build_server(session):
         return session.result(request_id)
 
     def instant_image(request_id: str, view: Literal["before", "after"] = "after") -> CallToolResult:
-        return CallToolResult(content=[ImageContent(type="image", data=base64.b64encode(session.image(request_id, view=view)).decode("ascii"), mimeType="image/png")])
+        try:
+            data = session.image(request_id, view=view)
+        except InstantImageError as error:
+            value = {"request_id": request_id, "view": view, "status": "image_unavailable",
+                     "read_only": True, "automatic_retry_allowed": False,
+                     "error": {"code": error.code, "message": str(error)}, "next": error.next}
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+                                  structuredContent=value)
+        return CallToolResult(content=[ImageContent(type="image", data=base64.b64encode(data).decode("ascii"), mimeType="image/png")])
 
     def instant_stop() -> dict:
         return session.stop()
@@ -365,10 +410,10 @@ def build_server(session):
     descriptions = {
         "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option.",
         "instant_status": "Read host, target, pending IDs and cleanup status; no screenshot or input.",
-        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal}; type_text={text,x,y,click_before_typing:true,clear_existing:false} (set clear_existing:true to replace; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
+        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
         "instant_result": "Read original response without executing again. pending means wait; result_unknown means inspect, never retry blindly. operation_succeeded is not proof of task outcome.",
-        "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Compare both against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
-        "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. Does not close user apps.",
+        "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Missing/pending/corrupt evidence returns isError=true with status=image_unavailable, error.code and next guidance; it says nothing about whether the original input happened. Do not replay automatically. Compare both frames against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
+        "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. Does not close user apps itself; a Windows MCP client may terminate its launched descendants on disconnect. Explicitly close test-created windows first using close_launched_window and verify window_closed.",
     }
     for fn in (instant_start, instant_status, instant_submit, instant_result, instant_image, instant_stop):
         server.add_tool(fn, name=fn.__name__, description=descriptions[fn.__name__])

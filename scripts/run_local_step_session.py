@@ -34,6 +34,14 @@ def run_step_command(coordinator, target, command):
         observation_wait_ms=command.get("observation_wait_ms"))
 
 
+def run_read_text_command(capture_current, command):
+    from app.operation.screen_reading.captured_text import read_captured_text
+    observation = {**capture_current(), 'capture_id': 'text-' + secrets.token_hex(16),
+                   'captured_at': now()}
+    result = read_captured_text(observation, max_chars=command.get('max_chars', 10000))
+    return result, observation
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
@@ -111,7 +119,8 @@ def main():
             raise ValueError("target window identity changed")
         image = ScreenshotService(window_manager=co._windows(), capture_dir=out / "captures").capture_window(
             focus_window=False, purpose="live-latency-observation")
-        return {**image, "sha256": hashlib.sha256(Path(image["image_path"]).read_bytes()).hexdigest()}
+        return {**image, "window": {"handle": bound.handle, "process_id": bound.process_id},
+                "sha256": hashlib.sha256(Path(image["image_path"]).read_bytes()).hexdigest()}
 
     try:
         host = DesktopReviewHost(out / "inbox.json", out / "reviews", secrets.token_urlsafe(32))
@@ -174,12 +183,22 @@ def main():
                     response["preparation_preview"] = preview
                     response["result"] = co.confirm_window_preparation(preview["preparation_id"])
                     response["observation"] = co._owner.call(capture)
+                elif kind == "close_launched_window":
+                    response["result"] = co.close_launched_window(
+                        target_window_handle=command["handle"], target_process_id=command["process_id"])
+                    if (response["result"].get("status") == "window_closed" and target
+                            and target["handle"] == command["handle"]
+                            and target["process_id"] == command["process_id"]):
+                        target = None
                 elif kind == "prepare_models":
                     response["result"] = co.prepare_local_step_models(prepare_ocr=True)
                 elif kind == "release_models":
                     response["result"] = co.release_resident_models()
                 elif kind == "capture":
                     response["observation"] = co._owner.call(capture)
+                elif kind == "read_text":
+                    response["result"], response["observation"] = co._owner.call(
+                        lambda: run_read_text_command(capture, command))
                 elif kind == "step":
                     response["result"] = run_step_command(co, target, command)
                     observed = response["result"].get("observation", {})

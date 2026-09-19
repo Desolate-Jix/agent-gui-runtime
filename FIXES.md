@@ -1,30 +1,39 @@
-# v0.1.0-test.2 · 更新与验收范围 / Changes and verification scope
+# v0.1.0-test.3 · 更新与验收范围 / Changes and verification scope
 
-2026-09-19 · 执行模式增量测试版，不是稳定版。 / Incremental execution-mode test release, not a stable release.
+2026-09-20 · 执行模式第三批测试版，不是稳定版；公开状态以GitHub Release为准。 / Execution-mode test.3, not production-stable; publication is determined by GitHub Release.
 
 ## 新增与修复 / Changes
 
-1. 支持 15 种编辑键及显式文本替换；复用现有输入后端，按键不偷偷点击或重新聚焦。 / Fifteen editing keys and explicit replacement reuse the input backend; key dispatch never implicitly clicks or refocuses.
-2. MCP 请求字段和宿主状态错误结构化，非法请求不入队；纯参数校验不再导入 Windows COM。 / Structured field/state rejection before queuing; pure validation no longer imports Windows COM.
-3. 明确标签提取与候选排序、控件身份判断共用同一规则；避免把指令上下文中的 Search 当目标标签。模糊候选返回诊断，不新建另一个点击后端。 / Shared explicit-label extraction for ranking and identity; command context does not become the target label. Ambiguous candidates return diagnostics.
-4. 事后采集失败保留固定错误码和单独补图指引；已输入不等于目标成功，也不允许把未知结果当未输入。 / Post-capture failure retains typed diagnostics and an observation-only recovery hint; dispatch is not task success.
-5. 没有新增自动风险拦截、审批步骤或学习功能，也未进行模型速度优化。 / No new automatic risk policy, approval steps, learning feature or model-speed optimization.
+1. 识别点击支持single/right/double，复用同一输入后端，双击记录实际派发间隔。 / Single/right/double clicks share one input backend with dispatch timing.
+2. 增加 `read_text`：新截图读取可见文字、行框、时间、capture_id和原图摘要；同一请求取图不重新截图。 / Fresh visible-image OCR with stable source-image retrieval.
+3. 增加 `close_launched_window`：正常关闭本会话启动的确切窗口；MCP断连前先关窗再停止并核实清理。 / Gracefully close session-launched windows before stop/disconnect.
+4. 修复字段值/方位表达、菜单项语序的目标解析和UIA范围选择；明确菜单目标使用完整菜单子树，不扩大整页扫描预算。 / Generic field/menu wording and current UIA scope fixes.
+5. 小范围词级OCR放大识别后映射原图；零宽空格/标点仅作断词，不再导致有效整页词扫描失败。词字符仍须有有效几何，不合成可点击框。 / Small-crop word OCR and zero-area delimiter handling without fabricated word geometry.
+6. 保留15种编辑键、文本替换、结构化请求错误、截图故障诊断、原图判断和不自动重放。 / Retain editing keys, replacement, actionable errors, evidence and no automatic replay.
 
-## 实际验证 / Checks performed
+本批不新增安全审批功能、学习模式或模型性能优化。 / No new approval/policy layer, learning feature or model-performance optimization.
 
-- 隔离候选 23 个相关模块共 **550 项通过**，2 个第三方弃用警告。覆盖字段校验、COM 隔离、目标标签、识别候选、编辑键、输入派发及后图诊断。 / **550 checks pass** across 23 targeted modules in the isolated candidate, with two dependency deprecation warnings.
-- 真实 MCP stdio：版本 test.2、六工具、非法请求恢复、同连接同宿主、同 ID 不重放、重连回执、关闭清理通过；不将其称为实机输入测试。 / Real stdio lifecycle passes version/tool/error/reconnect/cleanup checks; this is distinct from real input.
-- 维护源码用全新本机 Edge 表单连续 **10 轮、220 次输入**，耗时 **187.613 秒**；440 个前后图摘要与 220 个返回图片摘要一致。 / Ten fresh local-form rounds, 220 inputs, 187.613 seconds; 440 before/after and 220 returned-image digests checked.
-- 隔离候选另以全新会话复跑 **1 轮、22 次输入**，**17.691 秒**，44 个前后图和 22 个返回图摘要一致，清理通过。涵盖全部 15 种按键和文本替换。 / Isolated candidate: one fresh 22-input round in 17.691 seconds, all 15 keys/replacement, 66 digest checks and cleanup pass.
-- 上述表单测试不加载视觉模型，耗时不能代表识别点击速度；同一台设备不代表跨设备稳定性。 / Form runs do not load vision models; timings are not recognition-click performance or cross-device guarantees.
+## 当前已验证 / Evidence available
 
-## 保留的问题 / Known limitations
+- 最新公共OCR修复后，24模块438项源码相关回归通过，2项第三方弃用警告；51项窄回归是重叠集合，不能相加。 / Post-fix source checks: 438 pass across 24 modules; overlapping subsets are not additive.
+- Codex在真实Google页面完成右键、菜单全选、整句替换、回车、单词双击及替换、读取/滚动/再读、关窗清理。 / Codex exercised the real Google input/read/scroll/cleanup chain.
+- 冻结候选自身270项隔离无输入检查通过，无原工作树运行代码导入泄漏；真实MCP stdio六工具、版本、非法字段恢复、同ID不重放、重连和清理通过。 / 270 isolated shipped checks plus real stdio identity/recovery/receipt/cleanup checks pass, with no worktree runtime imports.
+- Codex先实机通过，再交AionUi在同一冻结候选独立执行：22 PASS / 0 FAIL / 0 INCONCLUSIVE。覆盖右击菜单、全选、整句替换、仅双击一个单词再替换、回车、读文、滚动重读、旧ID原图不变、正常关窗及同连接清理。主Agent复核14条命令回执与44项原图摘要。 / Codex-first then independent AionUi real-site acceptance: 22 checks pass; 14 command receipts and 44 image digests were audited.
+- 旧候选暴露的零宽标点词框异常已用整张失败原图验证修复，不依赖分块绕行。外部追加复扫曾因误用Python3.13/旧OCR1.2.3报缺元数据；保留失败记录后双环境对照确定为辅助客户端环境偏差。指定Python3.11/OCR1.4.4下双方重复整图均返回301词。 / The delimiter fix passes the original whole image. A later auxiliary failure was traced to the client's wrong interpreter/old OCR, not waived; both agents reproduced the environment difference.
+- 本批未重复首次安装下载、管理员应用和跨设备验收；源码检查集合重叠，不相加。 / Fresh-machine setup, elevated targets and cross-device acceptance were not repeated; test subsets overlap.
 
-- 初次 23 次输入测试曾有一次已输入但事后采集失败。独立补图确认输入生效、没有重放；原始具体原因仍未知。后续十轮和候选一轮未复现，不声称修复了缺帧根因。 / One initial after-frame failure followed real dispatch. Separate capture confirmed the effect without replay. Its original cause remains unproven despite no recurrence.
-- 一次重复测试在第六轮因测试记录器并发写文件而中断；记录器的锁和原子替换已有失败前/修复后回归。这不是一次完整通过的产品测试。 / A separate repetition attempt stopped in round six due to a recorder write race, now regression-tested with lock/atomic replacement; that campaign is not counted as a full pass.
-- 意外收集测试辅助模块的扩展运行出现 48 失败、1232 通过、1 跳过；其中 20 项缺未交付的原生审核测试 fixture，24 项用旧 tag 的同一测试独立复现（含 18 项学习导航等价判断），其余 4 项在旧版通过、在候选隔离重跑也通过（对应两模块共 6 项通过）。后者提示运行顺序/共享状态问题，具体污染源尚未证明。不宣称全仓测试通过，也不把学习导航旧失败当作已修复；这些能力不在即时包交付范围。 / Overbroad helper collection: 48 failures, 1232 passes, one skip. Twenty lacked a native-review fixture; 24 reproduced against test.1 with identical tests, including 18 learned-navigation equivalence cases. Four passed on baseline and on an isolated candidate rerun (six checks across their two modules). Order/shared-state interference is suspected, not proven. This is not an all-suite pass or a fix for the excluded learning/navigation baseline failures.
-- 小目标、不完整 OCR、动态页面、其他应用/设备、管理员目标的本批增量仍需测试；首次安装依赖和模型下载没有在新电脑上重验。 / Small targets, partial OCR, dynamic pages, other apps/devices, elevated-target increments and first installation on a fresh machine remain unverified.
+## 实测命令耗时 / Measured command latency
 
-主执行语义保持：verified=null，由 Agent 读取前后原图判断；不自动重放。不含旧学习内容、截图、用户日志或模型权重。 / Outcome judgement remains with the Agent using original frames; no automatic replay. No learned content, screenshots, user logs or weights are distributed.
+AionUi同连接一轮：右击19.14秒、菜单全选13.33秒、双击13.94秒、填写0.42–0.49秒、回车2.27–2.48秒、读文6.25–6.85秒、滚动1.12秒、关窗0.063秒。右击包含首轮准备；以上不是包含Agent决策的任务总时间，也不是提速承诺。 / One persistent-connection round: right-click19.14s, menu13.33s, double-click13.94s, type0.42–0.49s, Enter2.27–2.48s, read6.25–6.85s, scroll1.12s and close0.063s. Not end-to-end agent latency or a speedup claim.
 
-分发目录复核：包内无输入回归子集 110 项通过，实际 MCP stdio 再验通过；其运行源码与实机候选逐文件一致。 / Distribution recheck: 110 shipped no-input checks and real MCP stdio smoke pass; runtime source matches the live-tested candidate byte for byte.
+## 限制 / Limitations
+
+- 历史偶发双击未选中、已派发后缺图的原始根因仍未全部关闭；单次成功不等于长期稳定。 / Historical intermittent selection/missing-frame causes remain open.
+- OCR是可见图像读取，不是DOM、完整文章或精准URL/字段提取；浏览器栏、遮挡、通知、未渲染内容影响结果。 / Visible pixels only; chrome, overlays and incomplete rendering affect results.
+- `verified=null`等待Agent复核；输入已派发、画面变化和任务成功是不同概念。缺图只补图，不自动重放。 / Agent-owned null verification; dispatch/change is not task success.
+- 冷启动、视觉模型识别仍慢。本机案例不是小目标、任意网站、其他设备、管理员应用或无人值守可靠性保证。 / Cold start/inference remain slow; no universal or unattended reliability claim.
+- 首次安装、依赖/模型下载和不同硬件仍需接收者验证；本包不附环境或模型。 / Fresh-machine setup remains recipient-tested; environments/weights are not bundled.
+- 使用安装脚本锁定的Python3.11和OCR1.4.4，服务与辅助脚本使用同一解释器。旧OCR1.2.3不支持所需词几何；不能用整行框替代单词框。 / Use the locked environment consistently; OCR1.2.3 lacks required word geometry.
+- MCP客户端退出可能通过Windows Job结束派生浏览器。先用框架关闭自己的测试窗口，stop并轮询清理后再断开；不要动用户原有窗口。 / Close owned windows before stop/disconnect; client Job teardown can terminate spawned browsers.
+
+模型下载与配置见FRIEND_SETUP.md，Agent契约见AGENT_GUIDE.md，读取接口见EXECUTION_READ_TEXT.md。 / See setup, agent and visible-text contracts shipped alongside this document.

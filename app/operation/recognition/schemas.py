@@ -121,6 +121,7 @@ class LocalGroundingRequest:
     ocr_scan: Callable[[str], OCRResult]
     app_name: str | None = None
     crop_padding: int = 24
+    text_granularity: str = "line"
 
 
 @dataclass

@@ -4,7 +4,7 @@
 .cache/
 __pycache__/
 *.py[cod]
-models/
+/models/
 runtime_state/
 runtime-output/
 logs/
