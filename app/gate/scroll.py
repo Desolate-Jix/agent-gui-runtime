@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.gate.scroll_evidence import measure_scroll_spatial_evidence
+
 
 SCROLL_SCOPE_CONTRACT = "scroll_scope_invariant_v1"
 
 
 def _point_in_rect(point: dict[str, int], rect: dict[str, int]) -> bool:
-    return rect["x"] <= point["x"] <= rect["x"] + rect["width"] and rect["y"] <= point["y"] <= rect["y"] + rect["height"]
+    return rect["x"] <= point["x"] < rect["x"] + rect["width"] and rect["y"] <= point["y"] < rect["y"] + rect["height"]
 
 
 def scroll_window_size_matches(requested: Any, actual: dict[str, int]) -> bool:
@@ -44,7 +46,7 @@ def build_scroll_precondition_decision(
 ) -> dict[str, Any]:
     reasons: list[str] = []
     reject_reasons: list[str] = []
-    window_bounds = {"x": 0, "y": 0, "width": max(0, int(window_rect["width"]) - 1), "height": max(0, int(window_rect["height"]) - 1)}
+    window_bounds = {"x": 0, "y": 0, "width": max(0, int(window_rect["width"])), "height": max(0, int(window_rect["height"]))}
     if _point_in_rect(point, window_bounds):
         reasons.append("point_inside_window")
     else:
@@ -90,19 +92,36 @@ def build_scroll_effect_validation(
     target_container: dict[str, Any] | None,
 ) -> dict[str, Any]:
     verification = post_scroll_verification if isinstance(post_scroll_verification, dict) else {}
-    diff = verification.get("diff") if isinstance(verification.get("diff"), dict) else {}
-    changed = bool(diff.get("changed") or verification.get("verified"))
+    target_id = (target_container or {}).get("container_id") or getattr(request, "target_container_id", None)
+    bbox = getattr(request, "container_bbox", None)
+    if hasattr(bbox, "model_dump"):
+        bbox = bbox.model_dump()
+    if bbox is None:
+        bbox = (target_container or {}).get("bbox")
+    if bbox is None and getattr(request, "scroll_scope", None) == "window":
+        before = verification.get("before")
+        size = before.get("viewport_size") if isinstance(before, dict) else None
+        if isinstance(size, dict):
+            bbox = {"x": 0, "y": 0, "width": size.get("width"), "height": size.get("height")}
+    evidence = measure_scroll_spatial_evidence(
+        before=verification.get("before"), after=verification.get("after"),
+        target_bbox=bbox, target_container_id=target_id,
+    )
     return {
-        "contract_version": "scroll_effect_validation_v1",
-        "status": "moved" if changed else "unknown",
-        "target_container_id": (target_container or {}).get("container_id") or getattr(request, "target_container_id", None),
+        "contract_version": "scroll_effect_validation_v2",
+        "status": evidence["status"],
+        "target_container_id": target_id,
         "target_pane": (target_container or {}).get("pane_role") or getattr(request, "target_pane", None),
-        "target_container_content_changed": changed,
+        "target_container_content_changed": evidence["target_changed"],
         "target_container_scroll_offset_changed": None,
-        "same_semantic_page": True,
-        "non_target_panes_stable": None,
-        "wrong_scope_detected": False,
-        "no_effect_detected": False if changed else None,
+        "same_semantic_page": None,
+        "non_target_panes_stable": evidence["non_target_stable"],
+        "wrong_scope_detected": evidence["wrong_scope_detected"],
+        "no_effect_detected": None,
+        "scroll_movement_verified": None,
+        "direction_verified": None,
+        "boundary_reached": None,
+        "spatial_evidence": evidence,
         "verification_basis": verification.get("verification_basis"),
     }
 
@@ -114,11 +133,17 @@ def build_scroll_scope_invariant(
     non_target_changes: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     changes = [item for item in non_target_changes or [] if isinstance(item, dict) and item.get("changed") is True]
-    wrong_scope = bool(changes)
-    if target_changed is False and not wrong_scope:
-        status = "no_target_progress"
-    elif wrong_scope:
+    observed = bool(non_target_changes) and all(
+        isinstance(item, dict) and type(item.get("changed")) is bool
+        for item in non_target_changes or []
+    )
+    wrong_scope = True if changes else (False if observed else None)
+    if wrong_scope is True:
         status = "wrong_scope_detected"
+    elif type(target_changed) is not bool or wrong_scope is None:
+        status = "unknown"
+    elif target_changed is False:
+        status = "no_target_progress"
     else:
         status = "ok"
     return {
@@ -128,18 +153,18 @@ def build_scroll_scope_invariant(
         "non_target_panes": non_target_changes or [],
         "wrong_scope_detected": wrong_scope,
         "status": status,
-        "reasons": ["non_target_pane_changed"] if wrong_scope else (["target_did_not_change"] if target_changed is False else ["target_scope_ok"]),
+        "reasons": [{"wrong_scope_detected": "non_target_pane_changed", "unknown": "scope_evidence_incomplete", "no_target_progress": "target_did_not_change", "ok": "target_scope_ok"}[status]],
     }
 
 
 def apply_scroll_scope_invariant(scroll_result: dict[str, Any], invariant: dict[str, Any]) -> dict[str, Any]:
     payload = dict(scroll_result)
     payload["scroll_scope_invariant"] = invariant
-    payload["wrong_scope_detected"] = bool(payload.get("wrong_scope_detected") or invariant.get("wrong_scope_detected"))
+    payload["wrong_scope_detected"] = True if payload.get("wrong_scope_detected") is True else invariant.get("wrong_scope_detected")
     effect = payload.get("scroll_effect_validation") if isinstance(payload.get("scroll_effect_validation"), dict) else {}
     if effect:
         effect = dict(effect)
-        effect["wrong_scope_detected"] = bool(effect.get("wrong_scope_detected") or invariant.get("wrong_scope_detected"))
+        effect["wrong_scope_detected"] = True if effect.get("wrong_scope_detected") is True else invariant.get("wrong_scope_detected")
         effect["non_target_panes_stable"] = False if invariant.get("wrong_scope_detected") else effect.get("non_target_panes_stable")
         payload["scroll_effect_validation"] = effect
     return payload

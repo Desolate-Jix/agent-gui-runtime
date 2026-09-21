@@ -41,6 +41,8 @@ _BASE_BUNDLE_FIELDS = {
 }
 _REF_FIELDS = {"id", "content_sha256"}
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_STATIC_BUNDLE_CONTRACT = "hybrid_static_capture_bundle_v1"
+_STATIC_CONTEXT_CONTRACT = "hybrid_static_capture_context_v1"
 
 
 def build_omni_candidate_ledger(
@@ -200,6 +202,8 @@ def validate_current_capture_bundle(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("capture bundle must be an object")
     bundle = deepcopy(dict(value))
+    if bundle.get("contract_version") == _STATIC_BUNDLE_CONTRACT:
+        return _validate_static_capture_bundle(bundle)
     allowed = _BASE_BUNDLE_FIELDS | {"capture_identity", "context", "bundle_ref"}
     actual_fields = set(bundle)
     if actual_fields != _BASE_BUNDLE_FIELDS | {"capture_identity", "context"} and actual_fields != allowed:
@@ -235,6 +239,46 @@ def validate_current_capture_bundle(value: Mapping[str, Any]) -> dict[str, Any]:
     return bundle
 
 
+def _validate_static_capture_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    base_fields = {
+        "contract_version", "bundle_id", "run_id", "workflow_revision",
+        "capture_lineage_ref", "artifact_ref", "context_ref", "content_sha256",
+        *_NON_AUTHORIZING,
+    }
+    allowed = base_fields | {"capture_identity", "context", "bundle_ref"}
+    if set(bundle) != base_fields | {"capture_identity", "context"} and set(bundle) != allowed:
+        raise ValueError("static capture bundle is not a closed verified bundle")
+    canonical_json_bytes(bundle)
+    if bundle.get("bundle_id") is None or not str(bundle["bundle_id"]).startswith("hybrid-static-capture/"):
+        raise ValueError("static capture bundle_id is invalid")
+    if bundle.get("content_sha256") != content_sha256(
+        {key: child for key, child in bundle.items() if key not in {"capture_identity", "context", "bundle_ref"}}
+    ):
+        raise ValueError("static capture bundle content_sha256 mismatch")
+    _require_non_authorizing(bundle, name="static capture bundle")
+    capture = validate_capture_identity(bundle.get("capture_identity"))
+    context = _validate_static_context(bundle.get("context"))
+    if (
+        bundle.get("capture_lineage_ref") != capture["capture_lineage_ref"]
+        or bundle.get("artifact_ref") != capture["artifact_ref"]
+        or context["capture_lineage_ref"] != capture["capture_lineage_ref"]
+        or context["run_id"] != bundle.get("run_id")
+        or context["workflow_revision"] != bundle.get("workflow_revision")
+        or capture["workflow_revision"] != str(bundle.get("workflow_revision"))
+    ):
+        raise ValueError("static capture bundle current capture identity mismatch")
+    expected_context_ref = {"id": context["context_id"], "content_sha256": context["content_sha256"]}
+    if bundle.get("context_ref") != expected_context_ref:
+        raise ValueError("static capture bundle context_ref mismatch")
+    if "bundle_ref" in bundle:
+        reference = _ref(bundle["bundle_ref"], name="bundle_ref")
+        if reference != {"id": bundle.get("bundle_id"), "content_sha256": bundle.get("content_sha256")}:
+            raise ValueError("static capture bundle_ref mismatch")
+    bundle["capture_identity"] = capture
+    bundle["context"] = context
+    return bundle
+
+
 def _validate_context(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("capture bundle context must be an object")
@@ -260,6 +304,42 @@ def _validate_context(value: object) -> dict[str, Any]:
     if not isinstance(context.get("sources"), list) or not isinstance(context.get("derived_views"), list):
         raise ValueError("capture bundle context evidence lists are invalid")
     _require_non_authorizing(context, name="capture bundle context")
+    return context
+
+
+def _validate_static_context(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("static capture bundle context must be an object")
+    context = deepcopy(dict(value))
+    required = {
+        "contract_version", "context_id", "run_id", "workflow_revision",
+        "capture_lineage_ref", "window_binding", "static_asset", "availability",
+        "sources", "derived_views", "content_sha256", *_NON_AUTHORIZING,
+    }
+    if set(context) != required or context.get("contract_version") != _STATIC_CONTEXT_CONTRACT:
+        raise ValueError("static capture bundle context is not closed")
+    if context.get("content_sha256") != content_sha256(context):
+        raise ValueError("static capture bundle context content_sha256 mismatch")
+    if (
+        not isinstance(context.get("context_id"), str)
+        or not context["context_id"].startswith("hybrid-static-context/")
+        or not isinstance(context.get("run_id"), str)
+        or not context["run_id"]
+        or isinstance(context.get("workflow_revision"), bool)
+        or not isinstance(context.get("workflow_revision"), int)
+        or context.get("window_binding") is not None
+        or context.get("sources") != []
+        or context.get("derived_views") != []
+        or context.get("availability") != {
+            "ocr": {"status": "not_collected_static"},
+            "uia": {"status": "not_applicable_static", "reason": "no_live_window"},
+        }
+    ):
+        raise ValueError("static capture bundle context is invalid")
+    _ref(context.get("capture_lineage_ref"), name="static context capture_lineage_ref")
+    # 消费端复用同一静态契约，不能另外写一份只认识公共集的字段规则。
+    validate_contract(context, _STATIC_CONTEXT_CONTRACT)
+    _require_non_authorizing(context, name="static capture bundle context")
     return context
 
 

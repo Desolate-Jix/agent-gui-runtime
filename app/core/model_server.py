@@ -8,6 +8,7 @@ import json
 import math
 import os
 import psutil
+import re
 import socket
 import subprocess
 import threading
@@ -192,14 +193,22 @@ def model_base_url(profile: dict[str, Any]) -> str:
     return f"http://127.0.0.1:{port}/v1"
 
 
-def check_model_server(profile: dict[str, Any], *, timeout: float = 1.0) -> dict[str, Any]:
+def check_model_server(
+    profile: dict[str, Any], *, timeout: float = 1.0,
+    request_reader: Callable[[urllib.request.Request, float], bytes] | None = None,
+) -> dict[str, Any]:
+    def read(request: urllib.request.Request) -> bytes:
+        if request_reader is not None:
+            return request_reader(request, timeout)
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read()
+
     base_url = model_base_url(profile)
     health_payload: dict[str, Any] | None = None
     if _profile_supports_health_status(profile):
         health_request = urllib.request.Request(f"{base_url}/health", headers={"Accept": "application/json"})
         try:
-            with urllib.request.urlopen(health_request, timeout=timeout) as response:
-                health_payload = json.loads(response.read().decode("utf-8"))
+            health_payload = json.loads(read(health_request).decode("utf-8"))
             health_status = str(health_payload.get("status") or "").casefold()
             if health_status == "busy":
                 return {
@@ -212,8 +221,7 @@ def check_model_server(profile: dict[str, Any], *, timeout: float = 1.0) -> dict
             health_payload = None
     request = urllib.request.Request(f"{base_url}/models", headers={"Accept": "application/json"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = json.loads(read(request).decode("utf-8"))
         return {
             "status": "running",
             "base_url": base_url,
@@ -647,6 +655,23 @@ def run_qwen_projection_model(
     timeout_seconds: float = 120.0,
 ) -> list[dict[str, Any]]:
     """Send the closed simple-native per-goal projection under an exact lease."""
+    content = run_qwen_projection_model_raw(
+        projection=projection, screenshot_bytes=screenshot_bytes,
+        screenshot_media_type=screenshot_media_type, screenshot_sha256=screenshot_sha256,
+        model_lease=model_lease, timeout_seconds=timeout_seconds,
+    )
+    parsed = json.loads(content)
+    if not isinstance(parsed, list):
+        raise ValueError("Qwen projection response is not a bare JSON array")
+    return parsed
+
+
+def run_qwen_projection_model_raw(
+    *, projection: Mapping[str, Any], screenshot_bytes: bytes,
+    screenshot_media_type: str, screenshot_sha256: str,
+    model_lease: dict[str, Any], timeout_seconds: float = 120.0,
+) -> str:
+    """保留相同租约、提示和传输合同，返回未经重序列化的消息正文。"""
     compact = deepcopy(dict(projection)) if isinstance(projection, Mapping) else None
     if not isinstance(compact, dict) or set(compact) != {"image_size", "goals", "candidates"}:
         raise ValueError("Qwen model projection is not closed")
@@ -746,10 +771,7 @@ def run_qwen_projection_model(
     content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, str):
         raise ValueError("Qwen projection response has no JSON message content")
-    parsed = json.loads(content)
-    if not isinstance(parsed, list):
-        raise ValueError("Qwen projection response is not a bare JSON array")
-    return parsed
+    return content
 
 
 def run_hybrid_vista_bare_point(
@@ -4518,74 +4540,109 @@ def _cancel_profile_request(
     request_id: str,
     timeout: float,
     verify_seconds: float,
+    verify_instance: Callable[[], None] | None = None,
+    request_reader: Callable[[urllib.request.Request, float], bytes] | None = None,
 ) -> dict[str, Any]:
+    """取消控制请求只能由匹配确认与可验证健康状态证明完成。"""
     profile_id = str(profile.get("profile_id") or "unknown")
     endpoint = str(profile.get("request_cancel_endpoint") or "").strip()
-    body = json.dumps({"request_id": request_id}).encode("utf-8")
+    deadline = time.monotonic() + max(0.0, float(timeout)) + max(0.0, float(verify_seconds))
+
+    def failed(error: str, acknowledgement: dict[str, Any] | None = None) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "profile_id": profile_id,
+            "status": "cancel_failed",
+            "model_service_compute_termination": "cancel_failed",
+            "error": error,
+        }
+        if acknowledgement is not None:
+            result["acknowledgement"] = acknowledgement
+        return result
+
+    def verify() -> None:
+        if verify_instance is not None:
+            verify_instance()
+
     request = urllib.request.Request(
         endpoint,
-        data=body,
+        data=json.dumps({"request_id": request_id}).encode("utf-8"),
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            acknowledgement = json.loads(response.read().decode("utf-8"))
+        verify()
+        budget = min(max(0.0, float(timeout)), max(0.0, deadline - time.monotonic()))
+        if budget <= 0:
+            return failed("cancel control budget exhausted before POST")
+        if request_reader is None:
+            with urllib.request.urlopen(request, timeout=budget) as response:
+                response_bytes = response.read()
+        else:
+            response_bytes = request_reader(request, budget)
+        acknowledgement = json.loads(response_bytes.decode("utf-8"))
+        if not isinstance(acknowledgement, dict):
+            return failed("cancel acknowledgement is not an object")
+        verify()
     except Exception as exc:
-        return {
-            "profile_id": profile_id,
-            "status": "cancel_failed",
-            "model_service_compute_termination": "cancel_failed",
-            "error": str(exc),
-        }
+        return failed(str(exc))
 
     acknowledgement_status = str(acknowledgement.get("status") or "").strip()
-    if acknowledgement_status == "request_not_active":
-        return {
-            "profile_id": profile_id,
-            "status": "request_not_active",
-            "model_service_compute_termination": "request_not_active",
-            "acknowledgement": acknowledgement,
-        }
-    if acknowledgement_status != "cancellation_acknowledged":
-        return {
-            "profile_id": profile_id,
-            "status": "cancel_failed",
-            "model_service_compute_termination": "cancel_failed",
-            "acknowledgement": acknowledgement,
-        }
+    if (
+        acknowledgement.get("contract_version") != "model_request_cancel_response_v1"
+        or str(acknowledgement.get("request_id") or "") != request_id
+        or acknowledgement_status not in {"cancellation_acknowledged", "request_not_active"}
+        or (acknowledgement_status == "request_not_active" and acknowledgement.get("request_fenced") is not True)
+    ):
+        return failed("cancel acknowledgement contract does not match request", acknowledgement)
 
-    deadline = time.monotonic() + max(0.0, float(verify_seconds))
     last_health: dict[str, Any] | None = None
-    while True:
-        server_status = check_model_server(profile, timeout=timeout)
-        health = server_status.get("health")
+    while time.monotonic() < deadline:
+        try:
+            verify()
+            remaining = max(0.0, deadline - time.monotonic())
+            # check_model_server 可能依次请求 health 与 models，因此为每次探测预留总预算。
+            probe_timeout = min(max(0.0, float(timeout)), remaining / 2.0)
+            if probe_timeout <= 0:
+                break
+            server_status = check_model_server(profile, timeout=probe_timeout,
+                **({"request_reader": request_reader} if request_reader is not None else {}))
+            verify()
+        except Exception as exc:
+            return failed(str(exc), acknowledgement)
+        health = server_status.get("health") if isinstance(server_status, dict) else None
         last_health = health if isinstance(health, dict) else None
-        active_request = (
-            last_health.get("active_request")
-            if isinstance(last_health, dict)
-            else None
+        active_request = last_health.get("active_request") if last_health is not None else object()
+        valid_active = active_request is None or (
+            isinstance(active_request, dict)
+            and isinstance(active_request.get("request_id"), str)
+            and bool(active_request["request_id"].strip())
+            and active_request["request_id"].strip() != request_id
         )
-        active_request_id = (
-            str(active_request.get("request_id") or "")
-            if isinstance(active_request, dict)
-            else ""
-        )
-        if active_request_id != request_id:
+        # 既有 health 实现不是可中断流；探测返回后不把超时结果提升为终止证明。
+        if time.monotonic() >= deadline:
+            break
+        if (
+            isinstance(server_status, dict)
+            and server_status.get("status") in {"running", "busy"}
+            and last_health is not None
+            and "active_request" in last_health
+            and valid_active
+        ):
+            status = "terminated" if acknowledgement_status == "cancellation_acknowledged" else "request_not_active"
             return {
                 "profile_id": profile_id,
-                "status": "terminated",
-                "model_service_compute_termination": "terminated",
+                "status": status,
+                "model_service_compute_termination": status,
                 "acknowledgement": acknowledgement,
                 "health": last_health,
             }
-        if time.monotonic() >= deadline:
-            break
         time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+    status = "cancellation_acknowledged_pending" if acknowledgement_status == "cancellation_acknowledged" else "cancel_failed"
     return {
         "profile_id": profile_id,
-        "status": "cancellation_acknowledged_pending",
-        "model_service_compute_termination": "cancellation_acknowledged_pending",
+        "status": status,
+        "model_service_compute_termination": status,
         "acknowledgement": acknowledgement,
         "health": last_health,
     }
@@ -4674,7 +4731,46 @@ def _stop_exclusive_resource_conflicts(profile: dict[str, Any]) -> dict[str, Any
     return result
 
 
-def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
+class ModelServerLaunchInterrupted(RuntimeError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _model_launch_remaining(cancelled: threading.Event | None, deadline: float | None) -> float | None:
+    if cancelled is not None and cancelled.is_set():
+        raise ModelServerLaunchInterrupted("model_service_cancelled")
+    if deadline is None:
+        return None
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+        raise ValueError("model launch deadline is invalid")
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ModelServerLaunchInterrupted("model_service_readiness_timeout")
+    return remaining
+
+
+def start_model_server(
+    profile: dict[str, Any],
+    *,
+    scope_name: str | None = None,
+    child_env: dict[str, str] | None = None,
+    output_root: Path | None = None,
+    cancelled: threading.Event | None = None,
+    deadline: float | None = None,
+    worker_executable: Path | None = None,
+) -> dict[str, Any]:
+    _model_launch_remaining(cancelled, deadline)
+    explicit_scope_name = None
+    if scope_name is not None:
+        explicit_scope_name = str(scope_name).strip()
+        if not explicit_scope_name:
+            raise ValueError("explicit model process scope is required")
+    explicit_output_root = None
+    if output_root is not None:
+        if not isinstance(output_root, Path) or not output_root.is_absolute():
+            raise ValueError("explicit model output root must be an absolute Path")
+        explicit_output_root = output_root
     if os.environ.get("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER") == "1":
         raise RuntimeError(
             "model server wrapper disabled by inherited test safety sentinel"
@@ -4682,22 +4778,34 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
     if profile.get("launchable") is False:
         profile_id = str(profile.get("profile_id") or "unknown")
         raise ValueError(f"Model profile is not launchable: {profile_id}")
-    script = _resolve_path(str(profile.get("start_script") or "scripts/model_servers/start_llama_vision_server.ps1"))
-    if not script.exists():
-        raise FileNotFoundError(f"Model start script not found: {script}")
-    logs_dir = ROOT_DIR / "logs"
+    if worker_executable is None:
+        script = _resolve_path(str(profile.get("start_script") or "scripts/model_servers/start_llama_vision_server.ps1"))
+        if not script.exists():
+            raise FileNotFoundError(f"Model start script not found: {script}")
+    else:
+        if (not isinstance(worker_executable, Path) or not worker_executable.is_absolute()
+                or str(profile.get("output_contract") or "").strip().casefold() != "vista_point_v1"
+                or "python_path" in profile or not profile.get("model_path")):
+            raise ValueError("Packaged worker requires an absolute executable and a VISTA profile without Python override")
+        if not worker_executable.is_file():
+            raise FileNotFoundError(f"Packaged model worker not found: {worker_executable}")
+    effective_profile = deepcopy(profile)
+    if explicit_output_root is not None:
+        profile_id = str(effective_profile.get("profile_id") or "model")
+        safe_profile_id = re.sub(r"[^a-zA-Z0-9_.-]+", "-", profile_id).strip(".-") or "model"
+        logs_dir = explicit_output_root / "logs"
+        log_profile_id = safe_profile_id
+        effective_profile["pid_file"] = str(
+            explicit_output_root / "model-server-pids" / f"{safe_profile_id}.pid"
+        )
+    else:
+        logs_dir = ROOT_DIR / "logs"
+        log_profile_id = effective_profile.get("profile_id")
     logs_dir.mkdir(parents=True, exist_ok=True)
-    log_path = logs_dir / f"local-vision-server-{profile.get('profile_id')}-{time.strftime('%Y%m%d-%H%M%S')}.log"
-    command = [
-        "powershell",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        str(script),
-    ]
-    for key, parameter in [
+    log_path = logs_dir / f"local-vision-server-{log_profile_id}-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    parameters = [
         ("model_path", "-ModelPath"),
+        ("python_path", "-PythonPath"),
         ("mmproj_path", "-MmprojPath"),
         ("server_path", "-ServerPath"),
         ("model_name", "-ModelName"),
@@ -4712,7 +4820,17 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
         ("max_new_tokens", "-MaxNewTokens"),
         ("gpu_memory_gib", "-GpuMemoryGiB"),
         ("cpu_memory_gib", "-CpuMemoryGiB"),
-    ]:
+    ]
+    if worker_executable is None:
+        command = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
+    else:
+        # 冻结入口只切换同一服务器的启动参数，原 Job、日志、取消与清理尾部保持不变。
+        command = [str(worker_executable), "--model-worker", "vista"]
+        parameters = [(key, "--" + key.replace("_", "-")) for key in (
+            "model_path", "model_name", "host", "port", "device", "dtype", "max_new_tokens",
+            "gpu_memory_gib", "cpu_memory_gib",
+        )]
+    for key, parameter in parameters:
         value = profile.get(key)
         if value not in (None, ""):
             if key.endswith("_path"):
@@ -4724,26 +4842,44 @@ def start_model_server(profile: dict[str, Any]) -> dict[str, Any]:
                 command.extend([parameter, str(value)])
 
     return _launch_model_server_process(
-        profile=profile,
+        profile=effective_profile,
         log_path=log_path,
         command=command,
+        **({"scope_name": explicit_scope_name} if explicit_scope_name is not None else {}),
+        **({"child_env": child_env} if child_env is not None else {}),
+        **({"cancelled": cancelled} if cancelled is not None else {}),
+        **({"deadline": deadline} if deadline is not None else {}),
     )
 
 
 def _launch_model_server_process(
-    *, profile: dict[str, Any], log_path: Path, command: list[str]
+    *,
+    profile: dict[str, Any],
+    log_path: Path,
+    command: list[str],
+    scope_name: str | None = None,
+    child_env: dict[str, str] | None = None,
+    cancelled: threading.Event | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
+    _model_launch_remaining(cancelled, deadline)
+    if scope_name is None:
+        hybrid_scope_name = os.environ.get(
+            "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
+        ).strip()
+    else:
+        hybrid_scope_name = str(scope_name).strip()
+        if not hybrid_scope_name:
+            raise ValueError("explicit model process scope is required")
     log_file = log_path.open("a", encoding="utf-8")
     process = None
-    hybrid_scope_name = os.environ.get(
-        "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
-    ).strip()
     pid_path = model_profile_pid_path(profile)
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(
         subprocess, "CREATE_NO_WINDOW", 0
     )
     scope_cleanup_evidence = None
     try:
+        _model_launch_remaining(cancelled, deadline)
         if hybrid_scope_name:
             from app.learn.hybrid.windows_process_scope import spawn_process_in_scope
 
@@ -4754,6 +4890,7 @@ def _launch_model_server_process(
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 creationflags=creationflags,
+                **({"env": child_env} if child_env is not None else {}),
             )
         else:
             process = subprocess.Popen(
@@ -4762,13 +4899,24 @@ def _launch_model_server_process(
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
                 creationflags=creationflags,
+                **({"env": child_env} if child_env is not None else {}),
             )
-        time.sleep(float(profile.get("startup_exit_check_seconds") or 0.75))
+        wait_seconds = float(profile.get("startup_exit_check_seconds") or 0.75)
+        remaining = _model_launch_remaining(cancelled, deadline)
+        if remaining is not None:
+            wait_seconds = min(wait_seconds, remaining)
+        # 正式启动等待响应同一个取消事件，旧调用仍沿用原等待行为。
+        if cancelled is None:
+            time.sleep(wait_seconds)
+        else:
+            cancelled.wait(wait_seconds)
+        _model_launch_remaining(cancelled, deadline)
         returncode = process.poll()
         if returncode is not None:
             raise RuntimeError(
                 f"Model start script exited immediately with code {returncode}; see log: {log_path}"
             )
+        _model_launch_remaining(cancelled, deadline)
         _write_model_profile_pid(pid_path, int(process.pid))
         health_status: dict[str, Any] | None = None
         pid_sync = None
@@ -4776,10 +4924,17 @@ def _launch_model_server_process(
             health_timeout = float(
                 profile.get("startup_health_timeout_seconds") or 0.25
             )
+            remaining = _model_launch_remaining(cancelled, deadline)
+            if remaining is not None:
+                health_timeout = min(health_timeout, remaining / 2)
+            if cancelled is not None:
+                health_timeout = min(health_timeout, 0.25)
             health_status = check_model_server(profile, timeout=health_timeout)
+            _model_launch_remaining(cancelled, deadline)
             pid_sync = _sync_pid_file_from_health(
                 profile, health_status, pid_path=pid_path
             )
+        _model_launch_remaining(cancelled, deadline)
         return {
             "pid": process.pid,
             "pid_source": "health" if pid_sync else "wrapper_process",
@@ -4804,9 +4959,11 @@ def _launch_model_server_process(
                 stable_zero_observations=3,
             )
             if scope_cleanup_evidence.get("cleanup_status") != "verified":
-                raise RuntimeError(
-                    "Hybrid model start failure cleanup is indeterminate"
-                ) from error
+                raise HybridModelLaunchCleanupError({
+                    "contract_version": "hybrid_model_launch_handle_cleanup_v1",
+                    "cleanup_status": "indeterminate",
+                    "scope_cleanup_evidence": deepcopy(scope_cleanup_evidence),
+                }) from error
         elif process is not None and process.poll() is None:
             process.kill()
             process.wait(timeout=5)
@@ -4841,9 +4998,13 @@ def _launch_model_server_process(
                         pid_file=pid_path,
                         remove_owned_pid_file=True,
                         stable_zero_observations=3,
+                        retained_process_identities=tuple(
+                            (scope_cleanup_evidence or {}).get("observed_member_identities_before", [])
+                            + (scope_cleanup_evidence or {}).get("remaining_owned_process_identities", [])),
                     )
                 except BaseException as scope_error:
                     scope_cleanup_evidence = {
+                        **(scope_cleanup_evidence or {}),
                         "contract_version": "hybrid_windows_process_scope_v1",
                         "scope_name": hybrid_scope_name,
                         "cleanup_status": "indeterminate",

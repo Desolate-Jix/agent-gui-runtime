@@ -14,6 +14,7 @@ class CandidateRankRequest:
     top_k: int = 5
     state_hint: str | None = None
     screen_reading: dict[str, Any] | None = None
+    control_target: dict[str, Any] | None = None
 
 
 @dataclass
@@ -120,6 +121,7 @@ class LocalGroundingRequest:
     ocr_scan: Callable[[str], OCRResult]
     app_name: str | None = None
     crop_padding: int = 24
+    text_granularity: str = "line"
 
 
 @dataclass

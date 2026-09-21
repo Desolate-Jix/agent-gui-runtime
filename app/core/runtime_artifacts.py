@@ -7,6 +7,7 @@ import re
 import uuid
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -28,19 +29,36 @@ TRACE_MAX_DEPTH = int(os.environ.get("OPENCLAW_TRACE_MAX_DEPTH", "12"))
 TRACE_COMPACT_LIST_KEYS = {"scroll_history", "previous_scrolls", "history", "attempts"}
 TRACE_BINARY_TEXT_KEYS = {"image_base64", "base64", "image_bytes", "bytes", "png", "jpg", "jpeg"}
 
-for path in (
-    LOGS_DIR,
-    TRACES_DIR,
-    ARTIFACTS_DIR,
-    SCREENSHOTS_DIR,
-    VERIFICATION_DIR,
-    REVIEW_OVERLAYS_DIR,
-    RECOGNITION_CROPS_DIR,
-    LOCAL_LEARNING_DIR,
-    LEARNED_INSTRUCTION_ARTIFACTS_DIR,
-):
-    path.mkdir(parents=True, exist_ok=True)
+_runtime_output_root: ContextVar[Path | None] = ContextVar("runtime_output_root", default=None)
 
+
+def _validated_relative_path(relative_path: str | Path) -> Path:
+    candidate = Path(relative_path)
+    if candidate.is_absolute() or candidate.anchor or any(part == ".." for part in candidate.parts):
+        raise ValueError("relative_path must be a relative path without '..'")
+    return candidate
+
+
+@contextmanager
+def pinned_runtime_output_root(root: Path) -> Iterator[Path]:
+    """为单次操作绑定绝对输出根目录，进入时不创建目录。"""
+    if not isinstance(root, Path) or not root.is_absolute():
+        raise ValueError("root must be an absolute Path")
+    token = _runtime_output_root.set(root)
+    try:
+        yield root
+    finally:
+        _runtime_output_root.reset(token)
+
+
+def runtime_output_directory(relative_path: str | Path, *, legacy_path: Path | None = None, create: bool = False) -> Path:
+    """从操作范围或兼容旧路径解析输出目录。"""
+    relative = _validated_relative_path(relative_path)
+    root = _runtime_output_root.get()
+    directory = root / relative if root is not None else (legacy_path if legacy_path is not None else relative)
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 def slugify(value: Optional[str], *, fallback: str = "item", max_length: int = 80) -> str:
     text = (value or "").strip().lower()
@@ -108,22 +126,22 @@ def build_screenshot_path(
         parts.append(slugify(name_hint, fallback="target"))
     parts.append(roi_label(roi))
     parts.append(timestamp_label())
-    return SCREENSHOTS_DIR / ("__".join(parts) + ".png")
+    return runtime_output_directory("artifacts/screenshots", legacy_path=SCREENSHOTS_DIR, create=True) / ("__".join(parts) + ".png")
 
 
 def build_verification_image_path(*, action_name: str, suffix: str = "diff") -> Path:
     name = "__".join([slugify(action_name, fallback="action"), slugify(suffix, fallback="artifact"), timestamp_label()])
-    return VERIFICATION_DIR / f"{name}.png"
+    return runtime_output_directory("artifacts/verification", legacy_path=VERIFICATION_DIR, create=True) / f"{name}.png"
 
 
 def build_review_overlay_path(*, name_hint: Optional[str] = None, suffix: str = "review-overlay") -> Path:
     parts = [slugify(name_hint, fallback="trace"), slugify(suffix, fallback="overlay"), timestamp_label()]
-    return REVIEW_OVERLAYS_DIR / ("__".join(parts) + ".png")
+    return runtime_output_directory("artifacts/review-overlays", legacy_path=REVIEW_OVERLAYS_DIR, create=True) / ("__".join(parts) + ".png")
 
 
 def build_recognition_crop_path(*, name_hint: Optional[str] = None, candidate_id: Optional[str] = None) -> Path:
     parts = [slugify(name_hint, fallback="recognition"), slugify(candidate_id, fallback="candidate"), timestamp_label()]
-    return RECOGNITION_CROPS_DIR / ("__".join(parts) + ".png")
+    return runtime_output_directory("artifacts/recognition-crops", legacy_path=RECOGNITION_CROPS_DIR, create=True) / ("__".join(parts) + ".png")
 
 
 def new_learned_instruction_id() -> str:
@@ -134,7 +152,7 @@ def learned_instruction_bundle_dir(learned_instruction_id: str) -> Path:
     safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "", learned_instruction_id)
     if not safe_id:
         raise ValueError("learned_instruction_id is empty or invalid")
-    return LEARNED_INSTRUCTION_ARTIFACTS_DIR / safe_id
+    return runtime_output_directory("artifacts/local-learning/instructions", legacy_path=LEARNED_INSTRUCTION_ARTIFACTS_DIR, create=True) / safe_id
 
 
 def learned_instruction_record_path(learned_instruction_id: str) -> Path:
@@ -142,7 +160,7 @@ def learned_instruction_record_path(learned_instruction_id: str) -> Path:
 
 
 def write_trace(*, category: str, operation: str, payload: dict[str, Any], name_hint: Optional[str] = None) -> str:
-    category_dir = TRACES_DIR / slugify(category, fallback="general")
+    category_dir = runtime_output_directory("logs/traces", legacy_path=TRACES_DIR, create=True) / slugify(category, fallback="general")
     category_dir.mkdir(parents=True, exist_ok=True)
     parts = [timestamp_label(), slugify(operation, fallback="operation")]
     if name_hint:

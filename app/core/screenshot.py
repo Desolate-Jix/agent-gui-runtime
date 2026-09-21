@@ -33,12 +33,30 @@ class ROIValue(Protocol):
     def model_dump(self) -> dict[str, Any]: ...
 
 
+class CaptureVisibilityError(ValueError):
+    """仅保留固定可见性原因，不把窗口信息放入跨边界错误。"""
+
+    def __init__(self, reason: str) -> None:
+        allowed = {"capture_window_minimized", "capture_window_occluded",
+                   "capture_visibility_unavailable", "capture_window_unavailable",
+                   "capture_binding_changed", "capture_rectangle_invalid", "capture_visibility_changed"}
+        self.reason = reason if isinstance(reason, str) and reason in allowed else "capture_visibility_unavailable"
+        super().__init__(self.reason + ": restore and uncover the target window before capture")
+
+
 class ScreenshotService:
     """Capture screenshots for the currently bound window using MSS."""
 
-    def __init__(self) -> None:
-        self._capture_dir = SCREENSHOTS_DIR
-        self._capture_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(
+        self,
+        *,
+        window_manager: Any | None = None,
+        capture_dir: Path | None = None,
+    ) -> None:
+        self._window_manager = (
+            globals()["window_manager"] if window_manager is None else window_manager
+        )
+        self._capture_dir = SCREENSHOTS_DIR if capture_dir is None else Path(capture_dir)
         self._capture_keep_limit = 40
         self._focus_settle_seconds = 0.5
 
@@ -52,15 +70,26 @@ class ScreenshotService:
         focus_window: bool = True,
     ) -> dict[str, Any]:
         """Capture a screenshot for the bound window or a sub-region."""
+        started = last_mark = time.perf_counter()
+        capture_stages = []
+
+        def mark(name):
+            nonlocal last_mark
+            now = time.perf_counter()
+            capture_stages.append({"name": name, "elapsed_ms": round((now - last_mark) * 1000, 3)})
+            last_mark = now
+
         self._ensure_capture_backend()
 
-        if focus_window:
-            bound = window_manager.focus_bound_window()
+        bound = self._window_manager.get_bound_window()
+        mark("backend_and_binding")
+        # 只用刚刷新过的前台事实省去重复激活，不缓存截图或省略前后来源校验。
+        if focus_window and (bound is None or getattr(bound, "is_active", None) is not True):
+            bound = self._window_manager.focus_bound_window()
             self._wait_after_focus()
-        else:
-            bound = window_manager.get_bound_window()
-            if bound is None:
-                raise ValueError("No bound window available to capture")
+        if bound is None:
+            raise ValueError("No bound window available to capture")
+        mark("foreground_preparation")
 
         capture_rect = self._resolve_capture_rect(
             left=bound.rect.left,
@@ -77,15 +106,35 @@ class ScreenshotService:
             "height": capture_rect["height"],
         }
 
+        binding = self._capture_binding(bound)
+        visibility = self._require_capture_visibility(bound, monitor)
+        mark("geometry_and_pre_visibility")
+
         logger.info("Capturing bound window: handle={}, monitor={}", bound.handle, monitor)
 
         with mss() as sct:  # type: ignore[operator]
             raw = sct.grab(monitor)
+            mark("backend_open_and_grab")
+            current = self._window_manager.get_bound_window()
+            if current is None or self._capture_binding(current) != binding:
+                raise ValueError("capture_binding_changed: discard the captured screen pixels")
+            after_visibility = self._require_capture_visibility(current, monitor)
+            if visibility.get("occluded_regions", []) != after_visibility.get("occluded_regions", []):
+                raise CaptureVisibilityError("capture_visibility_changed")
+            mark("post_binding_and_visibility")
             image = Image.frombytes("RGB", raw.size, raw.rgb)  # type: ignore[union-attr]
+            mark("pixel_conversion")
+
+        # 不把其他窗口的像素当成目标内容；窗口坐标只在遮罩时换算一次。
+        for region in visibility.get("occluded_regions", []):
+            x = bound.rect.left + region["x"] - monitor["left"]
+            y = bound.rect.top + region["y"] - monitor["top"]
+            image.paste((32, 32, 32), (x, y, x + region["width"], y + region["height"]))
+        mark("backend_close_and_mask")
 
         image_path: Optional[str] = None
         if save_image:
-            output_path = build_screenshot_path(
+            generated_path = build_screenshot_path(
                 title=bound.title,
                 process_name=bound.process_name,
                 handle=bound.handle,
@@ -93,12 +142,22 @@ class ScreenshotService:
                 roi=capture_rect["roi"],
                 name_hint=name_hint,
             )
+            output_path = (
+                generated_path
+                if self._capture_dir == SCREENSHOTS_DIR
+                else self._capture_dir / generated_path.name
+            )
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             image_path = str(output_path.resolve())
-            image.save(image_path)
+            mark("output_path")
+            image.save(image_path, compress_level=3)
+            # PIL 直接写文件以免增加一次整图缓冲复制，此段明确包含编码和写盘。
+            mark("png_encode_and_write")
             logger.info("Saved screenshot to {}", image_path)
-            self._cleanup_old_captures()
+            self._cleanup_old_captures(output_path.parent)
+            mark("retention_cleanup")
 
-        return {
+        result = {
             "image_path": image_path,
             "image_width": image.width,
             "image_height": image.height,
@@ -109,7 +168,27 @@ class ScreenshotService:
                 "width": capture_rect["window_width"],
                 "height": capture_rect["window_height"],
             },
+            "capture_timings": {"contract_version": "window_capture_timing_v1",
+                "total_ms": round((time.perf_counter() - started) * 1000, 3),
+                "steps": capture_stages, "nested_timings_additive": False},
         }
+        if visibility.get("occluded_regions"):
+            result["capture_visibility"] = {**visibility, "masked": True,
+                                             "coordinate_space": "window"}
+        return result
+
+    @staticmethod
+    def _capture_binding(bound):
+        return (bound.handle, bound.process_id, bound.rect.left, bound.rect.top,
+                bound.rect.right, bound.rect.bottom)
+
+    def _require_capture_visibility(self, bound, monitor):
+        check = getattr(self._window_manager, "validate_bound_capture_visibility", None)
+        result = check(bound=bound, rect=monitor, allow_partial=True) if callable(check) else None
+        if not isinstance(result, dict) or result.get("allowed") is not True:
+            reason = result.get("reason", "capture_visibility_unavailable") if isinstance(result, dict) else "capture_visibility_unavailable"
+            raise CaptureVisibilityError(reason)
+        return result
 
     def _resolve_capture_rect(
         self,
@@ -169,10 +248,11 @@ class ScreenshotService:
             "window_height": window_height,
         }
 
-    def _cleanup_old_captures(self) -> None:
-        protected = _benchmark_protected_screenshot_paths(self._capture_dir)
+    def _cleanup_old_captures(self, capture_dir: Path | None = None) -> None:
+        resolved_capture_dir = capture_dir or self._capture_dir
+        protected = _benchmark_protected_screenshot_paths(resolved_capture_dir)
         captures = sorted(
-            (path for path in self._capture_dir.glob("*.png") if path.resolve() not in protected),
+            (path for path in resolved_capture_dir.glob("*.png") if path.resolve() not in protected),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )

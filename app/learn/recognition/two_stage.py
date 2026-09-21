@@ -10,7 +10,7 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 from app.core.ocr_service import ocr_service
-from app.core.runtime_artifacts import ARTIFACTS_DIR
+from app.core.runtime_artifacts import ARTIFACTS_DIR, runtime_output_directory
 from app.learn.recognition.root_partition import (
     adapt_root_partition_to_stage1_contract,
     build_deterministic_root_partition,
@@ -6947,8 +6947,7 @@ def _render_two_stage_overlay(
             font=font,
             parent_bbox=parent_bbox,
         )
-    out_dir = ARTIFACTS_DIR / "review-overlays"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = runtime_output_directory("artifacts/review-overlays", legacy_path=ARTIFACTS_DIR / "review-overlays", create=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     out_path = out_dir / f"{source.stem}__two-stage-understanding__{timestamp}.png"
     canvas.save(out_path)
@@ -7037,8 +7036,7 @@ def _render_message_context_review_overlay(
             font=font,
             parent_bbox=parent_bbox,
         )
-    out_dir = ARTIFACTS_DIR / "review-overlays"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = runtime_output_directory("artifacts/review-overlays", legacy_path=ARTIFACTS_DIR / "review-overlays", create=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     overlay_path = out_dir / f"{source.stem}__message-context-review__{timestamp}.png"
     canvas.save(overlay_path)
@@ -7088,8 +7086,7 @@ def _render_stage1_region_localization_overlay(
             _draw_box(draw, rough, f"rough {label}", color=(160, 160, 160), font=font, width=2)
         if precise:
             _draw_box(draw, precise, f"precise {label}", color=(24, 114, 204), font=font, width=4)
-    out_dir = ARTIFACTS_DIR / "review-overlays"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = runtime_output_directory("artifacts/review-overlays", legacy_path=ARTIFACTS_DIR / "review-overlays", create=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     out_path = out_dir / f"{source.stem}__stage1-region-localization__{timestamp}.png"
     canvas.save(out_path)
@@ -7135,8 +7132,7 @@ def _render_stage1_5_partition_overlay(
             font=font,
             width=style["width"],
         )
-    out_dir = ARTIFACTS_DIR / "review-overlays"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = runtime_output_directory("artifacts/review-overlays", legacy_path=ARTIFACTS_DIR / "review-overlays", create=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     out_path = out_dir / f"{source.stem}__stage1-5-partition__{timestamp}.png"
     canvas.save(out_path)
@@ -7426,8 +7422,7 @@ def _write_message_context_zoom(
         )
     )
     zoom = crop.resize((crop.width * 2, crop.height * 2))
-    out_dir = ARTIFACTS_DIR / "review-overlays"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = runtime_output_directory("artifacts/review-overlays", legacy_path=ARTIFACTS_DIR / "review-overlays", create=True)
     out_path = out_dir / f"{source_stem}__message-context-review-zoom__{timestamp}.png"
     zoom.save(out_path)
     return out_path

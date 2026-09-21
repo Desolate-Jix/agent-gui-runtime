@@ -29,8 +29,8 @@ from app.api.models.request import (
     TypeTextRequest,
 )
 from app.api.models.response import APIResponse, ErrorModel
-from app.seek.execute_observation import build_seek_execute_observation
-from app.seek.form_inventory import build_seek_form_field_inventory
+from app.application_profiles.seek.execute_observation import build_seek_execute_observation
+from app.application_profiles.seek.form_inventory import build_seek_form_field_inventory
 
 
 router = APIRouter(prefix="/execute", tags=["execute"])

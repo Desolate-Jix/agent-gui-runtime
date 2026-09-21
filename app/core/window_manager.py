@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import math
 import unicodedata
 from dataclasses import dataclass
 from typing import Optional
@@ -115,14 +116,14 @@ class WindowManager:
 
     def focus_bound_window(self) -> BoundWindow:
         """Bring the currently bound window to the foreground and refresh its state."""
-        self._ensure_window_mutation_authority()
+        self._ensure_window_mutation_authority(preparation_handle=getattr(self._bound_window, "handle", None))
         self._ensure_windows_backend()
         bound = self.get_bound_window()
         if bound is None:
             raise ValueError("No bound window available to focus")
 
         logger.info("Focusing bound window: handle={}, title={}", bound.handle, bound.title)
-        self._activate_window(bound.handle)
+        activation_error = self._activate_window(bound.handle)
 
         refreshed: Optional[BoundWindow] = None
         active_handle = 0
@@ -144,7 +145,139 @@ class WindowManager:
         raise RuntimeError(
             "Bound window foreground verification failed: "
             f"expected_handle={bound.handle}, actual_foreground_handle={active_handle}"
-        )
+        ) from activation_error
+
+    def prepare_bound_window(self, permit: object) -> BoundWindow:
+        """消费本地人工确认许可，只恢复和聚焦同一进程窗口。"""
+        from app.core.window_preparation import _window_preparation_scope
+
+        with _window_preparation_scope(permit, self):
+            return self.focus_bound_window()
+
+    def prepare_maximized_bound_window(self, permit: object) -> BoundWindow:
+        """消费本地人工确认许可，只最大化并聚焦同一进程窗口。"""
+        from app.core.window_preparation import _window_preparation_scope
+
+        with _window_preparation_scope(permit, self, operation="maximize"):
+            return self.maximize_bound_window(focus=True)
+
+    def validate_bound_capture_visibility(self, *, bound: BoundWindow, rect: dict[str, int],
+                                          allow_partial: bool = False) -> dict[str, object]:
+        """截图可排除局部遮挡；目标区域核验默认仍要求完全可见。"""
+        base = {"contract_version": "bound_capture_visibility_v2", "allowed": False,
+                "reason": "capture_visibility_unavailable", "bound_window_handle": bound.handle}
+        try:
+            self._ensure_windows_backend()
+            if not win32gui.IsWindow(bound.handle) or not win32gui.IsWindowVisible(bound.handle):
+                return {**base, "reason": "capture_window_unavailable"}
+            if win32gui.IsIconic(bound.handle):
+                return {**base, "reason": "capture_window_minimized"}
+            expected = (bound.rect.left, bound.rect.top, bound.rect.right, bound.rect.bottom)
+            if (self._capture_surface_rect(bound.handle) != expected
+                    or self._get_process_id(bound.handle) != bound.process_id):
+                return {**base, "reason": "capture_binding_changed"}
+            if (set(rect) != {"left", "top", "width", "height"}
+                    or any(type(value) is not int for value in rect.values())
+                    or rect["width"] <= 0 or rect["height"] <= 0):
+                return {**base, "reason": "capture_rectangle_invalid"}
+            left, top = rect["left"], rect["top"]
+            right, bottom = left + rect["width"], top + rect["height"]
+            if not (expected[0] <= left < right <= expected[2]
+                    and expected[1] <= top < bottom <= expected[3]):
+                return {**base, "reason": "capture_rectangle_invalid"}
+            current = int(win32gui.GetTopWindow(None) or 0)
+            seen = set()
+            regions = set()
+            while current and current not in seen and len(seen) < 4096:
+                if current == bound.handle:
+                    if not regions:
+                        return {**base, "allowed": True, "reason": "capture_window_visible"}
+                    area = self._occluded_union_area(regions)
+                    visible = 1.0 - area / (rect["width"] * rect["height"])
+                    return {**base, "allowed": visible > 0,
+                            "reason": "capture_window_partially_visible" if visible > 0 else "capture_window_occluded",
+                            "visible_fraction": visible,
+                            "occluded_regions": [
+                                {"x": x1 - expected[0], "y": y1 - expected[1], "width": x2 - x1, "height": y2 - y1}
+                                for x1, y1, x2, y2 in sorted(regions)]}
+                seen.add(current)
+                if win32gui.IsWindowVisible(current) and not win32gui.IsIconic(current):
+                    # 绑定窗口拥有的原生弹出菜单属于同一可见表面，不应被截图遮罩。
+                    # 无法验证 owner 链时保持原处理，避免把不明窗口误判为内部内容。
+                    if current != bound.handle and self._is_owned_popup(current, bound.handle, include_shadow=True):
+                        current = int(win32gui.GetWindow(current, win32con.GW_HWNDNEXT) or 0)
+                        continue
+                    other_left, other_top, other_right, other_bottom = win32gui.GetWindowRect(current)
+                    if (max(left, other_left) < min(right, other_right)
+                            and max(top, other_top) < min(bottom, other_bottom)):
+                        if not allow_partial:
+                            return {**base, "reason": "capture_window_occluded", "occluding_window_handle": current}
+                        regions.add((max(left, other_left), max(top, other_top),
+                                     min(right, other_right), min(bottom, other_bottom)))
+                        if len(regions) > 256:
+                            return base
+                current = int(win32gui.GetWindow(current, win32con.GW_HWNDNEXT) or 0)
+            return base
+        except Exception as error:
+            return {**base, "error_type": type(error).__name__}
+
+    def _is_owned_popup(self, candidate_handle: int, bound_handle: int, *, include_shadow: bool = False) -> bool:
+        """标准菜单可能没有 owner 链，此时核验活动 GUI 线程的菜单归属。"""
+        try:
+            get_ancestor = getattr(win32gui, "GetAncestor")
+            root_owner_flag = getattr(win32con, "GA_ROOTOWNER", 3)
+            root_owner = int(get_ancestor(candidate_handle, root_owner_flag) or candidate_handle)
+            if root_owner == int(bound_handle):
+                return True
+            classes = {"#32768", "SysShadow"} if include_shadow else {"#32768"}
+            if win32gui.GetClassName(candidate_handle) not in classes:
+                return False
+            thread, process = win32process.GetWindowThreadProcessId(bound_handle)
+            if not thread or not process or tuple(win32process.GetWindowThreadProcessId(candidate_handle)) != (thread, process):
+                return False
+            state = self._read_gui_menu_state(thread)
+            owner = state["menu_owner"]
+            return bool(state["flags"] & 0x10 and state["active"] == bound_handle
+                        and win32gui.GetForegroundWindow() == bound_handle and owner
+                        and tuple(win32process.GetWindowThreadProcessId(owner)) == (thread, process)
+                        and int(get_ancestor(owner, win32con.GA_ROOT) or owner) == bound_handle)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _read_gui_menu_state(thread: int) -> dict[str, int]:
+        """只读查询系统菜单所属窗口；不发送消息或更改前台。"""
+        import ctypes
+        from ctypes import wintypes
+
+        class GUIThreadInfo(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                        *[(name, wintypes.HWND) for name in ("active", "focus", "capture", "menu_owner", "move_size", "caret")],
+                        ("caret_rect", wintypes.RECT)]
+
+        state = GUIThreadInfo()
+        state.cbSize = ctypes.sizeof(state)
+        query = ctypes.WinDLL("user32", use_last_error=True).GetGUIThreadInfo
+        query.argtypes = [wintypes.DWORD, ctypes.POINTER(GUIThreadInfo)]
+        query.restype = wintypes.BOOL
+        if not query(thread, ctypes.byref(state)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return {name: int(getattr(state, name) or 0) for name in ("flags", "active", "menu_owner")}
+
+    @staticmethod
+    def _occluded_union_area(regions: set[tuple[int, int, int, int]]) -> int:
+        """按横向条带计算并集，重叠浮窗不重复扣减可见面积。"""
+        edges = sorted({x for left, _, right, _ in regions for x in (left, right)})
+        area = 0
+        for left, right in zip(edges, edges[1:]):
+            intervals = sorted((top, bottom) for x1, top, x2, bottom in regions if x1 < right and x2 > left)
+            end = None
+            height = 0
+            for top, bottom in intervals:
+                height += max(0, bottom - max(top, end if end is not None else top))
+                end = max(bottom, end if end is not None else bottom)
+            area += (right - left) * height
+        return area
 
     def validate_bound_point_visibility(
         self,
@@ -152,6 +285,7 @@ class WindowManager:
         bound: BoundWindow,
         x: int,
         y: int,
+        expected_owned_popup_handle: int | None = None,
     ) -> dict[str, object]:
         """验证窗口坐标点当前是否仍由绑定窗口拥有。"""
         self._ensure_windows_backend()
@@ -202,14 +336,42 @@ class WindowManager:
             hit_handle == int(bound.handle)
             or is_child
             or hit_root == int(bound.handle)
-            or hit_root_owner == int(bound.handle)
         )
+        # 原生菜单是 owned 顶层窗而非 child；同进程且根 owner 匹配才属于当前目标。
+        owned_popup = bool(type(expected_owned_popup_handle) is int and expected_owned_popup_handle > 0
+                           and hit_root == expected_owned_popup_handle and self._is_owned_popup(hit_root, int(bound.handle))
+                           and bound.process_id and process_id == bound.process_id)
+        if expected_owned_popup_handle is not None:
+            return {**base, "allowed": owned_popup,
+                    "reason": "target_point_owned_by_bound_popup" if owned_popup else "expected_popup_target_changed",
+                    "expected_owned_popup_handle": expected_owned_popup_handle, "hit_window": hit_window}
         return {
             **base,
-            "allowed": owned,
-            "reason": "target_point_owned_by_bound_window" if owned else "target_point_occluded",
+            "allowed": owned or owned_popup,
+            "reason": ("target_point_owned_by_bound_window" if owned else
+                       "target_point_owned_by_bound_popup" if owned_popup else "target_point_occluded"),
             "hit_window": hit_window,
         }
+
+    def validate_bound_region_visibility(self, *, bound: BoundWindow,
+                                         bbox: tuple[float, float, float, float]) -> dict[str, object]:
+        """目标框按窗口坐标向外取整，不能用未遮挡的中心点替代完整目标。"""
+        invalid = {"allowed": False, "reason": "target_region_invalid"}
+        if (not isinstance(bbox, (tuple, list)) or len(bbox) != 4
+                or any(type(value) not in (int, float) or not math.isfinite(value) for value in bbox)):
+            return invalid
+        x, y, width, height = bbox
+        if (x < 0 or y < 0 or width <= 0 or height <= 0
+                or x + width > bound.rect.right - bound.rect.left
+                or y + height > bound.rect.bottom - bound.rect.top):
+            return invalid
+        left, top = math.floor(x), math.floor(y)
+        evidence = self.validate_bound_capture_visibility(bound=bound, rect={
+            "left": bound.rect.left + left, "top": bound.rect.top + top,
+            "width": math.ceil(x + width) - left, "height": math.ceil(y + height) - top})
+        return {**evidence, "reason": "target_region_visible" if evidence.get("allowed") is True
+                else "target_region_occluded" if evidence.get("reason") == "capture_window_occluded"
+                else evidence.get("reason", "capture_visibility_unavailable")}
 
     def resize_bound_window(
         self,
@@ -265,7 +427,10 @@ class WindowManager:
 
     def maximize_bound_window(self, *, focus: bool = True) -> BoundWindow:
         """Maximize the currently bound window and refresh its bound-window snapshot."""
-        self._ensure_window_mutation_authority()
+        self._ensure_window_mutation_authority(
+            preparation_handle=getattr(self._bound_window, "handle", None),
+            preparation_operation="maximize",
+        )
         self._ensure_windows_backend()
         bound = self.get_bound_window()
         if bound is None:
@@ -369,17 +534,26 @@ class WindowManager:
         if not WINDOWS_BACKEND_AVAILABLE:
             return False
 
+        def rejected(reason: str, **details) -> bool:
+            # 只记录当前绑定的失败，不输出标题内容，也不刷屏记录枚举中的无关窗口。
+            if self._bound_window is not None and wrapper.handle == self._bound_window.handle:
+                logger.warning("Bound window candidate rejected: handle={} reason={} details={}",
+                               wrapper.handle, reason, details)
+            return False
+
         try:
             handle = wrapper.handle
             if not win32gui.IsWindowVisible(handle):  # type: ignore[union-attr]
-                return False
-            if win32gui.GetParent(handle) != 0:  # type: ignore[union-attr]
-                return False
+                return rejected("not_visible")
+            # GetParent 也返回弹窗 owner；只沿父子链判断，保留独立弹窗身份。
+            if win32gui.GetAncestor(handle, win32con.GA_ROOT) != handle:  # type: ignore[union-attr]
+                return rejected("not_top_level")
             if not wrapper.window_text().strip():
-                return False
+                return rejected("empty_title")
             return True
-        except Exception:
-            return False
+        except Exception as error:
+            return rejected("candidate_query_failed", error_type=type(error).__name__,
+                            winerror=getattr(error, "winerror", None))
 
     def _is_bound_handle_valid(self, handle: int) -> bool:
         """Return whether the bound handle still points to a visible top-level window."""
@@ -391,7 +565,8 @@ class WindowManager:
                 return False
             if not win32gui.IsWindowVisible(handle):  # type: ignore[union-attr]
                 return False
-            if win32gui.GetParent(handle) != 0:  # type: ignore[union-attr]
+            # 绑定必须仍是原顶层窗口，不能把 owner 当作父控件。
+            if win32gui.GetAncestor(handle, win32con.GA_ROOT) != handle:  # type: ignore[union-attr]
                 return False
             return True
         except Exception:
@@ -401,9 +576,9 @@ class WindowManager:
         return "".join(char for char in value.strip().lower() if unicodedata.category(char) != "Cf")
 
     def _build_bound_window(self, wrapper: HwndWrapper) -> BoundWindow:
-        """Build a serializable bound-window snapshot from a wrapper."""
+        """截图、UIA 投影和输入共用客户区原点；标题继续作为窗口元数据。"""
         self._ensure_windows_backend()
-        left, top, right, bottom = win32gui.GetWindowRect(wrapper.handle)  # type: ignore[union-attr]
+        left, top, right, bottom = self._capture_surface_rect(wrapper.handle)
         process_id = self._get_process_id(wrapper.handle)
         process_name = self._get_process_name(process_id)
         active_handle = win32gui.GetForegroundWindow()  # type: ignore[union-attr]
@@ -417,14 +592,29 @@ class WindowManager:
             is_active=active_handle == wrapper.handle,
         )
 
-    def _activate_window(self, handle: int) -> None:
+    @staticmethod
+    def _capture_surface_rect(handle: int, *, gui=None) -> tuple[int, int, int, int]:
+        """排除非客户区透明边框；不可把其他窗口像素归属于当前应用。"""
+        gui = win32gui if gui is None else gui
+        left, top, right, bottom = gui.GetClientRect(handle)
+        if right <= left or bottom <= top:
+            raise ValueError("native_capture_client_area_unavailable")
+        screen_left, screen_top = gui.ClientToScreen(handle, (left, top))
+        screen_right, screen_bottom = gui.ClientToScreen(handle, (right, bottom))
+        if screen_right <= screen_left or screen_bottom <= screen_top:
+            raise ValueError("native_capture_client_area_invalid")
+        return screen_left, screen_top, screen_right, screen_bottom
+
+    def _activate_window(self, handle: int) -> Optional[Exception]:
         """Best-effort lightweight foreground activation for screen-coordinate capture."""
-        self._ensure_window_mutation_authority()
+        self._ensure_window_mutation_authority(preparation_handle=handle)
+        activation_error = None
         try:
             if hasattr(win32gui, "IsIconic") and win32gui.IsIconic(handle):  # type: ignore[union-attr]
                 win32gui.ShowWindow(handle, win32con.SW_RESTORE)  # type: ignore[union-attr]
         except Exception as exc:
             logger.warning("Window restore check failed for handle {}: {}", handle, exc)
+            activation_error = exc
 
         attached_threads: list[int] = []
         current_thread = 0
@@ -480,14 +670,21 @@ class WindowManager:
             win32gui.SetForegroundWindow(handle)  # type: ignore[union-attr]
         except Exception as exc:
             logger.warning("Foreground activation failed for handle {}: {}", handle, exc)
-            if not self._retry_foreground_activation_with_alt_unlock(handle):
-                self._cycle_past_shell_notification_foreground(handle)
+            activation_error = exc
+            from app.core.window_preparation import _window_preparation_is_active
+
+            # 准备窗口不拥有键鼠权限，也不尝试合成按键回退。
+            if not _window_preparation_is_active():
+                if not self._retry_foreground_activation_with_alt_unlock(handle):
+                    self._cycle_past_shell_notification_foreground(handle)
         finally:
             for thread_id in reversed(attached_threads):
                 try:
                     win32process.AttachThreadInput(current_thread, thread_id, False)  # type: ignore[union-attr]
                 except Exception as exc:
                     logger.warning("Input-thread detach failed for handle {}: {}", handle, exc)
+        # 保留失败原因到前台核验；成功恢复不因中间警告被误判失败。
+        return activation_error
 
     def _retry_foreground_activation_with_alt_unlock(self, handle: int) -> bool:
         """Retry foreground activation after a bounded synthetic Alt press."""
@@ -600,8 +797,19 @@ class WindowManager:
                 f"Import error: {WINDOWS_BACKEND_IMPORT_ERROR}"
             )
 
-    def _ensure_window_mutation_authority(self) -> None:
-        """拒绝未由 LiveController 单次授权的窗口状态变更。"""
+    def _ensure_window_mutation_authority(
+        self, *, preparation_handle: int | None = None, preparation_operation: str = "focus",
+    ) -> None:
+        """严格模式保留单次授权，本地关闭模式仅额外允许当前确切窗口聚焦。"""
+        from app.core.window_preparation import _window_preparation_allowed
+
+        if _window_preparation_allowed(self, preparation_handle, preparation_operation):
+            return
+        from app.core.local_input_policy import local_operator_input_is_allowed
+        if preparation_operation == "focus" and preparation_handle is not None and local_operator_input_is_allowed(self):
+            bound = self.get_bound_window()
+            if bound is not None and preparation_handle == bound.handle:
+                return
         if not runtime_backend_input_is_active():
             raise PermissionError(
                 "Window mutation requires one-time LiveController authority via DesktopBackend"

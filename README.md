@@ -1,306 +1,92 @@
-## Agent Review Instant v0.1.0-test.4 — 执行模式测试版 / Execution-mode test release
+# Agent Review Instant
 
-[下载 ZIP / Download ZIP](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.4/AgentReviewInstant-v0.1.0-test.4.zip) · [发布页与校验和 / Release & checksum](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.0-test.4) · [安装与模型下载 / Setup & models](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.0-test.4/FRIEND_SETUP.md) · [Agent 操作说明 / Agent guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.0-test.4/AGENT_GUIDE.md) · [可复现源码 / Released source](https://github.com/Desolate-Jix/agent-gui-runtime/tree/instant-v0.1.0-test.4)
+**v0.1.0-test.4 · 执行模式测试版 / Execution-mode test release**
 
-当前公开交付是 Windows MCP **即时执行源码测试包**，不是完整学习模式或正式稳定版。支持窗口发现/启动/选择/切换/最大化/正常关闭、识别单击/右击/双击、文本替换、23 种编辑按键、上下滚动和当前截图 OCR 读取。通过六个 `instant_*` 工具接入；Agent 根据前后原图判断结果。
+本目录对应已发布的 test.4 测试包；它不是正式稳定版。/ This directory corresponds to the published test.4 package; it is not a production-stable release.
 
-The public delivery is a Windows MCP **instant-execution source test bundle**, not learning-mode delivery or a stable release. It supports window operations, recognition-based single/right/double clicks, typing/replacement, 23 editing keys, vertical scrolling and visible-image OCR. Six tools expose operations; the Agent judges original-image evidence.
+让支持 MCP 的 Agent 通过同一套 Windows 框架识别界面、点击、填写、编辑按键和滚动，并读取原始截图判断结果。
 
-**有人看护的低风险 operator 模式。** 快捷配置使用管理员 MCP 并关闭自动风险拦截；UAC 由本人确认，一次只让一个 Agent 操作。模型、依赖环境单独安装，ZIP 不含用户数据。普通目标也可按安装说明使用非管理员入口。 / **Supervised low-risk operator mode only.** Quick configuration enables elevated input without automatic risk interception; confirm UAC yourself and use one controller. Models/dependencies are separate; the bundle contains no user data. Non-elevated setup is documented for normal targets.
+A Windows automation runtime for MCP-compatible agents: recognize controls, click, type, use editing keys, scroll, and inspect original screenshots to judge results.
 
-### 本次交付 / This release — 2026-09-21
+> **仅用于有人看护的低风险测试，不是正式稳定版。快捷配置使用管理员宿主并关闭框架自动风险拦截，会真实操作鼠标和键盘。不要用于付款、发送、删除、最终提交等不可逆操作。**
+>
+> **Supervised low-risk testing only, not a stable release. Quick setup uses an administrator host with automatic risk interception disabled and real mouse/keyboard input. Do not use for payments, sending, deletion or final submissions.**
 
-- 修复初始空剪贴板输入、明确目标定位、原生编辑区/菜单、窗口退出观察、UIA 有界遍历与鼠标坐标转换；增加 8 个选区/文档边界键。 / Shared clipboard, target, native-editor/menu, observation, UIA traversal and coordinate repairs; eight selection/document-boundary keys added.
-- 743 项源码与 743 项发布目录隔离回归通过（集合重叠），7 项构建检查，241 个运行时导入无开发工作树泄漏；真实 MCP 零输入检查通过。 / Scoped source/release-isolation and stdio checks pass; counts overlap and are not additive.
-- Codex 先实测，AionUi 再对同冻结运行时独立完成记事本修改/两种撤销/不保存，以及真实网页搜索→正文→后退两轮，关闭各自窗口并清理宿主。外部客户端 5 项问题修正后重跑通过，不记为首次全部通过。 / Codex-first, then independent same-runtime native/browser continuous acceptance passed after disclosed tester-client repairs; not first-attempt perfection.
-- 运行代码与受测候选逐字节一致；599 个 ZIP 条目按清单核验，GitHub 下载回读摘要一致。包约 2.82 MiB，不含环境或模型。 / Runtime matches the tested candidate; all ZIP members and the public download hash were verified.
-- Back 仍约 20–23 秒，首次安装/管理员目标/跨设备未在本批重测；不是长期准确率或无人值守承诺。 / Back remains about 20–23 s; fresh-install, elevated-target and cross-device coverage were not repeated.
+## 下载 / Download
 
-[完整更新与限制 / Full changes and limitations](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.0-test.4/FIXES.md)
+- [下载测试包 / Download ZIP](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.4/AgentReviewInstant-v0.1.0-test.4.zip)
+- [发布页与 SHA-256 / Release and checksum](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.0-test.4)
+- [安装、模型下载与配置 / Setup, models and configuration](FRIEND_SETUP.md)
+- [给 Agent 的操作说明 / Agent instructions](AGENT_GUIDE.md)
+- [测试范围与限制 / Test scope and limitations](FIXES.md)
 
-后续主线：稳定性与操作覆盖 → 速度优化 → 学习模式；本轮发布后停止，供用户检查。以下为历史完整产品资料，不代表此测试包交付范围。 / Roadmap: stability/operations, then speed, then learning. Work stops after this release for user review; historical full-product material below is outside this bundle.
+这是小型**源码包**，不含 Python 环境、模型权重、账号或用户数据，也不是双击即用的安装器。
 
----
+This is a small **source bundle**, not a standalone installer. Python dependencies and model weights are installed separately. No accounts or user data are included.
 
-# agent-gui-runtime
+## 能做什么 / Capabilities
 
-**Version 0.3.0 · Windows GUI Agent Runtime · Portfolio v1 frozen · bounded Quick Apply-only release**
-
-[简体中文](README.zh-CN.md)
-
-## A reliability runtime target between computer-use agents and Windows GUI actions
-
-An in-progress Windows GUI runtime designed to turn uncertain exploration into human-reviewed operational knowledge, then re-locate, gate, execute, and verify semantic actions against the current interface.
-
-**Perception is replaceable. Reviewed knowledge is durable.**
-
-**Target invariant:** Runtime Authority must be non-bypassable. **The exact released workflow asset now has both deterministic callsite proof and one bounded controlled-live proof: a fresh Job Detail observation led to one Runtime-authorized Windows `open_apply_flow` dispatch, a fresh `Choose documents` stop-boundary observation, and a durable `SAFE_STOP/stop_boundary` receipt.**
-
-> **Target authority model:** Providers propose evidence. Agents propose semantic intent. The runtime alone grants bounded execution authority.
-
-[![Sanitized reviewed workflow overview](docs/media/private-prototype-workflow.png)](docs/media/private-prototype-workflow.png)
-
-*Sanitized workflow overview from the [earlier public showcase repository](https://github.com/Desolate-Jix/windows-gui-agent-runtime): reviewed interface knowledge guides intent, while the runtime must re-locate against the current observation and independently gate each action. This is a product-story illustration, not current Portfolio v1 live proof.*
-
-### Product surfaces from the earlier public showcase
-
-> **Historical showcase UI.** These panels make the Learn → Human Review → Runtime handoff visible. They show product and design lineage—not current Portfolio v1 live proof—and the current interface may differ.
-
-<table>
-  <tr>
-    <td width="50%" align="center"><a href="docs/media/private-prototype-learn-mode.png"><img src="docs/media/private-prototype-learn-mode.png" alt="Historical Learn Mode panel with workflow graph and boxed interface evidence" width="100%"></a></td>
-    <td width="50%" align="center"><a href="docs/media/private-prototype-execute-mode.png"><img src="docs/media/private-prototype-execute-mode.png" alt="Historical Execute Mode panel with runtime state, available actions, Gate, and Trace" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td valign="top"><strong>Learn / Review</strong><br>A reviewer inspects boxed interface evidence, corrects semantic states, and connects a reusable workflow graph. The panel does not authorize execution.</td>
-    <td valign="top"><strong>Execute / Runtime</strong><br>The intended current-state, available-action, Locate, Gate, and Trace surfaces. This image does not prove a current dispatch, observed semantic effect, or live replay.</td>
-  </tr>
-</table>
-
-![Sanitized historical workflow sequence](docs/media/private-prototype-seek.gif)
-
-*Sanitized historical illustration: results → detail → application-entry blocker / Safe Stop. It is not a recorded Agent run and does not prove any click, form mutation, or submission.*
-
-- **Today:** offline contract foundations; a tracked human-reviewed and CAS-published Job Detail workflow with two reviewed regions and fresh-process exact reload proof; an exact deterministic release-callsite proof; and one independently reviewed bounded controlled-live Windows proof through server-owned confirmation, fresh Apply Entry verification, and durable `SAFE_STOP/stop_boundary`.
-- **Implemented internally:** exact released asset → loopback `LocalAgentRuntimeCallsite` → production current-evidence adapter → strict Observation/Intent → current re-ground → Gate → one-time authority → exactly one deterministic fake dispatch → fresh C2 observation → semantic Safe Stop → durable terminal receipt.
-- **Not yet:** general SEEK navigation, form filling, file upload, Continue/Next, submission, unattended reliability, production readiness, public/external Agent integration, external/remote Provider integration, or live external Agent adapters.
-
-## Why this runtime exists
-
-The common computer-use loop is short:
-
-```text
-screenshot → model → coordinate → click
-```
-
-It can fail when responses become stale, windows change, labels repeat, or dispatch is mistaken for verified effect. A stronger model alone creates neither durable knowledge nor authority.
-
-This project adds the missing reliability layer:
-
-```text
-uncertain exploration → evidence → human review → durable semantic workflow
-→ current-interface relocation → Gate → bounded execution → Verify / Safe Stop
-```
-
-This project does **not** race the perception releases of Qwen, OpenAI, Anthropic, OmniParser, or similar teams. New perception belongs behind the evidence boundary. Bundled screenshot, UIA, OCR, and recognition are a baseline/fallback—not the moat or proof of general visual understanding.
-
-## How it differs
-
-| Screenshot-to-click systems | Target runtime behavior |
+| 功能 / Capability | 本版范围 / Scope |
 | --- | --- |
-| Model output can become a coordinate. | Provider output remains evidence through trusted adaptation and review. |
-| Past geometry may be replayed. | Reviewed semantics are reused; geometry must be relocated on the current capture. |
-| The model or Agent owns the action decision. | The Agent proposes semantic intent; Runtime Authority decides whether one bounded attempt is allowed. |
-| A sent click may be reported as success. | The observed effect must be verified, otherwise the result is unverified or a safe stop. |
-| Changing models can change everything. | Four contracts separate evidence, assets, Agent intent, and receipts. |
+| Agent 连接 / Connection | MCP stdio；六个工具 / Six tools |
+| 窗口 / Windows | 发现、目录启动、选择、前台切换、最大化、正常关闭本会话启动的窗口 / Discover, catalog launch, select, focus, maximize, close session-launched windows |
+| 识别点击 / Recognition click | 单击、右击、双击；字段、菜单项和单词定位，保留原图和几何来源 / Single/right/double click with field/menu/word targeting and original evidence |
+| 输入 / Input | 文本填写/替换、23 种编辑键、上下滚动 / Type/replace, 23 editing keys, vertical scroll |
+| 读取 / Reading | 每次从当前可见原图读取OCR文字及行框；不是全页或DOM提取 / Fresh visible-image OCR and line boxes, not full-page/DOM extraction |
+| 结果判断 / Outcome | Agent 查看前后原图判断；框架不将像素变化冒充任务成功 / Agent judges original images; pixel change is not task success |
+| 会话 / Sessions | 一次一个命令、同 ID 不重放、重连取回执、停止清理 / Serial commands, no ID replay, reconnect receipts, cleanup |
 
-## Target lifecycle
+**不包含**学习模式、流程记忆复用、完整审核工作台、任意快捷键或无人值守任务。不要将这些开发主线能力当成本次测试包的交付承诺。
 
-Required end state—one narrow controlled-live slice now proves this loop, but broader or production use remains incomplete:
+**Not included:** learning mode, workflow-memory reuse, the full review workbench, arbitrary hotkeys or unattended tasks.
 
-1. **Explore** an uncertain path.
-2. **Capture evidence** with identity, coordinates, provenance, and freshness.
-3. **Review** semantics, actions, transitions, effects, and risk.
-   - The Panel now uses one interface-asset library with explicit reusable, pending-review, safe-stop, and stale-review states. **Correct and confirm** opens one full-image workbench over an explicitly declared clean or sanitized-clean capture. Review boxes are independent overlays, never pixels baked into that editable base. Clicking a box must resolve one exact workflow control, action candidate, and outgoing transition before the semantic fields appear or **Confirm and store** becomes available; unknown image provenance or ambiguous/unmapped boxes fail closed with a visible error. The final gesture validates every outgoing operation and records four independently revision-bound facts—the target control/region, exact action candidate, transition edge, and source node—before persistence. A standalone source can save evidence corrections only; it cannot approve a workflow. Compilation plus CAS publication remains a separate non-authorizing **Generate workflow version** action.
-4. **Compile** an immutable semantic asset that grants no authority.
-5. **Observe again** for an Agent intent.
-6. **Relocate** on the current interface; old coordinates are hints only.
-7. **Gate** one attempt using current evidence and danger checks.
-8. **Execute** through the internal Desktop I/O backend seam beneath Runtime Authority. W3b composes the reviewed asset, passive bound-window capture, real UIA origin, pinned recognition, strict intent, current re-ground, Gate, reviewed-target-region pre-dispatch freshness, one-shot Windows backend, and durable receipt.
-9. **Verify** or Safe Stop. Deterministic proof loads the exact released CAS asset and verifies fresh C2 with zero duplicate redispatch. One bounded controlled-live run additionally dispatched exactly one real Windows `open_apply_flow`, resolved fresh `Choose documents` evidence, and persisted `SAFE_STOP/stop_boundary`.
+## 快速开始 / Quick start
 
-## Target authority architecture
-
-The public architecture freezes four contracts:
-
-1. **Perception Provider Contract** — native output becomes trusted canonical UEI evidence.
-2. **Reviewed Workflow Asset Contract** — reviewed evidence becomes durable semantic states, transitions, verification policy, provenance, and revision/hash.
-3. **Agent Runtime Contract** — Runtime exposes Observation/actions; Agent returns observation-bound semantic intent.
-4. **Runtime Result & Verification Receipt Contract** — distinguishes Gate, dispatch, effect, next state, and Safe Stop.
-
-The pinned `WorkflowRef` keeps the exact reviewed source `workflow_id` separate from the compiled `asset_id`. The compiler carries that registry/path/SHA-verified identity into immutable lineage, and Runtime/adapter/controller boundaries reject substitution instead of inferring an ID from an asset name. Older v2 objects without this lineage field fail closed and must be recompiled; no historical geometry gains authority.
-
-Internal W3b/W4/W5 controller slices and the exact release-callsite composition are deterministic-test verified. Commit `b9309005` binds CAS asset `a9eb42d9439568770735f69ff109e6d93b86085507414d62ee49cfef33bb1d1b` through the loopback `LocalAgentRuntimeCallsite`, production `ExistingWindowsCurrentEvidenceAdapter`, default `LiveController`, Gate, claim, server-owned confirmation, and receipt path. Pre-approval dispatch is zero; reconstructed execution produces exactly one `DeterministicFakeBackend` dispatch, fresh C2 Apply Entry, durable `SAFE_STOP/stop_boundary`, and duplicate approval/Intent zero redispatch. The bounded controlled-live receipt below is a separate evidence layer, not a general reliability claim:
-
-```text
-Built-in fallback or trusted perception provider
-                    │
-        trusted adapter → Canonical UEI Evidence
-                    │              (non-authorizing)
-                    ▼
-          Learning + Human Review
-                    │
-                    ▼
-       Reviewed Workflow Asset + lineage
-                    │              (non-authorizing)
-                    ▼
-Computer-Use Agent ◄── Observation / Receipt
-        │
-        └── semantic intent only ──► Runtime Authority
-                                      │
-                         current capture + relocation
-                                      │
-                               Gate + bounded attempt
-                                      │
-                       [internal Desktop I/O backend seam]
-                                      │
-                            Verify / Safe Stop / Receipt
-```
-
-Any Provider can target the architecture through a **trusted adapter** into Universal Evidence Interface v1 (UEI). Current proof covers built-in, recorded, and bounded local OmniParser Shadow paths—not a remote marketplace.
-
-The current OmniParser path is a **review-only provider/shadow** prototype. Exact-capture candidates can enter the same large-image human Review surface, but they cannot authorize clicks.
-
-<!-- UEI M2 conformance: 不是主叙事，也不是生产 Learn、GUI、replay 或 Execute 集成；不能成为点击授权。 -->
-
-Future external Agents receive observations/actions and return observation-bound semantic intent. They cannot submit old coordinates, bypass Gate, or verify effects. No external/remote Provider or external Agent adapter is live-integrated today.
-
-The Desktop I/O Backend SPI is an **internal implementation seam**, not a fifth public contract. W3b binds it only after passive bound-window capture, observed UIA origin, pinned recognition, current re-ground, Gate, and reviewed-target-region pre-dispatch freshness; the Windows backend is one-shot and durable duplicate receipts prevent re-dispatch. The deterministic fake backend remains available for tests. Replacement must not expand authority.
-
-## Honest status
-
-| Capability | Status | What the claim means |
-| --- | --- | --- |
-| UEI schemas, refs, registration, static projections | **Current — Contract Proof** | Canonical, provenance-preserving, non-authorizing evidence boundary. |
-| Reviewed Workflow v2 compiler and persistence | **Current — Contract Proof** | Offline compile/store/reload; publication grants no authority. |
-| Agent Observation / Intent / Receipt schemas and internal controller composition | **Current — deterministic + one bounded live proof** | The loopback-only `/runtime/agent` callsite binds the exact released asset, projects server-owned active asset/window state, accepts only geometry-free intent IDs, and returns the durable Receipt contract. Deterministic external-boundary doubles and a fake output backend cover the release callsite, while one bounded Windows/SEEK run proves the same contract through server-owned confirmation and exactly one physical dispatch. |
-| Server-owned one-shot confirmation and safe resume | **Current — deterministic + one bounded live proof** | Immutable request/decision/resume/closed markers bind the exact claim, workflow revision/hashes, transition/action, capture/state evidence, HWND/PID, and fixed expiry. The local approval route accepts only a server confirmation ID and decision. The bounded live proof used this same route before exactly one dispatch. |
-| Bounded SEEK browser navigation recording | **Partial** | Bounded historical live GUI recording; not Portfolio v1 Controlled Live Workflow Proof. It does not prove saved-workflow replay or semantic verification. |
-| Built-in perception baseline/fallback | **Partial** | Screenshot, UIA, OCR, and recognition exist; unfamiliar-interface reliability is unproven. |
-| Built-in and local OmniParser Shadow output entering one provider-neutral review model | **Partial — live provider + contract proof** | Built-in evidence plus recorded and bounded local OmniParser worker results are sealed into UEI and render through the same non-authorizing large-image Review path. On the frozen five unfamiliar Windows screens, deterministic filtering reduced standalone Omni candidates from 404 to 368 while preserving all 78 strict matches; precision/recall/F1 were `0.211957 / 0.382353 / 0.272727`, canonical role coverage remained `0`, and replacement stayed **NO-GO**. UIA role enrichment is separately labelled hybrid evidence; none of this authorizes execution. |
-| Human review and workflow creation | **Current — Portfolio v1 release asset** | The visible Panel flow repaired Quick Apply, added a non-executable Save evidence box, and now rebinds to backend-canonical saved_review before accepting human_approved. The tracked release workspace recompiles and reloads active asset workflow_portfolio_v1_seek_apply_entry_fe297b5738f8c17790429e925ceab6f0 byte-exactly at content SHA 8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7. Five unavailable archival draft snapshots are explicitly marked unresolved and non-authoritative; they do not affect the current asset. The asset remains non-authorizing; Apply Entry remains the safe-stop boundary. |
-| Current relocation, Gate, and unique dispatch authority (W4) | **Current — internal + one bounded live proof** | Only `LiveController` mints authority; `ExistingWindowsBackendAdapter` is the sole authority-scope consumer; guarded raw sinks fail closed. The scoped live run passed current target-region freshness and dispatched once; this does not prove general reliability or public integration. |
-| Post-action semantic verification and verified receipt promotion (W5) | **Current — deterministic + one bounded live proof** | The active released asset reached one real `open_apply_flow` dispatch, fresh `Choose documents` resolution, verified effect/destination, and durable `SAFE_STOP/stop_boundary`; `attempt_count=1` and there was no form fill, upload, Continue/Next, submission, or redispatch. |
-| Portfolio v1 close-out (W6) | **Frozen — bounded Quick Apply-only release** | The tracked release workspace, 12-second privacy-checked GIF, public receipt/negative-control/cleanup package, exact active-revision reload, and bounded `open_apply_flow` proof are complete and independently reviewed. Current semantic `open_detail` live proof is deferred to post-v1 and is not a Portfolio v1 acceptance predicate. |
-| Desktop I/O Backend SPI | **Partial** | Internal SPI, deterministic fake backend, and guarded one-shot Windows backend exist. It is not a public HTTP route, agent/demo callsite, or production-readiness claim. |
-| Provider routing and remote providers | **Planned** | No automatic Provider fallback today. |
-| Live external Computer-Use Agent adapters | **Planned** | None live-integrated today. |
-| Production or unfamiliar-site reliability | **Not claimed** | No all-site or unattended claim. |
-
-### Bounded controlled-live receipt
-
-One scoped run started from an already-open SEEK Job Detail and used the same reviewed asset, loopback Agent Runtime contract, server-owned confirmation, current re-grounding, Gate, Windows backend, post-action observation, and durable receipt path:
-
-![Controlled Portfolio v1 runtime replay](docs/media/portfolio-v1-controlled-live.gif)
-
-*12-second privacy-checked editorial replay, not a continuous recording. The PRE capture is separately hashed but not receipt-bound; the POST capture is receipt-bound. See the [media manifest](docs/media/portfolio-v1-controlled-live.manifest.json) and [public evidence package](release/portfolio-v1/evidence/manifest.json).*
-
-- workflow: `portfolio_v1_seek_apply_entry`
-- active asset SHA: `8284e1729409aa0a4f6a751a1a03d85fc51db1c7d53d473bd012455a3fc391b7`
-- receipt: `receipt.38d529e464f94dbf858ec4d18de90c7c`
-- receipt object SHA: `8d5f94cebbbb7b6de6b2a144390fbbb37fa6c018f51e82789af0f797266c485e`
-- result: one `open_apply_flow` dispatch → fresh `Choose documents` state → `SAFE_STOP/stop_boundary`
-- negative controls: all six canonical failure classes are mapped through the Runtime boundary, with exact-current controls separated from behavior-equivalent synthetic fixtures; no form fill, typing, upload, Continue/Next, final submit, or redispatch occurred
-
-This proves one bounded runtime path only. It does **not** prove Provider accuracy, general SEEK navigation, unfamiliar-site reliability, unattended operation, application completion, or production readiness. PII-bearing application screenshots and raw fields are intentionally excluded from public evidence.
-
-## Historical prototype evidence
-
-> **Historical showcase evidence.** The screenshots below were published by the earlier public showcase repository and are included to show design lineage. They are **not current Portfolio v1 live proof**, and the current interface may differ. SEEK and all employer names and marks belong to their respective owners; no affiliation or endorsement is implied.
-
-### SEEK reference states · Historical screenshots
-
-<table>
-  <tr>
-    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-results.png"><img src="docs/media/private-prototype-seek-results.png" alt="Historical private prototype showing SEEK results recognition" width="100%"></a></td>
-    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-job-detail.png"><img src="docs/media/private-prototype-seek-job-detail.png" alt="Historical private prototype showing the SEEK job-detail state" width="100%"></a></td>
-    <td width="33%" align="center"><a href="docs/media/private-prototype-seek-application.png"><img src="docs/media/private-prototype-seek-application.png" alt="Historical private prototype showing redacted SEEK application entry" width="100%"></a></td>
-  </tr>
-  <tr>
-    <td align="center"><strong>Results</strong><br>Search controls, result regions, and job-card evidence.</td>
-    <td align="center"><strong>Job Detail</strong><br>Detail drawer, metadata, description, and separate Quick apply entry.</td>
-    <td align="center"><strong>Application Entry</strong><br>Personal content is redacted. This shows document-selection entry only—not form completion, Continue/Next, or submission.</td>
-  </tr>
-</table>
-
-### SEEK reference recording · Partial historical visual corroboration
-
-![Historical SEEK three-state navigation recording](docs/media/seek-three-interface-real-agent-demo.gif)
-
-This 16-second historical recording covers SEEK home/list, job detail, and same-site Apply entry; application content is redacted, with no fill, typing, upload, Continue/Next, or submission. It is bounded visual corroboration—not Portfolio v1 Controlled Live Workflow Proof. Without a matching current runtime trace and receipt, it does **not** establish which component produced each click or prove restart/reload, relocation, Gate lineage, semantic verification, receipts, or autonomous replay.
-
-SEEK is a **reference workflow**, not the product. The frozen v1 target is **Job Detail → `open_apply_flow` → Apply Entry → Safe Stop**. `open_detail` is a post-v1 engineering target, not a v1 acceptance predicate or a homepage-traversal claim.
-
-## Engineering highlights
-
-- **Freshness and lineage:** candidates bind capture, viewport, source, geometry, and freshness.
-- **Revision-bound review:** evidence or semantic changes revoke stale approval.
-- **Non-authorizing assets:** revisions preserve knowledge without becoming permission.
-- **Semantic actions:** `open_detail` and `open_apply_flow` are distinct from field mutation, continuation, and terminal submission.
-- **Fail-closed ambiguity:** stale/wrong/unknown/ambiguous states are zero-click outcomes.
-- **Durable verification receipts:** the internal controller persists dispatch, verification checkpoint, C2 evidence, and the exactly paired terminal receipt; duplicate/restart lookup cannot blindly redispatch. Recovery may passively recapture C2 after a crash before terminal persistence, but it never redispatches the action. This is deterministic internal evidence, not live proof.
-
-## Run locally
-
-Requirements: Windows 10/11, Python `>=3.11,<3.12`, and `uv`.
+1. 使用 Windows x64；依赖锁定为 Python 3.11。先准备 [uv](https://docs.astral.sh/uv/getting-started/installation/)。设备、显存和磁盘规划见安装说明；不同设备仍需实测。
+2. 下载 ZIP，解压到空间充足的目录。进入该目录，审阅脚本后执行：
 
 ```powershell
-git clone https://github.com/Desolate-Jix/agent-gui-runtime.git
-cd agent-gui-runtime
-uv sync
-.\start_test_panel.bat
+.\scripts\setup_instant.ps1 -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel
 ```
 
-Or start the local API directly:
+3. 脚本安装依赖、下载 [VISTA-4B 官方模型](https://huggingface.co/inclusionAI/VISTA-4B)，生成本机 MCP 配置。模型约 9.1 GB，环境另占空间。不要复制别人的绝对路径配置。
+4. 将生成的 `mcp-config.local.json` 中的服务器配置导入 Agent，重新连接。UAC 弹窗由本人确认；本包不自动确认 UAC。
+5. 把 [AGENT_GUIDE.md](AGENT_GUIDE.md) 给 Agent，先验连接，再在专用低风险窗口测试。同一任务保持连接；结束前 `close_launched_window` 关闭本会话测试窗口，然后 `instant_stop` 并轮询 `instant_status` 至 `cleanup_verified=true`，最后断连。
+
+Use Windows x64 and Python 3.11 with uv. Extract the ZIP, review and run the setup command above, then import the generated local MCP configuration into your Agent. Confirm UAC yourself. Follow AGENT_GUIDE.md, test a dedicated low-risk target, and poll cleanup after stopping. Setup does not alter global Agent configuration or download unrelated models.
+
+已有环境与模型，仅重新生成连接配置 / Reuse an existing environment and model:
 
 ```powershell
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+.\scripts\configure_instant.ps1 -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData"
 ```
 
-The bounded local Agent Runtime callsite is exposed at `POST /runtime/agent/session/start`, `POST /runtime/agent/intent/submit`, and `POST /runtime/agent/confirmation/decide`. It is loopback-only and assumes one uvicorn worker. The server—not the client—selects the sole active reviewed asset, current bound window, workflow hashes, semantic action binding, evidence, and production backend. In addition to deterministic route proof, the repository now records the single bounded real Windows/SEEK Safe Stop receipt above; it must not be generalized beyond that scope.
+## 已验证与边界 / Verification and limits
 
-Model weights and optional vision services are not distributed. Do not commit private evidence or credentials.
+- test.4 冻结候选已通过 743 项源码回归与 743 项隔离包回归（集合有重叠，不相加），另有 7 项构建检查和 241 项运行时导入检查；未发现原工作树泄漏。/ The test.4 frozen candidate passes 743 source checks and 743 isolated-bundle checks (overlapping, not additive), plus 7 build checks and 241 runtime-import checks with no worktree leakage.
+- Codex 已在同一冻结候选完成原生连续流程与浏览器连续流程；AionUi 随后完成四个有界验收组。AionUi 的首轮并非全通过，期间修复了 5 个 tester-client 问题后，四组复测均通过。/ Codex completed native and browser continuous journeys on the same frozen candidate. AionUi then passed four bounded groups after five tester-client fixes; the first attempt was not all-pass.
+- 原生覆盖记事本替换、键盘 Undo、菜单 Undo 与 Don't Save 关闭；浏览器覆盖 Python 文档 Quick search → 精确文章 → Back，并重复两次后关闭/停止清理。归档哈希 562 项、图片引用 23 项、冻结文件 595 项均已复核。/ Native coverage includes Notepad replace, keyboard Undo, menu Undo and Don't Save close; browser coverage is Python docs Quick search → exact article → Back, repeated twice, then close/stop cleanup. 562 archive hashes, 23 image references and 595 frozen files were verified.
+- 这是有人看护的 operator-mode 测试包；本批未验证自动策略，也不作通用准确率或性能承诺。Back 实测约 19.95–22.58 秒，链接约 7.85–8.37 秒，均为观测值而非保证。/ This remains an operator-mode test package; automatic-policy validation was not performed, and no general accuracy or performance claim is made. Observed Back latency was about 19.95–22.58s and link latency about 7.85–8.37s; these are observations, not guarantees.
+- 候选 09 的独立实机失败记录保留为历史，不代表 test.4 结果。首次安装、管理员目标和跨设备验收本批未重复；不自动重放、不承诺任意网站或长期稳定。/ Candidate09's independent live-acceptance failure is retained as history and does not describe test.4. Fresh install, elevated targets and cross-device acceptance were not repeated; no automatic replay, universal-site or long-term stability claim is made.
 
-## Target state and roadmap
+The earlier candidate09 failure remains historical context; the test.4 evidence above is the current release evidence. Counts overlap and are not additive.
 
-Portfolio v1 is **frozen as a bounded Quick Apply-only release** with a tracked and independently reviewed evidence package for one scoped controlled-live receipt:
+**依赖不要混用 / Keep the interpreter consistent:** 本包锁定 Python 3.11 与 `rapidocr-onnxruntime==1.4.4`。MCP服务与辅助OCR脚本都使用安装脚本生成的 `.venv\Scripts\python.exe`，不要随手用PATH里的 `python`。实测旧版1.2.3不返回词级几何，出现 `OCR word output is missing character metadata` 时先核对解释器和依赖，不要跳过校验或把整行框伪装成词框。 / Use the package venv for both MCP and OCR helpers. Version 1.2.3 lacks the required word metadata; check interpreter/dependencies rather than fabricating word boxes.
 
-> **Reviewed release asset → exact reload → deterministic exact-asset proof → one controlled-live `open_apply_flow` → fresh Apply Entry `SAFE_STOP/stop_boundary` receipt → public evidence review passed.**
+## 维护者检查 / Maintainer checks
 
-Current semantic `open_detail` live proof is deferred to **post-v1** and is not a Portfolio v1 acceptance predicate. Historical `open_detail` artifacts remain unpromoted because their semantic verifier was marked not applicable. Frozen means the declared bounded scope is closed; it does **not** mean Stable, general reliability, Provider accuracy, general SEEK navigation, form fill, Continue/Next, upload, final submit, unattended operation, or production readiness.
+包内带有编辑键、MCP、读文、鼠标序列、菜单和词框的无输入回归子集。安装开发依赖后执行 `python -m pytest tests -q`；它不等于完整开发仓库验收。真实连接检查可运行 `scripts/smoke_instant_mcp.py`（参数见安装说明）。不要把单元测试通过当作已执行桌面动作。
 
-Automatic provider selection, remote execution, raw-coordinate Agent authority, ATS traversal, form filling, upload, Continue/Next, and final submission are not Portfolio v1 capabilities.
+The shipped no-input subset covers keys, MCP, reading, mouse sequences, menus and word geometry. Run `python -m pytest tests -q` after installing dev dependencies. This is not full-repository validation; the separate stdio smoke also does not substitute for live input.
 
-## Safety and non-goals
+## 反馈 / Feedback
 
-- Learning drafts, provider evidence, workflow graphs, and published assets never authorize action.
-- `final_submit`, `send`, `confirm`, `payment`, and `delete` remain prohibited boundaries for this portfolio slice.
-- Form fields, upload, and Continue/Next produce a Safe Stop in the v1 reference workflow; no form mutation belongs to the proof.
-- A plausible model response is not permission. Unknown, stale, ambiguous, wrong-window, or unverified states stop rather than guess.
-- This is not an unattended job-application service and does not claim coverage of all Windows applications, websites, models, or providers.
+[提交 Issue / File an issue](https://github.com/Desolate-Jix/agent-gui-runtime/issues)：提供版本、Windows/GPU、目标软件、复现步骤、脱敏回执、是否发生真实输入及清理结果。截图和日志可能含个人信息，请自行脱敏，**不要上传账号、令牌、完整私人会话或模型权重**。
 
-## Repository map
+Include version, Windows/GPU, target application, reproduction steps, redacted receipts, actual-input status and cleanup results. Remove personal data from screenshots/logs; never upload credentials, private conversations or weights.
 
-- `app/learn/` — evidence contracts, recognition, learning tasks, and review projections.
-- `app/agent/` — reviewed workflow assets, semantic Agent contracts, replay, and receipt logic.
-- `app/operation/` — window binding, observation, grounding, and operation boundaries.
-- `app/gate/` — candidate, window, dataflow, and dangerous-action checks.
-- `app/web_panel/` — local learning, review, and replay workspace.
-- `schemas/uei/v1/` — Universal Evidence Interface contracts.
-- `tests/` — contract, regression, and safety-boundary checks.
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — detailed boundaries and invariants.
-- [`CHANGELOG.md`](CHANGELOG.md) — release-scoped changes and limitations.
-- [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — optional component and license boundaries.
+## 源码分支与许可 / Source branch and license
 
-<details>
-<summary>Synthetic framework evidence</summary>
+`codex/release-instant-test-4`：用于第四批执行模式测试版的可复现源码快照；不替代完整桌面产品开发分支。 / A clean source snapshot for this instant-mode test release, separate from full-product development.
 
-![Synthetic framework demo](docs/media/demo.gif)
-
-`demo.gif` proves only that the deterministic synthetic framework has click capability and can observe a synthetic result. It is **not** live GUI evidence and does not prove Agent behavior, model accuracy, human review, current relocation, or saved-workflow replay.
-
-</details>
-
-## License
-
-[ISC](LICENSE)
-
-
-## Simple-native provider smoke (Phase A)
-
-`python scripts/run_simple_native_provider_smoke.py` defaults to offline `preflight`: it validates only `case-001` through `case-005`, never starts a model, and performs no action. `replay` uses injected native-shape fixtures and writes a regression-only, non-promotable 25-target diagnostic. It copies each public regression image byte-for-byte into the artifact directory, seals a capture bundle with explicitly empty/unavailable OCR and UIA observations, and derives every candidate bbox from Omni output.
-
-The three protocols remain independent: Omni emits only `{bbox,type,content,interactivity}`; Qwen keeps the complete runtime request locally while the model sees fixed goals and ordinal candidates `{candidate_index,bbox,active}`, then returns only a bare top-level JSON array of `{goal_index,candidate_index,status,confidence}` objects. `BOUND` must name one existing candidate index; `UNBOUND` must use `null`. The adapter deterministically restores role/label from the fixed goal and stable candidate IDs from the sealed Omni inventory; malformed, duplicate goal indices, reordered, out-of-range, or inactive bindings fail closed or abstain before VISTA; multiple fixed goals may bind the same existing candidate. VISTA receives a newly persisted candidate crop and returns only bare normalized `[x,y]`. Runtime IDs, capture lineage, crop hashes, coordinate transforms, metrics, and review-only fields are adapter-owned. Capture SHA and dimensions are revalidated around every provider call. VISTA is bounded by the 25 strictly parsed provider goals: each goal produces exactly one selected or abstained outcome, and only an active per-goal `BOUND` candidate may dispatch it. Provider phases are batched `Omni -> cleanup -> Qwen -> cleanup -> VISTA -> cleanup`; every begun phase releases exactly once in a `finally` path, including unexpected provider exceptions. Cleanup uses a closed observation with no remaining owned/provider/helper/descendant process, listener, or lease evidence, and a later phase cannot continue unless it is verified clean; simultaneous provider and cleanup failures remain explicitly chained. The scorer validates the five ordered cases and 25 outcomes before it alone opens Gold, while the regression report records the sealed provider-artifact SHA-256.
-
-
-> Implementation status: `actual` is now technically wired, but remains unreachable unless both `--mode actual` and `--operator-approved-model-start` are supplied. Construction is lazy and starts nothing. Once explicitly invoked, the diagnostic holds at most one GPU provider: five managed Omni native workers share one phase scope, five compact Qwen per-goal binding calls share one exact scoped lease, and at most 25 bare-point VISTA calls share one exact lease. Each phase projects existing exact release/scope evidence into the closed cleanup observation and blocks the next provider on dispatch or cleanup uncertainty. This implementation work did not run `actual` or start a model; no fresh accuracy claim is made.
+[ISC License](LICENSE)。依赖与模型受各自许可证约束，模型从官方来源另行下载。 / Dependencies and models retain their respective licenses and are downloaded separately.

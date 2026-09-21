@@ -4406,6 +4406,48 @@ def append_benchmark_v2_attempt_event(
         return event
 
 
+def reserve_benchmark_v2_attempt(
+    *,
+    journal_path: Path,
+    attempt_ref: Mapping[str, object],
+    resource_ref: Mapping[str, object],
+) -> dict[str, Any]:
+    path = Path(journal_path)
+    if not path.is_absolute() or path != path.resolve():
+        raise ValueError("benchmark attempt journal path must be canonical")
+    attempt = _attempt_sealed_parent(attempt_ref, "benchmark attempt ref")
+    resource = _attempt_sealed_parent(resource_ref, "benchmark attempt resource ref")
+    with _ATTEMPT_JOURNAL_LOCK:
+        if not path.exists():
+            return append_benchmark_v2_attempt_event(
+                journal_path=path,
+                attempt_ref=attempt,
+                phase="prepared",
+                event_kind="attempt_prepared",
+                resource_ref=resource,
+            )
+        events = read_benchmark_v2_attempt_journal(
+            journal_path=path,
+            attempt_ref=attempt,
+        )
+        reservations = [
+            event for event in events if event.get("event_kind") == "attempt_prepared"
+        ]
+        if len(reservations) != 1:
+            raise ValueError("benchmark attempt reservation is unavailable or duplicated")
+        reservation = reservations[0]
+        if reservation is not events[0] or reservation.get("sequence") != 1:
+            raise ValueError("benchmark attempt reservation is not the initial event")
+        if (
+            reservation.get("phase") != "prepared"
+            or reservation.get("provider_id") is not None
+            or reservation.get("probe_kind") is not None
+            or reservation.get("resource_ref") != resource
+        ):
+            raise ValueError("benchmark attempt reservation differs")
+        return deepcopy(reservation)
+
+
 def _probe_v2_monotonic(value: object, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{name} monotonic value is invalid")
@@ -8145,6 +8187,7 @@ __all__ = [
     "project_benchmark_v2_attempt_lifecycle",
     "project_benchmark_v2_attempt_ledger",
     "read_benchmark_v2_attempt_journal",
+    "reserve_benchmark_v2_attempt",
     "select_benchmark_v2_attempt_ledger_horizon",
     "validate_benchmark_v2_lifecycle_probe_receipt_v2",
     "validate_benchmark_v2_probe_stable_zero_evidence_v1",

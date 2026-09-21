@@ -14,10 +14,12 @@ from app.learn.workflow_state import (
     transition_learning_workflow_state,
     validate_learning_workflow_state,
 )
+from app.learn.workflow_paths import (
+    LEARNING_WORKFLOW_STORE_PATH_ENV,
+    resolve_learning_workflow_store_path,
+)
 
 LEARNING_WORKFLOW_STORE_CONTRACT_VERSION = "learning_workflow_run_store_v1"
-LEARNING_WORKFLOW_STORE_PATH_ENV = "AGENT_GUI_LEARNING_WORKFLOW_STORE_PATH"
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class LearningWorkflowRunStore:
@@ -261,26 +263,6 @@ def _normalized_run_id(run_id: str) -> str:
     if not value:
         raise LearningWorkflowTransitionError("run_id is required")
     return value
-
-
-def resolve_learning_workflow_store_path(
-    *,
-    project_root: str | Path = _PROJECT_ROOT,
-) -> Path | None:
-    """解析权威工作流状态路径；测试可显式选择内存模式。"""
-
-    configured = str(os.environ.get(LEARNING_WORKFLOW_STORE_PATH_ENV) or "").strip()
-    if configured == ":memory:":
-        return None
-    root = Path(project_root).resolve()
-    if configured:
-        configured_path = Path(configured)
-        return (
-            configured_path
-            if configured_path.is_absolute()
-            else root / configured_path
-        ).resolve()
-    return (root / "runtime_state" / "learning-workflow-runs.json").resolve()
 
 
 learning_workflow_run_store = LearningWorkflowRunStore(

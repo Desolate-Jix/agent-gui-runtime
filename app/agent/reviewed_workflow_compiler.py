@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from app.agent.action_semantics import REVIEWED_SINGLE_STEP_ACTIONS
+from app.agent.scroll_parameters import SCROLL_SEMANTIC_ACTION, validate_scroll_review_subject
+from app.agent.text_parameters import TEXT_SEMANTIC_ACTION, validate_text_review_subject
+
 from copy import deepcopy
 import hashlib
 import json
@@ -18,7 +22,7 @@ from app.learn.interface_workflow_review import (
 
 _COMPILE_CONTRACT = "reviewed_workflow_compile_result_v2"
 _REGISTRY_CONTRACT = "interface_workflow_library_registry_v1"
-_ALLOWED_ACTIONS = {"open_detail", "open_apply_flow", "back", "close_modal"}
+_ALLOWED_ACTIONS = REVIEWED_SINGLE_STEP_ACTIONS | {SCROLL_SEMANTIC_ACTION, TEXT_SEMANTIC_ACTION}
 _STOP_BOUNDARY_STATUS = "needs_learning"
 _SAFE_ID_PART = re.compile(r"[^A-Za-z0-9_.:-]+")
 _GRANULAR_CONFIRMATION_CONTRACTS = {
@@ -151,6 +155,22 @@ def _exact_transition_subjects(
     candidate_semantic_action = _text(action_candidate.get("semantic_action")).casefold()
     candidate_action_type = _text(action_candidate.get("action_type")).casefold()
     candidate_action = candidate_semantic_action or candidate_action_type
+    if edge_action == SCROLL_SEMANTIC_ACTION:
+        try:
+            validate_scroll_review_subject(edge)
+            validate_scroll_review_subject(action_candidate)
+        except ValueError as error:
+            return target_matches[0], None, str(error)
+        if not _type_exact_equal(edge.get("scroll_parameters"), action_candidate.get("scroll_parameters")):
+            return target_matches[0], None, "reviewed scroll parameters disagree between candidate and edge"
+    if edge_action == TEXT_SEMANTIC_ACTION:
+        try:
+            validate_text_review_subject(edge)
+            validate_text_review_subject(action_candidate)
+        except ValueError as error:
+            return target_matches[0], None, str(error)
+        if not _type_exact_equal(edge.get("text_parameters"), action_candidate.get("text_parameters")):
+            return target_matches[0], None, "reviewed text parameters disagree between candidate and edge"
     candidate_target_node_ids = [
         _text(action_candidate.get(key))
         for key in ("target_interface_id", "target_node_id")
@@ -241,14 +261,23 @@ def _anchor_label(item: dict[str, Any], fallback: str) -> str:
 def _stable_node_anchors(node: dict[str, Any], state_id: str) -> tuple[list[dict[str, str]], dict[str, str]]:
     anchors: list[dict[str, str]] = []
     target_refs: dict[str, str] = {}
-    display = _text(node.get("display_name") or node.get("state_signature") or node.get("node_id"))
-    anchors.append(
-        {
-            "anchor_id": _safe_id("anchor_", f"{state_id}:identity"),
-            "label": display,
-            "kind": "text",
-        }
+    scroll_regions = {
+        _text(candidate.get("target_region_id")) for candidate in node.get("action_candidates") or []
+        if isinstance(candidate, dict) and (candidate.get("semantic_action") or candidate.get("action_type")) == SCROLL_SEMANTIC_ACTION
+    }
+    text_fields = {
+        _text(candidate.get("target_control_id") or candidate.get("target_region_id"))
+        for candidate in node.get("action_candidates") or []
+        if isinstance(candidate, dict) and (candidate.get("semantic_action") or candidate.get("action_type")) == TEXT_SEMANTIC_ACTION
+    }
+    external = node.get("surface_type") == "external_untrusted_interface" or (
+        isinstance(node.get("evidence"), dict)
+        and node["evidence"].get("external_source_kind") == "untrusted_external"
     )
+    recognition_text = _text(node.get("recognition_text"))
+    if not external or recognition_text:
+        display = recognition_text or _text(node.get("display_name") or node.get("state_signature") or node.get("node_id"))
+        anchors.append({"anchor_id": _safe_id("anchor_", f"{state_id}:identity"), "label": display, "kind": "text"})
     for collection, id_keys, kind in (
         (node.get("controls"), ("control_id", "id"), "control"),
         (node.get("regions"), ("region_id", "id"), "region"),
@@ -262,8 +291,25 @@ def _stable_node_anchors(node: dict[str, Any], state_id: str) -> tuple[list[dict
             if not original_id or original_id in target_refs:
                 continue
             anchor_id = _safe_id("anchor_", f"{state_id}:{kind}:{original_id}")
+            target = item.get("target_observation")
+            observed_control = (
+                kind == "region" and original_id not in scroll_regions and original_id not in text_fields
+                and node.get("surface_type") == "recorded_action_observation"
+                and isinstance(node.get("evidence"), dict)
+                and node["evidence"].get("external_source_kind") == "recorded_action"
+                and isinstance(target, dict)
+                and target.get("contract_version") == "action_learning_target_observation_v1"
+                and _text(target.get("role")).casefold() in {
+                    "button", "card", "checkbox", "combobox", "control", "link", "list item",
+                    "listitem", "menuitem", "radio", "tab", "toggle",
+                }
+            )
+            # 保留原区域的审核绑定；已观察到的交互控件不能编译成普通容器。
             anchors.append(
-                {"anchor_id": anchor_id, "label": _anchor_label(item, original_id), "kind": kind}
+                {"anchor_id": anchor_id, "label": _anchor_label(item, original_id),
+                 "kind": "control" if observed_control else kind,
+                 **({"scroll_container_id": original_id} if kind == "region" and original_id in scroll_regions else {}),
+                 **({"text_field_id": original_id} if original_id in text_fields else {})}
             )
             target_refs[original_id] = anchor_id
     return anchors, target_refs
@@ -281,6 +327,8 @@ def _application_asset(identity: dict[str, Any]) -> dict[str, Any]:
     else:
         result["executable"] = identity.get("executable_identity")
         result["product_identity"] = identity.get("product_identity")
+        if identity.get("executable_path"):
+            result["executable_path"] = identity.get("executable_path")
     return result
 
 
@@ -335,6 +383,7 @@ def _identity_comparison_fields(identity: dict[str, Any]) -> dict[str, Any]:
             {
                 "executable_identity": identity.get("executable_identity"),
                 "product_identity": identity.get("product_identity"),
+                **({"executable_path": identity["executable_path"]} if identity.get("executable_path") else {}),
             }
         )
     return fields
@@ -434,6 +483,22 @@ def _registry_record(
     return record, []
 
 
+def _has_unresolved_target_semantics(review: dict[str, Any]) -> bool:
+    # 只检查当前图的语义对象，不把历史备注当成可执行知识。
+    pending = list(review.get("nodes") or []) + list(review.get("edges") or [])
+    while pending:
+        item = pending.pop()
+        if not isinstance(item, dict):
+            continue
+        if item.get("requires_semantic_review") is True or item.get("target_semantics_status") == "stale_after_retarget":
+            return True
+        for key in ("regions", "controls", "action_candidates", "external_relationships"):
+            children = item.get(key)
+            if isinstance(children, list):
+                pending.extend(children)
+    return False
+
+
 def compile_reviewed_workflow_asset_v2(
     *, project_root: Path, source_workflow_path: str | Path, expected_source_workflow_sha256: str
 ) -> dict[str, Any]:
@@ -462,6 +527,8 @@ def compile_reviewed_workflow_asset_v2(
     edges = review.get("edges")
     if not isinstance(workflow, dict) or not isinstance(nodes, list) or not isinstance(edges, list):
         return _blocked([_reason("source_workflow_structure_invalid", "v1 workflow, nodes and edges are required")])
+    if _has_unresolved_target_semantics(review):
+        return _blocked([_reason("unresolved_target_semantics", "retargeted graph semantics must be explicitly corrected and reviewed before compilation")])
     workflow_id = _text(workflow.get("workflow_id"))
     try:
         identity = normalize_application_identity(
@@ -539,6 +606,16 @@ def compile_reviewed_workflow_asset_v2(
     for node_id, node in node_by_id.items():
         state_id = state_ids[node_id]
         anchors, target_refs = _stable_node_anchors(node, state_id)
+        external = node.get("surface_type") == "external_untrusted_interface" or (
+            isinstance(node.get("evidence"), dict)
+            and node["evidence"].get("external_source_kind") == "untrusted_external"
+        )
+        if external and not any(not anchor.get("text_field_id") for anchor in anchors):
+            reasons.append(_reason(
+                "recognition_text_required",
+                "missing_observable_interface_identity",
+                node_id=node_id,
+            ))
         anchors_by_node[node_id] = target_refs
         state: dict[str, Any] = {
             "state_id": state_id,
@@ -682,7 +759,9 @@ def compile_reviewed_workflow_asset_v2(
                 "source_state_id": state_ids[source_id],
                 "target_state_id": target_state_id,
                 "semantic_action": action,
-                "display_name": _text(edge.get("operation_id") or edge_id),
+                **({"scroll_parameters": deepcopy(edge["scroll_parameters"])} if action == SCROLL_SEMANTIC_ACTION else {}),
+                **({"text_parameters": deepcopy(edge["text_parameters"])} if action == TEXT_SEMANTIC_ACTION else {}),
+                "display_name": _text(edge.get("display_name") or edge.get("operation_id") or edge_id),
                 "element_ref": element_ref,
                 "preconditions": _preconditions(),
                 "reviewed_semantic_constraints": {

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from difflib import SequenceMatcher
+from app.operation.recognition.text_match import text_similarity as _text_similarity, normalize_text as _normalize_text
 
 from app.operation.recognition.schemas import (
     CandidateRankResult,
@@ -24,6 +24,8 @@ def decide_pre_click(
     min_local_text_similarity: float = 0.45,
     allow_low_margin_when_grounded: bool = False,
     expected_effect: dict[str, object] | None = None,
+    uia_snapshot: dict | None = None,
+    screenshot_sha256: str | None = None,
 ) -> PreClickDecisionResult:
     grounding_by_id = {item.candidate_id: item for item in grounding.results}
     decisions: list[PreClickCandidateDecision] = []
@@ -38,6 +40,8 @@ def decide_pre_click(
                 min_candidate_score=min_candidate_score,
                 min_local_text_similarity=min_local_text_similarity,
                 expected_effect=expected_effect,
+                uia_snapshot=uia_snapshot,
+                screenshot_sha256=screenshot_sha256,
             )
         )
 
@@ -129,6 +133,8 @@ def _candidate_decision(
     min_candidate_score: float,
     min_local_text_similarity: float,
     expected_effect: dict[str, object] | None,
+    uia_snapshot: dict | None = None,
+    screenshot_sha256: str | None = None,
 ) -> PreClickCandidateDecision:
     allowed = True
     reasons: list[str] = []
@@ -216,8 +222,28 @@ def _candidate_decision(
             else:
                 reasons.append("local_ocr_text_match")
         else:
-            allowed = False
-            reasons.append("missing_local_ocr_text")
+            from app.operation.recognition.native_control_hit_binding import has_current_native_control_hit
+            from app.operation.recognition.native_control_ocr_observation import DISAGREEMENT
+            from app.operation.recognition.scroll_grounding import has_current_scroll_grounding
+            if has_current_scroll_grounding(candidate, local, uia_snapshot, screenshot_sha256, goal=goal):
+                if click_point != local.refined_click_point:
+                    allowed = False
+                    reasons.append("scroll_region_point_must_not_be_adjusted")
+                else:
+                    reasons.append("current_scroll_region_verified_without_ocr")
+            elif has_current_native_control_hit(candidate, local, uia_snapshot, screenshot_sha256):
+                if DISAGREEMENT in local.reasons:
+                    allowed = False
+                    reasons.append(DISAGREEMENT)
+                if click_point != local.refined_click_point:
+                    allowed = False
+                    reasons.append('native_control_hit_point_must_not_be_adjusted')
+                else:
+                    reasons.append('native_control_hit_geometry_verified' if DISAGREEMENT in local.reasons
+                                   else 'native_control_hit_verified_without_ocr')
+            else:
+                allowed = False
+                reasons.append("missing_local_ocr_text")
 
     if _verified_precision_text_candidate(
         goal=goal,
@@ -388,13 +414,19 @@ def _resolve_click_point(
     chosen = safe_center if should_use_center else raw
     source = "bbox_safe_center" if should_use_center else "raw_grounding_point"
     reason = "raw_model_point_near_edge" if should_use_center else "raw_grounding_point_within_safe_margin"
+    synthetic = candidate.bbox_refine_reason == "synthetic_bbox_around_vista_direct_point"
+    if synthetic:
+        chosen, source, reason = raw, "raw_grounding_point", "synthetic_search_box_not_target_proof"
     return chosen, {
         "contract_version": "resolved_click_point_v1",
         "target_text": candidate.text or candidate.label,
         "target_role": role or None,
         "bbox": bbox_payload,
-        "bbox_source": "candidate_refined_bbox" if candidate.refined_bbox else "candidate_element_bbox",
-        "raw_model_point": raw,
+        "bbox_source": candidate.bbox_refine_reason or ("candidate_refined_bbox" if candidate.refined_bbox else "candidate_element_bbox"),
+        "independent_target_bbox_verified": False,
+        "geometry_check_scope": "search_region_only" if synthetic else "candidate_bounds_only",
+        "raw_model_point": dict((candidate.element.evidence.get("vista_direct_point") or {}).get("point") or raw),
+        "raw_grounding_point": raw,
         "chosen_point": chosen,
         "chosen_point_source": source,
         "adjustment_reason": reason,
@@ -623,25 +655,6 @@ def _negates_next_click_target(preceding_text: str) -> bool:
     )
 
 
-def _text_similarity(left: str, right: str) -> float:
-    if not left or not right:
-        return 0.0
-    if left == right:
-        return 1.0
-    if min(len(left), len(right)) >= 3 and (left in right or right in left):
-        return 0.9
-    left_tokens = set(left.split())
-    right_tokens = set(right.split())
-    token_score = 0.0
-    if left_tokens and right_tokens:
-        token_score = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
-    return max(token_score, SequenceMatcher(None, left, right).ratio())
-
-
-def _normalize_text(value: str) -> str:
-    normalized = str(value or "").casefold()
-    normalized = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", " ", normalized)
-    return " ".join(normalized.split())
 
 
 def _unique(values: list[str]) -> list[str]:

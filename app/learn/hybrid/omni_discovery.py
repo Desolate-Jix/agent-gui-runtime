@@ -18,6 +18,7 @@ from app.learn.recognition.uei.omniparser_shadow_adapter import (
     PROFILE_ID,
     PROVIDER_ID,
     PROVIDER_VERSION,
+    TrustedOmniParserConfiguration,
 )
 from app.learn.recognition.uei.provider_adapters import (
     AdapterFailure,
@@ -47,6 +48,7 @@ def run_hybrid_omni_discovery(
     payload: dict[str, Any],
     *,
     cancellation_event: Event | None = None,
+    configuration: TrustedOmniParserConfiguration | None = None,
 ) -> dict[str, Any]:
     """调用受信任 Shadow runtime，并仅返回重新验证的安全输出。"""
     request = _validated_payload(payload)
@@ -62,7 +64,7 @@ def run_hybrid_omni_discovery(
     identity = bundle["capture_identity"]
     store = UEIObjectStore(root=root / _STORE_RELATIVE_PATH)
     try:
-        provider_adapter = OmniParserShadowAdapter()
+        provider_adapter = OmniParserShadowAdapter(configuration=configuration) if configuration is not None else OmniParserShadowAdapter()
     except AdapterFailure as failure:
         provider_adapter = _BootstrapFailureAdapter(failure)
     adapter = _FailureCapturingAdapter(provider_adapter)

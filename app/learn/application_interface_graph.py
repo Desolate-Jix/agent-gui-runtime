@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.agent.action_semantics import ACTIVITY_ACTIONS
+
 import hashlib
 import json
 import re
@@ -19,6 +21,7 @@ from app.learn.interface_assets import (
 
 APPLICATION_INTERFACE_GRAPH_CONTRACT = "application_interface_graph_v1"
 _ALLOWED_ACTION_TYPES = {
+    *ACTIVITY_ACTIONS,
     "back",
     "click",
     "close_modal",
