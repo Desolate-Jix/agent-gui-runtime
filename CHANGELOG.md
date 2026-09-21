@@ -1,16 +1,24 @@
+# test.5 changes and limits / test.5 变更与边界
+
+- `v0.1.0-test.5` consolidates the seven-tool MCP surface, `instant_run`/`input_sequence`, compact original-image receipts and bounded conditional observation. The release candidate is not uploaded yet.
+- 836 source checks and the final bounded AionUi acceptance are recorded; earlier aborted attempts and receipt-only follow-up remain historical evidence, not a claim of full GUI coverage.
+- No whole-page completion, cross-site accuracy, unattended automation, payment/send/delete/final-submit support, or universal hardware guarantee is claimed. Default waits and explicit confirmation boundaries remain unchanged.
+
+## Historical test.4 notes / test.4 历史记录
+
 # v0.1.0-test.4 · 执行模式测试版 / Execution-mode test release
 
 本版本集中收拢 test.3 之后的源码修复，作为有人看护的 operator-mode 测试包交付；不是正式稳定版。/ This release consolidates fixes after test.3 as a supervised operator-mode test package; it is not production-stable.
 
 ## 本批内容 / Candidate changes
 
-- 修复初始空剪贴板零序号的输入失败，以及精确链接首轮上下文、离屏同名项误判和裁图混入邻行；未放宽框外点、可见重名或不完整树检查。 / Repair empty-clipboard initialization and exact-link current-frame context without weakening ambiguous or inconsistent geometry checks. See EXECUTION_BROWSER_RETEST_20260921.md.
+- 修复初始空剪贴板零序号的输入失败，以及精确链接首轮上下文、离屏同名项误判和裁图混入邻行；未放宽框外点、可见重名或不完整树检查。 / Repair empty-clipboard initialization and exact-link current-frame context without weakening ambiguous or inconsistent geometry checks. See docs/verification/EXECUTION_BROWSER_RETEST_20260921.md.
 
 - 补齐直接引号标签、角色及相邻相反按钮的通用定位；唯一真实 UIA 按钮约束首次模型 ROI。进程退出与观察探针失败分开，不等同任务成功。 / Quoted-target identity and real-control grounding repaired; process absence is distinct from probe failure.
 - 候选 09 之前的源码同会话 26 条命令曾覆盖真实记事本与文档站；后续独立测试仍暴露缺陷，因此不把历史成功当作最新修复的完整验收。 / The earlier 26-command source journey passed, but later independent defects prevent treating it as acceptance of subsequent repairs.
 - 修复命名输入框被泛化为任意 Edit、原生编辑区右键落入滚动条、容器边缘遮挡误拒和绝对鼠标坐标取整。真实客户区与坐标来源明确保留；不新增审批或自动重放。 / Repair named-field identity, native editor context-click geometry, peripheral occlusion and absolute-pointer rounding without new approval or replay behavior.
 - UIA 主树、外壳、菜单及浮窗使用有限子元素数组和统一有界遍历；重复、环、缺身份和 COM 异常保留不完整诊断，不把预算耗尽伪装成完整。 / Shared finite UIA enumeration retains incomplete diagnostics for cycles, duplicate/missing identities and read errors.
-- 最小 MCP 宿主环境下，仅为模型子进程补齐缺失的 Windows 可执行扩展名与真实账户信息，修复准备阶段提前退出和 Torch 账户查找失败；不修改父进程或全局环境。真实模型准备及清理已验证。 / Worker-only completion of missing Windows environment restores real preparation without global or parent changes; see EXECUTION_MODEL_ENVIRONMENT.md.
+- 最小 MCP 宿主环境下，仅为模型子进程补齐缺失的 Windows 可执行扩展名与真实账户信息，修复准备阶段提前退出和 Torch 账户查找失败；不修改父进程或全局环境。真实模型准备及清理已验证。 / Worker-only completion of missing Windows environment restores real preparation without global or parent changes; see docs/verification/EXECUTION_MODEL_ENVIRONMENT.md.
 
 - 剪贴板位图句柄不可复制时，在原 DIB/DIBV5 字节完整保存的前提下恢复图像；不吞掉其他格式或覆盖用户更新。 / Preserve verified DIB image bytes when a bitmap handle cannot be copied.
 - 关闭等待提供窗口/弹窗诊断；取消弹窗后支持再次明确关闭。输入结果与后图失败分开，返回只读恢复候选，不自动切窗或重放。 / Actionable modal close and separate dispatch/observation results with explicit recovery.

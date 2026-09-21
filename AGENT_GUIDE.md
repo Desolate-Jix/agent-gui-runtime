@@ -1,22 +1,22 @@
-# Agent 接入与操作 / Agent usage — v0.1.0-test.4 candidate
+# Agent 接入与操作 / Agent usage — v0.1.0-test.5 candidate
 
-**未发布源码修复 / Unreleased source fix:** 普通“点击输入框”与结构化 input 目标现在也要求模型定位可编辑区内部，避免边框、占位文字字形或相邻搜索按钮；原目标标签保留。按钮/图标/框内单词不因此改成聚焦整个字段。仍须读图核对焦点、实际文字与跳转，派发不等于成功。此修复未进入下方 test.4 独立验收或下载包。/ Plain field-click goals and structured input targets now request interior focus without changing the original label or word/button/icon targets. Inspect actual focus, text and navigation; dispatch is not success. This fix is not part of the test.4 independent acceptance or download. [实测边界 / Limits](EXECUTION_INPUT_FOCUS.md).
+**test.5 候选聚焦行为 / test.5 candidate focus behavior:** 普通“点击输入框”与结构化 input 目标现在也要求模型定位可编辑区内部，避免边框、占位文字字形或相邻搜索按钮；原目标标签保留。按钮/图标/框内单词不因此改成聚焦整个字段。仍须读图核对焦点、实际文字与跳转，派发不等于成功。此修复纳入 test.5 候选文档；仍须按回执与原图独立核验。/ Plain field-click goals and structured input targets now request interior focus without changing the original label or word/button/icon targets. Inspect actual focus, text and navigation; dispatch is not success. The test.5 candidate documents this fix; still verify it independently from receipts and original images. [实测边界 / Limits](docs/verification/EXECUTION_INPUT_FOCUS.md).
 
-本指南对应 test.4：同冻结运行时已通过 Codex 与 AionUi 的限定连续实测，范围与未覆盖项见 FIXES.md；不是通用可靠性保证。 / This test.4 guide covers the same runtime used in bounded Codex and AionUi continuous acceptance; see FIXES.md for limits.
+本指南对应 test.5：同冻结运行时已通过 Codex 与 AionUi 的限定连续实测，范围与未覆盖项见 CHANGELOG.md；不是通用可靠性保证。 / This test.5 guide covers the same runtime used in bounded Codex and AionUi continuous acceptance; see CHANGELOG.md for limits.
 
 ## 本候选新增契约 / Candidate contracts
 
-- 精确网页链接可用 `Click the result link labelled "完整可见标题"`；唯一性按本帧范围核对，完全离屏同名项不冒充可点目标，部分可见重名仍参与消歧。点击后仍须读原图确认网址/正文变化。 / Exact quoted links use current-frame identity; inspect post-images for navigation rather than trusting dispatch. See EXECUTION_BROWSER_RETEST_20260921.md.
+- 精确网页链接可用 `Click the result link labelled "完整可见标题"`；唯一性按本帧范围核对，完全离屏同名项不冒充可点目标，部分可见重名仍参与消歧。点击后仍须读原图确认网址/正文变化。 / Exact quoted links use current-frame identity; inspect post-images for navigation rather than trusting dispatch. See docs/verification/EXECUTION_BROWSER_RETEST_20260921.md.
 
-- 显式按钮标签可写 `Click the '不保存' (Don't save) button`；保留否定文字、角色和快捷键后缀。只有同帧完整 UIA 树的唯一精确按钮才约束首次模型 ROI，不能用此语法掩盖多个候选。 / Quoted labels preserve identity and role; unique exact current UIA buttons seed the initial model ROI. [定位边界 / Limits](EXECUTION_QUOTED_BUTTON_TARGET.md)。
+- 显式按钮标签可写 `Click the '不保存' (Don't save) button`；保留否定文字、角色和快捷键后缀。只有同帧完整 UIA 树的唯一精确按钮才约束首次模型 ROI，不能用此语法掩盖多个候选。 / Quoted labels preserve identity and role; unique exact current UIA buttons seed the initial model ROI. [定位边界 / Limits](docs/verification/EXECUTION_QUOTED_BUTTON_TARGET.md)。
 - 后图缺失且 `recovery.status=process_not_running` 表示目标进程已不在，不代表正常关闭或任务成功。保留原回执、核对任务效果，不重放输入；权限错误或其他窗口的枚举错误不能解释为退出。 / Target process absence is an observation, not effect verification or authorization to replay.
 
 - 23 种按键包括原有 15 种及 `Shift+Left/Right/Up/Down/Home/End`、`Ctrl+Home/End`。只作用于当前目标焦点，x/y 不会先点击。 / Eight selection/document-boundary chords augment the existing fifteen; coordinates do not focus the field.
 - 排名是分数诊断，`recommended_candidate_id` 才是明确推荐身份，不要自行取 `candidates[0]` 替代。`current_control_ocr_text_center` 是本次真实 OCR 文字中心，原模型点另行保留；这不等于任务已成功。 / Preserve explicit selection and coordinate provenance; neither ranking nor dispatch proves task effect.
 - 浏览器 `browser_document_observation` 的空正文状态不等于页面空白或加载完成；先读原图，不能按旧图坐标配新控件，也不自动重放。 / Empty UIA is not an empty/ready page; inspect current images without mixing observation generations.
-- 窗口、词级与观察恢复契约已纳入 test.4；链接文档中的早期源码状态属于历史记录。 / Window, word and observation contracts ship in test.4; earlier source-only entries in linked documents are historical.
+- 窗口、词级与观察恢复契约已纳入 test.4；链接文档中的早期源码状态属于历史记录。 / Window, word and observation contracts ship in test.5; earlier source-only entries in linked documents are historical.
 
-**test.4 窗口观察 / Window observation：** `close_launched_window` 等待时增加 `close_observation` 和 `next_action`；收到 `inspect_owned_window` 后保持会话，读取并选择确切弹窗，解决已授权选项后再核验原窗口消失。动作关闭目标时，派发成功与事后图缺失必须分开判断，不根据外层 `operation_succeeded=false` 重放；先检查退出诊断；目标仍存在时才明确选窗补图，已退出时不要重新选择不存在的窗口。`instant_stop.cleanup_verified` 只代表宿主收尾。 / Pending closure now carries owned-window diagnostics; inspect the exact dialog, resolve an authorized choice and verify disappearance before stopping. Dispatch may succeed with unavailable post-images; inspect rather than replay. [详细契约 / Details](EXECUTION_WINDOW_TRANSITIONS.md)。
+**test.5 窗口观察 / Window observation：** `close_launched_window` 等待时增加 `close_observation` 和 `next_action`；收到 `inspect_owned_window` 后保持会话，读取并选择确切弹窗，解决已授权选项后再核验原窗口消失。动作关闭目标时，派发成功与事后图缺失必须分开判断，不根据外层 `operation_succeeded=false` 重放；先检查退出诊断；目标仍存在时才明确选窗补图，已退出时不要重新选择不存在的窗口。`instant_stop.cleanup_verified` 只代表宿主收尾。 / Pending closure now carries owned-window diagnostics; inspect the exact dialog, resolve an authorized choice and verify disappearance before stopping. Dispatch may succeed with unavailable post-images; inspect rather than replay. [详细契约 / Details](docs/verification/EXECUTION_WINDOW_TRANSITIONS.md)。
 
 本包只提供即时操作，不是学习桥。按用户指定的低风险任务使用本包接口，不使用另一套鼠标工具冒充本包测试。快捷入口使用管理员宿主且自动风险拦截关闭；一次只允许一个 Agent 控制桌面。付款、发送、删除、最终提交等不可逆操作不在本次测试范围。
 
@@ -26,11 +26,11 @@ Instant-mode operations only, not learning. Use this framework for the user's su
 
 `Ctrl+Z` 派发应用原生撤销键，不保证事务回滚或清空文档；按当前应用内容和选区核验效果。同样截图不代表同样撤销历史，不要把它当成测试环境重置，也不要因未清空自动重复按键。 / Ctrl+Z invokes native application undo, not guaranteed rollback or fixture reset. Inspect content and selection; identical screenshots do not imply identical undo history. Do not replay automatically.
 
-**源码恢复契约 / Source recovery contract:** `keyboard_target_not_foreground` 携带拒绝当刻两个 HWND，`phase=not_dispatched` 只证明没有派发该按键；先处理/取消已识别的弹窗，再选择目标并看图，用新请求继续。取消关闭后可明确再次调用 `close_launched_window`；同一模态等待不重复关闭，`instant_result` 查询不产生关闭动作。 / Inspect and resolve the actual focus/modal state before a new request; a new explicit close can follow observed modal dismissal, while receipt reads and pending-modal checks never resend. [边界 / Limits](EXECUTION_FOCUS_RECOVERY.md)。
+**源码恢复契约 / Source recovery contract:** `keyboard_target_not_foreground` 携带拒绝当刻两个 HWND，`phase=not_dispatched` 只证明没有派发该按键；先处理/取消已识别的弹窗，再选择目标并看图，用新请求继续。取消关闭后可明确再次调用 `close_launched_window`；同一模态等待不重复关闭，`instant_result` 查询不产生关闭动作。 / Inspect and resolve the actual focus/modal state before a new request; a new explicit close can follow observed modal dismissal, while receipt reads and pending-modal checks never resend. [边界 / Limits](docs/verification/EXECUTION_FOCUS_RECOVERY.md)。
 
-**明确单词目标 / Explicit word targets（test.4）：** `Double-click the word "East" at the end of the line` 会保持词级目标并使用独立词框；不要把整行框或模型点当作目标命中证据。双击可能包含尾随空格，替换前读取实际选区或原图，效果不明时不自动重放。 / Preserve word identity, inspect actual selection and trailing whitespace before replacement, and never infer success from dispatch. [实测边界 / Limits](EXECUTION_WORD_CONTEXT_FIX.md)。
+**明确单词目标 / Explicit word targets（test.5）：** `Double-click the word "East" at the end of the line` 会保持词级目标并使用独立词框；不要把整行框或模型点当作目标命中证据。双击可能包含尾随空格，替换前读取实际选区或原图，效果不明时不自动重放。 / Preserve word identity, inspect actual selection and trailing whitespace before replacement, and never infer success from dispatch. [实测边界 / Limits](docs/verification/EXECUTION_WORD_CONTEXT_FIX.md)。
 
-**窗口观察恢复 / Window observation recovery：** `operation_success_scope=input_route_only` 时，`operation_succeeded` 只描述输入路由，仍须检查 `observation_status` 和 `agent_review`。旧窗口 after 缺失会返回 `evidence_incomplete` 和 `recovery.candidates`；按任务明确选窗再查看新请求的截图，不重放原输入，也不把同进程窗口自动当后继。 / Inspect input and observation separately; explicitly select and inspect a recovery candidate without replacing old evidence. [完整契约 / Contract](EXECUTION_OBSERVATION_RECOVERY.md)。
+**窗口观察恢复 / Window observation recovery：** `operation_success_scope=input_route_only` 时，`operation_succeeded` 只描述输入路由，仍须检查 `observation_status` 和 `agent_review`。旧窗口 after 缺失会返回 `evidence_incomplete` 和 `recovery.candidates`；按任务明确选窗再查看新请求的截图，不重放原输入，也不把同进程窗口自动当后继。 / Inspect input and observation separately; explicitly select and inspect a recovery candidate without replacing old evidence. [完整契约 / Contract](docs/verification/EXECUTION_OBSERVATION_RECOVERY.md)。
 
 ## 连接顺序 / Connection sequence
 
@@ -52,7 +52,7 @@ Launch uses an observed app_id with optional url; select requires real handle/pr
 
 ## 源码新增：组合动作 / Source-only input sequences
 
-**源码已做有限实测，未发布 / Source-only, bounded live verification, unreleased.** 新增第七个工具 `instant_run`，接受原命令和 `kind=input_sequence`；默认有限等待后一次返回精简回执与原始后图。836 项测试、真实 Google 连续搜索及只填写已验证；不是跨站点准确率或整体提速保证。完整示例、部分完成与超时读取契约见 [组合动作说明 / Input sequences](EXECUTION_INPUT_SEQUENCE.md)。旧 test.4 包只有六个工具，不可调用此入口。 / The new seventh tool bundles a bounded wait, compact receipt and original after image. 836 tests and bounded Google continuous/fill-only cases passed; this is not cross-site accuracy or end-to-end speed assurance. Released test.4 has only six tools and does not support this entrypoint.
+**test.5 候选已做有限实测 / Bounded live verification for the test.5 candidate.** test.5 提供第七个工具 `instant_run`，接受原命令和 `kind=input_sequence`；默认有限等待后一次返回精简回执与原始后图。836 项测试、真实 Google 连续搜索及只填写已验证；不是跨站点准确率或整体提速保证。完整示例、部分完成与超时读取契约见 [组合动作说明 / Input sequences](docs/verification/EXECUTION_INPUT_SEQUENCE.md)。test.5 candidate provides this entrypoint; older six-tool packages do not. / The seventh tool bundles a bounded wait, compact receipt and original after image. 836 tests and bounded Google continuous/fill-only cases passed; this is not cross-site accuracy or end-to-end speed assurance. Released test.4 has only six tools and does not support this entrypoint.
 
 组合仅限 Agent 已决定的“聚焦字段 → 输入 → 核对 → 可选 Enter 搜索”。不要把需要观察后重新决策的结果点击提前加入，不把 `completed` 当成搜索结果正确。`pending` 不等于取消；沿用原 ID 读取，保持 MCP 连接。 / Group only already-decided field input and optional search; inspect the result before choosing a result link. Completion is not task success, and pending is not cancellation. Keep the connection and read the same ID.
 
@@ -82,7 +82,7 @@ Submit one action at a time, await the receipt and inspect images before proceed
 
 `Enter`, `Tab`, `Shift+Tab`, `Escape`, `Backspace`, `Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`, `Ctrl+A`, `Ctrl+Z`, `Ctrl+Y`。
 
-test.4 增加 `Shift+Left/Right/Up/Down/Home/End`、`Ctrl+Home/End`，共 23 种支持键；旧 test.3 不支持新增的 8 种。单项与连续测试的覆盖不同，详见发布记录。 / test.4 ships 23 keys including these eight new chords; do not send the additions to test.3. See release notes for single-operation versus continuous coverage. See [selection keys](EXECUTION_SELECTION_KEYS.md).
+test.5 支持 `Shift+Left/Right/Up/Down/Home/End`、`Ctrl+Home/End`，共 23 种支持键；旧 test.3 不支持新增的 8 种。单项与连续测试的覆盖不同，详见发布记录。 / test.5 supports 23 keys including these eight new chords; do not send the additions to test.3. See release notes for single-operation versus continuous coverage. See [selection keys](docs/verification/EXECUTION_SELECTION_KEYS.md).
 
 按键发给当前焦点；其 x/y 只用于窗口点校验，**不会点击或重新聚焦**。先通过截图确认焦点；切字段用 Tab/Shift+Tab。应用可能不支持撤销/重做，不把按键派发当作生效。不支持任意组合键、shell 或隐式 submit。
 
@@ -155,7 +155,7 @@ IDs are unique per session. Reusing an ID retrieves its original receipt and nev
 不要递归抓取第一个 `action_executed`：`recognition_plan.execution_path` 是 planning 快照，实际输入读 `response.data.result.execution_path`、`agent_step_result` 与 `click_result`。目标关闭后 after 不存在不是未派发，也不独自证明成功，需核对当前窗口状态。 / Planning snapshots are not execution receipts. Read the actual execution fields and independently check task effects and target exit.
 
 
-**可选条件等待，仅源码 / Optional conditional wait, source only:** 在 `step` 或搜索型 `input_sequence` 的 command 中提供 `observation_condition={"text":"准确的可访问名称","control_type":"Text"}`，并设正数 `observation_wait_ms`（最高2000）。只接受明确名称和角色；不知道准确标志时省略，不猜名称。`condition_met` 不等于任务成功或全页渲染完成；`timed_out` 不代表输入没执行，不自动重放。同步 UIA/截图 I/O 不受轮询预算硬中断。 / Supply an exact accessible name and role only when known; otherwise omit the condition. Condition success is not task/full-page success, and timeout must not trigger input replay. Polling budgets do not hard-interrupt synchronous UIA/capture I/O. [完整契约与实测 / Contract and tests](EXECUTION_CONDITIONAL_WAIT.md)。
+**可选条件等待，仅源码 / Optional conditional wait, source only:** 在 `step` 或搜索型 `input_sequence` 的 command 中提供 `observation_condition={"text":"准确的可访问名称","control_type":"Text"}`，并设正数 `observation_wait_ms`（最高2000）。只接受明确名称和角色；不知道准确标志时省略，不猜名称。`condition_met` 不等于任务成功或全页渲染完成；`timed_out` 不代表输入没执行，不自动重放。同步 UIA/截图 I/O 不受轮询预算硬中断。 / Supply an exact accessible name and role only when known; otherwise omit the condition. Condition success is not task/full-page success, and timeout must not trigger input replay. Polling budgets do not hard-interrupt synchronous UIA/capture I/O. [完整契约与实测 / Contract and tests](docs/verification/EXECUTION_CONDITIONAL_WAIT.md)。
 
 
-请求ID必须为1–80位小写ASCII字母/数字/下划线/连字符，首位为字母或数字；非法ID返回invalid_request_id，不入队，修正后沿用同一连接。条件应选稳定的正文标志，不选天气/轮换广告。 / IDs use 1–80 lowercase ASCII alphanumeric/dash/underscore characters, starting alphanumeric. Invalid IDs are rejected before admission; correct them on the same connection. Prefer stable content markers over weather/rotating ads. [独立实测及已知限制 / Acceptance and limits](EXECUTION_AIONUI_ACCEPTANCE_20260921.md)。
+请求ID必须为1–80位小写ASCII字母/数字/下划线/连字符，首位为字母或数字；非法ID返回invalid_request_id，不入队，修正后沿用同一连接。条件应选稳定的正文标志，不选天气/轮换广告。 / IDs use 1–80 lowercase ASCII alphanumeric/dash/underscore characters, starting alphanumeric. Invalid IDs are rejected before admission; correct them on the same connection. Prefer stable content markers over weather/rotating ads. [独立实测及已知限制 / Acceptance and limits](docs/verification/EXECUTION_AIONUI_ACCEPTANCE_20260921.md)。

@@ -1,11 +1,19 @@
-# test.4 发布范围 / Release scope
+# v0.1.0-test.5 发布范围 / Release scope
 
-分支 `codex/release-instant-test-4` 用于第四批即时执行测试版；从 test.3 的干净发布分支增量更新，不提交完整开发工作树的其他修改。 / This branch contains the fourth instant-execution test release, incrementally based on test.3, not unrelated development-worktree changes.
+本候选是 Windows 受监督执行模式测试版，标签为 `instant-v0.1.0-test.5`。
+This candidate is a supervised Windows execution-mode test release, tagged `instant-v0.1.0-test.5`.
 
-运行代码、测试、配置模板和依赖锁定文件逐字节来自已经 Codex 与 AionUi 实机验证的冻结候选 10。冻结清单 SHA-256：`21ffdf6cf5e5100559d706d3c34f52a7da43412701fb73002cd471e25f2aec7d`。发布后处理仅更新公开文档和验证摘要；不重新生成或修改运行代码。 / Runtime, tests, configuration templates and dependency locks match the live-tested frozen candidate byte for byte; only public documentation and verification metadata change.
+## Included / 包含
 
-本批增加选区按键并修复通用定位、原生菜单、剪贴板、窗口观察等问题。不包含学习模式交付，也不新增安全策略。 / Selection keys and common targeting, native-menu, clipboard and window-observation repairs; no learning-mode delivery or new safety policy.
+- MCP stdio runtime with seven tools, including `instant_run` and bounded `input_sequence`.
+- Fresh visible-image OCR, compact original-image receipts, 23 editing keys, window/session lifecycle and explicit cleanup verification.
+- Conditional observation for a known UIA text/control marker; default waits and confirmation boundaries are unchanged.
+- Bilingual setup and agent guidance, plus verification reports under `docs/verification/`.
 
-验收是有人看护的 operator 模式：源码及包内测试集合重叠；同包连续实测和独立复测均通过限定任务，客户端失败保留。自动策略、跨设备和无人值守可靠性并未认证。 / Bounded supervised operator-mode acceptance only; overlapping test counts are not additive and tester failures remain recorded.
+## Evidence and limits / 证据与边界
 
-模型和环境另行安装；ZIP 不含账号、凭据、私人截图、运行会话或模型权重。详见 FRIEND_SETUP.md、AGENT_GUIDE.md、FIXES.md 与 release-verification.json。 / Models/environments are separate; no private operational data is shipped.
+- Current source regression: 841 passing checks. Final bounded AionUi acceptance passed; earlier aborted client attempts and receipt-only follow-up remain recorded as historical evidence.
+- This does not claim cross-site accuracy, whole-page completion, unattended automation, long-term stability, universal hardware support, or support for payment, sending, deletion or final submission.
+- Models, dependencies and user data are not shipped. Use [FRIEND_SETUP.md](FRIEND_SETUP.md), then run no-input smoke before explicitly authorizing supervised low-risk input.
+
+The package builder is `scripts/build_instant_bundle.py`. The bundle is expected to contain the maintained source, `README.md`, `AGENT_GUIDE.md`, `FRIEND_SETUP.md`, `RELEASE_SCOPE.md`, `CHANGELOG.md`, `docs/verification/` and scripts; package validation must precede any publication claim.

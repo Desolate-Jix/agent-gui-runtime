@@ -104,7 +104,7 @@ Generate local JSON/TOML snippets without input permission first. The generator 
 2. JSON 客户端：将 `mcpServers` 内的 **`agent-review-instant` 单个条目**合并进现有配置，保留其他服务器；已经有同名条目就更新，**不要新增重复项或覆盖整个配置文件**。
 3. TOML 客户端：使用生成的 `mcp-config.local.toml` 对应段落；不要把 JSON 粘进 TOML。
 4. 如果设置界面要求分别填写命令、参数、环境变量，分别使用生成配置中的 `command`、`args`、`env`；不要把全部参数拼进 executable 字段。
-5. 保存并重新连接服务器。若当前对话没有工具，按该 Agent 软件的机制新开对话。应出现 `instant_start / instant_status / instant_submit / instant_result / instant_image / instant_stop` 六个工具。
+5. 保存并重新连接服务器。若当前对话没有工具，按该 Agent 软件的机制新开对话。应出现 `instant_start / instant_status / instant_submit / instant_result / instant_image / instant_stop / instant_run` 七个工具。
 
 Merge only the named server into the existing configuration, or update it in place. Preserve other servers. Use the generated TOML section only for TOML clients. Reconnect; some clients need a new conversation to expose tools. If the folder is moved later, regenerate the snippets because paths are absolute.
 
@@ -116,7 +116,7 @@ Merge only the named server into the existing configuration, or update it in pla
 .\.venv\Scripts\python.exe scripts\smoke_instant_mcp.py --model-directory "D:\AgentReviewModels\VISTA-4B" --data-dir "D:\AgentReviewInstantSmoke" --report "D:\AgentReviewInstant\smoke-report.json"
 ```
 
-该脚本只验证 MCP 握手、六个工具、宿主启动、窗口发现、同 ID 回执及清理，**不发送键鼠、不截图、不进行模型推理**。注意：脚本为了覆盖实际配置通道，会在它自己隔离的宿主中启用本地输入能力，但脚本不提交输入命令；它不会修改你给 Agent 的配置。完成后应看到 `cleanup_verified=true`。
+该脚本只验证 MCP 握手、七个工具、宿主启动、窗口发现、同 ID 回执及清理，**不发送键鼠、不截图、不进行模型推理**。注意：脚本为了覆盖实际配置通道，会在它自己隔离的宿主中启用本地输入能力，但脚本不提交输入命令；它不会修改你给 Agent 的配置。完成后应看到 `cleanup_verified=true`。
 
 这个结果只代表连接正常。入口依赖检查可另执行：
 
@@ -170,14 +170,14 @@ Give `AGENT_GUIDE.md` to the agent. Verify the target and original image, prepar
 ## 7. 本预览版边界与反馈 / Limits and useful feedback
 
 - 填写支持 `clear_existing=true` 显式替换已有内容；不会自动回车。
-- 当前 test.4 测试版支持 23 种编辑键，完整列表见 AGENT_GUIDE.md。按键作用于当前焦点，x/y 不会点击；不是任意快捷键工具。
+- 当前 test.5 测试版支持 23 种编辑键，完整列表见 AGENT_GUIDE.md。按键作用于当前焦点，x/y 不会点击；不是任意快捷键工具。
 - `read_text` 从当前可见原图返回 OCR 文字与行框，不是 DOM 或整篇结构化内容提取；需要 Agent 看图核验错字和截断。
 - 支持识别单击、右击和双击；不包含学习、自动流程记忆、拖拽或任意应用可靠性的保证。
 - `verified=null` / `awaiting_agent_review` 表示还需要 Agent 检查实际效果；不能只凭 `returned`／成功标志判断业务目标完成。
 - 截图可能遮罩被遮挡区域，这不是分辨率下降。不要点击遮罩内无法确认的目标。
 - 日志可能包含填写的原文，原图会进入连接的 Agent 上下文并可能发送给其模型服务。请用无敏感内容的专用测试窗口；向开发者反馈时只提供脱敏必要片段，不转发整个数据目录、账号信息或模型访问令牌。
 
-The test.4 release supports text replacement, 23 current-focus editing keys, single/right/double clicks and visible-image OCR. Arbitrary hotkeys, DOM/full-document extraction, learning and drag remain outside the supported surface. Inspect actual effects; receipts are not task proof. Occlusion masks are not downsampling. Logs may contain entered text and screenshots may reach the connected agent's model provider; share only minimal redacted diagnostics.
+The test.5 candidate supports text replacement, 23 current-focus editing keys, single/right/double clicks and visible-image OCR. Arbitrary hotkeys, DOM/full-document extraction, learning and drag remain outside the supported surface. Inspect actual effects; receipts are not task proof. Occlusion masks are not downsampling. Logs may contain entered text and screenshots may reach the connected agent's model provider; share only minimal redacted diagnostics.
 
 遇到问题请记录：包版本、Windows／GPU／驱动、失败命令类型和请求 ID、错误原文、每步 `command_wall_ms`、是否已经产生实际动作，以及清理结果。**不必为了收集报告而反复执行失败输入。**
 
