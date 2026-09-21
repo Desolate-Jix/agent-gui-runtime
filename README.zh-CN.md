@@ -1,23 +1,24 @@
-## Agent Review Instant v0.1.0-test.3 — 执行模式测试版 / Execution-mode test release
+## Agent Review Instant v0.1.0-test.4 — 执行模式测试版 / Execution-mode test release
 
-[下载与校验和 / Download & checksum](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.0-test.3) · [已交付源码 / Released source](https://github.com/Desolate-Jix/agent-gui-runtime/tree/instant-v0.1.0-test.3) · [安装、模型下载与配置 / Setup & models](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.0-test.3/FRIEND_SETUP.md) · [Agent 操作说明 / Agent guide](docs/INSTANT_PUBLIC_AGENT_GUIDE.md)
+[下载 ZIP / Download ZIP](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.4/AgentReviewInstant-v0.1.0-test.4.zip) · [发布页与校验和 / Release & checksum](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.0-test.4) · [安装与模型下载 / Setup & models](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.0-test.4/FRIEND_SETUP.md) · [Agent 操作说明 / Agent guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.0-test.4/AGENT_GUIDE.md) · [可复现源码 / Released source](https://github.com/Desolate-Jix/agent-gui-runtime/tree/instant-v0.1.0-test.4)
 
-当前提供给外部 Agent 的是 Windows MCP **执行模式源码测试包**，不是正式稳定版或学习模式交付。支持窗口发现/启动/选择/切换/最大化、识别单击/右击/双击、文本填写与替换、15 种编辑键、上下滚动、当前截图 OCR 读文，以及正常关闭本会话启动的窗口。通过六个 `instant_*` MCP 工具接入；结果由 Agent 查看原始前后截图判断。
+当前公开交付是 Windows MCP **即时执行源码测试包**，不是完整学习模式或正式稳定版。支持窗口发现/启动/选择/切换/最大化/正常关闭、识别单击/右击/双击、文本替换、23 种编辑按键、上下滚动和当前截图 OCR 读取。通过六个 `instant_*` 工具接入；Agent 根据前后原图判断结果。
 
-The current public delivery is a Windows MCP **execution-mode source test bundle**, not a stable release or learning-mode delivery. It supports window discovery/launch/selection/focus/maximization, recognition-based single/right/double clicks, typing/replacement, 15 editing keys, vertical scrolling, visible-image OCR and closing session-launched windows. Six `instant_*` tools expose these operations; the Agent judges outcomes from original before/after images.
+The public delivery is a Windows MCP **instant-execution source test bundle**, not learning-mode delivery or a stable release. It supports window operations, recognition-based single/right/double clicks, typing/replacement, 23 editing keys, vertical scrolling and visible-image OCR. Six tools expose operations; the Agent judges original-image evidence.
 
-**仅用于有人看护的低风险测试。** 快捷配置使用管理员宿主、关闭框架自动风险拦截，会真实操作键盘鼠标。UAC 由本人确认；一个桌面同时只让一个 Agent 操作。模型与 Python 环境另行安装，不包含私人数据。 / **Supervised low-risk testing only.** Quick setup uses an administrator host with automatic risk interception disabled and real input. Confirm UAC yourself and use one desktop controller at a time. Models/Python dependencies are separate; private data is excluded.
+**有人看护的低风险 operator 模式。** 快捷配置使用管理员 MCP 并关闭自动风险拦截；UAC 由本人确认，一次只让一个 Agent 操作。模型、依赖环境单独安装，ZIP 不含用户数据。普通目标也可按安装说明使用非管理员入口。 / **Supervised low-risk operator mode only.** Quick configuration enables elevated input without automatic risk interception; confirm UAC yourself and use one controller. Models/dependencies are separate; the bundle contains no user data. Non-elevated setup is documented for normal targets.
 
-### 当前进度 / Current progress — 2026-09-20
+### 本次交付 / This release — 2026-09-21
 
-- test.3 已发布：438 项源码相关检查、270 项隔离交付检查（集合重叠，不相加）；Codex 实测后，AionUi 同冻结候选完成 22 项 Google 检查，原图摘要与清理已复核。 / Released after scoped source/isolation checks and Codex-first, independent AionUi Google acceptance; counts overlap.
-- 新增 Wikipedia 覆盖：搜索 Wellington → 进入文章 → 读取 → 下滚重读 → 返回顶部 → 关闭清理；Codex 核对 13 条操作回执、26 项图片摘要。AionUi 报告修正客户端后 19 项通过，**最新原始证据尚待维护者独立复核**，不算首次全通过或长期稳定。 / Additional Wikipedia coverage reviewed by Codex; AionUi reports 19 passing checks after tester corrections, with maintainer evidence review still pending.
-- 识别点击约 16.7 秒、读文约 6–10 秒、滚动约 2.1 秒，仅为该次 Wikipedia 命令耗时，不是通用性能保证。历史偶发双击/缺帧、跨设备与首次安装验证仍开放。 / Single-run command timings only; intermittent double-click/missing-frame and broader device/install validation remain open.
-- 顺序：**稳定性和补齐操作 → 速度优化 → 学习模式**。新候选先由 Codex 使用框架在真实网站/应用测试，再交 AionUi 独立复测；累计验证后发布，不为每次文档/测试变更重新打包，本阶段不新增安全功能。 / **Stability and operations → speed → learning.** Codex tests real targets through the framework before AionUi independently checks the frozen candidate; batch releases follow evidence, not every edit. No new safety features in this phase.
+- 修复初始空剪贴板输入、明确目标定位、原生编辑区/菜单、窗口退出观察、UIA 有界遍历与鼠标坐标转换；增加 8 个选区/文档边界键。 / Shared clipboard, target, native-editor/menu, observation, UIA traversal and coordinate repairs; eight selection/document-boundary keys added.
+- 743 项源码与 743 项发布目录隔离回归通过（集合重叠），7 项构建检查，241 个运行时导入无开发工作树泄漏；真实 MCP 零输入检查通过。 / Scoped source/release-isolation and stdio checks pass; counts overlap and are not additive.
+- Codex 先实测，AionUi 再对同冻结运行时独立完成记事本修改/两种撤销/不保存，以及真实网页搜索→正文→后退两轮，关闭各自窗口并清理宿主。外部客户端 5 项问题修正后重跑通过，不记为首次全部通过。 / Codex-first, then independent same-runtime native/browser continuous acceptance passed after disclosed tester-client repairs; not first-attempt perfection.
+- 运行代码与受测候选逐字节一致；599 个 ZIP 条目按清单核验，GitHub 下载回读摘要一致。包约 2.82 MiB，不含环境或模型。 / Runtime matches the tested candidate; all ZIP members and the public download hash were verified.
+- Back 仍约 20–23 秒，首次安装/管理员目标/跨设备未在本批重测；不是长期准确率或无人值守承诺。 / Back remains about 20–23 s; fresh-install, elevated-target and cross-device coverage were not repeated.
 
-[本轮覆盖、失败与边界 / Coverage, failures and limits](docs/EXECUTION_CROSS_SITE_TEST3.md)
+[完整更新与限制 / Full changes and limitations](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.0-test.4/FIXES.md)
 
-以下为历史完整产品资料，不代表当前执行模式测试包的交付范围。此处文档更新不改动 test.3 标签、ZIP、校验和或已安装客户端。 / Historical full-product material follows, separate from the current test bundle. This documentation update does not change the test.3 tag, ZIP, checksum or installed clients.
+后续主线：稳定性与操作覆盖 → 速度优化 → 学习模式；本轮发布后停止，供用户检查。以下为历史完整产品资料，不代表此测试包交付范围。 / Roadmap: stability/operations, then speed, then learning. Work stops after this release for user review; historical full-product material below is outside this bundle.
 
 ---
 
