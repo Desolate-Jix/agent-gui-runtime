@@ -609,6 +609,16 @@ def _confirmed_ancestor_control_ids(
     for key in duplicate_runtime:
         by_runtime.pop(key, None)
 
+    # 共享祖先在同一次快照中只读一次 COM 父级；失败也保持本帧未知，不跨帧缓存。
+    parent_keys = {}
+
+    def parent_key_for(wrapper):
+        token = id(wrapper)
+        if token not in parent_keys:
+            parent = _safe_call(getattr(wrapper, "parent", None))
+            parent_keys[token] = _runtime_id_key(parent) if parent is not None else None
+        return parent_keys[token]
+
     result: dict[int, tuple[str, ...]] = {}
     for wrapper, _control in observed:
         current = wrapper
@@ -620,10 +630,7 @@ def _confirmed_ancestor_control_ids(
         chain: list[str] = []
         valid = True
         while True:
-            parent = _safe_call(getattr(current, "parent", None))
-            if parent is None:
-                break
-            parent_key = _runtime_id_key(parent)
+            parent_key = parent_key_for(current)
             if parent_key is None or parent_key not in by_runtime:
                 # 已确认的前缀仍可信；未采集的更高层不被臆造进快照。
                 break

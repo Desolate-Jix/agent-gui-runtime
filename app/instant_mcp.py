@@ -1,6 +1,7 @@
 """即时模式的本地 STDIO 适配；动作仍交给原串行会话执行。"""
 
 import base64
+import asyncio
 import hashlib
 import json
 import os
@@ -45,9 +46,14 @@ class InstantStartError(ValueError):
         self.next = next_step
 
 
+def _validate_request_id(request_id):
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", request_id):
+        raise ValueError("request_id must be 1-80 lowercase ASCII letters/digits/dashes/underscores")
+
+
 class InstantCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "close_launched_window"]
+    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "close_launched_window"]
     app_id: str | None = None
     url: str | None = None
     handle: int | None = Field(default=None, gt=0)
@@ -55,6 +61,7 @@ class InstantCommand(BaseModel):
     operation: Literal["execute_recognition_plan", "type_text", "scroll", "press_key"] | None = None
     request: dict | None = None
     observation_wait_ms: int | None = Field(default=None, ge=0, le=2000)
+    observation_condition: dict | None = None
     max_chars: int | None = Field(default=None, ge=1, le=20000)
 
     def command(self):
@@ -63,7 +70,8 @@ class InstantCommand(BaseModel):
             "launch": ({"app_id"}, {"app_id", "url"}),
             "select": ({"handle", "process_id"}, {"handle", "process_id"}),
             "close_launched_window": ({"handle", "process_id"}, {"handle", "process_id"}),
-            "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms"}),
+            "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition"}),
+            "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition"}),
             "read_text": (set(), {"max_chars"}),
         }
         required, allowed = fields.get(self.kind, (set(), set()))
@@ -74,18 +82,28 @@ class InstantCommand(BaseModel):
             from app.desktop_review.local_action_contract import _validated_request
             # 只验证，运行时再次验证；不在桥接层重写执行请求。
             _validated_request(self.operation, self.request)
+        elif self.kind == "input_sequence":
+            from app.desktop_review.input_sequence import InputSequenceRequest
+            InputSequenceRequest.model_validate(self.request)
+        if self.observation_condition is not None:
+            from app.core.observation_policy import resolve_render_grace_ms, local_action_observation_kind
+            from app.desktop_review.conditional_observation import validate_condition
+            if self.kind == "input_sequence" and not self.request.get("submit_search"):
+                raise ValueError("input_sequence condition requires submit_search")
+            action = ("press_enter" if self.kind == "input_sequence" else
+                      local_action_observation_kind(self.operation, self.request))
+            validate_condition(self.observation_condition, resolve_render_grace_ms(action, self.observation_wait_ms))
         return value
 
 
 def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    from app.core.json_snapshot import read_json_snapshot
+    return read_json_snapshot(path)
 
 
 def write_json(path, value):
-    path = Path(path)
-    temp = path.with_name(path.name + "." + uuid4().hex + ".tmp")
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temp.replace(path)
+    from app.core.json_snapshot import write_json_snapshot
+    write_json_snapshot(path, value)
 
 
 class InstantSession:
@@ -204,8 +222,7 @@ class InstantSession:
                 "automatic_retry_allowed": False}
 
     def _path(self, request_id, folder):
-        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", request_id):
-            raise ValueError("request_id must be 1-80 lowercase ASCII letters/digits/dashes/underscores")
+        _validate_request_id(request_id)
         if self.session is None:
             raise ValueError("start a session first")
         return self.session / folder / (request_id + ".json")
@@ -236,8 +253,15 @@ class InstantSession:
             if not path.exists():
                 if not self._path(request_id, "commands").exists():
                     return {"request_id": request_id, "status": "not_found"}
-                return {"request_id": request_id, "status": "pending" if self.status()["host_alive"] else "result_unknown",
-                        "automatic_retry_allowed": False}
+                pending = {"request_id": request_id, "status": "pending" if self.status()["host_alive"] else "result_unknown",
+                           "automatic_retry_allowed": False}
+                progress_path = self._path(request_id, "sequence-progress")
+                if progress_path.is_file():
+                    progress = read_json(progress_path)
+                    pending["partial_execution"] = {"completed_steps": progress.get("completed_steps", []),
+                        "phase": progress.get("phase"), "action_executed": progress.get("action_executed"),
+                        "progress_path": str(progress_path), "task_effect_verified": None}
+                return pending
             response = read_json(path)
             # 输入可能含个人文本，桥接回执不重复回显原始命令。
             response.pop("command", None)
@@ -260,13 +284,19 @@ class InstantSession:
                     for key in ("handle", "process_id"))
             receipt = {"request_id": request_id, **response, "operation_succeeded": ok,
                        "task_effect_verified": False, "automatic_retry_allowed": False}
-            if result.get("contract_version") == "local_direct_step_v1":
-                receipt["operation_succeeded"] = ok and api.get("success") is True
+            sequence = result.get("contract_version") == "input_sequence_v1"
+            if result.get("contract_version") == "local_direct_step_v1" or sequence:
+                receipt["operation_succeeded"] = (ok and result.get("status") == "completed" if sequence
+                                                   else ok and api.get("success") is True)
                 before = result.get("capture") or {}
                 after = (result.get("observation") or {}).get("capture") or {}
                 receipt.update(operation_success_scope="input_route_only",
                                input_route_succeeded=api.get("success") if type(api.get("success")) is bool else None,
                                observation_status=(result.get("observation") or {}).get("status", "not_requested"))
+                if sequence:
+                    receipt.update(operation_success_scope="declared_sequence_only",
+                        input_route_succeeded=None, task_effect_verified=None,
+                        action_executed=result.get("action_executed"))
                 receipt["agent_review"] = {
                     "status": "awaiting_agent_review" if before and after else "evidence_incomplete",
                     "verified": None, "judged_by": "agent",
@@ -275,7 +305,7 @@ class InstantSession:
                                "available": bool(before), "sha256": before.get("sha256")},
                     "after": {"tool": "instant_image", "arguments": {"request_id": request_id, "view": "after"},
                               "frame_id": "after_settled", "image_path": after.get("image_path"),
-                              "observation_stage": "after_render_wait", "render_completion_verified": False,
+                              "observation_stage": after.get("observation_stage", "after_render_wait"), "render_completion_verified": False,
                               "render_grace_ms": (result.get("observation") or {}).get("render_grace_ms"),
                               "available": bool(after), "sha256": after.get("sha256")},
                     "comparison": {"frame_pair": ["before_input", "after_settled"],
@@ -393,11 +423,14 @@ def build_server(session):
         return session.status()
 
     def instant_submit(request_id: str, command: InstantCommand) -> CallToolResult:
+        validation_code = "invalid_request_id"
         try:
+            _validate_request_id(request_id)
+            validation_code = "invalid_command"
             validated = command.command()
         except ValueError as error:
             # 只捕获入队前校验，日志不写输入值，执行异常不能伪装成未执行。
-            detail = {"code": "invalid_command", "message": str(error)}
+            detail = {"code": validation_code, "message": str(error)}
             if isinstance(error, ValidationError):
                 detail = {"code": "invalid_command", "message": "Invalid action field values",
                           "issues": [{"field": list(e["loc"]), "type": e["type"]}
@@ -417,7 +450,8 @@ def build_server(session):
                         log.write(json.dumps({"timestamp_unix": time.time(), **value}, ensure_ascii=False) + "\n")
                 except OSError as log_error:
                     value["diagnostic_log_error"] = type(log_error).__name__
-            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))])
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+                                  structuredContent=value)
         try:
             value = session.submit(request_id, validated)
         except InstantAdmissionError as error:
@@ -430,8 +464,58 @@ def build_server(session):
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
                               structuredContent=value)
 
-    def instant_result(request_id: str) -> dict:
-        return session.result(request_id)
+    def result_bundle(request_id, *, detail="compact", images="after", receipt=None):
+        from app.instant_receipt import compact_receipt
+        receipt = session.result(request_id) if receipt is None else receipt
+        value = (compact_receipt(receipt, full_receipt_path=session._path(request_id, "responses"))
+                 if detail == "compact" else receipt)
+        image_blocks = []
+        if images != "none" and receipt.get("status") not in {"pending", "not_found", "result_unknown"}:
+            delivery = []
+            for view in (("before", "after") if images == "both" else ("after",)):
+                try:
+                    data = session.image(request_id, view=view)
+                except InstantImageError as error:
+                    delivery.append({"view": view, "status": "unavailable", "error": {
+                        "code": error.code, "message": str(error)}, "next": error.next})
+                else:
+                    delivery.append({"view": view, "status": "included", "sha256": hashlib.sha256(data).hexdigest(),
+                                     "content_index": len(image_blocks) + 1, "original_pixels": True})
+                    image_blocks.append(ImageContent(type="image", data=base64.b64encode(data).decode("ascii"),
+                                                     mimeType="image/png"))
+            value["image_delivery"] = delivery
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False)),
+                                       *image_blocks], structuredContent=value)
+
+    def instant_result(request_id: str, detail: Literal["full", "compact"] = "full",
+                       images: Literal["none", "after", "both"] = "none") -> CallToolResult:
+        return result_bundle(request_id, detail=detail, images=images)
+
+    async def instant_run(request_id: str, command: InstantCommand, wait_ms: int = 25000,
+                          detail: Literal["compact", "full"] = "compact",
+                          images: Literal["after", "both", "none"] = "after") -> CallToolResult:
+        # 等待只查磁盘回执，不占用会话锁、不重新派发；超时后原命令仍可能在执行。
+        if type(wait_ms) is not int or not 0 <= wait_ms <= 30000:
+            value = {"request_id": request_id, "status": "validation_rejected", "accepted": False,
+                "automatic_retry_allowed": False, "error": {"code": "invalid_wait_ms",
+                "message": "wait_ms must be an integer from 0 to 30000"}}
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value))],
+                                  structuredContent=value)
+        sent = instant_submit(request_id, command)
+        if sent.is_error:
+            return sent
+        deadline = time.monotonic() + wait_ms / 1000
+        while True:
+            value = session.result(request_id)
+            if value.get("status") != "pending":
+                return result_bundle(request_id, detail=detail, images=images, receipt=value)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                value.update(wait_expired=True, command_cancelled=False,
+                    next={"tool": "instant_result", "arguments": {
+                        "request_id": request_id, "detail": detail, "images": images}})
+                return result_bundle(request_id, detail=detail, images=images, receipt=value)
+            await asyncio.sleep(min(.1, remaining))
 
     def instant_image(request_id: str, view: Literal["before", "after"] = "after") -> CallToolResult:
         try:
@@ -448,6 +532,7 @@ def build_server(session):
         return session.stop()
 
     descriptions = {
+        "instant_run": "Preferred one-call execution: submit one durable command, wait up to wait_ms (0..30000, default 25000), return compact receipt plus exact original after PNG together. images=both adds before; detail=full preserves diagnostics. Same commands as instant_submit, including input_sequence request={field_goal,text,clear_existing:true,submit_search:true|false}. A sequence focuses the field through recognition, types, checks the actual focused UIA value, optionally presses Enter for search, then observes. No arbitrary batch, next-result click or task-success claim. Unsupported/unreadable fields interrupt with partial receipts; do not blindly replay. A wait timeout is NOT cancellation: use next to read the same ID, keeping this MCP connection alive.",
         "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option. Known preflight configuration failures return isError=true, status=start_rejected, error.code and next guidance; host_launch_attempted=false refers only to this call, not existing sessions.",
         "instant_status": "Read host, target, pending IDs and cleanup status; no screenshot or input.",
         "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y, Shift+Left, Shift+Right, Shift+Up, Shift+Down, Shift+Home, Shift+End, Ctrl+Home, Ctrl+End. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
@@ -455,6 +540,10 @@ def build_server(session):
         "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Missing/pending/corrupt evidence returns isError=true with status=image_unavailable, error.code and next guidance; it says nothing about whether the original input happened. Do not replay automatically. Compare both frames against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
         "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. Does not close user apps itself; a Windows MCP client may terminate its launched descendants on disconnect. Explicitly close test-created windows first using close_launched_window and verify window_closed.",
     }
-    for fn in (instant_start, instant_status, instant_submit, instant_result, instant_image, instant_stop):
+    descriptions["instant_submit"] += " Also supports kind=input_sequence, request={field_goal,text,clear_existing:true,submit_search:true|false}; observation_wait_ms applies to the final Enter observation. Use instant_run for bounded waiting and inline final image without separate polling/image calls."
+    descriptions["instant_result"] += " Optional detail=compact omits verbose traces; full (default) keeps the old receipt fields. images=after|both includes original PNGs in this same call; default none preserves JSON-only delivery."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Optional command.observation_condition={text:exact_accessible_name,control_type:Text|Hyperlink|Button|Document} enables read-only early observation for step or submit_search sequences. Requires a positive observation_wait_ms budget (navigation defaults to 2000). Only a newly appearing unique visible match, repeated and rechecked after capture, ends early. Accessible names can differ from screenshot captions. Missing/ambiguous/old matches time out and still return an image; inspect observation.condition, not operation_succeeded, for this outcome. This is not full-page readiness or task verification. Synchronous UIA and capture I/O are outside a hard timeout; no input replay. Omit the condition when no reliable marker is known."
+    for fn in (instant_start, instant_status, instant_submit, instant_result, instant_image, instant_stop, instant_run):
         server.add_tool(fn, name=fn.__name__, description=descriptions[fn.__name__])
     return server

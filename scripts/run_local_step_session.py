@@ -19,9 +19,8 @@ def now():
 
 
 def write(path, data):
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    from app.core.json_snapshot import write_json_snapshot
+    write_json_snapshot(path, data)
 
 
 def run_step_command(coordinator, target, command):
@@ -31,7 +30,9 @@ def run_step_command(coordinator, target, command):
     return coordinator.execute_local_step(
         target_window_handle=target["handle"], target_process_id=target["process_id"],
         operation=operation, request=request, include_observation=True,
-        observation_wait_ms=command.get("observation_wait_ms"))
+        observation_wait_ms=command.get("observation_wait_ms"),
+        **({"observation_condition": command["observation_condition"]}
+           if command.get("observation_condition") is not None else {}))
 
 
 def run_read_text_command(capture_current, command):
@@ -203,6 +204,15 @@ def main():
                     response["result"] = run_step_command(co, target, command)
                     observed = response["result"].get("observation", {})
                     response["observation"] = observed.get("capture")
+                elif kind == "input_sequence":
+                    from app.desktop_review.input_sequence import run_input_sequence
+                    progress = out / "sequence-progress"
+                    progress.mkdir(exist_ok=True)
+                    response["result"] = run_input_sequence(co, target, command["request"],
+                        observation_wait_ms=command.get("observation_wait_ms"),
+                        observation_condition=command.get("observation_condition"),
+                        persist=lambda value: write(progress / path.name, value))
+                    response["observation"] = response["result"].get("observation", {}).get("capture")
                 elif kind == "close":
                     response["result"] = {"closing": True}
                 else:

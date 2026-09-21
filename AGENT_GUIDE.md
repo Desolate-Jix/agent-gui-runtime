@@ -1,5 +1,7 @@
 # Agent 接入与操作 / Agent usage — v0.1.0-test.4 candidate
 
+**未发布源码修复 / Unreleased source fix:** 普通“点击输入框”与结构化 input 目标现在也要求模型定位可编辑区内部，避免边框、占位文字字形或相邻搜索按钮；原目标标签保留。按钮/图标/框内单词不因此改成聚焦整个字段。仍须读图核对焦点、实际文字与跳转，派发不等于成功。此修复未进入下方 test.4 独立验收或下载包。/ Plain field-click goals and structured input targets now request interior focus without changing the original label or word/button/icon targets. Inspect actual focus, text and navigation; dispatch is not success. This fix is not part of the test.4 independent acceptance or download. [实测边界 / Limits](EXECUTION_INPUT_FOCUS.md).
+
 本指南对应 test.4：同冻结运行时已通过 Codex 与 AionUi 的限定连续实测，范围与未覆盖项见 FIXES.md；不是通用可靠性保证。 / This test.4 guide covers the same runtime used in bounded Codex and AionUi continuous acceptance; see FIXES.md for limits.
 
 ## 本候选新增契约 / Candidate contracts
@@ -47,6 +49,12 @@ Instant-mode operations only, not learning. Use this framework for the user's su
 `launch` 使用发现结果里的 app_id，可附 url；`select` 使用真实 handle、process_id；`maximize`、`capture` 针对已选窗口。`prepare_models` 可在连续任务前预热一次，`release_models` 释放模型。不要把每次冷启动耗时当成热启动点击耗时。
 
 Launch uses an observed app_id with optional url; select requires real handle/process_id. Maximize/capture use the selected window. Prepare models once for a continuous task and release them when appropriate; cold-start timings are not warm-click timings.
+
+## 源码新增：组合动作 / Source-only input sequences
+
+**源码已做有限实测，未发布 / Source-only, bounded live verification, unreleased.** 新增第七个工具 `instant_run`，接受原命令和 `kind=input_sequence`；默认有限等待后一次返回精简回执与原始后图。836 项测试、真实 Google 连续搜索及只填写已验证；不是跨站点准确率或整体提速保证。完整示例、部分完成与超时读取契约见 [组合动作说明 / Input sequences](EXECUTION_INPUT_SEQUENCE.md)。旧 test.4 包只有六个工具，不可调用此入口。 / The new seventh tool bundles a bounded wait, compact receipt and original after image. 836 tests and bounded Google continuous/fill-only cases passed; this is not cross-site accuracy or end-to-end speed assurance. Released test.4 has only six tools and does not support this entrypoint.
+
+组合仅限 Agent 已决定的“聚焦字段 → 输入 → 核对 → 可选 Enter 搜索”。不要把需要观察后重新决策的结果点击提前加入，不把 `completed` 当成搜索结果正确。`pending` 不等于取消；沿用原 ID 读取，保持 MCP 连接。 / Group only already-decided field input and optional search; inspect the result before choosing a result link. Completion is not task success, and pending is not cancellation. Keep the connection and read the same ID.
 
 ## 单步输入 / Single-step input
 
@@ -145,3 +153,9 @@ IDs are unique per session. Reusing an ID retrieves its original receipt and nev
 ### 读取实际执行结果 / Read the actual execution result
 
 不要递归抓取第一个 `action_executed`：`recognition_plan.execution_path` 是 planning 快照，实际输入读 `response.data.result.execution_path`、`agent_step_result` 与 `click_result`。目标关闭后 after 不存在不是未派发，也不独自证明成功，需核对当前窗口状态。 / Planning snapshots are not execution receipts. Read the actual execution fields and independently check task effects and target exit.
+
+
+**可选条件等待，仅源码 / Optional conditional wait, source only:** 在 `step` 或搜索型 `input_sequence` 的 command 中提供 `observation_condition={"text":"准确的可访问名称","control_type":"Text"}`，并设正数 `observation_wait_ms`（最高2000）。只接受明确名称和角色；不知道准确标志时省略，不猜名称。`condition_met` 不等于任务成功或全页渲染完成；`timed_out` 不代表输入没执行，不自动重放。同步 UIA/截图 I/O 不受轮询预算硬中断。 / Supply an exact accessible name and role only when known; otherwise omit the condition. Condition success is not task/full-page success, and timeout must not trigger input replay. Polling budgets do not hard-interrupt synchronous UIA/capture I/O. [完整契约与实测 / Contract and tests](EXECUTION_CONDITIONAL_WAIT.md)。
+
+
+请求ID必须为1–80位小写ASCII字母/数字/下划线/连字符，首位为字母或数字；非法ID返回invalid_request_id，不入队，修正后沿用同一连接。条件应选稳定的正文标志，不选天气/轮换广告。 / IDs use 1–80 lowercase ASCII alphanumeric/dash/underscore characters, starting alphanumeric. Invalid IDs are rejected before admission; correct them on the same connection. Prefer stable content markers over weather/rotating ads. [独立实测及已知限制 / Acceptance and limits](EXECUTION_AIONUI_ACCEPTANCE_20260921.md)。

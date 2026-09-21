@@ -25,7 +25,8 @@ async def run(root, model, data, administrator=False):
             assert evidence["server_version"] == "0.1.0-test.4"
             tools = await client.list_tools()
             evidence["tools"] = [t.name for t in tools.tools]
-            assert len(evidence["tools"]) == 6
+            assert set(evidence["tools"]) == {"instant_start", "instant_status", "instant_submit",
+                "instant_result", "instant_image", "instant_stop", "instant_run"}
 
             async def call(name, args=None):
                 result = await client.call_tool(name, args or {})

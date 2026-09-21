@@ -2044,6 +2044,9 @@ def _vista_direct_grounding_options(request: VisionRecognitionPlanRequestModel) 
 
 
 def _vista_direct_prompt(goal: str, control_target: dict[str, Any] | None = None, semantic_action: str | None = None) -> str:
+    focus_instruction = (' Return a suitable focus point in the interior of the editable field, '
+                         'away from its borders; not the search/action button and not merely '
+                         'the placeholder text glyphs.')
     if semantic_action == "fill_field":
         label = control_target["label"] if control_target is not None else goal
         return (f'Locate the editable text field for "{label}". Return a suitable focus point '
@@ -2052,8 +2055,13 @@ def _vista_direct_prompt(goal: str, control_target: dict[str, Any] | None = None
     if control_target is not None:
         from app.operation.recognition.control_target import validate_control_target
         target = validate_control_target(control_target)
-        return f'Locate the exact visible {target["role"]} "{target["label"]}". {goal}'
+        return (f'Locate the exact visible {target["role"]} "{target["label"]}". {goal}'
+                + (focus_instruction if target["role"] == "input" else ""))
     from app.operation.recognition.text_match import explicit_target_label, explicit_word_target
+    from app.operation.recognition.control_target import _field_target_label
+    # 点击输入框与填写共享内部聚焦语义；保留完整目标，不把框内单词或按钮改成字段。
+    if _field_target_label(goal) is not None and explicit_word_target(goal) is None:
+        return goal + focus_instruction
     from app.operation.recognition.candidate_ranker import _goal_label_match
     label = explicit_target_label(goal)
     if label and not explicit_word_target(goal) and _goal_label_match(goal, [label], negated=False):
@@ -2066,6 +2074,17 @@ def _vista_direct_prompt(goal: str, control_target: dict[str, Any] | None = None
     if lowered.startswith(("click ", "locate ", "press ", "tap ")) or text.startswith(("点击", "定位", "选择", "打开")):
         return text
     return f"Click {text}"
+
+
+def _field_focus_uses_full_context(goal, control_target=None):
+    """聚焦字段保留整图语境，不把位置描述重新解释为局部裁图中的另一个字段。"""
+    from app.operation.recognition.control_target import _field_target_label
+    from app.operation.recognition.text_match import explicit_word_target
+    if explicit_word_target(goal) is not None:
+        return False
+    if control_target is not None:
+        return control_target.get("role") == "input"
+    return _field_target_label(goal) is not None
 
 
 def _bbox_around_point(point: dict[str, int], *, image_size: ImageSize, size: int) -> dict[str, int]:
@@ -3220,6 +3239,8 @@ def _recognition_plan_from_vista_point(
                 coarse_identity = None
                 coarse_identity_error = None
                 coarse_control_proof = None
+                field_focus_full_context = ((request.metadata or {}).get("semantic_action") != "fill_field"
+                    and _field_focus_uses_full_context(goal, control_target))
                 if direct_options.get("refine") is not False:
                     from app.operation.recognition.text_match import explicit_word_target
                     coarse_identity, coarse_identity_error = _vista_direct_current_uia_identity(
@@ -3246,7 +3267,8 @@ def _recognition_plan_from_vista_point(
                         if has_current_control_ocr_binding(probe, local,
                                 fast_inventory.get("raw_uia_snapshot"), hashlib.sha256(image_path.read_bytes()).hexdigest()):
                             coarse_control_proof = deepcopy(probe.element.evidence[EVIDENCE_KEY])
-                if direct_options.get("refine") is not False and coarse_control_proof is None:
+                if (direct_options.get("refine") is not False and coarse_control_proof is None
+                        and not field_focus_full_context):
                     # 本帧粗定位若已命中唯一身份，裁图须包含完整控件，不能从左侧落点截断长标签。
                     if coarse_identity is not None and coarse_identity_error is None:
                         refine_preprocess = _prepare_vista_candidate_roi_image(
@@ -3307,6 +3329,8 @@ def _recognition_plan_from_vista_point(
                     if coarse_control_proof is not None:
                         vista_payload.update(refine_skipped_reason="current_control_ocr_already_grounded",
                                              coarse_control_ocr_binding=coarse_control_proof)
+                    elif field_focus_full_context:
+                        vista_payload.update(refine_skipped_reason="field_focus_preserves_full_image_context")
                 if (_point_in_browser_chrome(vista_payload["point"], image_size=input_image_size, app_name=request.app_name)
                         and (fast_inventory.get("raw_uia_snapshot") or {}).get("scan_scope") != "browser_chrome"):
                     selected_candidate = None

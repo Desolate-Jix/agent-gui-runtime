@@ -46,6 +46,20 @@ def check(root):
     reader = importlib.import_module("app.operation.screen_reading.captured_text")
     ocr = importlib.import_module("app.core.ocr_service")
     instant = importlib.import_module("app.instant_mcp")
+    sequence = importlib.import_module("app.desktop_review.input_sequence")
+    fields = importlib.import_module("app.agent.windows_text_field_reader")
+    receipts = importlib.import_module("app.instant_receipt")
+    if not (callable(sequence.run_input_sequence) and callable(fields.WindowsTextFieldReader.read_field)
+            and callable(receipts.compact_receipt)):
+        raise ValueError("input sequence dependencies are unavailable")
+    instant.InstantCommand.model_validate({"kind": "input_sequence", "request": {
+        "field_goal": "Search input", "text": "dependency preflight only", "submit_search": True}}).command()
+    condition = importlib.import_module("app.desktop_review.conditional_observation")
+    if not callable(condition.observe_until_condition) or not callable(condition.UIATextConditionProbe):
+        raise ValueError("conditional observation dependencies are unavailable")
+    instant.InstantCommand.model_validate({"kind": "input_sequence", "request": {
+        "field_goal": "Search input", "text": "preflight", "submit_search": True},
+        "observation_condition": {"text": "Expected result", "control_type": "Text"}}).command()
     if not callable(reader.read_captured_text) or not callable(ocr.ocr_service.scan_image):
         raise ValueError("observation handler is not callable: read_text")
     instant.InstantCommand.model_validate({"kind": "read_text", "max_chars": 10000})
@@ -82,6 +96,7 @@ def check(root):
             "operations": checked, "observation_operations": observation_checked,
             "recognition_click_variants": click_variants, "window_operations": window_checked,
             "editing_keys_validated": editing_keys,
+            "input_sequence": {"handler_imported": True, "request_validated": True, "handler_executed": False},
             "local_module_sources": sources,
             "limitation": "Dependency and request validation only, not real input or end-to-end acceptance"}
 

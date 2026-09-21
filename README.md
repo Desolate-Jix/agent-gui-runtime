@@ -2,7 +2,15 @@
 
 **v0.1.0-test.4 · 执行模式测试版 / Execution-mode test release**
 
-本目录对应已发布的 test.4 测试包；它不是正式稳定版。/ This directory corresponds to the published test.4 package; it is not a production-stable release.
+本分支以已发布 test.4 为基线，包含尚未打包的输入框聚焦修复；下方下载仍是原 test.4，不含本修复。它不是正式稳定版。/ This branch is based on published test.4 with an unreleased input-focus fix. The download below remains the original test.4 and does not contain this fix. It is not production-stable.
+
+源码修复与实测边界见 [输入框聚焦回归 / Input-focus regression](EXECUTION_INPUT_FOCUS.md)。/ See the linked report for source changes and live-test limits.
+
+**已做有限实测的源码新增，未发布 / Source additions with bounded live verification, unreleased:** `input_sequence` 组合填写、核对与可选回车；`instant_run` 一次返回精简回执和原图；同帧 UIA 父链去重；新增可选 `observation_condition`，等待明确标志出现后返回，不改变默认等待。836 项测试通过；本轮同一真实 Google 窗口连续完成 9 次搜索、1 次已有标志负控，原图与清理均复核。条件命中的“回车＋后图”0.76–1.50秒，对照固定等待2.17–2.31秒；这是有限组件测量，不是总体性能或准确率保证。旧 test.4 不包含这些新增。 / 836 tests passed. Nine real same-session searches and one pre-existing-marker control completed, with image and cleanup verification. Successful conditional Enter-plus-observation took 0.76–1.50s versus fixed 2.17–2.31s; bounded component measurements are not overall performance or accuracy guarantees. Released test.4 does not include these additions.
+
+**独立验收 / Independent acceptance:** AionUi 同源码最终一轮8次搜索＋1次负控通过；前4次客户端中止、条件未提前结束及跨宿主窗口归属问题如实保留。验收后的两处回执修复另做无输入复核，详见 [验收范围 / Acceptance](EXECUTION_AIONUI_ACCEPTANCE_20260921.md)。 / The final independent round passed; earlier failures and remaining limits are retained. Receipt-only follow-up is distinguished from live coverage.
+
+见 [接口 / API](EXECUTION_INPUT_SEQUENCE.md)、[早期测试 / Earlier tests](EXECUTION_INPUT_SEQUENCE_TESTS.md)、[UIA 去重 / UIA deduplication](EXECUTION_UIA_SCAN_OPTIMIZATION.md) 与 [条件等待与稳定性 / Conditional wait and stability](EXECUTION_CONDITIONAL_WAIT.md)。
 
 让支持 MCP 的 Agent 通过同一套 Windows 框架识别界面、点击、填写、编辑按键和滚动，并读取原始截图判断结果。
 

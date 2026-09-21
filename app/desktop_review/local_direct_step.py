@@ -14,6 +14,7 @@ from app.core.local_input_policy import _local_operator_input_scope, _local_oper
 from app.core.runtime_artifacts import RuntimeTimer
 from app.core.screenshot import ScreenshotService, CaptureVisibilityError
 from app.core.observation_policy import local_action_observation_kind, resolve_render_grace_ms
+from .conditional_observation import UIATextConditionProbe, observe_until_condition, validate_condition
 from .local_action_contract import LocalActionFieldsError, _validated_request
 from .post_action_recovery import observe_recovery_windows
 
@@ -65,7 +66,7 @@ class LocalDirectStepMixin:
 
     def execute_local_step(self, *, target_window_handle: int, target_process_id: int,
                            operation: str, request: dict, include_observation: bool = False,
-                           observation_wait_ms: int | None = None) -> dict:
+                           observation_wait_ms: int | None = None, observation_condition: dict | None = None) -> dict:
         """仅本地协调器入口；不经 Agent JSON 关闭策略，也不要求一次性执行凭据。"""
         timer = RuntimeTimer(contract_version="local_step_invocation_timing_v1")
         timing_context = {"invocation_id": "local-invocation-" + uuid4().hex,
@@ -85,6 +86,8 @@ class LocalDirectStepMixin:
                 timing_context["observation_wait_ms"] = (resolve_render_grace_ms(
                     local_action_observation_kind(operation, request), observation_wait_ms)
                     if include_observation else 0)
+                timing_context["observation_condition"] = validate_condition(
+                    observation_condition, timing_context["observation_wait_ms"])
             with timer.step("coordinator_begin"):
                 self._begin("idle")
             configuration = None
@@ -182,6 +185,11 @@ class LocalDirectStepMixin:
                 image_path = Path(capture["image_path"])
                 report["capture"] = {**capture, "sha256": sha256(image_path.read_bytes()).hexdigest(),
                     "frame_id": "before_input", "observation_stage": "before_input"}
+            condition = timing_context.get("observation_condition")
+            if condition is not None:
+                with timer.step("observation_condition_baseline"):
+                    probe = UIATextConditionProbe(condition, manager, reader, identity)
+                    baseline = probe()
             # 范围内只有此会话的原路由可执行；无一次性凭据、无默认/跨会话放行。
             with _local_operator_input_scope(manager=manager, identity_reader=reader, identity=identity,
                     window_rect=window_rect,
@@ -204,23 +212,33 @@ class LocalDirectStepMixin:
                 with timer.step("post_action_observation"):
                     try:
                         wait_ms = timing_context.get("observation_wait_ms", 0)
-                        if wait_ms and self._cancel_wait.wait(wait_ms / 1000):
-                            raise ValueError("post-action observation cancelled")
-                        after = _capture_observation(manager, reader, identity, handle, pid, output, roi)
+                        condition_result = None
+                        if condition is not None:
+                            after, condition_result = observe_until_condition(probe,
+                                lambda: _capture_observation(manager, reader, identity, handle, pid, output, roi),
+                                baseline, timeout_ms=wait_ms, cancel=self._cancel_wait, clock=perf_counter)
+                            condition_result["expected"] = condition
+                        else:
+                            if wait_ms and self._cancel_wait.wait(wait_ms / 1000):
+                                raise ValueError("post-action observation cancelled")
+                            after = _capture_observation(manager, reader, identity, handle, pid, output, roi)
                         after = {**after, "frame_id": "after_settled",
-                            "observation_stage": "after_render_wait", "render_grace_ms": wait_ms,
+                            "observation_stage": "after_condition_wait" if condition else "after_render_wait", "render_grace_ms": wait_ms,
                             "render_completion_verified": False}
                         report["observation"] = {"status": "captured", "capture": after,
                             "source": "post_action", "authorizes_action": False,
                             "readiness": "unassessed", "render_grace_ms": wait_ms,
                             "automatic_retry_allowed": False}
+                        if condition_result is not None:
+                            report["observation"].update(condition=condition_result, readiness=condition_result["status"])
                     except Exception as error:
                         if report["phase"] == "returned":
                             report["phase"] = "returned_observation_unavailable"
                         elif report["phase"] != "not_dispatched":
                             report["phase"] = "result_unknown"
                         report["observation"] = {"status": "unavailable", "error_type": type(error).__name__,
-                            "error_code": error.reason if isinstance(error, CaptureVisibilityError) else "post_action_observation_failed",
+                            "error_code": error.reason if isinstance(error, CaptureVisibilityError) else
+                                getattr(error, "reason_code", "post_action_observation_failed"),
                             "next_action": "capture_current_state_without_replaying_input",
                             "authorizes_action": False, "readiness": "unknown", "automatic_retry_allowed": False}
                         recovery = observe_recovery_windows(manager, identity)
