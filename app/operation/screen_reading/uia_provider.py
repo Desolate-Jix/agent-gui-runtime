@@ -4,7 +4,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from itertools import islice
 from typing import Any, Iterator, Mapping
 
 from app.core.window_manager import BoundWindow, window_manager
@@ -14,10 +13,123 @@ UIA_PROVIDER_VERSION = "windows_uia_provider_v1"
 DEFAULT_UIA_MAX_CONTROLS = 1000
 HARD_UIA_MAX_CONTROLS = 4000
 
+
+class _FiniteUIAChildren:
+    def __init__(self, array, wrap):
+        self.array, self.wrap = array, wrap
+        self.length = int(array.Length)
+        if self.length < 0:
+            raise ValueError("Negative UIA children array length")
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, index):
+        if not 0 <= index < self.length:
+            raise IndexError(index)
+        return self.wrap(self.array.GetElement(index))
+
+
+def _finite_uia_children(wrapper):
+    """直接读取有限子元素数组；不使用会吞 COM 异常的 children 包装或兄弟游标。"""
+    from pywinauto.uia_defines import IUIA
+    from pywinauto.uia_element_info import UIAElementInfo
+
+    api = IUIA()
+    array = wrapper.element_info.element.FindAll(api.tree_scope["children"], api.true_condition)
+    return _FiniteUIAChildren(array, lambda element: wrapper.backend.generic_wrapper_class(UIAElementInfo(element)))
+
+
+def _bounded_uia_walk(root, *, budget, prune_documents=False):
+    """按读取次数限额遍历；重复身份、环和读取异常不能伪装成完整树。"""
+    budget = max(1, int(budget))
+    wrappers, errors, frames, seen = [], [], [], set()
+    current, path = root, frozenset()
+    excluded = 0
+    while current is not None:
+        wrappers.append(current)
+        key = _runtime_id_key(current)
+        duplicate = key is not None and key in seen
+        if key is None:
+            errors.append({"reason": "runtime_identity_unavailable", "index": len(wrappers) - 1})
+        elif duplicate:
+            errors.append({"reason": "ancestor_cycle" if key in path else "duplicate_runtime_id",
+                           "index": len(wrappers) - 1, "runtime_id": list(_public_runtime_id(current.element_info) or [])})
+        if key is not None:
+            seen.add(key)
+        document = prune_documents and str(getattr(current.element_info, "control_type", "")).casefold() == "document"
+        excluded += int(document)
+        if len(wrappers) == budget:
+            break
+        if not duplicate and not document:
+            try:
+                children = _finite_uia_children(current)
+                frames.append([children, 0, path | {key} if key is not None else path])
+            except Exception as exc:
+                errors.append({"reason": "children_enumeration_failed", "index": len(wrappers) - 1,
+                               "message": str(exc), "winerror": getattr(exc, "winerror", None)})
+        current = None
+        while frames:
+            children, index, child_path = frames[-1]
+            try:
+                if index >= len(children):
+                    frames.pop()
+                    continue
+                frames[-1][1] += 1
+                current, path = children[index], child_path
+                break
+            except Exception as exc:
+                frames.pop()
+                errors.append({"reason": "children_enumeration_failed", "child_index": index,
+                               "message": str(exc), "winerror": getattr(exc, "winerror", None)})
+    truncated = len(wrappers) == budget
+    return {"wrappers": wrappers, "scan_visited_count": len(wrappers),
+            "scan_complete": not truncated and not errors, "truncated": truncated,
+            "truncation_reason": "control_budget_reached" if truncated else None,
+            "traversal_errors": errors, "excluded_document_count": excluded}
+
+
+def _walk_metadata(walk):
+    return {key: value for key, value in walk.items() if key not in {"wrappers", "excluded_document_count"}}
+
 _PINNED_UIA_SNAPSHOT: ContextVar[dict[str, Any] | None] = ContextVar(
     "pinned_uia_snapshot",
     default=None,
 )
+
+
+def browser_document_observation(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    """只描述同帧正文树的可见证据，不把遍历结束或空树当作页面就绪。"""
+    controls = [item for item in snapshot.get("controls", []) if isinstance(item, dict)]
+    documents = {item.get("control_id") for item in controls
+                 if item.get("control_type") == "Document" and item.get("control_id")}
+    descendants = [item for item in controls
+                   if item.get("control_type") != "Document"
+                   and documents.intersection(item.get("ancestor_control_ids") or [])]
+    process = str((snapshot.get("window") or {}).get("process_name")).casefold()
+    if process not in {"msedge.exe", "chrome.exe", "chromium.exe"}:
+        status = "not_applicable"
+    elif snapshot.get("scan_scope", "bound_window") != "bound_window":
+        status = "out_of_scope"
+    elif snapshot.get("status") != "ok":
+        status = "unavailable"
+    elif descendants:
+        status = "content_observed"
+    elif snapshot.get("scan_complete") is not True or snapshot.get("truncated") is not False:
+        status = "unknown_incomplete_scan"
+    else:
+        status = "document_without_observed_content" if documents else "no_document_observed"
+    applicable = status not in {"not_applicable", "out_of_scope", "unavailable"}
+    return {
+        "contract_version": "browser_document_observation_v1", "status": status,
+        "document_count": len(documents) if applicable else 0,
+        "content_control_count": len(descendants) if applicable else 0,
+        "scan_complete": snapshot.get("scan_complete"),
+        "page_ready_verified": None, "automatic_retry_allowed": False,
+        "next_action": "inspect_current_image_or_request_fresh_observation"
+            if status in {"document_without_observed_content", "no_document_observed",
+                          "unknown_incomplete_scan", "unavailable"} else None,
+    }
 
 
 @contextmanager
@@ -55,6 +167,7 @@ class UIAControl:
     runtime_id: tuple[int, ...] | None = None
     ancestor_control_ids: tuple[str, ...] = ()
     scroll_axes: dict[str, bool | None] | None = None
+    native_client_geometry: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +185,8 @@ class UIAControl:
             "runtime_id": list(self.runtime_id) if self.runtime_id is not None else None,
             "ancestor_control_ids": list(self.ancestor_control_ids),
             **({"scroll_axes": dict(self.scroll_axes)} if self.scroll_axes is not None else {}),
+            **({"native_client_geometry": deepcopy(self.native_client_geometry)}
+               if self.native_client_geometry is not None else {}),
         }
 
 
@@ -107,10 +222,8 @@ class WindowsUIAProvider:
 
             desktop = Desktop(backend="uia")
             root = desktop.window(handle=bound.handle).wrapper_object()
-            # 先固定根 wrapper，再按深度优先顺序只拉取预算内控件，避免全树枚举后截断。
-            wrappers = [root, *islice(root.iter_descendants(), control_budget - 1)]
-            # 到达预算即保守标为截断，不额外读取可能阻塞的下一个节点来猜完整性。
-            truncated = len(wrappers) == control_budget
+            walk = _bounded_uia_walk(root, budget=control_budget)
+            wrappers = walk["wrappers"]
             observed: list[tuple[Any, UIAControl]] = []
             zero_area_structural_ids: set[int] = set()
             for index, wrapper in enumerate(wrappers):
@@ -129,10 +242,7 @@ class WindowsUIAProvider:
                 "provider_version": self.version,
                 "status": "ok",
                 "scan_budget": control_budget,
-                "scan_visited_count": len(wrappers),
-                "scan_complete": not truncated,
-                "truncated": truncated,
-                "truncation_reason": "control_budget_reached" if truncated else None,
+                **_walk_metadata(walk),
                 "window": {
                     "handle": bound.handle,
                     "title": bound.title,
@@ -162,9 +272,41 @@ class WindowsUIAProvider:
                 if not identity or not any(identity == (item.get("controls") or [{}])[0].get("runtime_id") for item in scopes):
                     scopes.append(scope)
             snapshot["menu_scopes"] = scopes
+            if str(bound.process_name).casefold() in {"msedge.exe", "chrome.exe", "chromium.exe"}:
+                snapshot["browser_chrome_scope"] = self._browser_chrome_scope(root, bound=bound, window=snapshot["window"])
+                snapshot["browser_document_observation"] = browser_document_observation(snapshot)
             return snapshot
         except Exception as exc:
             return self._unavailable("uia_scan_failed", str(exc))
+
+    def _browser_chrome_scope(self, root, *, bound, window):
+        """独立有界遍历浏览器外壳；不下钻网页 Document，也不声称整页完整。"""
+        budget = DEFAULT_UIA_MAX_CONTROLS
+        try:
+            walk = _bounded_uia_walk(root, budget=budget, prune_documents=True)
+            wrappers = walk["wrappers"]
+            observed = []
+            zero_area_ids = set()
+            documents = 0
+            for index, wrapper in enumerate(wrappers):
+                if str(wrapper.element_info.control_type).casefold() == "document":
+                    documents += 1
+                    continue
+                control = self._control_from_wrapper(wrapper, bound=bound, index=index,
+                    zero_area_structural_ids=zero_area_ids)
+                if control is not None:
+                    observed.append((wrapper, control))
+            ancestors = _confirmed_ancestor_control_ids(observed, traversed_wrappers=wrappers,
+                zero_area_structural_ids=zero_area_ids)
+            controls = [replace(control, ancestor_control_ids=ancestors.get(id(wrapper), ())).to_dict()
+                        for wrapper, control in observed]
+            return {"provider": self.provider_id, "provider_version": self.version,
+                    "status": "ok", "scan_scope": "browser_chrome", "scan_budget": budget,
+                    **_walk_metadata(walk), "excluded_document_count": documents,
+                    "window": deepcopy(window), "controls": controls, "control_count": len(controls)}
+        except Exception as exc:
+            return {"status": "unavailable", "scan_scope": "browser_chrome", "scan_complete": False,
+                    "reason": "browser_chrome_scan_failed", "message": str(exc)}
 
     def _complete_menu_scopes(self, observed, *, controls, bound, window, root_is_owned_popup=False):
         """只补采当前树已证实归属的唯一可见菜单，不扩大全窗口扫描预算。"""
@@ -181,7 +323,8 @@ class WindowsUIAProvider:
         wrapper, original = menus[0]
         budget = 128
         try:
-            wrappers = [wrapper, *islice(wrapper.iter_descendants(), budget - 1)]
+            walk = _bounded_uia_walk(wrapper, budget=budget)
+            wrappers = walk["wrappers"]
             zero_ids = set()
             items = []
             for index, current in enumerate(wrappers):
@@ -199,8 +342,7 @@ class WindowsUIAProvider:
             return [{"provider": self.provider_id, "provider_version": self.version, "status": "ok",
                      "scan_scope": "menu_subtree",
                      "source_menu_control_id": original.control_id,
-                     "scan_budget": budget, "scan_visited_count": len(wrappers),
-                     "scan_complete": len(wrappers) < budget, "truncated": len(wrappers) == budget,
+                     "scan_budget": budget, **_walk_metadata(walk),
                      "window": dict(window), "control_count": len(scoped), "controls": scoped}]
         except Exception as exc:
             return [{"status": "unavailable", "scan_scope": "menu_subtree",
@@ -216,7 +358,7 @@ class WindowsUIAProvider:
         handles = []
         def collect(handle, _):
             if (handle != bound.handle and win32gui.IsWindowVisible(handle)
-                    and win32gui.GetAncestor(handle, 3) == bound.handle
+                    and window_manager._is_owned_popup(handle, bound.handle)
                     and win32process.GetWindowThreadProcessId(handle)[1] == bound.process_id):
                 handles.append(handle)
         win32gui.EnumWindows(collect, None)
@@ -229,9 +371,10 @@ class WindowsUIAProvider:
         for handle in handles:
             try:
                 root = desktop.window(handle=handle).wrapper_object()
-                wrappers = [root, *islice(root.iter_descendants(), 127)]
-                if len(wrappers) == 128:
-                    scopes.append({"status": "unavailable", "reason": "owned_popup_scan_incomplete", "scan_complete": False})
+                walk = _bounded_uia_walk(root, budget=128)
+                wrappers = walk["wrappers"]
+                if not walk["scan_complete"]:
+                    scopes.append({"status": "unavailable", "reason": "owned_popup_scan_incomplete", **_walk_metadata(walk)})
                     continue
                 zero_ids, observed = set(), []
                 for index, wrapper in enumerate(wrappers):
@@ -313,6 +456,9 @@ class WindowsUIAProvider:
             patterns=patterns,
             runtime_id=_public_runtime_id(info),
             scroll_axes=_scroll_axes(wrapper) if "Scroll" in patterns else None,
+            native_client_geometry=_native_edit_client_geometry(
+                info, bound=bound, screen_bbox=screen_bbox, control_type=control_type,
+            ) if str(control_type).casefold() in {"edit", "textbox"} else None,
         )
 
     def _unavailable(self, code: str, message: str) -> dict[str, Any]:
@@ -326,6 +472,97 @@ class WindowsUIAProvider:
             "controls": [],
         }
 
+
+
+class _NativeEditGeometryBackend:
+    @contextmanager
+    def physical_pixels(self):
+        import ctypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        setter = user32.SetThreadDpiAwarenessContext
+        setter.argtypes = [ctypes.c_void_p]
+        setter.restype = ctypes.c_void_p
+        previous = setter(ctypes.c_void_p(-4))
+        if not previous:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            yield
+        finally:
+            if not setter(previous):
+                raise ctypes.WinError(ctypes.get_last_error())
+
+    def identity(self, handle):
+        import win32gui
+        import win32process
+        from pywinauto.uia_element_info import UIAElementInfo
+
+        return (win32gui.GetAncestor(handle, 2), win32process.GetWindowThreadProcessId(handle)[1],
+                win32gui.GetClassName(handle), _public_runtime_id(UIAElementInfo(handle)))
+
+    def client_rect(self, handle):
+        import win32gui
+
+        return win32gui.GetClientRect(handle)
+
+    def to_screen(self, handle, point):
+        import win32gui
+
+        return win32gui.ClientToScreen(handle, point)
+
+
+def _native_edit_geometry_backend():
+    return _NativeEditGeometryBackend()
+
+
+def _native_edit_client_geometry(info, *, bound, screen_bbox, control_type):
+    """只为身份匹配的原生编辑 HWND 读取真实客户区，不从 UIA 大框猜测滚动条宽度。"""
+    base = {"status": "unavailable", "source": "win32_edit_client_rect",
+            "coordinate_space": "capture_image_pixels"}
+    if str(control_type).casefold() not in {"edit", "textbox"}:
+        return {**base, "status": "not_applicable", "reason": "not_edit_control"}
+    try:
+        # element_info.handle 是当前元素的 NativeWindowHandle，不使用 wrapper 的祖先回退。
+        handle = getattr(info, "handle", None)
+        if type(handle) is not int or handle <= 0:
+            return {**base, "reason": "native_window_handle_unavailable"}
+        base["native_window_handle"] = handle
+        runtime_id = _public_runtime_id(info)
+        if runtime_id is None:
+            return {**base, "reason": "native_element_identity_unavailable"}
+        backend = _native_edit_geometry_backend()
+        with backend.physical_pixels():
+            identity = backend.identity(handle)
+            root, pid, native_class, native_runtime_id = identity
+            if root != bound.handle:
+                return {**base, "reason": "native_window_root_mismatch"}
+            if bound.process_id is None or pid != bound.process_id:
+                return {**base, "reason": "native_window_process_mismatch"}
+            if native_runtime_id != runtime_id:
+                return {**base, "reason": "native_element_identity_mismatch"}
+            native_class = str(native_class).casefold()
+            if native_class != "edit" and not native_class.startswith("richedit"):
+                return {**base, "reason": "not_native_edit_class"}
+            left, top, right, bottom = backend.client_rect(handle)
+            x, y = backend.to_screen(handle, (left, top))
+            x2, y2 = backend.to_screen(handle, (right, bottom))
+            if x2 <= x or y2 <= y or right <= left or bottom <= top:
+                return {**base, "reason": "invalid_client_geometry"}
+            if (x < screen_bbox.x or y < screen_bbox.y
+                    or x2 > screen_bbox.x + screen_bbox.w or y2 > screen_bbox.y + screen_bbox.h):
+                return {**base, "reason": "client_geometry_outside_control"}
+            if (x < bound.rect.left or y < bound.rect.top
+                    or x2 > bound.rect.right or y2 > bound.rect.bottom):
+                return {**base, "reason": "client_geometry_outside_capture"}
+            if backend.identity(handle) != identity:
+                return {**base, "reason": "native_element_identity_changed"}
+        return {**base, "status": "ok", "reason": "current_native_edit_client_rect",
+                "bbox": {"x": x - bound.rect.left, "y": y - bound.rect.top, "w": x2 - x, "h": y2 - y},
+                "screen_bbox": {"x": x, "y": y, "w": x2 - x, "h": y2 - y}}
+    except Exception as exc:
+        # 可选 Win32 证据失败不抹掉 UIA 原始控件；保留原因给调用方判断。
+        return {**base, "reason": "native_client_geometry_failed", "message": str(exc),
+                "winerror": getattr(exc, "winerror", None)}
 
 
 def _runtime_id_key(wrapper: Any) -> tuple[tuple[str, int | str], ...] | None:

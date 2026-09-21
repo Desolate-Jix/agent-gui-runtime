@@ -57,6 +57,14 @@ def uia_control_is_action_identity(control: Mapping[str, object]) -> bool:
     }
 
 
+def explicit_browser_navigation_goal(goal: str) -> bool:
+    """只识别明确点浏览器导航按钮的单步目标，不把正文提及当目标。"""
+    return bool(re.match(
+        r"\s*(?:(?:left|single)[ -]?)?click\s+(?:the\s+)?browser(?:'s)?\s+"
+        r"(?:back|forward|refresh|reload)\s+button\b", goal, re.I)
+        or re.match(r"\s*点击浏览器(?:工具栏(?:的)?)?(?:返回|后退|前进|刷新)按钮", goal))
+
+
 def explicit_menu_item_goal(goal: str) -> bool:
     """识别菜单项为动作目标，不能因上下文提到菜单就改用菜单子树。"""
     action = re.match(r"\s*(?:(?:(?:left|right|double|single)[ -]?)?click|select|choose)\s+(?:the\s+)?", goal, re.I)
@@ -71,20 +79,31 @@ def explicit_menu_item_goal(goal: str) -> bool:
     return bool(target and not re.search(r"\b(?:then|inside|within|button|input|field|box|word)\b", target.group("label"), re.I))
 
 
+def _field_target_label(goal):
+    """空标签表示泛型字段；字段前的限定词必须保留为完整名称。"""
+    # 动作后的方位介词仍指字段本身；框内单词/按钮由下方目标边界排除。
+    action = re.match(r"\s*(?:right[ -]?click|double[ -]?click|click|focus|locate)\b\s*(?:(?:on|inside|within|in)\s+)?", goal, re.I)
+    if action is None:
+        return None
+    tail = goal[action.end():]
+    field = re.search(r"\b(?:(?:search\s+)?input\s+(?:box|field)|search\s+(?:box|field)|text\s+(?:box|field|area)|textbox|textarea|combobox)\b", tail, re.I)
+    if field is None:
+        return None
+    prefix = re.sub(r"^\s*(?:the|an?)\s+", "", tail[:field.start()], count=1, flags=re.I).strip()
+    if re.search(r"\b(?:inside|within|in|on|word|button|link|label|icon|menu|checkbox|radio)\b|[,;.!?\n]", prefix, re.I):
+        return None
+    # Quick search input box 的 search 属于名称，不能只留下 Quick。
+    if prefix and re.match(r"search\b", field.group(), re.I):
+        prefix += " search"
+    return " ".join(unicodedata.normalize("NFC", prefix).split())
+
+
 def generic_field_target(goal, *, control_target=None, target_text=None):
     """只识别直接指向字段的动作，不把框内单词、按钮或明确标签泛化。"""
     from app.operation.recognition.text_match import explicit_target_marker
     if control_target is not None or target_text or explicit_target_marker(goal):
         return False
-    # 动作后的方位介词仍指字段本身；框内单词/按钮由下方目标边界排除。
-    action = re.match(r"\s*(?:right[ -]?click|double[ -]?click|click|focus|locate)\b\s*(?:(?:on|inside|within|in)\s+)?", goal, re.I)
-    if action is None:
-        return False
-    tail = goal[action.end():]
-    field = re.search(r"\b(?:input\s+(?:box|field)|search\s+(?:box|field)|text\s+(?:box|field|area)|textbox|textarea|combobox)\b", tail, re.I)
-    if field is None:
-        return False
-    return re.search(r"\b(?:inside|within|in|on|word|button|link|label|icon|menu|checkbox|radio)\b", tail[:field.start()], re.I) is None
+    return _field_target_label(goal) == ""
 
 
 def uia_action_identity_matches(control, *, goal, control_target=None, target_text=None):
@@ -95,12 +114,27 @@ def uia_action_identity_matches(control, *, goal, control_target=None, target_te
         return False
     if control_target is not None:
         return uia_control_matches(control, control_target)
-    if generic_field_target(goal, target_text=target_text):
+    from app.operation.recognition.text_match import explicit_target_role, explicit_target_marker
+    requested_role = explicit_target_role(goal)
+    if requested_role is not None:
+        expected = {"menu item": {"menuitem"}, "radio button": {"radiobutton"},
+                    "hyperlink": {"hyperlink"}, "link": {"hyperlink"}, "button": {"button", "splitbutton"},
+                    "tab": {"tabitem"}, "checkbox": {"checkbox"},
+                    "input": {"edit", "textbox", "combobox"}, "field": {"edit", "textbox", "combobox"}}
+        if re.sub(r"\s+", "", str(control.get("control_type") or "").casefold()) not in expected[requested_role]:
+            return False
+    field_label = _field_target_label(goal) if explicit_target_marker(goal) is None else None
+    if generic_field_target(goal, target_text=target_text) or field_label:
         # 动态值不是字段标签；这里只限定角色，唯一几何与状态由当前树消费者核验。
         kind = str(control.get("control_type") or "").casefold()
         patterns = {str(item).casefold() for item in control.get("patterns") or []}
-        return (kind in {"edit", "textbox", "text box"} and bool(patterns & {"value", "text"})
-                or kind in {"combobox", "combo box"} and {"value", "text"} <= patterns)
+        editable = (kind in {"edit", "textbox", "text box"} and bool(patterns & {"value", "text"})
+                    or kind in {"combobox", "combo box"} and {"value", "text"} <= patterns)
+        if field_label:
+            label = " ".join(unicodedata.normalize("NFC", str(control.get("name") or "")).split()).casefold()
+            requested = field_label.casefold()
+            return editable and label == requested and (not target_text or label == " ".join(str(target_text).split()).casefold())
+        return editable
     target_key = re.sub(r'\s+', ' ', str(target_text or '').strip().casefold())
     label_key = re.sub(r'\s+', ' ', str(control.get('name') or '').strip().casefold())
     return ((not target_key or label_key == target_key)

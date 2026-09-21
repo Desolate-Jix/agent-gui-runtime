@@ -22,7 +22,7 @@ async def run(root, model, data, administrator=False):
         async with ClientSession(*streams) as client:
             initialized = await client.initialize()
             evidence["server_version"] = initialized.server_info.version
-            assert evidence["server_version"] == "0.1.0-test.3"
+            assert evidence["server_version"] == "0.1.0-test.4"
             tools = await client.list_tools()
             evidence["tools"] = [t.name for t in tools.tools]
             assert len(evidence["tools"]) == 6

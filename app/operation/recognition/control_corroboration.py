@@ -1,4 +1,4 @@
-"""同一当前可点击控件内的模型点与独立 OCR 绑定；不扩大框或移动点击点。"""
+"""同一当前可点击控件内的模型点与独立 OCR 绑定，保留原点和派生点来源。"""
 from collections.abc import Mapping
 import re
 import unicodedata
@@ -41,7 +41,7 @@ def current_control_ocr_binding(candidate, local, uia, screenshot_sha256):
             or uia.get('scan_complete') is not True or uia.get('truncated') is not False
             or not isinstance(screenshot_sha256, str) or not re.fullmatch('[0-9a-f]{64}', screenshot_sha256)
             or candidate.role not in {'button', 'link'} or candidate.element.role != candidate.role
-            or local.coordinate_source != 'vista_point_v1_corroborated_by_local_ocr'
+            or local.coordinate_source not in {'vista_point_v1_corroborated_by_local_ocr', 'current_control_ocr_text_center'}
             or not candidate.eligible or not candidate.element.interaction_policy.allowed
             or local.candidate_id != candidate.candidate_id or local.element_id != candidate.element_id):
         return None
@@ -53,8 +53,14 @@ def current_control_ocr_binding(candidate, local, uia, screenshot_sha256):
     evidence = candidate.element.evidence
     action = evidence.get('screen_inventory_action') or {}
     model = evidence.get('vista_direct_identity') or {}
+    centered = local.coordinate_source == 'current_control_ocr_text_center'
+    model_point = model.get('point')
+    if centered and (not _box(text_box) or point != {
+            'x': text_box['x'] + text_box['w'] // 2, 'y': text_box['y'] + text_box['h'] // 2}):
+        return None
     if (action.get('source') != 'windows_uia.controls' or model.get('source') != 'vista_direct_point_grounding'
-            or model.get('point') != point or action.get('bbox') != bbox
+            or (not centered and model_point != point) or not _inside(bbox, model_point)
+            or action.get('bbox') != bbox
             or (candidate.refined_bbox is not None and candidate.refined_bbox != bbox)
             or not _inside(bbox, point) or not _contains(bbox, text_box)
             or not _contains(local.crop_bbox, text_box)):
@@ -81,12 +87,13 @@ def current_control_ocr_binding(candidate, local, uia, screenshot_sha256):
             continue
         # 浏览器可能为整个事件冒泡容器暴露 Invoke；已证实的结构祖先不是独立命中目标。
         if (other.get('control_id') in (control.get('ancestor_control_ids') or [])
-                and other.get('control_type') in {'Group', 'Pane', 'Document'}
+                and (other.get('control_type') in {'Group', 'Pane', 'Document'}
+                     or (other.get('control_type') == 'ListItem' and other.get('patterns') == []))
                 and _contains(other.get('bbox'), bbox)):
             continue
         actionable = _actionable(other) or other.get('control_type') in {
             'Edit', 'ComboBox', 'TextBox', 'TabItem', 'TreeItem', 'ListItem', 'RadioButton', 'SplitButton'}
-        if actionable and (_inside(other.get('bbox'), point)
+        if actionable and (_inside(other.get('bbox'), point) or _inside(other.get('bbox'), model_point)
                            or _overlaps(other.get('bbox'), text_box)):
             return None
     def normalize(value):
@@ -99,7 +106,8 @@ def current_control_ocr_binding(candidate, local, uia, screenshot_sha256):
             'runtime_id': list(runtime_id),
             'candidate_id': candidate.candidate_id, 'element_id': candidate.element_id,
             'bbox': dict(bbox), 'point': dict(point), 'matched_text': local.matched_text,
-            'matched_text_bbox': dict(text_box)}
+            'matched_text_bbox': dict(text_box),
+            **({'model_point': dict(model_point), 'coordinate_source': local.coordinate_source} if centered else {})}
 
 
 def has_current_control_ocr_binding(candidate, local, uia, screenshot_sha256):

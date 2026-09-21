@@ -170,14 +170,14 @@ Give `AGENT_GUIDE.md` to the agent. Verify the target and original image, prepar
 ## 7. 本预览版边界与反馈 / Limits and useful feedback
 
 - 填写支持 `clear_existing=true` 显式替换已有内容；不会自动回车。
-- 按键支持 15 种编辑键，完整列表见 AGENT_GUIDE.md。按键作用于当前焦点，x/y 不会点击；不是任意快捷键工具。
-- 本包没有通用结构化内容读取接口。Agent 可以查看原图并理解内容，但不要将这算成框架“读取接口”已通过。
-- 不包含学习、自动流程记忆、拖拽或右键的交付保证。
+- 当前 test.4 测试版支持 23 种编辑键，完整列表见 AGENT_GUIDE.md。按键作用于当前焦点，x/y 不会点击；不是任意快捷键工具。
+- `read_text` 从当前可见原图返回 OCR 文字与行框，不是 DOM 或整篇结构化内容提取；需要 Agent 看图核验错字和截断。
+- 支持识别单击、右击和双击；不包含学习、自动流程记忆、拖拽或任意应用可靠性的保证。
 - `verified=null` / `awaiting_agent_review` 表示还需要 Agent 检查实际效果；不能只凭 `returned`／成功标志判断业务目标完成。
 - 截图可能遮罩被遮挡区域，这不是分辨率下降。不要点击遮罩内无法确认的目标。
 - 日志可能包含填写的原文，原图会进入连接的 Agent 上下文并可能发送给其模型服务。请用无敏感内容的专用测试窗口；向开发者反馈时只提供脱敏必要片段，不转发整个数据目录、账号信息或模型访问令牌。
 
-Explicit text replacement and 15 current-focus editing keys are supported. Arbitrary hotkeys, structured content reading, learning, drag and right-click remain outside the supported surface. Inspect actual effects; returned receipts are not semantic task proof. Occlusion masks are not image downsampling. Logs can contain entered text, and returned screenshots may reach the connected agent's model provider; share only minimal redacted diagnostics.
+The test.4 release supports text replacement, 23 current-focus editing keys, single/right/double clicks and visible-image OCR. Arbitrary hotkeys, DOM/full-document extraction, learning and drag remain outside the supported surface. Inspect actual effects; receipts are not task proof. Occlusion masks are not downsampling. Logs may contain entered text and screenshots may reach the connected agent's model provider; share only minimal redacted diagnostics.
 
 遇到问题请记录：包版本、Windows／GPU／驱动、失败命令类型和请求 ID、错误原文、每步 `command_wall_ms`、是否已经产生实际动作，以及清理结果。**不必为了收集报告而反复执行失败输入。**
 

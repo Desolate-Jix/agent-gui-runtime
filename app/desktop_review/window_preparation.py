@@ -14,7 +14,7 @@ from app.agent.native_identity import (
     validate_native_identity_fact,
 )
 from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore, content_sha256
-from app.core.window_close import post_window_close, window_handle_exists
+from app.core.window_close import observe_close_wait, post_window_close, window_handle_exists
 
 
 class WindowPreparationMixin:
@@ -217,7 +217,7 @@ class WindowPreparationMixin:
         if identity is None:
             raise self._error("window_close_not_launched", "window was not launched by this coordinator")
         close_state = getattr(self, "_launched_window_close_state", {})
-        # 已发关闭请求后只补确认，窗口消失时不能再绑定它。
+        # 同一关闭等待只补确认；已观察到弹窗退出后，新调用可重新请求关闭。
         if close_state.get((target_window_handle, target_process_id)) and not window_handle_exists(target_window_handle):
             self._launched_window_identities.pop((target_window_handle, target_process_id), None)
             close_state.pop((target_window_handle, target_process_id), None)
@@ -233,7 +233,13 @@ class WindowPreparationMixin:
             raise self._error("window_close_identity_unavailable", "launched window identity is unavailable") from error
         if current != identity:
             raise self._error("window_close_identity_changed", "launched window identity changed")
-        if not close_state.get((target_window_handle, target_process_id), False):
+        previous = close_state.get((target_window_handle, target_process_id), False)
+        modal_dismissed = False
+        if isinstance(previous, dict) and previous.get("modal_observed"):
+            observed = observe_close_wait(target_window_handle, target_process_id)
+            modal_dismissed = (observed.get("status") == "window_still_present"
+                and observed.get("parent_enabled") is True and not observed.get("owned_windows"))
+        if not previous or modal_dismissed:
             post_window_close(target_window_handle)
             close_state[(target_window_handle, target_process_id)] = True
             self._launched_window_close_state = close_state
@@ -245,8 +251,22 @@ class WindowPreparationMixin:
                 return {"status": "window_closed", "success": True, "close_requested": True,
                         "automatic_retry_allowed": False}
             self._cancel_wait.wait(min(0.05, max(0.0, deadline - time.monotonic())))
+        try:
+            observation = observe_close_wait(target_window_handle, target_process_id)
+        except Exception as error:
+            # 关闭请求已经发送；诊断失败不能伪装成窗口关闭或允许自动重发。
+            observation = {"status": "unavailable", "error_type": type(error).__name__,
+                           "error": str(error), "owned_windows": [], "authorizes_input": False}
+        if observation.get("status") == "owned_modal_visible":
+            close_state[(target_window_handle, target_process_id)] = {"modal_observed": True}
         return {"status": "window_close_pending", "success": False, "close_requested": True,
-                "automatic_retry_allowed": False}
+                "automatic_retry_allowed": False, "window_cleanup_verified": False,
+                "window": {"handle": target_window_handle, "process_id": target_process_id},
+                "close_observation": observation,
+                "next_action": "inspect_owned_window" if observation.get("owned_windows") else "inspect_window_close_wait",
+                "next": "Keep this MCP session open. Inspect the current window/dialog using select, capture and instant_image; "
+                        "resolve only an authorized choice, then call close_launched_window again to verify disappearance. "
+                        "Do not treat instant_stop cleanup as window cleanup or automatically confirm save/discard."}
 
     def _cache_prepared_identity(self, intent, identity):
         if intent.get("source") in {"app_catalog", "selected_window"}:

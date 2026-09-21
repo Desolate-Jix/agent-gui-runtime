@@ -13,6 +13,10 @@ CASES = [
     ("Left", [0x25]), ("Right", [0x27]), ("Up", [0x26]), ("Down", [0x28]),
     ("Home", [0x24]), ("End", [0x23]), ("Ctrl+A", [0x11, 0x41]),
     ("Ctrl+Z", [0x11, 0x5A]), ("Ctrl+Y", [0x11, 0x59]),
+    ("Shift+Left", [0x10, 0x25]), ("Shift+Right", [0x10, 0x27]),
+    ("Shift+Up", [0x10, 0x26]), ("Shift+Down", [0x10, 0x28]),
+    ("Shift+Home", [0x10, 0x24]), ("Shift+End", [0x10, 0x23]),
+    ("Ctrl+Home", [0x11, 0x24]), ("Ctrl+End", [0x11, 0x23]),
 ]
 
 
@@ -45,7 +49,7 @@ def test_command_contract_and_backend_dispatch_the_same_editing_key(keyboard, mo
     assert events == [(key, False) for key in keys] + [(key, True) for key in reversed(keys)]
 
 
-@pytest.mark.parametrize("name,keys", [("Shift+Tab", [0x10, 0x09]), ("Ctrl+Z", [0x11, 0x5A])])
+@pytest.mark.parametrize("name,keys", [(name, keys) for name, keys in CASES if len(keys) > 1])
 def test_failed_editing_chord_releases_modifier_without_replay(keyboard, monkeypatch, name, keys):
     events = []
     def send(key, *, key_up):

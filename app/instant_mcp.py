@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-INSTANT_VERSION = "0.1.0-test.3"
+INSTANT_VERSION = "0.1.0-test.4"
 
 
 class InstantAdmissionError(ValueError):
@@ -29,6 +29,15 @@ class InstantAdmissionError(ValueError):
 
 class InstantImageError(ValueError):
     """只读证据错误，不判断原动作是否执行，也不触发重放。"""
+
+    def __init__(self, code, message, next_step):
+        super().__init__(message)
+        self.code = code
+        self.next = next_step
+
+
+class InstantStartError(ValueError):
+    """仅表示创建宿主之前的配置错误，不判断既有会话的执行结果。"""
 
     def __init__(self, code, message, next_step):
         super().__init__(message)
@@ -113,9 +122,12 @@ class InstantSession:
     def start(self, new_session=False):
         with self.guard:
             if not self.allow_local_input:
-                raise ValueError("Local operator must explicitly launch with --allow-local-input; tools cannot change this")
+                raise InstantStartError("local_input_not_enabled",
+                    "Local operator must explicitly launch with --allow-local-input; tools cannot change this",
+                    "Ask the operator to check the MCP launch configuration; do not change input authorization automatically.")
             if not self.model_directory.is_dir():
-                raise ValueError("configured model directory does not exist")
+                raise InstantStartError("model_directory_unavailable", "configured model directory does not exist",
+                    "Check --model-directory is an existing directory; use forward slashes or escaped backslashes in configuration, then reconnect.")
             self._lock()
             pointer = self.data_root / "latest-session.json"
             if self.session is None and pointer.is_file():
@@ -249,8 +261,12 @@ class InstantSession:
             receipt = {"request_id": request_id, **response, "operation_succeeded": ok,
                        "task_effect_verified": False, "automatic_retry_allowed": False}
             if result.get("contract_version") == "local_direct_step_v1":
+                receipt["operation_succeeded"] = ok and api.get("success") is True
                 before = result.get("capture") or {}
                 after = (result.get("observation") or {}).get("capture") or {}
+                receipt.update(operation_success_scope="input_route_only",
+                               input_route_succeeded=api.get("success") if type(api.get("success")) is bool else None,
+                               observation_status=(result.get("observation") or {}).get("status", "not_requested"))
                 receipt["agent_review"] = {
                     "status": "awaiting_agent_review" if before and after else "evidence_incomplete",
                     "verified": None, "judged_by": "agent",
@@ -267,6 +283,13 @@ class InstantSession:
                     "automatic_retry_allowed": False,
                     "next": "Read before/after images, judge success/failure/uncertain against the goal. The internal immediate diagnostic diff uses a different frame pair. No change is not necessarily failure. Never replay automatically.",
                 }
+                if not after:
+                    receipt["agent_review"]["recovery"] = (result.get("observation") or {}).get("recovery")
+                    receipt["agent_review"]["next"] = (
+                        "After image is unavailable; input route outcome is separate from task effect. "
+                        "Inspect recovery candidates (same process, not proven successors), then explicitly select "
+                        "the intended current window and capture it under a new request_id. If no candidates are "
+                        "available, discover current windows. Do not replay the original input; retain this receipt.")
             return receipt
 
     def image(self, request_id, view="after"):
@@ -346,8 +369,25 @@ def build_server(session):
     from mcp.types import CallToolResult, ImageContent, TextContent
     server = MCPServer(name="agent-review-instant", version=INSTANT_VERSION, description="Windows instant-mode preview. Local operator input; no learning. Start explicitly, submit ONE command, poll its ID, inspect image before next action. No automatic retries.")
 
-    def instant_start(new_session: bool = False) -> dict:
-        return session.start(new_session=new_session)
+    def instant_start(new_session: bool = False) -> CallToolResult:
+        try:
+            value = session.start(new_session=new_session)
+        except InstantStartError as error:
+            # 不捕获启动后的异常，不能把未知宿主状态伪装成未启动。
+            value = {"status": "start_rejected", "host_launch_attempted": False,
+                     "automatic_retry_allowed": False,
+                     "error": {"code": error.code, "message": str(error)}, "next": error.next}
+            with session.guard:
+                try:
+                    session.data_root.mkdir(parents=True, exist_ok=True)
+                    with (session.data_root / "startup-errors.jsonl").open("a", encoding="utf-8") as log:
+                        log.write(json.dumps({"timestamp_unix": time.time(), **value}, ensure_ascii=False) + "\n")
+                except OSError as log_error:
+                    value["diagnostic_log_error"] = type(log_error).__name__
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+                                  structuredContent=value)
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+                              structuredContent=value)
 
     def instant_status() -> dict:
         return session.status()
@@ -408,10 +448,10 @@ def build_server(session):
         return session.stop()
 
     descriptions = {
-        "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option.",
+        "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option. Known preflight configuration failures return isError=true, status=start_rejected, error.code and next guidance; host_launch_attempted=false refers only to this call, not existing sessions.",
         "instant_status": "Read host, target, pending IDs and cleanup status; no screenshot or input.",
-        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
-        "instant_result": "Read original response without executing again. pending means wait; result_unknown means inspect, never retry blindly. operation_succeeded is not proof of task outcome.",
+        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y, Shift+Left, Shift+Right, Shift+Up, Shift+Down, Shift+Home, Shift+End, Ctrl+Home, Ctrl+End. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
+        "instant_result": "Read original response without executing again. pending means wait; result_unknown means inspect, never retry blindly. For local steps operation_success_scope=input_route_only; check observation_status and agent_review.recovery separately. operation_succeeded is not proof of task outcome.",
         "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Missing/pending/corrupt evidence returns isError=true with status=image_unavailable, error.code and next guidance; it says nothing about whether the original input happened. Do not replay automatically. Compare both frames against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
         "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. Does not close user apps itself; a Windows MCP client may terminate its launched descendants on disconnect. Explicitly close test-created windows first using close_launched_window and verify window_closed.",
     }

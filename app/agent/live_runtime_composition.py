@@ -1612,8 +1612,10 @@ def _parse_candidate_result(value: Mapping[str, Any]) -> CandidateRankResult:
         raise ValueError("candidate element identities are ambiguous")
     _validate_ranked_candidates(candidates, expected_eligible=True)
     _validate_ranked_candidates(rejected, expected_eligible=False)
-    recommended = candidates[0].candidate_id if candidates else None
-    if _optional_text(value["recommended_candidate_id"]) != recommended:
+    # 排名是分数诊断；模型明确选中的候选可不是首项，解析不能重新选择目标。
+    recommended = _optional_text(value["recommended_candidate_id"])
+    if ((candidates and recommended not in {item.candidate_id for item in candidates})
+            or (not candidates and recommended is not None)):
         raise ValueError("candidate recommendation is inconsistent")
     return CandidateRankResult(
         contract_version="candidate_rank_v1",
@@ -1779,9 +1781,10 @@ def _parse_local_grounding(value: Mapping[str, Any]) -> LocalGroundingResult:
     if set(value) != required or value.get("contract_version") != "narrow_search_v1":
         raise ValueError("local grounding result is malformed")
     results = [_parse_local_result(_strict_mapping(item)) for item in _strict_list(value["results"])]
-    successful = [item for item in results if item.status == "grounded"]
-    recommended = successful[0].candidate_id if successful else (results[0].candidate_id if results else None)
-    if _optional_text(value["recommended_candidate_id"]) != recommended:
+    # 定位结果的状态和顺序均保留；推荐身份不是重选或升级为 grounded 的依据。
+    recommended = _optional_text(value["recommended_candidate_id"])
+    if ((results and recommended not in {item.candidate_id for item in results})
+            or (not results and recommended is not None)):
         raise ValueError("local grounding recommendation is inconsistent")
     return LocalGroundingResult(
         contract_version="narrow_search_v1",

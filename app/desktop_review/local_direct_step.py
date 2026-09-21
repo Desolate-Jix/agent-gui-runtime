@@ -15,6 +15,7 @@ from app.core.runtime_artifacts import RuntimeTimer
 from app.core.screenshot import ScreenshotService, CaptureVisibilityError
 from app.core.observation_policy import local_action_observation_kind, resolve_render_grace_ms
 from .local_action_contract import LocalActionFieldsError, _validated_request
+from .post_action_recovery import observe_recovery_windows
 
 
 class LocalDirectStepMixin:
@@ -193,6 +194,11 @@ class LocalDirectStepMixin:
                     report["response"] = _post_action(operation, request, manager)
             # 进入原路由后可能已产生部分输入，失败返回不能证明没有副作用。
             report["phase"] = "returned" if report["response"].get("success") is True else "result_unknown"
+            response_data = report["response"].get("data") or {}
+            if (operation == "press_key" and report["response"].get("success") is False
+                    and response_data.get("dispatch_status") == "not_dispatched"
+                    and response_data.get("pressed") is False):
+                report["phase"] = "not_dispatched"
             if timing_context.get("include_observation"):
                 # 结果和后图同次回传；观察失败不能重放已经可能派发的动作。
                 with timer.step("post_action_observation"):
@@ -209,11 +215,22 @@ class LocalDirectStepMixin:
                             "readiness": "unassessed", "render_grace_ms": wait_ms,
                             "automatic_retry_allowed": False}
                     except Exception as error:
-                        report["phase"] = "result_unknown"
+                        if report["phase"] == "returned":
+                            report["phase"] = "returned_observation_unavailable"
+                        elif report["phase"] != "not_dispatched":
+                            report["phase"] = "result_unknown"
                         report["observation"] = {"status": "unavailable", "error_type": type(error).__name__,
                             "error_code": error.reason if isinstance(error, CaptureVisibilityError) else "post_action_observation_failed",
                             "next_action": "capture_current_state_without_replaying_input",
                             "authorizes_action": False, "readiness": "unknown", "automatic_retry_allowed": False}
+                        recovery = observe_recovery_windows(manager, identity)
+                        report["observation"]["recovery"] = recovery
+                        if recovery["status"] == "candidates_available":
+                            report["observation"]["next_action"] = "inspect_recovery_windows_then_select_and_capture"
+                        elif recovery["status"] == "process_not_running":
+                            # 进程消失可解释缺图，但不证明正常退出或任务成功，也不能重放输入。
+                            report["observation"]["error_code"] = "target_process_not_running"
+                            report["observation"]["next_action"] = "review_task_effect_without_replaying_input"
             return report
         except Exception as error:
             failure = error

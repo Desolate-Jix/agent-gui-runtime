@@ -204,7 +204,7 @@ class WindowManager:
                 if win32gui.IsWindowVisible(current) and not win32gui.IsIconic(current):
                     # 绑定窗口拥有的原生弹出菜单属于同一可见表面，不应被截图遮罩。
                     # 无法验证 owner 链时保持原处理，避免把不明窗口误判为内部内容。
-                    if current != bound.handle and self._is_owned_popup(current, bound.handle):
+                    if current != bound.handle and self._is_owned_popup(current, bound.handle, include_shadow=True):
                         current = int(win32gui.GetWindow(current, win32con.GW_HWNDNEXT) or 0)
                         continue
                     other_left, other_top, other_right, other_bottom = win32gui.GetWindowRect(current)
@@ -221,16 +221,48 @@ class WindowManager:
         except Exception as error:
             return {**base, "error_type": type(error).__name__}
 
-    @staticmethod
-    def _is_owned_popup(candidate_handle: int, bound_handle: int) -> bool:
-        """仅按可验证的 GA_ROOTOWNER 关系识别绑定窗口的原生 popup。"""
+    def _is_owned_popup(self, candidate_handle: int, bound_handle: int, *, include_shadow: bool = False) -> bool:
+        """标准菜单可能没有 owner 链，此时核验活动 GUI 线程的菜单归属。"""
         try:
             get_ancestor = getattr(win32gui, "GetAncestor")
             root_owner_flag = getattr(win32con, "GA_ROOTOWNER", 3)
             root_owner = int(get_ancestor(candidate_handle, root_owner_flag) or candidate_handle)
-            return root_owner == int(bound_handle)
+            if root_owner == int(bound_handle):
+                return True
+            classes = {"#32768", "SysShadow"} if include_shadow else {"#32768"}
+            if win32gui.GetClassName(candidate_handle) not in classes:
+                return False
+            thread, process = win32process.GetWindowThreadProcessId(bound_handle)
+            if not thread or not process or tuple(win32process.GetWindowThreadProcessId(candidate_handle)) != (thread, process):
+                return False
+            state = self._read_gui_menu_state(thread)
+            owner = state["menu_owner"]
+            return bool(state["flags"] & 0x10 and state["active"] == bound_handle
+                        and win32gui.GetForegroundWindow() == bound_handle and owner
+                        and tuple(win32process.GetWindowThreadProcessId(owner)) == (thread, process)
+                        and int(get_ancestor(owner, win32con.GA_ROOT) or owner) == bound_handle)
         except Exception:
             return False
+
+    @staticmethod
+    def _read_gui_menu_state(thread: int) -> dict[str, int]:
+        """只读查询系统菜单所属窗口；不发送消息或更改前台。"""
+        import ctypes
+        from ctypes import wintypes
+
+        class GUIThreadInfo(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                        *[(name, wintypes.HWND) for name in ("active", "focus", "capture", "menu_owner", "move_size", "caret")],
+                        ("caret_rect", wintypes.RECT)]
+
+        state = GUIThreadInfo()
+        state.cbSize = ctypes.sizeof(state)
+        query = ctypes.WinDLL("user32", use_last_error=True).GetGUIThreadInfo
+        query.argtypes = [wintypes.DWORD, ctypes.POINTER(GUIThreadInfo)]
+        query.restype = wintypes.BOOL
+        if not query(thread, ctypes.byref(state)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return {name: int(getattr(state, name) or 0) for name in ("flags", "active", "menu_owner")}
 
     @staticmethod
     def _occluded_union_area(regions: set[tuple[int, int, int, int]]) -> int:
@@ -307,7 +339,7 @@ class WindowManager:
         )
         # 原生菜单是 owned 顶层窗而非 child；同进程且根 owner 匹配才属于当前目标。
         owned_popup = bool(type(expected_owned_popup_handle) is int and expected_owned_popup_handle > 0
-                           and hit_root == expected_owned_popup_handle and hit_root_owner == int(bound.handle)
+                           and hit_root == expected_owned_popup_handle and self._is_owned_popup(hit_root, int(bound.handle))
                            and bound.process_id and process_id == bound.process_id)
         if expected_owned_popup_handle is not None:
             return {**base, "allowed": owned_popup,

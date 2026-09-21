@@ -48,11 +48,14 @@ _REGISTERED_HGLOBAL_FORMATS = {
 class ClipboardTransactionError(RuntimeError):
     """不含剪贴板内容的事务失败。"""
 
-    def __init__(self, code: str, restore_status: str | None = None) -> None:
+    def __init__(self, code: str, restore_status: str | None = None, *, native_error: dict | None = None) -> None:
         self.code = code
         self.restore_status = restore_status
+        self.native_error = dict(native_error) if native_error else None
         self.cleanup_errors: tuple[str, ...] = ()
         message = code if restore_status is None else f"{code}:{restore_status}"
+        if self.native_error:
+            message += f":{self.native_error['win32_function']}:winerror={self.native_error['winerror']}"
         super().__init__(message)
 
 
@@ -77,6 +80,7 @@ class ClipboardSnapshot:
     entries: tuple[ClipboardEntry, ...] = field(repr=False)
     sequence: int | None = field(default=None, compare=False)
     _bitmap_handles: set[int] = field(default_factory=set, repr=False, compare=False)
+    bitmap_preservation: dict | None = field(default=None, compare=False)
 
 
 class ClipboardBackend(Protocol):
@@ -102,6 +106,7 @@ class ClipboardTextTransaction:
         self._temporary_installed = False
         self.cleanup_errors: tuple[str, ...] = ()
         self.status = "not_started"
+        self.bitmap_preservation: dict | None = None
 
     def __repr__(self) -> str:
         return f"ClipboardTextTransaction(restore={self._restore_requested!r}, status={self.status!r})"
@@ -109,6 +114,7 @@ class ClipboardTextTransaction:
     def __enter__(self) -> ClipboardTextTransaction:
         try:
             self._snapshot = self._backend.capture()
+            self.bitmap_preservation = self._snapshot.bitmap_preservation
             self._sequence = self._snapshot.sequence
             self._sequence = self._backend.replace_with_text(
                 self._text, self._snapshot.sequence, snapshot=self._snapshot,
@@ -128,7 +134,7 @@ class ClipboardTextTransaction:
             self.cleanup_errors = error.cleanup_errors
             self.status = error.restore_status or self.status
             self._finish_failed_enter()
-            primary = ClipboardTransactionError(error.code, self.status)
+            primary = ClipboardTransactionError(error.code, self.status, native_error=error.native_error)
             self._attach_cleanup_status(primary)
             raise primary from None
         except Exception:
@@ -259,6 +265,7 @@ class WindowsClipboardBackend:
         api = self._require_api()
         entries: list[ClipboardEntry] = []
         snapshot = ClipboardSnapshot(())
+        bitmap_copy_error = None
         try:
             with self._clipboard_lock(api):
                 format_id = 0
@@ -269,12 +276,28 @@ class WindowsClipboardBackend:
                         if api.get_last_error() != 0:
                             raise ClipboardTransactionError("clipboard_capture_failed")
                         break
-                    entry = self._capture_entry(api, format_id)
+                    try:
+                        entry = self._capture_entry(api, format_id)
+                    except ClipboardTransactionError as error:
+                        if format_id != CF_BITMAP or error.code != "bitmap_copy_failed":
+                            raise
+                        # 先保存同图像的全部 DIB 原字节；没有副本时不能进入写入阶段。
+                        bitmap_copy_error = error
+                        continue
                     entries.append(entry)
                     if entry._bitmap_handle is not None:
                         snapshot._bitmap_handles.add(entry._bitmap_handle)
                 snapshot.entries = tuple(entries)
-                snapshot.sequence = self._require_sequence(api)
+                if bitmap_copy_error is not None:
+                    dib_formats = [entry.format for entry in entries if entry.format in {CF_DIB, CF_DIBV5} and entry.data]
+                    if not dib_formats:
+                        raise bitmap_copy_error
+                    # Windows 可从 DIB 合成 CF_BITMAP；不丢弃其他格式或修改原图字节。
+                    snapshot.bitmap_preservation = {
+                        "mode": "dib_system_synthesis", "source_formats": dib_formats,
+                        "copy_error": {"code": bitmap_copy_error.code, **(bitmap_copy_error.native_error or {})},
+                    }
+                snapshot.sequence = self._require_sequence(api, allow_initial_empty=not entries)
             return snapshot
         except Exception as cause:
             failure = cause if isinstance(cause, ClipboardTransactionError) else ClipboardTransactionError("clipboard_capture_failed")
@@ -287,7 +310,7 @@ class WindowsClipboardBackend:
 
     def replace_with_text(self, text: str, expected_sequence: int | None, *, snapshot: ClipboardSnapshot) -> int:
         api = self._require_api()
-        if not expected_sequence:
+        if expected_sequence is None or (expected_sequence == 0 and snapshot.entries):
             raise ClipboardTransactionError("clipboard_sequence_unavailable")
         hglobal = self._allocate_hglobal(api, text.encode("utf-16-le") + b"\x00\x00")
         transferred = False
@@ -296,7 +319,7 @@ class WindowsClipboardBackend:
         failure = None
         try:
             with self._clipboard_lock(api):
-                if self._require_sequence(api) != expected_sequence:
+                if self._require_sequence(api, allow_initial_empty=expected_sequence == 0) != expected_sequence:
                     raise ClipboardTransactionError("ownership_conflict")
                 if not api.user32.EmptyClipboard():
                     raise ClipboardTransactionError("temporary_write_failed")
@@ -427,9 +450,12 @@ class WindowsClipboardBackend:
             bitmap = int(api.user32.GetClipboardData(format_id) or 0)
             if not bitmap:
                 raise ClipboardTransactionError("clipboard_data_unavailable")
+            api.set_last_error(0)
             copy = int(api.user32.CopyImage(bitmap, IMAGE_BITMAP, 0, 0, LR_CREATEDIBSECTION) or 0)
             if not copy:
-                raise ClipboardTransactionError("unsupported_format")
+                raise ClipboardTransactionError("bitmap_copy_failed", native_error={
+                    "win32_function": "CopyImage", "winerror": api.get_last_error(),
+                })
             return ClipboardEntry(format_id, b"", _bitmap_handle=copy)
         name = self._format_name(api, format_id) if format_id >= 0xC000 else None
         if format_id not in _HGLOBAL_FORMATS and name not in _REGISTERED_HGLOBAL_FORMATS:
@@ -505,9 +531,15 @@ class WindowsClipboardBackend:
         self._owner_thread_id = threading.get_ident()
         return hwnd
 
-    def _require_sequence(self, api: _Win32ClipboardApi) -> int:
+    def _require_sequence(self, api: _Win32ClipboardApi, *, allow_initial_empty: bool = False) -> int:
         sequence = int(api.user32.GetClipboardSequenceNumber())
         if sequence == 0:
+            # 初始空剪贴板可返回零；必须已持锁且重新枚举为空，不能把拒绝访问当空状态。
+            if allow_initial_empty and self._clipboard_open:
+                api.set_last_error(0)
+                first_format = int(api.user32.EnumClipboardFormats(0))
+                if first_format == 0 and api.get_last_error() == 0:
+                    return 0
             raise ClipboardTransactionError("clipboard_sequence_unavailable")
         return sequence
 

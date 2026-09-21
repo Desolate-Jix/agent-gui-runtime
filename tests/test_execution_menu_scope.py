@@ -17,6 +17,8 @@ def test_truncated_window_collects_bounded_menu_subtree(monkeypatch, unrelated_p
     tail = _TreeWrapper((4,), "MenuItem", "Inspect", (100, 160, 300, 190), menu)
     root.iter_descendants = lambda: iter([menu, item, tail])
     menu.iter_descendants = lambda: iter([item, tail])
+    mapping = {id(root): [menu], id(menu): [item, tail]}
+    monkeypatch.setattr(module, "_finite_uia_children", lambda node: mapping.get(id(node), []))
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", SimpleNamespace(
         Desktop=lambda **kwargs: SimpleNamespace(window=lambda **kw: root)))
     bound = SimpleNamespace(handle=42, title="browser", process_id=7, process_name="browser.exe",
@@ -58,6 +60,8 @@ def test_owned_popup_menu_is_found_beyond_main_tree_budget(monkeypatch, menu_is_
     root.iter_descendants = lambda: iter([page] * 10)
     popup.iter_descendants = lambda: iter([menu, item])
     menu.iter_descendants = lambda: iter([item])
+    mapping = {id(root): [page] * 10, id(popup): [menu], id(menu): [item]}
+    monkeypatch.setattr(module, "_finite_uia_children", lambda node: mapping.get(id(node), []))
     desktop = SimpleNamespace(window=lambda handle: (menu if menu_is_root else popup) if handle == 99 else root)
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", SimpleNamespace(Desktop=lambda **kw: desktop))
     provider = module.WindowsUIAProvider()
@@ -75,6 +79,7 @@ def test_owned_popup_menu_is_found_beyond_main_tree_budget(monkeypatch, menu_is_
 def test_missing_optional_win32_probe_does_not_erase_uia(monkeypatch):
     root = _TreeWrapper((1,), "Window", "browser", (0, 0, 600, 500))
     root.iter_descendants = lambda: iter([])
+    monkeypatch.setattr(module, "_finite_uia_children", lambda node: [])
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", SimpleNamespace(
         Desktop=lambda **kwargs: SimpleNamespace(window=lambda **kw: root)))
     monkeypatch.setitem(__import__("sys").modules, "win32gui", None)

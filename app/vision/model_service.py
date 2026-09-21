@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from app.vision.configuration import VisionConfigurationSnapshot, _select_local_config, _source_project_root
+from app.vision.model_environment import model_worker_environment
 
 
 class ModelServiceError(RuntimeError):
@@ -160,7 +161,7 @@ class FormalModelService:
                 self._scope = scopes.WindowsProcessScope(self._scope_name, create=True)
                 self._ownership = "owned"
                 model_server.start_model_server(self._profile, scope_name=self._scope_name,
-                    child_env=dict(os.environ), output_root=self._output_root, cancelled=cancelled, deadline=deadline,
+                    child_env=model_worker_environment(os.environ), output_root=self._output_root, cancelled=cancelled, deadline=deadline,
                     **({"worker_executable": self._configuration.worker_executable}
                        if self._configuration.worker_executable is not None else {}))
                 self._check_cancel(cancelled)

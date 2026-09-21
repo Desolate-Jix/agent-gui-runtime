@@ -139,9 +139,23 @@ class Verifier:
         logger.info("Verifying action: {}", action_name)
         time.sleep(max(0, wait_ms) / 1000.0)
 
-        after_capture = self._capture_scope_state(roi=roi, action_name=action_name, purpose="post_action") if capture_scope_evidence else screenshot_service.capture_window(
-            roi=roi, save_image=True, purpose="post_action", name_hint=action_name,
-        )
+        if capture_scope_evidence:
+            after_capture = self._capture_scope_state(roi=roi, action_name=action_name, purpose="post_action")
+        elif judged_by_agent:
+            try:
+                # 动作可能关闭当前弹窗；观察只读，不再聚焦已消失的旧目标。
+                after_capture = screenshot_service.capture_window(
+                    roi=roi, save_image=True, purpose="post_action", name_hint=action_name, focus_window=False,
+                )
+            except Exception as error:
+                # 采集失败不抹掉已返回的点击回执，也不等同于任务失败或重放许可。
+                after_capture = {"image_path": None, "capture_status": "unavailable",
+                    "error_type": type(error).__name__, "error": str(error),
+                    "next_action": "inspect_current_window_without_replaying_input"}
+        else:
+            after_capture = screenshot_service.capture_window(
+                roi=roi, save_image=True, purpose="post_action", name_hint=action_name,
+            )
         bound = window_manager.get_bound_window()
 
         diff_result = self._compare_images(
@@ -178,6 +192,7 @@ class Verifier:
             "action_name": action_name,
             "before": before_state,
             "after": after_capture if capture_scope_evidence else {
+                **after_capture,
                 "image_path": after_capture.get("image_path"),
                 "roi": after_capture.get("roi"),
                 "window_handle": bound.handle if bound is not None else None,

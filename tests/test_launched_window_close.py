@@ -132,3 +132,65 @@ def test_hidden_window_is_pending_and_second_call_does_not_repeat_close(monkeypa
         result = coordinator.close_launched_window(target_window_handle=101, target_process_id=202)
         assert result['status'] == 'window_close_pending' and not result['success']
     assert posted == [101]
+
+
+def test_pending_close_returns_modal_target_and_agent_next_step(monkeypatch):
+    coordinator = Coordinator(Windows())
+    posted = []
+    monkeypatch.setattr(module.WindowsNativeIdentityReader, 'read_identity', lambda *_: deepcopy(IDENTITY))
+    monkeypatch.setattr(module, 'window_handle_exists', lambda _: True)
+    monkeypatch.setattr(module, 'post_window_close', lambda handle: posted.append(handle))
+    monkeypatch.setattr(module, 'observe_close_wait', lambda handle, pid: {
+        'status': 'owned_modal_visible', 'parent_enabled': False,
+        'owned_windows': [{'handle': 303, 'process_id': 202, 'title': '保存提示',
+                           'class_name': '#32770', 'enabled': True}], 'authorizes_input': False}, raising=False)
+    result = coordinator.close_launched_window(target_window_handle=101, target_process_id=202)
+    assert result['status'] == 'window_close_pending' and result['success'] is False
+    assert result['next_action'] == 'inspect_owned_window'
+    assert result['close_observation']['owned_windows'][0]['handle'] == 303
+    assert result['window_cleanup_verified'] is False
+    assert result['automatic_retry_allowed'] is False
+    assert posted == [101]
+
+
+def test_close_diagnostic_failure_stays_pending_and_reports_original_error(monkeypatch):
+    coordinator = Coordinator(Windows())
+    monkeypatch.setattr(module.WindowsNativeIdentityReader, 'read_identity', lambda *_: deepcopy(IDENTITY))
+    monkeypatch.setattr(module, 'window_handle_exists', lambda _: True)
+    monkeypatch.setattr(module, 'post_window_close', lambda _: None)
+
+    def unavailable(*_):
+        raise OSError(5, 'Access denied')
+
+    monkeypatch.setattr(module, 'observe_close_wait', unavailable)
+    result = coordinator.close_launched_window(target_window_handle=101, target_process_id=202)
+    assert result['status'] == 'window_close_pending' and result['success'] is False
+    assert result['close_requested'] and not result['automatic_retry_allowed']
+    assert result['next_action'] == 'inspect_window_close_wait'
+    assert result['close_observation']['status'] == 'unavailable'
+    assert result['close_observation']['error_type'] == 'OSError'
+    assert 'Access denied' in result['close_observation']['error']
+
+
+def test_new_close_after_observed_modal_dismissal_posts_again(monkeypatch):
+    coordinator = Coordinator(Windows())
+    state = {"modal": True, "alive": True}
+    posted = []
+    monkeypatch.setattr(module.WindowsNativeIdentityReader, 'read_identity', lambda *_: deepcopy(IDENTITY))
+    monkeypatch.setattr(module, 'window_handle_exists', lambda _: state['alive'])
+    monkeypatch.setattr(module, 'observe_close_wait', lambda *_: {
+        'status': 'owned_modal_visible' if state['modal'] else 'window_still_present',
+        'parent_enabled': not state['modal'],
+        'owned_windows': [{'handle': 303}] if state['modal'] else [], 'authorizes_input': False})
+    def post(handle):
+        posted.append(handle)
+        if len(posted) == 2:
+            state['alive'] = False
+    monkeypatch.setattr(module, 'post_window_close', post)
+    first = coordinator.close_launched_window(target_window_handle=101, target_process_id=202)
+    assert first['status'] == 'window_close_pending'
+    still_modal = coordinator.close_launched_window(target_window_handle=101, target_process_id=202)
+    assert still_modal['status'] == 'window_close_pending' and posted == [101]
+    state['modal'] = False
+    second = coordinator.close_launched_window(target_window_handle=101, target_process_id=202)
+    assert second['status'] == 'window_closed' and posted == [101, 101]

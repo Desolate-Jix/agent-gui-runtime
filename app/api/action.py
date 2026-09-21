@@ -29,6 +29,7 @@ from app.core.window_manager import window_manager
 from app.core.browser_navigation_guard import probe_after_settle, probe_bound_browser, verify_navigation_policy
 from app.gate.scroll import build_scroll_effect_validation, build_scroll_precondition_decision, build_scroll_safe_point
 from app.operation.mousetester import should_verify_mouse_tester_semantics, target_bbox_from_recommended, verify_mouse_tester_post_click_semantics
+from app.operation.recognition.click_visibility import recognition_click_visibility
 from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
 from app.trace.actions import write_execute_trace_if_enabled
 from app.api.models.request import (
@@ -2632,7 +2633,12 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 if isinstance(navigation_policy, dict) and navigation_policy.get("required") is True:
                     navigation_before = probe_bound_browser(int(bound.handle))
                 with timer.step("click_point", attempt=attempt_index):
-                    target_box = target_bbox_from_recommended(plan.get("recommended_target") or {})
+                    visibility_scope = recognition_click_visibility(
+                        plan, selected_point, goal=request.goal,
+                        click_kind=request.click_kind, local_operator=local_policy_off,
+                    )
+                    base_result["click_visibility_scope"] = visibility_scope
+                    target_box = visibility_scope["target_bbox"]
                     visibility_options = ({"target_bbox": tuple(target_box[key] for key in ("x", "y", "width", "height"))}
                                           if target_box is not None else {})
                     menu_layer = ((plan.get("parse_result") or {}).get("screen_reading") or {}).get("source_layers", {}).get("windows_uia", {})
@@ -2742,7 +2748,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         _record_click_sequence_failure(base_result, exc)
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
         base_result["attempts"] = attempts
-        base_result["point_visibility"] = exc.evidence
+        # 点归属与区域遮挡分别留证，不能把区域拒绝伪装成点被遮住。
+        base_result["point_visibility"] = exc.evidence.get("point_visibility", exc.evidence)
+        if "region_visibility" in exc.evidence:
+            base_result["region_visibility"] = exc.evidence["region_visibility"]
         base_result["agent_execution_guidance"] = _agent_execution_guidance(
             request=request,
             status="blocked",

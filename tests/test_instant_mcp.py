@@ -28,6 +28,67 @@ def test_server_schema_builds(session):
     assert build_server(session).name == "agent-review-instant"
 
 
+@pytest.mark.parametrize("allow_input,missing_model,code", [
+    (True, True, "model_directory_unavailable"),
+    (False, False, "local_input_not_enabled"),
+])
+def test_start_preflight_error_is_actionable_without_launch(tmp_path, allow_input, missing_model, code):
+    import asyncio
+    model = tmp_path / "private-model-path" if missing_model else tmp_path
+    data = tmp_path / "data"
+    s = InstantSession(Path(__file__).resolve().parents[1], data, model, allow_local_input=allow_input)
+    result = asyncio.run(build_server(s).call_tool("instant_start", {"new_session": True}))
+    assert result.is_error
+    value = json.loads(result.content[0].text)
+    assert value["status"] == "start_rejected"
+    assert value["error"]["code"] == code
+    assert value["host_launch_attempted"] is False
+    assert value["automatic_retry_allowed"] is False and value["next"]
+    assert s.process is None and s.session is None and s.lock_file is None
+    log = (data / "startup-errors.jsonl").read_text(encoding="utf-8")
+    assert json.loads(log)["error"]["code"] == code
+    assert "private-model-path" not in log and "private-model-path" not in result.content[0].text
+    assert not list(data.glob("session-*"))
+
+
+def test_start_preflight_reports_log_failure_without_hiding_root_error(tmp_path):
+    import asyncio
+    data = tmp_path / "not-a-directory"
+    data.write_text("preserve", encoding="utf-8")
+    s = InstantSession(tmp_path, data, tmp_path / "missing", allow_local_input=True)
+    result = asyncio.run(build_server(s).call_tool("instant_start", {}))
+    value = json.loads(result.content[0].text)
+    assert result.is_error and value["error"]["code"] == "model_directory_unavailable"
+    assert value["diagnostic_log_error"] == "FileExistsError"
+    assert data.read_text(encoding="utf-8") == "preserve"
+
+
+def test_start_success_keeps_status_shape(session):
+    import asyncio
+    try:
+        result = asyncio.run(build_server(session).call_tool("instant_start", {}))
+        assert not result.is_error
+        value = json.loads(result.content[0].text)
+        assert value["phase"] == "ready" and value["host_alive"] is True
+        assert "host_launch_attempted" not in value
+    finally:
+        if session.lock_file:
+            session.lock_file.close()
+
+
+def test_unexpected_start_failure_is_not_misreported_as_preflight(session, monkeypatch):
+    import asyncio
+    from mcp.server.mcpserver.exceptions import UnexpectedToolError
+
+    def failed_launch(**kwargs):
+        raise OSError("launch state unknown")
+
+    monkeypatch.setattr(session, "start", failed_launch)
+    with pytest.raises(UnexpectedToolError):
+        asyncio.run(build_server(session).call_tool("instant_start", {}))
+    assert not (session.data_root / "startup-errors.jsonl").exists()
+
+
 def test_close_launched_window_requires_explicit_identity_and_queues_once(session):
     import asyncio
     server = build_server(session)
@@ -237,7 +298,8 @@ def test_text_replace_option_reaches_queue_without_implicit_submit(session, repl
 
 
 @pytest.mark.parametrize("key", ["Enter", "Tab", "Shift+Tab", "Escape", "Backspace", "Delete",
-    "Left", "Right", "Up", "Down", "Home", "End", "Ctrl+A", "Ctrl+Z", "Ctrl+Y"])
+    "Left", "Right", "Up", "Down", "Home", "End", "Ctrl+A", "Ctrl+Z", "Ctrl+Y",
+    "Shift+Left", "Shift+Right", "Shift+Up", "Shift+Down", "Shift+Home", "Shift+End", "Ctrl+Home", "Ctrl+End"])
 def test_editing_key_tool_admission_persists_one_command(session, key):
     import asyncio
     server = build_server(session)
@@ -415,6 +477,39 @@ def test_agent_review_missing_after_never_substitutes_immediate_frame(session):
     assert result['operation_succeeded'] is False
     with pytest.raises(ValueError, match='no recorded image'):
         session.image('missing-after', 'after')
+
+
+def test_known_dispatch_missing_after_is_separate_from_effect_and_guides_recovery(session):
+    recovery = {'status': 'candidates_available', 'candidates': [{'handle': 22, 'process_id': 44}],
+                'authorizes_input': False, 'successor_identity_verified': False}
+    write_json(session._path('transition', 'responses'), {'status': 'returned', 'result': {
+        'contract_version': 'local_direct_step_v1', 'phase': 'returned_observation_unavailable',
+        'capture': {'image_path': 'before.png', 'sha256': 'before'},
+        'observation': {'status': 'unavailable', 'recovery': recovery},
+        'response': {'success': True, 'data': {'pressed': True}}}})
+    result = session.result('transition')
+    assert result['operation_succeeded'] is True
+    assert result['operation_success_scope'] == 'input_route_only'
+    assert result['input_route_succeeded'] is True
+    assert result['observation_status'] == 'unavailable'
+    assert result['agent_review']['status'] == 'evidence_incomplete'
+    assert result['agent_review']['verified'] is None
+    assert result['agent_review']['recovery'] == recovery
+    assert 'select' in result['agent_review']['next']
+    assert result['task_effect_verified'] is False and result['automatic_retry_allowed'] is False
+    with pytest.raises(ValueError, match='no recorded image'):
+        session.image('transition', 'after')
+    assert not list((session.session / 'commands').glob('*.json'))
+
+
+@pytest.mark.parametrize('route_success', [None, False, 'true'])
+def test_transition_phase_alone_cannot_prove_route_success(session, route_success):
+    write_json(session._path('incomplete-route', 'responses'), {'status': 'returned', 'result': {
+        'contract_version': 'local_direct_step_v1', 'phase': 'returned_observation_unavailable',
+        'response': {'success': route_success}, 'observation': {'status': 'unavailable'}}})
+    result = session.result('incomplete-route')
+    assert result['operation_succeeded'] is False
+    assert result['input_route_succeeded'] is (False if route_success is False else None)
 
 
 @pytest.mark.parametrize('case,code', [

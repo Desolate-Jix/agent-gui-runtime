@@ -63,6 +63,7 @@ TASKBAR_ACTIVATION_VERIFY_INTERVAL_SECONDS = 0.05
 TASKBAR_ACTIVATION_VERIFY_TIMEOUT_SECONDS = 1.0
 
 _CLICK_RELEASE = ContextVar("current_click_mouse_release", default=None)
+_KEY_RELEASE = ContextVar("current_keyboard_release", default=None)
 
 
 @contextmanager
@@ -84,6 +85,16 @@ def _pending_click_release(controller, flags):
     return (state if state is not None and state["active"] and state["controller"] is controller
             and state["thread"] == get_ident() and state["attempted"] and state["releasing"]
             and not state["used"] and flags == state["up"] else None)
+
+
+class KeyboardForegroundMismatchError(RuntimeError):
+    """保存校验当刻的前台差异，不事后重读或暗中切换窗口。"""
+
+    def __init__(self, expected_handle: int, observed_handle: int) -> None:
+        self.evidence = {"expected_window_handle": expected_handle,
+                         "observed_foreground_handle": observed_handle,
+                         "stage": "before_keyboard_dispatch"}
+        super().__init__("Text target is not the foreground window before keyboard dispatch")
 
 
 class TargetPointOccludedError(RuntimeError):
@@ -247,7 +258,9 @@ class InputController:
         if target_bbox is not None:
             region_visibility = window_manager.validate_bound_region_visibility(bound=bound, bbox=target_bbox)
             if region_visibility.get("allowed") is not True:
-                raise TargetPointOccludedError(region_visibility)
+                raise TargetPointOccludedError({**region_visibility,
+                    "point_visibility": point_visibility,
+                    "region_visibility": region_visibility})
         if popup_guard is not None:
             hit_window = point_visibility.get("hit_window")
             if not isinstance(hit_window, dict) or hit_window.get("root_handle") != popup_guard.expectation.popup_handle:
@@ -274,7 +287,9 @@ class InputController:
             raise RuntimeError("Bound window changed immediately before mouse down")
         current_cursor = tuple(win32api.GetCursorPos())
         if current_cursor != (point["screen_x"], point["screen_y"]):
-            raise RuntimeError("Mouse cursor position changed immediately before mouse down")
+            raise RuntimeError("Mouse cursor position changed immediately before mouse down: "
+                f"expected_screen=({point['screen_x']}, {point['screen_y']}), "
+                f"observed_screen={current_cursor}, after_move={move_result.get('cursor_after_move')}")
 
         double_click_time_ms = self._double_click_time_ms() if click_count == 2 else None
         effective_hold_ms = int(max(0, hold_ms))
@@ -554,6 +569,7 @@ class InputController:
             "submit": bool(submit),
             "restore_clipboard": bool(restore_clipboard),
             "clipboard_restore_status": clipboard.status,
+            "clipboard_bitmap_preservation": getattr(clipboard, "bitmap_preservation", None),
             "clipboard_verified_before_paste": True,
             "clipboard_verify_attempts": verify_attempts,
             "clipboard_paste_settle_ms": int(CLIPBOARD_PASTE_SETTLE_SECONDS * 1000),
@@ -593,8 +609,9 @@ class InputController:
         current = self._require_bound_window()
         if self._text_target_snapshot(current) != snapshot:
             raise RuntimeError("Text target window changed before keyboard dispatch")
-        if int(win32gui.GetForegroundWindow()) != snapshot[0]:
-            raise RuntimeError("Text target is not the foreground window before keyboard dispatch")
+        foreground = int(win32gui.GetForegroundWindow())
+        if foreground != snapshot[0]:
+            raise KeyboardForegroundMismatchError(snapshot[0], foreground)
         if x is not None and y is not None:
             evidence = window_manager.validate_bound_point_visibility(bound=current, x=x, y=y)
             if evidence.get("allowed") is not True:
@@ -752,8 +769,9 @@ class InputController:
     def _send_move(self, screen_x: int, screen_y: int) -> None:
         screen_width = ctypes.windll.user32.GetSystemMetrics(SM_CXSCREEN)
         screen_height = ctypes.windll.user32.GetSystemMetrics(SM_CYSCREEN)
-        absolute_x = int(screen_x * 65535 / max(1, screen_width - 1))
-        absolute_y = int(screen_y * 65535 / max(1, screen_height - 1))
+        # 发送像素区间中心；旧公式向下取整会把靠左/上目标送到相邻像素。
+        absolute_x = ((2 * screen_x + 1) * 32768) // max(1, screen_width)
+        absolute_y = ((2 * screen_y + 1) * 32768) // max(1, screen_height)
         self._send_mouse_input(dx=absolute_x, dy=absolute_y, flags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE)
 
     def _send_mouse_flags(self, flags: int) -> int:
@@ -790,6 +808,17 @@ class InputController:
         return dispatched
 
     def _press_chord(self, keys: list[int]) -> None:
+        # 释放本次已尝试按下的键属于收尾；目标关闭不应把键留在按下状态。
+        state = {"controller": self, "thread": get_ident(), "pending": set(),
+                 "active": True, "releasing": False}
+        token = _KEY_RELEASE.set(state)
+        try:
+            self._press_chord_in_scope(keys, state)
+        finally:
+            state["active"] = False
+            _KEY_RELEASE.reset(token)
+
+    def _press_chord_in_scope(self, keys: list[int], state: dict) -> None:
         attempted: list[int] = []
         primary: BaseException | None = None
         try:
@@ -799,6 +828,7 @@ class InputController:
         except BaseException as error:
             primary = error
         release_error: BaseException | None = None
+        state["releasing"] = True
         for key in reversed(attempted):
             try:
                 self._send_key(key, key_up=True)
@@ -813,11 +843,18 @@ class InputController:
             raise release_error
 
     def _press_key(self, key: int) -> None:
-        self._send_key(key, key_up=False)
-        self._send_key(key, key_up=True)
+        self._press_chord([key])
 
     def _send_key(self, key: int, *, key_up: bool) -> None:
-        self._ensure_windows_input()
+        state = _KEY_RELEASE.get()
+        own_scope = (state is not None and state["active"] and state["controller"] is self
+                     and state["thread"] == get_ident())
+        cleanup = own_scope and state["releasing"] and key_up and key in state["pending"]
+        if cleanup:
+            # 单次消费，不能释放其他键、跨线程复用或授权下一次按下。
+            state["pending"].remove(key)
+        else:
+            self._ensure_windows_input()
         input_struct = INPUT(
             type=INPUT_KEYBOARD,
             union=INPUT_UNION(
@@ -830,6 +867,8 @@ class InputController:
                 )
             ),
         )
+        if own_scope and not key_up:
+            state["pending"].add(key)
         sent = ctypes.windll.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
         if sent != 1:
             raise RuntimeError(f"SendInput keyboard failed, sent={sent}, key={key}, key_up={key_up}")

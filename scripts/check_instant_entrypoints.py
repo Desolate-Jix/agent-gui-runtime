@@ -32,6 +32,12 @@ def check(root):
         local._validated_request(operation, request)
         checked.append({"operation": operation, "handler_imported": True, "request_validated": True,
                         "handler_executed": False})
+    from app.core.editing_keys import EDITING_KEY_CHORDS
+    # 全部维护键必须经过真实参数链，但预检不得派发输入。
+    editing_keys = []
+    for key in EDITING_KEY_CHORDS:
+        local._validated_request("press_key", {"key": key, "x": 1, "y": 1})
+        editing_keys.append(key)
     routes = {getattr(r, "path", "") for r in application.routes}
     for operation in ("execute_recognition_plan", "type_text", "scroll"):
         if "/action/" + operation not in routes:
@@ -75,6 +81,7 @@ def check(root):
             "input_executed": False, "screenshots_taken": False, "model_inference_tested": False,
             "operations": checked, "observation_operations": observation_checked,
             "recognition_click_variants": click_variants, "window_operations": window_checked,
+            "editing_keys_validated": editing_keys,
             "local_module_sources": sources,
             "limitation": "Dependency and request validation only, not real input or end-to-end acceptance"}
 

@@ -102,6 +102,8 @@ def test_snapshot_records_only_runtime_confirmed_parent_chain(monkeypatch) -> No
     root.iter_descendants = lambda: iter([group, field])
     fake_pywinauto = SimpleNamespace(Desktop=lambda **_kwargs: SimpleNamespace(window=lambda **_args: root))
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", fake_pywinauto)
+    monkeypatch.setattr(provider_module, "_finite_uia_children",
+                        lambda node: list(root.iter_descendants()) if node is root else [])
     bound = SimpleNamespace(
         handle=42,
         title="test",
@@ -126,6 +128,8 @@ def test_snapshot_drops_cycle_or_duplicate_runtime_parent_chain(monkeypatch) -> 
     root.iter_descendants = lambda: iter([first, duplicate])
     fake_pywinauto = SimpleNamespace(Desktop=lambda **_kwargs: SimpleNamespace(window=lambda **_args: root))
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", fake_pywinauto)
+    monkeypatch.setattr(provider_module, "_finite_uia_children",
+                        lambda node: list(root.iter_descendants()) if node is root else [])
     bound = SimpleNamespace(
         handle=42,
         title="test",
@@ -153,6 +157,8 @@ def test_runtime_confirmed_group_ancestor_allows_only_fill_field_overlap(monkeyp
     root.iter_descendants = lambda: iter([group, field])
     fake_pywinauto = SimpleNamespace(Desktop=lambda **_kwargs: SimpleNamespace(window=lambda **_args: root))
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", fake_pywinauto)
+    monkeypatch.setattr(provider_module, "_finite_uia_children",
+                        lambda node: list(root.iter_descendants()) if node is root else [])
     bound = SimpleNamespace(
         handle=42,
         title="test",
@@ -184,6 +190,8 @@ def test_snapshot_drops_cyclic_runtime_parent_chain(monkeypatch) -> None:
     root.iter_descendants = lambda: iter([group, field])
     fake_pywinauto = SimpleNamespace(Desktop=lambda **_kwargs: SimpleNamespace(window=lambda **_args: root))
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", fake_pywinauto)
+    monkeypatch.setattr(provider_module, "_finite_uia_children",
+                        lambda node: list(root.iter_descendants()) if node is root else [])
     bound = SimpleNamespace(
         handle=42,
         title="test",
@@ -203,6 +211,8 @@ def _tree_snapshot(monkeypatch, root, descendants):
     root.iter_descendants = lambda: iter(descendants)
     fake_pywinauto = SimpleNamespace(Desktop=lambda **_kwargs: SimpleNamespace(window=lambda **_args: root))
     monkeypatch.setitem(__import__("sys").modules, "pywinauto", fake_pywinauto)
+    monkeypatch.setattr(provider_module, "_finite_uia_children",
+                        lambda node: list(root.iter_descendants()) if node is root else [])
     bound = SimpleNamespace(
         handle=42,
         title="test",

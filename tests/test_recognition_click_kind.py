@@ -52,7 +52,8 @@ def test_unknown_click_kind_is_not_silently_single_click(kind):
 @pytest.mark.parametrize('kind,options', [('right', {'button':'right'}), ('double', {'click_count':2})])
 @pytest.mark.parametrize('failure', [None, 'second_click', 'second_occluded', 'first_unknown'])
 @pytest.mark.parametrize('menu_scope', [False, True])
-def test_recognition_route_dispatches_selected_kind_once(monkeypatch,tmp_path,kind,options,failure,menu_scope):
+@pytest.mark.parametrize('container_scope', [False, True])
+def test_recognition_route_dispatches_selected_kind_once(monkeypatch,tmp_path,kind,options,failure,menu_scope,container_scope):
     from app.api import action
     from app.api.models.response import APIResponse
     from app.core.local_input_policy import _local_operator_input_scope
@@ -77,6 +78,12 @@ def test_recognition_route_dispatches_selected_kind_once(monkeypatch,tmp_path,ki
     monkeypatch.setattr(action,'_render_recognition_plan_overlay_for_execution',lambda p:None)
     monkeypatch.setattr(action,'write_trace',lambda **kw:str(tmp_path/'trace.json'))
     monkeypatch.setattr(action,'_rewrite_execute_trace_result',lambda **kw:None)
+    if container_scope:
+        def visibility(plan, point, **kwargs):
+            assert kwargs['click_kind'] == kind and kwargs['local_operator'] is True
+            return {'scope': 'editable_container_point', 'reason': 'verified_current_edit',
+                    'target_bbox': {'x': point['x'], 'y': point['y'], 'width': 1, 'height': 1}}
+        monkeypatch.setattr(action, 'recognition_click_visibility', visibility)
     calls=[]
     def click(x,y,**kw):
         calls.append(kw)
@@ -99,6 +106,10 @@ def test_recognition_route_dispatches_selected_kind_once(monkeypatch,tmp_path,ki
         result=action.execute_recognition_plan(request)
     assert len(calls)==1 and all(calls[0].get(k)==v for k,v in options.items())
     assert calls[0].get('expected_owned_popup_handle') == (900 if menu_scope else None)
+    if container_scope:
+        assert calls[0]['target_bbox'][2:] == (1, 1)
+        payload = result.data.get('result', result.data)
+        assert payload['click_visibility_scope']['scope'] == 'editable_container_point'
     if failure:
         assert not result.success
         expected=None if failure=='first_unknown' else True

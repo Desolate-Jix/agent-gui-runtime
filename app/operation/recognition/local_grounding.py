@@ -60,8 +60,9 @@ def _ground_candidate(
     crop.save(crop_path)
 
     ocr_result = request.ocr_scan(str(crop_path))
+    match_pool, scoped = _control_ocr_match_pool(candidate, ocr_result.matches, crop_bbox, word_mode=word_mode)
     match = _best_match(
-        ocr_result.matches,
+        match_pool,
         goal=request.goal,
         candidate_texts=[candidate.label, candidate.text, candidate.element.description],
         exact=word_mode,
@@ -73,6 +74,8 @@ def _ground_candidate(
         if observed is not None:
             candidate.element.evidence[KEY] = observed
         reasons = ['no_matching_local_ocr_text']
+        if scoped:
+            reasons.append('local_ocr_scoped_to_control_bbox')
         if not ocr_result.matches:
             reasons.append('local_ocr_returned_no_text')
         elif _ocr_outside_target(ocr_result.matches, crop_bbox, candidate.element.bbox):
@@ -113,8 +116,32 @@ def _ground_candidate(
         confidence=round(confidence, 4),
         matched_text=match.text,
         matched_text_bbox=local_bbox,
-        reasons=["matched_local_ocr_text", "mapped_crop_text_center_to_full_image"],
+        reasons=["matched_local_ocr_text", "mapped_crop_text_center_to_full_image"]
+            + (["local_ocr_scoped_to_control_bbox"] if scoped else []),
     )
+
+
+def _control_ocr_match_pool(candidate, matches, crop, *, word_mode):
+    """留白仅辅助 OCR；真实按钮或链接只能用其自身框内文字参与消歧。"""
+    from app.operation.recognition.control_corroboration import _contains
+
+    action = candidate.element.evidence.get('screen_inventory_action') or {}
+    bbox = candidate.element.bbox.to_dict()
+    if (word_mode or candidate.role not in {'button', 'link'}
+            or candidate.element.role != candidate.role
+            or action.get('source') != 'windows_uia.controls' or not action.get('source_id')
+            or action.get('bbox') != bbox
+            or candidate.bbox_refine_reason == 'synthetic_bbox_around_vista_direct_point'
+            or (candidate.refined_bbox is not None and candidate.refined_bbox != bbox)):
+        return matches, False
+    selected = []
+    for match in matches:
+        local = match.bbox
+        box = {'x': crop['x'] + local.x, 'y': crop['y'] + local.y,
+               'w': local.width, 'h': local.height}
+        if _contains(bbox, box):
+            selected.append(match)
+    return selected, True
 
 
 def _ocr_outside_target(matches, crop, target) -> bool:
