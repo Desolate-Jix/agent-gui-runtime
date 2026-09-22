@@ -80,6 +80,11 @@ class _WindowSpecification:
 
 
 def _install_desktop(monkeypatch, root, *, error=None):
+    from app.operation.screen_reading.uia_graph import CanonicalUIAGraph
+    monkeypatch.setattr(provider_module, "CanonicalUIAGraph", lambda node: CanonicalUIAGraph(node,
+        identity=lambda current: (current.element_info.runtime_id, 7, "Pane", None, None, 42),
+        parent=lambda current: current._parent.element_info.runtime_id if current._parent else None,
+        compare=lambda left, right: left is right))
     class Children:
         def __init__(self, node): self.node = node
         def __len__(self):

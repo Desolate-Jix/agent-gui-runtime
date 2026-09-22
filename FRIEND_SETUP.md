@@ -75,16 +75,19 @@ Install uv from its official instructions, reopen PowerShell, enter the extracte
 当前即时识别使用 [inclusionAI/VISTA-4B](https://huggingface.co/inclusionAI/VISTA-4B)。按 Hugging Face 官方 [CLI 下载说明](https://huggingface.co/docs/huggingface_hub/guides/cli#download-to-a-local-folder)，在同一个程序目录执行：
 
 ```powershell
-.\.venv\Scripts\hf.exe download inclusionAI/VISTA-4B --local-dir "D:\AgentReviewModels\VISTA-4B" --include "*.json" "*.safetensors" "*.jinja"
+.\.venv\Scripts\hf.exe download inclusionAI/VISTA-4B --local-dir "D:\AgentReviewModels\VISTA-4B" --include "*.json" --include "*.safetensors" --include "*.jinja"
 ```
 
 - 下载的是 Transformers 格式。保留配置、分词器、处理器和模板文件，不能只下载一个权重文件；不需要下载训练用的 `training_args.bin`。
+- 每个筛选模式都要重复 `--include`；空格后直接追加模式会被当前锁定的 CLI 解析为明确文件名，并忽略筛选条件。
 - 官方仓库目前使用单个 `model.safetensors`。本包也支持既有的合法分片目录（索引加全部分片），**不需要手工把官方权重拆分**。GGUF／量化模型不能直接替换此路径。
 - 下载中断可以重复同一下载命令继续检查缺失文件；**这不等于允许重复发送 GUI 动作**。
 - 为便于复现，保存下载时官方页面的提交版本；需要固定版本时可为下载命令增加 `--revision <完整提交SHA>`，替换成真实 SHA，不要原样复制占位符。
 - 不需要额外下载 Qwen、OmniParser 等学习模式候选模型。OCR 运行依赖由锁定环境安装；真实模型准备能否成功仍要在你的设备上验证。
 
 Download the official Transformers assets, not GGUF. Keep the configuration, tokenizer, processor and chat template alongside the weights. A single official `model.safetensors` and complete indexed shards are supported; no manual sharding is needed. Record the repository commit for reproducibility, or pin a real full commit with `--revision`. Other learning-mode candidate models are unnecessary for this trial.
+
+Repeat `--include` for each pattern. With the locked CLI, additional bare patterns become explicit filenames and override the include filters.
 
 ## 4. 生成本机连接配置 / Generate local MCP configuration
 
@@ -163,21 +166,33 @@ With test interception disabled, OCR/narrow-search/risk judgments are recorded r
 3. `prepare_models`，确认模型准备结果；首次加载时间单独记录。
 4. 每次只执行一个低风险动作：例如 Google 搜索 Google Maps、进入地图、在空搜索框输入地点并回车、查看结果、滚动详情。
 5. 每步查询原请求 ID 并检查后图。超时／结果未知时不要换 ID 重发点击；先核对当前画面与旧回执。
-6. 结束 `instant_stop`，查询至 `cleanup_verified=true`，再结束连接。不要为了清理本测试而终止所有同名浏览器进程。
+6. 先用 `close_launched_window` 正常关闭本会话 `launch` 返回的确切 handle/process_id；有保存弹窗时先观察并处理本轮测试内容。再 `instant_stop`，查询至 `cleanup_verified=true` 且宿主退出，再结束连接。不要为了清理本测试而终止所有同名浏览器进程。
 
-Give `AGENT_GUIDE.md` to the agent. Verify the target and original image, prepare models, perform one low-risk action at a time, then inspect its receipt and after-image. Poll original IDs; never blindly replay unknown outcomes. Finish with verified cleanup rather than killing every browser process. Keep the MCP connection alive during a task.
+Give `AGENT_GUIDE.md` to the agent. Verify the target and original image, prepare models, perform one low-risk action at a time, then inspect its receipt and after-image. Poll original IDs; never blindly replay unknown outcomes. First use close_launched_window for the exact handle/process_id launched by this session and resolve only its test-content dialogs. Then stop and verify cleanup and host exit rather than killing every browser process. Keep the MCP connection alive during a task.
 
 ## 7. 本预览版边界与反馈 / Limits and useful feedback
 
+**未发布的模型清理修复 / Unreleased model cleanup fix:** 清理失败时请保留回执 `diagnostics`、会话 `report.json`，以及诊断 `evidence_path` 指向的 `cleanup-evidence.json`（先脱敏），无需发整个目录。里面区分进程身份、Job 成员、连续零观测与 PID 文件删除结果。显存下降不等于全部清理通过；10 秒是新增观察预算，不是朋友故障已经解决的证明。`cleanup_pending` 解除阻塞后可再调用 `instant_stop` 只重试清理；不得删除历史指针来强开新会话。
+
+For cleanup failures, share redacted receipt diagnostics, session report and the cleanup-evidence file referenced by `evidence_path`, not the entire data directory. VRAM release alone is insufficient. The new observation budget is not proof of a friend-machine fix. Resolve the blocker before explicitly retrying cleanup with `instant_stop`; preserve session records. [验证记录 / Verification](docs/verification/V5_MODEL_CLEANUP_FIXES.md).
+
+**未发布源码修复 / Unreleased source fix:** 应用“未发现”不等于 MCP 未注册。可使用 launch.name、发现的 app_id 或本地 .exe/.lnk 绝对路径；同名候选必须消歧，UWP 专用启动不保证。现有 test.5 下载包尚未包含，详见 AGENT_GUIDE.md。
+
+An undiscovered app is not an unregistered MCP server. The source fix supports name, discovered ID and local executable/shortcut paths; the existing test.5 ZIP is unchanged.
+
+模型准备错误新增 `diagnostics`：`phase`（preflight/launch/readiness）、`error_code`、`cause_type`，以及可取得的退出码、日志目录/路径、errno/winerror。提供脱敏错误、对应日志末尾、GPU/显存、模型目录及包名；不要发 token 或整个数据目录。模型加载完成前可能还未监听端口，单凭“拒绝连接”不能认定防火墙，也不能认定已修复。
+
+Model errors now expose startup phase/code/type and available exit/log/OS details. Share minimal redacted logs and hardware information. Connection refusal alone does not diagnose the firewall or prove a fix: the worker may not listen until weights load.
+
 - 填写支持 `clear_existing=true` 显式替换已有内容；不会自动回车。
-- 当前 test.5 测试版支持 23 种编辑键，完整列表见 AGENT_GUIDE.md。按键作用于当前焦点，x/y 不会点击；不是任意快捷键工具。
+- 自 test.5 起支持 23 种编辑键，完整列表见 AGENT_GUIDE.md。按键作用于当前焦点，x/y 不会点击；不是任意快捷键工具。
 - `read_text` 从当前可见原图返回 OCR 文字与行框，不是 DOM 或整篇结构化内容提取；需要 Agent 看图核验错字和截断。
 - 支持识别单击、右击和双击；不包含学习、自动流程记忆、拖拽或任意应用可靠性的保证。
 - `verified=null` / `awaiting_agent_review` 表示还需要 Agent 检查实际效果；不能只凭 `returned`／成功标志判断业务目标完成。
 - 截图可能遮罩被遮挡区域，这不是分辨率下降。不要点击遮罩内无法确认的目标。
 - 日志可能包含填写的原文，原图会进入连接的 Agent 上下文并可能发送给其模型服务。请用无敏感内容的专用测试窗口；向开发者反馈时只提供脱敏必要片段，不转发整个数据目录、账号信息或模型访问令牌。
 
-The test.5 candidate supports text replacement, 23 current-focus editing keys, single/right/double clicks and visible-image OCR. Arbitrary hotkeys, DOM/full-document extraction, learning and drag remain outside the supported surface. Inspect actual effects; receipts are not task proof. Occlusion masks are not downsampling. Logs may contain entered text and screenshots may reach the connected agent's model provider; share only minimal redacted diagnostics.
+Since test.5, the runtime supports text replacement, 23 current-focus editing keys, single/right/double clicks and visible-image OCR. Arbitrary hotkeys, DOM/full-document extraction, learning and drag remain outside the supported surface. Inspect actual effects; receipts are not task proof. Occlusion masks are not downsampling. Logs may contain entered text and screenshots may reach the connected agent's model provider; share only minimal redacted diagnostics.
 
 遇到问题请记录：包版本、Windows／GPU／驱动、失败命令类型和请求 ID、错误原文、每步 `command_wall_ms`、是否已经产生实际动作，以及清理结果。**不必为了收集报告而反复执行失败输入。**
 

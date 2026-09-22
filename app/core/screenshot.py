@@ -120,6 +120,7 @@ class ScreenshotService:
                 raise ValueError("capture_binding_changed: discard the captured screen pixels")
             after_visibility = self._require_capture_visibility(current, monitor)
             if visibility.get("occluded_regions", []) != after_visibility.get("occluded_regions", []):
+                logger.warning("Capture visibility changed: before={} after={}", visibility.get("occluded_regions"), after_visibility.get("occluded_regions"))
                 raise CaptureVisibilityError("capture_visibility_changed")
             mark("post_binding_and_visibility")
             image = Image.frombytes("RGB", raw.size, raw.rgb)  # type: ignore[union-attr]

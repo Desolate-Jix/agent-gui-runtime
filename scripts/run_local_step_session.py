@@ -165,6 +165,21 @@ def main():
                 kind = command["kind"]
                 if kind == "discover":
                     response["result"] = co.discover_applications()
+                elif kind in {"desktop_capture", "desktop_click"}:
+                    from app.desktop_review.desktop_command import prepare_desktop_target
+                    # 丢弃旧应用选择，准备失败时不得误用旧坐标或旧目标。
+                    target = None
+                    desktop = prepare_desktop_target(co)
+                    target = desktop["window"]
+                    response["desktop_context"] = desktop
+                    if kind == "desktop_capture":
+                        response["result"] = {"status": "focused", "window": target,
+                                              "binding_mode": "automatic_desktop_host"}
+                        response["observation"] = co._owner.call(capture)
+                    else:
+                        response["result"] = run_step_command(co, target,
+                            {**command, "operation": "execute_recognition_plan"})
+                        response["observation"] = response["result"].get("observation", {}).get("capture")
                 elif kind == "select":
                     preview = co.preview_selected_window_preparation(
                         target_window_handle=command["handle"], target_process_id=command["process_id"])
@@ -173,7 +188,9 @@ def main():
                     target = response["result"]["window"]
                     response["observation"] = co._owner.call(capture)
                 elif kind == "launch":
-                    preview = co.preview_application_launch(app_id=command["app_id"], url=command.get("url"))
+                    target = None
+                    preview = co.preview_application_launch(prefer_existing=command.get('prefer_existing', True),
+                        **{key: command[key] for key in ("app_id", "name", "path", "url") if key in command})
                     response["preparation_preview"] = preview
                     result = co.confirm_window_preparation(preview["preparation_id"])
                     target = result["window"]
@@ -204,6 +221,13 @@ def main():
                     response["result"] = run_step_command(co, target, command)
                     observed = response["result"].get("observation", {})
                     response["observation"] = observed.get("capture")
+                elif kind == "form_fill":
+                    from app.desktop_review.form_fill import run_form_fill
+                    progress = out / "sequence-progress"
+                    progress.mkdir(exist_ok=True)
+                    response["result"] = run_form_fill(co, target, command["request"],
+                        persist=lambda value: write(progress / path.name, value))
+                    response["observation"] = response["result"].get("observation", {}).get("capture")
                 elif kind == "input_sequence":
                     from app.desktop_review.input_sequence import run_input_sequence
                     progress = out / "sequence-progress"
@@ -240,11 +264,17 @@ def main():
         report.update(phase="failed", error_type=type(error).__name__, error=str(error))
         raise
     finally:
+        terminal_phase = report.get('phase')
         if co is not None:
-            try:
-                co.shutdown()
-            except Exception as error:
-                errors.append({"operation": "shutdown", "error_type": type(error).__name__})
+            from app.desktop_review.session_cleanup import shutdown_retaining_owner
+            from app.core.json_snapshot import read_json_snapshot
+
+            def cleanup_retry_token():
+                path = out / 'cleanup-retry.json'
+                return read_json_snapshot(path).get('request_id') if path.is_file() else None
+
+            shutdown_retaining_owner(co, report, lambda: write(out / 'report.json', report), cleanup_retry_token)
+            report['phase'] = 'failed' if terminal_phase == 'failed' else 'stopped'
         try:
             if host is not None:
                 host.close()

@@ -510,6 +510,11 @@ class InputController:
         bound = self._require_bound_window()
         snapshot = self._text_target_snapshot(bound)
         click_result = None
+        from app.core.local_keyboard_target import claim_keyboard_target
+        keyboard_target = claim_keyboard_target("type_text", {"text": text, "x": x, "y": y,
+            "click_before_typing": click_before_typing, "clear_existing": clear_existing, "submit": submit})
+        if keyboard_target is not None and field_guard is not None:
+            raise ValueError("internal keyboard scope cannot replace a reviewed text guard")
         if click_before_typing and (type(x) is not int or type(y) is not int):
             raise ValueError("integer x and y are required when click_before_typing=true")
         if field_guard is not None:
@@ -530,24 +535,30 @@ class InputController:
                 raise RuntimeError("Text target window changed before focus/click")
             if click_before_typing:
                 click_result = self.click_point(x, y, move_before_click=True, settle_ms=100, hold_ms=50)
-            else:
+            elif keyboard_target is None:
                 self._focus_window(bound.handle)
-            self._verify_text_target(snapshot, x=x, y=y)
+            if keyboard_target is None:
+                self._verify_text_target(snapshot, x=x, y=y)
             if field_guard is not None:
                 self._verify_text_region(bound, field_guard)
             clipboard.verify_current_text()
             if field_guard is not None:
                 field_guard.verify_before_selection()
             if clear_existing:
+                if keyboard_target is not None:
+                    self._verify_text_target(snapshot, x=x, y=y, keyboard_target=keyboard_target)
                 self._press_chord([VK_CONTROL, VK_A])
                 time.sleep(0.03)
             # 选择文字与粘贴之间窗口或剪贴板都可能变化，不能复用前一次检查。
-            self._verify_text_target(snapshot, x=x, y=y)
+            if keyboard_target is None:
+                self._verify_text_target(snapshot, x=x, y=y)
             if field_guard is not None:
                 self._verify_text_region(bound, field_guard)
             verify_attempts = clipboard.verify_current_text()
             if field_guard is not None:
                 field_guard.verify_before_paste()
+            if keyboard_target is not None:
+                self._verify_text_target(snapshot, x=x, y=y, keyboard_target=keyboard_target)
             self._press_chord([VK_CONTROL, VK_V])
             time.sleep(CLIPBOARD_PASTE_SETTLE_SECONDS)
             if submit:
@@ -583,7 +594,9 @@ class InputController:
             raise ValueError("press_key requires an observed window point")
         self._ensure_windows_input()
         bound = self._require_bound_window()
-        self._verify_text_target(self._text_target_snapshot(bound), x=x, y=y)
+        from app.core.local_keyboard_target import claim_keyboard_target
+        keyboard_target = claim_keyboard_target("press_key", {"key": key, "x": x, "y": y})
+        self._verify_text_target(self._text_target_snapshot(bound), x=x, y=y, keyboard_target=keyboard_target)
         self._press_chord(list(EDITING_KEY_CHORDS[key]))
         return {"pressed": True, "key": key, "window_handle": bound.handle,
             "input_backend": "SendInput", "text_retyped": False}
@@ -605,13 +618,26 @@ class InputController:
         return (int(bound.handle), getattr(bound, "process_id", None),
                 bound.rect.left, bound.rect.top, bound.rect.right, bound.rect.bottom)
 
-    def _verify_text_target(self, snapshot: tuple[Any, ...], *, x: int | None, y: int | None) -> None:
+    def _verify_text_target(self, snapshot: tuple[Any, ...], *, x: int | None, y: int | None,
+                            keyboard_target=None) -> None:
         current = self._require_bound_window()
         if self._text_target_snapshot(current) != snapshot:
             raise RuntimeError("Text target window changed before keyboard dispatch")
         foreground = int(win32gui.GetForegroundWindow())
         if foreground != snapshot[0]:
             raise KeyboardForegroundMismatchError(snapshot[0], foreground)
+        if keyboard_target is not None:
+            from app.core.local_keyboard_target import LocalKeyboardTarget
+            if type(keyboard_target) is not LocalKeyboardTarget:
+                raise ValueError("invalid internal keyboard field target")
+            keyboard_target.verify(window_manager)
+            # COM 复读可能耗时；真正按键前仍重新确认窗口与前台。
+            if self._text_target_snapshot(self._require_bound_window()) != snapshot:
+                raise RuntimeError("Text target window changed before keyboard dispatch")
+            foreground = int(win32gui.GetForegroundWindow())
+            if foreground != snapshot[0]:
+                raise KeyboardForegroundMismatchError(snapshot[0], foreground)
+            return
         if x is not None and y is not None:
             evidence = window_manager.validate_bound_point_visibility(bound=current, x=x, y=y)
             if evidence.get("allowed") is not True:

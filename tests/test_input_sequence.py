@@ -136,6 +136,26 @@ def test_unreadable_focus_returns_click_evidence_without_typing(monkeypatch):
     assert result["completed_steps"] == ["focus"] and len(co.calls) == 1
 
 
+def test_reader_stage_diagnostic_survives_without_private_exception_data(monkeypatch):
+    from app.agent.windows_text_field_reader import TextFieldReadError
+    error = TextFieldReadError("text_field_target_not_writable", diagnostic={
+        "phase": "describe_target", "read_index": 1, "check": "password", "attribute_state": 1})
+    error.diagnostic["name"] = "PRIVATE_SENTINEL"
+    co = Coordinator()
+    snapshots(monkeypatch, [error])
+    result = run(co)
+    assert result["error"] == {"code": "text_field_target_not_writable", "type": "TextFieldReadError",
+        "diagnostic": {"phase": "describe_target", "read_index": 1, "check": "password", "attribute_state": 1}}
+    assert len(co.calls) == 1
+
+
+def test_arbitrary_exception_diagnostic_is_not_exported(monkeypatch):
+    error = ValueError("PRIVATE_SENTINEL")
+    error.diagnostic = {"phase": "read_text", "name": "PRIVATE_SENTINEL"}
+    snapshots(monkeypatch, [error])
+    assert "diagnostic" not in run(Coordinator())["error"]
+
+
 def test_insert_uses_observed_selection_not_whole_field_assumption(monkeypatch):
     co = Coordinator()
     snapshots(monkeypatch, ["old query", "maps query"], selection=(0, 3))

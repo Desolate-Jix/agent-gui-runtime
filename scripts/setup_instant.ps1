@@ -30,7 +30,7 @@ try {
     if ($DownloadModel -and $PSCmdlet.ShouldProcess($ModelDirectory, 'Download official inclusionAI/VISTA-4B assets (about 9.1 GB)')) {
         $hf = Join-Path $root '.venv\Scripts\hf.exe'
         if (-not (Test-Path -LiteralPath $hf -PathType Leaf)) { throw 'hf.exe not found; complete dependency installation first.' }
-        & $hf download inclusionAI/VISTA-4B --local-dir $ModelDirectory --include '*.json' '*.safetensors' '*.jinja'
+        & $hf download inclusionAI/VISTA-4B --local-dir $ModelDirectory --include '*.json' --include '*.safetensors' --include '*.jinja'
         if ($LASTEXITCODE -ne 0) { throw 'Model download incomplete; configuration was not generated.' }
     }
     & (Join-Path $PSScriptRoot 'configure_instant.ps1') -ModelDirectory $ModelDirectory -DataDirectory $DataDirectory -Python $python -WhatIf:$WhatIfPreference

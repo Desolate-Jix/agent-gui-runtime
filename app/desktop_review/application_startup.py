@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import ntpath
 import re
 import time
 from threading import RLock
@@ -232,6 +233,11 @@ def _discovery(value: Any) -> dict[str, Any]:
 
 def _preview(value: Any, record: dict[str, Any]) -> dict[str, Any]:
     keys = {"contract_version", "preparation_id", "mode", "identity", "source", "app_id", "name", "url", "command", "executable_path", "catalog_entry_sha256", "executable_sha256", "expires_in_seconds"}
+    if isinstance(value, dict) and 'working_directory' in value:
+        cwd = value['working_directory']
+        if not isinstance(cwd, str) or not cwd or not ntpath.isabs(cwd):
+            raise AgentLinkError('application_preview_unavailable', 'application working directory is invalid')
+        keys.add('working_directory')
     if not isinstance(value, dict) or set(value) != keys or value.get("contract_version") != "native_window_preparation_v1" or value.get("mode") != "launch" or value.get("identity") is not None or value.get("source") != "app_catalog" or value.get("app_id") != record["app_id"] or value.get("url") != record["url"] or _ID.fullmatch(value.get("preparation_id", "")) is None or not isinstance(value.get("name"), str) or not value["name"] or not isinstance(value.get("executable_path"), str) or not value["executable_path"] or not isinstance(value.get("catalog_entry_sha256"), str) or _HASH.fullmatch(value["catalog_entry_sha256"]) is None or not isinstance(value.get("executable_sha256"), str) or _HASH.fullmatch(value["executable_sha256"]) is None or type(value.get("expires_in_seconds")) is not int or not 1 <= value["expires_in_seconds"] <= 3600 or not isinstance(value.get("command"), list) or not 1 <= len(value["command"]) <= 32 or any(not isinstance(item, str) or not item or len(item) > 4096 for item in value["command"]) or value["command"][0] != value["executable_path"]:
         raise AgentLinkError("application_preview_unavailable", "application preview is invalid")
     return deepcopy(value)

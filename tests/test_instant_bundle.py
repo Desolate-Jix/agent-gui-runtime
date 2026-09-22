@@ -43,6 +43,24 @@ def test_missing_required_source_fails_before_output(tmp_path):
     assert not (tmp_path / "output").exists()
 
 
+@pytest.mark.parametrize("entrypoint", (
+    "app/desktop_review/entrypoint.py", "app/desktop_review/application.py",
+    "app/agent_link/mcp_bridge.py",
+))
+def test_execution_bundle_excludes_learning_entrypoints_not_shared_runtime(tmp_path, entrypoint):
+    seed(tmp_path)
+    shared = ("app/desktop_review/host.py", "app/desktop_review/workspace.py",
+              "app/agent_link/host.py", "app/agent_link/http_app.py", "app/agent_link/service.py",
+              "app/learn/hybrid/windows_process_scope.py")
+    for name in (entrypoint, *shared):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("fixture", encoding="utf-8")
+    found = {p.relative_to(tmp_path).as_posix() for p in bundle.collect_sources(tmp_path)}
+    assert entrypoint not in found
+    assert set(shared) <= found
+
+
 def test_build_and_archive_only_ship_manifest_not_generated_junk(tmp_path, monkeypatch):
     source, out = tmp_path / "source", tmp_path / "delivery"
     seed(source)

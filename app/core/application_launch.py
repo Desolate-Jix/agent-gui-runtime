@@ -5,6 +5,6 @@ import subprocess
 from typing import Sequence, Any
 
 
-def launch_process(command: Sequence[str]) -> Any:
+def launch_process(command: Sequence[str], *, cwd: str | None = None) -> Any:
     """按既有列表参数语义启动，不经过 shell。"""
-    return subprocess.Popen(list(command))
+    return subprocess.Popen(list(command), cwd=cwd) if cwd else subprocess.Popen(list(command))

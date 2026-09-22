@@ -12,10 +12,12 @@ import zipfile
 
 def retained_app_source(relative):
     relative = Path(relative)
-    # 退役的是精确目录 app/seek，不是所有名为 seek 的维护依赖或上级目录。
+    # 精确排除退役目录和学习启动入口，保留执行共用的宿主、识别与清理依赖。
     excluded_roots = (Path("app/seek"), Path("app/web_panel"))
     return (relative.suffix in {".py", ".json"} and not any(x in relative.parts for x in ("__pycache__", "tests"))
-            and relative.as_posix() not in {"app/main.py", "app/api/panel.py"}
+            and relative.as_posix() not in {"app/main.py", "app/api/panel.py",
+                "app/desktop_review/entrypoint.py", "app/desktop_review/application.py",
+                "app/agent_link/mcp_bridge.py"}
             and not any(relative.is_relative_to(prefix) for prefix in excluded_roots))
 
 

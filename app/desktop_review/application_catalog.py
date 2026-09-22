@@ -1,6 +1,7 @@
 """复用现有应用目录解析，不创建第二个启动器。"""
 from copy import deepcopy
 import hashlib
+import ntpath
 from pathlib import Path, PureWindowsPath
 from urllib.parse import urlsplit
 
@@ -22,13 +23,44 @@ def _catalog():
     return deepcopy(catalog)
 
 
+def _available_catalog():
+    from .installed_applications import discover_installed_applications
+
+    catalog = _catalog()
+    existing = {app['app_id'] for app in catalog['apps']}
+    discovered = discover_installed_applications()
+    for app in catalog['apps']:
+        try:
+            command = _resolve(app)
+        except (ValueError, TypeError, OSError):
+            continue
+        duplicates = [item for item in discovered if item['launch_command'] == command
+                      and ntpath.normcase(item.get('working_directory') or '')
+                      == ntpath.normcase(app.get('working_directory') or '')]
+        # 仅合并唯一的同命令发现项；不同参数或工作目录仍保留为候选。
+        if len(duplicates) == 1:
+            duplicate = duplicates[0]
+            app['aliases'] = sorted(set([duplicate['name'], *duplicate.get('aliases', [])]))
+            discovered.remove(duplicate)
+    catalog['apps'].extend(app for app in discovered if app['app_id'] not in existing)
+    return catalog
+
+
+class ApplicationSelectionError(ValueError):
+    def __init__(self, code, message, candidates=()):
+        super().__init__(message)
+        self.diagnostics = {'error_code': code, 'candidates': [
+            {key: item.get(key) for key in ('app_id', 'name', 'launch_command', 'working_directory')} for item in candidates],
+            'next': 'Choose one candidate app_id, or supply an absolute local .exe/.lnk path.'}
+
+
 def _resolve(app, url=None):
     from app.api.apps import _resolve_launch_command
     from app.api.models.request import OpenAppRequest
 
     raw = app.get("launch_command")
     if (not isinstance(raw, list) or not raw or len(raw) > 64
-            or any(not isinstance(arg, str) or not arg or len(arg) > 8192
+            or not raw[0] or any(not isinstance(arg, str) or len(arg) > 8192
                    or has_launch_display_controls(arg) for arg in raw)):
         raise ValueError("catalog launch command is invalid")
     command = _resolve_launch_command(app, OpenAppRequest(app_id=app["app_id"], url=url))
@@ -44,7 +76,7 @@ def _resolve(app, url=None):
 
 def application_catalog_view():
     apps = []
-    for app in _catalog()["apps"]:
+    for app in _available_catalog()["apps"]:
         item = {"app_id": app["app_id"], "name": str(app.get("name") or app["app_id"]),
                 "capabilities": deepcopy(app.get("capabilities", [])), "executable_path": None, "launchable": False}
         try:
@@ -56,13 +88,31 @@ def application_catalog_view():
     return apps
 
 
-def application_launch_selection(app_id, url=None):
-    if not isinstance(app_id, str) or not app_id or len(app_id) > 128:
-        raise ValueError("catalog application ID is invalid")
-    matches = [app for app in _catalog()["apps"] if app["app_id"] == app_id]
+def application_launch_selection(app_id=None, url=None, *, name=None, path=None):
+    selector = {key: value for key, value in {'app_id': app_id, 'name': name, 'path': path}.items() if value is not None}
+    if len(selector) != 1 or any(not isinstance(value, str) or not value.strip() or len(value) > 4096
+                                or has_launch_display_controls(value) for value in selector.values()):
+        raise ValueError('launch requires exactly one non-empty app_id, name or path')
+    if path is not None:
+        from .installed_applications import explicit_application
+        matches = [explicit_application(path)]
+    else:
+        apps = _available_catalog()['apps']
+        if app_id is not None:
+            matches = [app for app in apps if app['app_id'] == app_id]
+        else:
+            query = name.strip().casefold()
+            labels = lambda app: [str(app.get('name', '')).casefold(),
+                                  *(str(alias).casefold() for alias in app.get('aliases', []))]
+            matches = [app for app in apps if query in labels(app)]
+            if not matches:
+                matches = [app for app in apps if any(query in label for label in labels(app))]
     if len(matches) != 1:
-        raise ValueError("catalog application was not found")
+        raise ApplicationSelectionError('application_name_ambiguous' if matches else 'application_not_found',
+            'Multiple applications match; choose a candidate.' if matches else
+            'Application was not discovered. Supply its .exe or .lnk path; MCP registration is not required.', matches)
     app = matches[0]
+    app_id = app['app_id']
     if url is not None:
         if (not isinstance(url, str) or not 1 <= len(url) <= 8192
                 or has_launch_display_controls(url) or " " in url or "\\" in url):
@@ -84,5 +134,6 @@ def application_launch_selection(app_id, url=None):
     with Path(command[0]).open("rb") as source:
         executable_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
     return {"source": "app_catalog", "app_id": app_id, "name": str(app.get("name") or app_id),
+            "selector": selector, "working_directory": app.get('working_directory'),
             "url": url, "command": command, "executable_path": command[0],
             "catalog_entry_sha256": canonical_hash(app), "executable_sha256": executable_sha256}

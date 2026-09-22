@@ -145,6 +145,8 @@ class FormalModelService:
 
         if self._closed or self._prepared or self._scope is not None or self._initialization_cleanup is not None:
             raise ModelServiceError("model_service_invalid_phase")
+        phase = "preflight"
+        launch_result = None
         try:
             self._check_cancel(cancelled)
             deadline = time.monotonic() + self._configuration.readiness_timeout_seconds
@@ -160,14 +162,17 @@ class FormalModelService:
                     raise ModelServiceError("model_service_scope_unavailable")
                 self._scope = scopes.WindowsProcessScope(self._scope_name, create=True)
                 self._ownership = "owned"
-                model_server.start_model_server(self._profile, scope_name=self._scope_name,
+                phase = "launch"
+                launch_result = model_server.start_model_server(self._profile, scope_name=self._scope_name,
                     child_env=model_worker_environment(os.environ), output_root=self._output_root, cancelled=cancelled, deadline=deadline,
                     **({"worker_executable": self._configuration.worker_executable}
                        if self._configuration.worker_executable is not None else {}))
+                phase = "readiness"
                 self._check_cancel(cancelled)
                 state = self._probe(deadline)
             else:
                 self._ownership = "external"
+            phase = "readiness"
             while True:
                 self._check_cancel(cancelled)
                 if time.monotonic() >= deadline:
@@ -198,14 +203,55 @@ class FormalModelService:
             if isinstance(error, scopes.HybridProcessScopeHandleCleanupError):
                 self._initialization_cleanup = error.cleanup_owner
             self._retain_cleanup_identities(getattr(error, "cleanup_evidence", {}))
-            self.close()
+            diagnostics = self._startup_diagnostics(error, phase, launch_result)
+            try:
+                self.close()
+            except Exception as cleanup_error:
+                diagnostics["cleanup_error_code"] = (cleanup_error.code if isinstance(cleanup_error, ModelServiceError)
+                                                     else "model_service_cleanup_failed")
+                cleanup_diagnostics = getattr(cleanup_error, 'diagnostics', None)
+                if isinstance(cleanup_diagnostics, dict) and cleanup_diagnostics.get('contract_version') == 'model_service_cleanup_diagnostics_v1':
+                    diagnostics['cleanup_diagnostics'] = cleanup_diagnostics
+                cleanup_error.diagnostics = diagnostics
+                raise
             if isinstance(error, ModelServiceError):
+                error.diagnostics = diagnostics
                 raise
             if not isinstance(error, Exception):
                 raise
-            if getattr(error, "code", None) in {"model_service_cancelled", "model_service_readiness_timeout"}:
-                raise ModelServiceError(error.code) from error
-            raise ModelServiceError("model_service_prepare_failed") from error
+            failure = ModelServiceError(diagnostics["error_code"])
+            failure.diagnostics = diagnostics
+            raise failure from error
+
+    def _startup_diagnostics(self, error: BaseException, phase: str, launch_result: Any) -> dict[str, Any]:
+        code = "model_service_prepare_failed"
+        if (isinstance(error, ModelServiceError)
+                or getattr(error, "code", None) in {"model_service_cancelled", "model_service_readiness_timeout"}):
+            code = error.code
+        logs = self._output_root / "logs"
+        diagnostics = {"contract_version": "model_service_startup_diagnostics_v1", "phase": phase,
+            "error_code": code, "cause_type": type(error).__name__, "process_exit_code": None,
+            "log_directory": str(logs) if self._ownership == "owned" else None, "log_path": None}
+        for key in ("errno", "winerror"):
+            value = getattr(error, key, None)
+            if type(value) is int:
+                diagnostics[key] = value
+        log_path = launch_result.get("log_path") if isinstance(launch_result, dict) else None
+        # 仅解析既有启动器的固定错误格式，不回显任意异常文本或日志内容。
+        if phase == "launch" and type(error) is RuntimeError:
+            match = re.fullmatch(r"Model start script exited immediately with code (-?\d+); see log: (.+)", str(error))
+            if match:
+                diagnostics["process_exit_code"] = int(match[1])
+                log_path = match[2]
+        if isinstance(log_path, str):
+            try:
+                candidate = Path(log_path).resolve()
+                if (candidate.parent == logs.resolve()
+                        and re.fullmatch(r"local-vision-server-[A-Za-z0-9_-]+-\d{8}-\d{6}\.log", candidate.name)):
+                    diagnostics["log_path"] = str(candidate)
+            except (OSError, ValueError):
+                pass
+        return diagnostics
 
     def can_retain(self) -> bool:
         """只判断驻留资格；不探测健康，不收养外部进程。"""
@@ -376,6 +422,8 @@ class FormalModelService:
                 raise ModelServiceError("model_service_cleanup_pending", result_unknown=True) from error
             self._initialization_cleanup = None
         if self._scope is not None:
+            evidence = None
+            stage = 'observe_owned_processes'
             try:
                 # 失败重试时 Job 可能已空，旧进程身份不能随观察调用结束而丢失。
                 for item in _identities_for_pids(self._scope.pids()):
@@ -384,15 +432,45 @@ class FormalModelService:
                 evidence = observe_process_scope_cleanup(self._scope_name, terminate=True,
                     listener_ports=[], pid_file=self._pid_path, remove_owned_pid_file=True,
                     stable_zero_observations=3, interval_seconds=0.1,
+                    timeout_seconds=10.0, include_diagnostics=True,
                     retained_process_identities=tuple(self._cleanup_member_identities.values()))
                 self._retain_cleanup_identities(evidence)
+                diagnostics = self._record_cleanup_evidence(evidence, stage)
                 if evidence.get("cleanup_status") != "verified":
-                    raise ModelServiceError("model_service_cleanup_pending", result_unknown=True)
+                    failure = ModelServiceError("model_service_cleanup_pending", result_unknown=True)
+                    failure.diagnostics = diagnostics
+                    raise failure
+                stage = 'close_job_handle'
                 self._scope.close()
             except Exception as error:
-                raise ModelServiceError("model_service_cleanup_pending", result_unknown=True) from error
+                failure = ModelServiceError("model_service_cleanup_pending", result_unknown=True)
+                failure.diagnostics = (getattr(error, 'diagnostics', None)
+                    or self._record_cleanup_evidence(evidence, stage, error))
+                raise failure from error
             self._scope = None
             self._cleanup_member_identities.clear()
             self._pending_request_id = None
         self._closed = True
         return {"cleanup_verified": True, "ownership": self._ownership}
+
+    def _record_cleanup_evidence(self, evidence, stage, error=None):
+        from app.core.json_snapshot import write_json_snapshot
+
+        # 仅保存结构化拥有权观察，排除底层任意异常原文和配置凭证。
+        safe = {key: value for key, value in (evidence or {}).items() if key != 'details'}
+        path = self._output_root / 'cleanup-evidence.json'
+        result = {'contract_version': 'model_service_cleanup_diagnostics_v1', 'stage': stage,
+                  'scope_name': self._scope_name, 'evidence': safe, 'evidence_path': str(path),
+                  'timeout_seconds': 10.0}
+        if error is not None:
+            result['error_type'] = type(error).__name__
+            for key in ('errno', 'winerror'):
+                value = getattr(error, key, None)
+                if type(value) is int:
+                    result[key] = value
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            write_json_snapshot(path, result)
+        except OSError as failure:
+            result['evidence_write_error'] = type(failure).__name__
+        return result

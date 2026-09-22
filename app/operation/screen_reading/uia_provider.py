@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Iterator, Mapping
 
 from app.core.window_manager import BoundWindow, window_manager
+from app.operation.screen_reading.uia_graph import CanonicalUIAGraph, UIAGraphError
 
 UIA_PROVIDER_ID = "windows_uia"
 UIA_PROVIDER_VERSION = "windows_uia_provider_v1"
@@ -41,50 +42,72 @@ def _finite_uia_children(wrapper):
 
 
 def _bounded_uia_walk(root, *, budget, prune_documents=False):
-    """按读取次数限额遍历；重复身份、环和读取异常不能伪装成完整树。"""
+    """按读取次数限额遍历；仅归一化已证实别名，真实冲突和异常仍不完整。"""
     budget = max(1, int(budget))
     wrappers, errors, frames, seen = [], [], [], set()
-    current, path = root, frozenset()
+    current, path, expected_parent = root, frozenset(), None
+    try:
+        graph = CanonicalUIAGraph(root)
+    except Exception:
+        graph = None
+        errors.append({"reason": "runtime_identity_unavailable" if _runtime_id_key(root) is None
+                       else "tree_identity_unavailable", "index": 0})
+    visited = 0
     excluded = 0
     while current is not None:
-        wrappers.append(current)
+        visited += 1
         key = _runtime_id_key(current)
         duplicate = key is not None and key in seen
+        alias = False
+        if graph is not None and visited > 1:
+            try:
+                alias = graph.visit(current, expected_parent=expected_parent,
+                    path={tuple(value for _, value in item) for item in path})
+            except Exception as exc:
+                errors.append({"reason": exc.reason if isinstance(exc, UIAGraphError)
+                               else "tree_identity_unavailable", "index": visited - 1})
+        if not alias:
+            wrappers.append(current)
         if key is None:
             errors.append({"reason": "runtime_identity_unavailable", "index": len(wrappers) - 1})
-        elif duplicate:
+        elif duplicate and not alias:
             errors.append({"reason": "ancestor_cycle" if key in path else "duplicate_runtime_id",
                            "index": len(wrappers) - 1, "runtime_id": list(_public_runtime_id(current.element_info) or [])})
         if key is not None:
             seen.add(key)
         document = prune_documents and str(getattr(current.element_info, "control_type", "")).casefold() == "document"
-        excluded += int(document)
-        if len(wrappers) == budget:
+        excluded += int(document and not alias)
+        if visited == budget:
             break
         if not duplicate and not document:
             try:
                 children = _finite_uia_children(current)
-                frames.append([children, 0, path | {key} if key is not None else path])
+                frames.append([children, 0, path | {key} if key is not None else path,
+                               _public_runtime_id(current.element_info)])
             except Exception as exc:
                 errors.append({"reason": "children_enumeration_failed", "index": len(wrappers) - 1,
                                "message": str(exc), "winerror": getattr(exc, "winerror", None)})
         current = None
         while frames:
-            children, index, child_path = frames[-1]
+            children, index, child_path, parent_id = frames[-1]
             try:
                 if index >= len(children):
                     frames.pop()
                     continue
                 frames[-1][1] += 1
-                current, path = children[index], child_path
+                current, path, expected_parent = children[index], child_path, parent_id
                 break
             except Exception as exc:
                 frames.pop()
                 errors.append({"reason": "children_enumeration_failed", "child_index": index,
                                "message": str(exc), "winerror": getattr(exc, "winerror", None)})
-    truncated = len(wrappers) == budget
-    return {"wrappers": wrappers, "scan_visited_count": len(wrappers),
+    truncated = visited == budget
+    return {"wrappers": wrappers, "scan_visited_count": visited,
             "scan_complete": not truncated and not errors, "truncated": truncated,
+            "graph_scan_complete": not truncated and not errors,
+            "provider_tree_valid": bool(graph and graph.provider_tree_valid and not errors),
+            "alias_count": graph.alias_count if graph else 0,
+            "cycle_count": graph.cycle_count if graph else 0,
             "truncation_reason": "control_budget_reached" if truncated else None,
             "traversal_errors": errors, "excluded_document_count": excluded}
 

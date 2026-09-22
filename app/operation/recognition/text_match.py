@@ -21,7 +21,8 @@ def text_similarity(left: str, right: str) -> float:
     return max(len(a & b) / len(a | b), SequenceMatcher(None, left, right).ratio())
 
 
-_TARGET_ROLE = r"menu\s+item|radio\s+button|hyperlink|link|button|tab|checkbox|input|field"
+_FIELD_ROLE = r"(?:search\s+|text\s+)?input\s+(?:box|field)|text\s+(?:box|field|area)|search\s+(?:box|field)|textbox|textarea"
+_TARGET_ROLE = rf"menu\s+item|radio\s+button|hyperlink|link|button|tab|checkbox|dropdown|option|{_FIELD_ROLE}|input|field"
 
 
 def explicit_target_marker(goal: str):
@@ -55,6 +56,8 @@ def explicit_target_role(goal: str) -> str | None:
         # 只读取紧邻标签及可选翻译后的角色，不采纳后续位置说明中的控件名。
         suffix = re.match(rf"\s*(?:\([^()]*\)\s*)?({_TARGET_ROLE})\b", tail[end + 1:], re.I) if end > 0 else None
         role = suffix.group(1) if suffix else None
+    if role and re.fullmatch(_FIELD_ROLE, role, re.I):
+        return "input"
     return " ".join(role.casefold().split()) if role else None
 
 

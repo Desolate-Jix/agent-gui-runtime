@@ -10,14 +10,21 @@ def compact_receipt(receipt, *, full_receipt_path=None):
     keys = ("request_id", "status", "operation_succeeded", "operation_success_scope",
         "input_route_succeeded", "task_effect_verified", "automatic_retry_allowed",
         "observation_status", "started_at", "finished_at", "command_wall_ms", "error", "error_type",
-        "diagnostics", "agent_review", "next", "accepted", "action_executed",
+        "diagnostics", "desktop_context", "agent_review", "next", "accepted", "action_executed",
         "wait_expired", "command_cancelled", "partial_execution")
     value = {key: deepcopy(receipt[key]) for key in keys if key in receipt}
     value["receipt_detail"] = "compact"
     value["full_receipt"] = {"tool": "instant_result", "arguments": {
         "request_id": receipt.get("request_id"), "detail": "full", "images": "none"},
         "path": str(full_receipt_path) if full_receipt_path is not None else None}
-    if result.get("contract_version") == "input_sequence_v1":
+    if result.get("contract_version") == "form_fill_v1":
+        value["form"] = {key: deepcopy(result[key]) for key in (
+            "status", "phase", "completed_fields", "interrupted_at", "action_executed",
+            "error", "total_ms", "next_action") if key in result}
+        value["form"]["fields"] = [{key: deepcopy(row[key]) for key in (
+            "index", "kind", "status", "check", "error", "action_executed") if key in row}
+            for row in result.get("fields", [])]
+    elif result.get("contract_version") == "input_sequence_v1":
         value["sequence"] = {key: deepcopy(result.get(key)) for key in (
             "sequence_id", "status", "completed_steps", "interrupted_at", "input_check",
             "action_executed", "error", "total_ms", "next_action", "selected_click_point",

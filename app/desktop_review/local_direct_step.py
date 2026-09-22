@@ -66,7 +66,8 @@ class LocalDirectStepMixin:
 
     def execute_local_step(self, *, target_window_handle: int, target_process_id: int,
                            operation: str, request: dict, include_observation: bool = False,
-                           observation_wait_ms: int | None = None, observation_condition: dict | None = None) -> dict:
+                           observation_wait_ms: int | None = None, observation_condition: dict | None = None,
+                           control_target=None, keyboard_target=None) -> dict:
         """仅本地协调器入口；不经 Agent JSON 关闭策略，也不要求一次性执行凭据。"""
         timer = RuntimeTimer(contract_version="local_step_invocation_timing_v1")
         timing_context = {"invocation_id": "local-invocation-" + uuid4().hex,
@@ -74,6 +75,10 @@ class LocalDirectStepMixin:
         failure = None
         try:
             with timer.step("request_validation"):
+                from app.core.local_control_target import LocalControlTarget
+                if control_target is not None and (operation != "execute_recognition_plan"
+                        or not isinstance(control_target, LocalControlTarget)):
+                    raise ValueError("internal control target requires a recognition click")
                 if type(include_observation) is not bool:
                     raise TypeError("include_observation must be bool")
                 if observation_wait_ms is not None:
@@ -83,6 +88,13 @@ class LocalDirectStepMixin:
                 if type(target_window_handle) is not int or target_window_handle <= 0 or type(target_process_id) is not int or target_process_id <= 0:
                     raise ValueError("local step requires a valid HWND and PID")
                 request = _validated_request(operation, request)
+                if keyboard_target is not None:
+                    from app.core.local_keyboard_target import LocalKeyboardTarget
+                    if (type(keyboard_target) is not LocalKeyboardTarget
+                            or keyboard_target.snapshot.identity.window_handle != target_window_handle
+                            or keyboard_target.snapshot.identity.process_id != target_process_id):
+                        raise ValueError("internal keyboard field target mismatch")
+                    keyboard_target.validate_command(operation, request)
                 timing_context["observation_wait_ms"] = (resolve_render_grace_ms(
                     local_action_observation_kind(operation, request), observation_wait_ms)
                     if include_observation else 0)
@@ -122,7 +134,8 @@ class LocalDirectStepMixin:
                         _timed_owner_call(self._owner, timer, "model_prepare_or_reuse", prepare)
                 return _timed_owner_call(self._owner, timer, "owner_dispatch",
                     lambda stage: self._execute_local_step_on_owner(target_window_handle,
-                        target_process_id, operation, request, configuration, timing_context=timing_context),
+                        target_process_id, operation, request, configuration, timing_context=timing_context,
+                        control_target=control_target, keyboard_target=keyboard_target),
                     includes="local_step_timings")
             finally:
                 try:
@@ -145,11 +158,13 @@ class LocalDirectStepMixin:
                 failure.add_note("local step timing persistence failed: " + type(timing_error).__name__)
 
     def _execute_local_step_on_owner(self, handle, pid, operation, request, configuration=None,
-                                     *, timing_context):
+                                     *, timing_context, control_target=None, keyboard_target=None):
         timer = RuntimeTimer(contract_version="local_step_owner_timing_v1")
         try:
             from app.vision.configuration import pinned_vision_configuration
-            with _local_operator_step_scope(), (pinned_vision_configuration(configuration) if configuration else nullcontext()):
+            from app.core.local_control_target import local_control_target_scope
+            from app.core.local_keyboard_target import local_keyboard_target_scope
+            with _local_operator_step_scope(), local_control_target_scope(control_target), local_keyboard_target_scope(keyboard_target), (pinned_vision_configuration(configuration) if configuration else nullcontext()):
                 return self._perform_local_step_on_owner(handle, pid, operation, request, timer, timing_context)
         finally:
             timing_context["local_step_timings"] = {**timer.to_dict(), "scope": "owner_execution",
@@ -170,6 +185,8 @@ class LocalDirectStepMixin:
         output.mkdir(parents=True, exist_ok=False)
         report = {"contract_version": "local_direct_step_v1", "step_id": step_id,
                   "started_at": _now(), "operation": operation, "target_identity": identity,
+                  "target_window_geometry": {"coordinate_space": "screen_pixels", "rect_format": "ltrb",
+                                             "rect": list(window_rect)},
                   "automatic_safety_interception": False, "one_time_authority_required": False,
                   "learning_enabled": False, "phase": "preparing", "request": _audit_request(request),
                   "effect_verified": False, "automatic_retry_allowed": False}

@@ -1,10 +1,30 @@
-# Agent 接入与操作 / Agent usage — v0.1.0-test.5 candidate
+# Agent 接入与操作 / Agent usage — v0.1.0-test.6
 
-**test.5 候选聚焦行为 / test.5 candidate focus behavior:** 普通“点击输入框”与结构化 input 目标现在也要求模型定位可编辑区内部，避免边框、占位文字字形或相邻搜索按钮；原目标标签保留。按钮/图标/框内单词不因此改成聚焦整个字段。仍须读图核对焦点、实际文字与跳转，派发不等于成功。此修复纳入 test.5 候选文档；仍须按回执与原图独立核验。/ Plain field-click goals and structured input targets now request interior focus without changing the original label or word/button/icon targets. Inspect actual focus, text and navigation; dispatch is not success. The test.5 candidate documents this fix; still verify it independently from receipts and original images. [实测边界 / Limits](docs/verification/EXECUTION_INPUT_FOCUS.md).
+## test.6：通用应用启动 / Installed applications
 
-本指南对应 test.5：同冻结运行时已通过 Codex 与 AionUi 的限定连续实测，范围与未覆盖项见 CHANGELOG.md；不是通用可靠性保证。 / This test.5 guide covers the same runtime used in bounded Codex and AionUi continuous acceptance; see CHANGELOG.md for limits.
+本节适用于 test.6；旧 test.5 包不包含新增接口，不需要为每个软件注册 MCP。 / Available in test.6, not older test.5 bundles. Apps do not need separate MCP registration.
 
-## 本候选新增契约 / Candidate contracts
+`instant_run` 示例 / Examples:
+
+```json
+{"request_id":"app-01","command":{"kind":"launch","name":"Character Map"}}
+{"request_id":"app-02","command":{"kind":"launch","path":"C:\\Tools\\Example.exe"}}
+{"request_id":"app-03","command":{"kind":"launch","path":"C:\\Users\\YourName\\Desktop\\Example.lnk"}}
+```
+
+- `app_id/name/path` 三选一；名称先精确匹配（含别名），再部分匹配。有多个候选返回 `diagnostics.candidates`，明确选择 app_id，不取第一项猜测。 / Exactly one selector; choose an explicit candidate when ambiguous.
+- `discover` 有界枚举用户/公共开始菜单、桌面快捷方式及 App Paths，不扫描整个磁盘；便携软件使用绝对路径。 / Bounded discovery, explicit paths for portable apps.
+- `prefer_existing` 默认 true：无 URL/启动参数时复用唯一且身份匹配的现有窗口；多个窗口需 select。传 false 显式启动；带 URL/参数不会只聚焦而吞掉参数。 / Reuse unique identity-matched windows only for argument-free launches; preserve URL/argument semantics.
+- `focused + reused_existing_window=true + launch_dispatched=false` 表示复用，用户原窗口不会因此获得会话清理所有权。不同 cwd 的快捷方式仍是不同候选，预览保留实际 cwd。 / Reuse does not grant cleanup ownership; distinct working directories remain distinct and visible in preview.
+- `launched_window_ready` 只代表新窗口身份匹配。UWP 专用链接及转交不同 exe 的启动器暂不保证；unknown/unavailable 后先检查旧回执和 discover，不盲目重启。 / Dispatch is not readiness; inspect uncertain launcher outcomes without blind replay.
+- 桌面可先 `desktop_capture`，再 `desktop_click`，request 包含 goal 和 `click_kind:"double"`。不用先 select，但内部仍绑定真实桌面宿主、新截图识别，不接受裸坐标。打开后 discover/select 新应用。 / Desktop commands resolve shell identity and use fresh recognition, not unbound raw coordinates.
+
+
+**输入框聚焦行为 / Input-field focus behavior:** 普通“点击输入框”与结构化 input 目标现在也要求模型定位可编辑区内部，避免边框、占位文字字形或相邻搜索按钮；原目标标签保留。按钮/图标/框内单词不因此改成聚焦整个字段。仍须读图核对焦点、实际文字与跳转，派发不等于成功。仍须按回执与原图独立核验。/ Plain field-click goals and structured input targets now request interior focus without changing the original label or word/button/icon targets. Inspect actual focus, text and navigation; dispatch is not success. Verify the result independently from receipts and original images. [实测边界 / Limits](docs/verification/EXECUTION_INPUT_FOCUS.md).
+
+本指南对应 test.6。Codex 单项／连续实测后已由 AionUi 独立复测，范围与保留失败见 docs/verification/TEST6_CANDIDATE_ACCEPTANCE.md，不作通用可靠性保证。 / test.6 received independent AionUi retesting after Codex single and continuous runs; see the acceptance report for retained failures and limitations.
+
+## 执行契约 / Execution contracts
 
 - 精确网页链接可用 `Click the result link labelled "完整可见标题"`；唯一性按本帧范围核对，完全离屏同名项不冒充可点目标，部分可见重名仍参与消歧。点击后仍须读原图确认网址/正文变化。 / Exact quoted links use current-frame identity; inspect post-images for navigation rather than trusting dispatch. See docs/verification/EXECUTION_BROWSER_RETEST_20260921.md.
 
@@ -14,7 +34,7 @@
 - 23 种按键包括原有 15 种及 `Shift+Left/Right/Up/Down/Home/End`、`Ctrl+Home/End`。只作用于当前目标焦点，x/y 不会先点击。 / Eight selection/document-boundary chords augment the existing fifteen; coordinates do not focus the field.
 - 排名是分数诊断，`recommended_candidate_id` 才是明确推荐身份，不要自行取 `candidates[0]` 替代。`current_control_ocr_text_center` 是本次真实 OCR 文字中心，原模型点另行保留；这不等于任务已成功。 / Preserve explicit selection and coordinate provenance; neither ranking nor dispatch proves task effect.
 - 浏览器 `browser_document_observation` 的空正文状态不等于页面空白或加载完成；先读原图，不能按旧图坐标配新控件，也不自动重放。 / Empty UIA is not an empty/ready page; inspect current images without mixing observation generations.
-- 窗口、词级与观察恢复契约已纳入 test.4；链接文档中的早期源码状态属于历史记录。 / Window, word and observation contracts ship in test.5; earlier source-only entries in linked documents are historical.
+- 窗口、词级与观察恢复契约已纳入 test.4；链接文档中的早期源码状态属于历史记录。 / Window, word and observation contracts shipped in test.4; earlier source-only entries in linked documents are historical.
 
 **test.5 窗口观察 / Window observation：** `close_launched_window` 等待时增加 `close_observation` 和 `next_action`；收到 `inspect_owned_window` 后保持会话，读取并选择确切弹窗，解决已授权选项后再核验原窗口消失。动作关闭目标时，派发成功与事后图缺失必须分开判断，不根据外层 `operation_succeeded=false` 重放；先检查退出诊断；目标仍存在时才明确选窗补图，已退出时不要重新选择不存在的窗口。`instant_stop.cleanup_verified` 只代表宿主收尾。 / Pending closure now carries owned-window diagnostics; inspect the exact dialog, resolve an authorized choice and verify disappearance before stopping. Dispatch may succeed with unavailable post-images; inspect rather than replay. [详细契约 / Details](docs/verification/EXECUTION_WINDOW_TRANSITIONS.md)。
 
@@ -50,11 +70,15 @@ Instant-mode operations only, not learning. Use this framework for the user's su
 
 Launch uses an observed app_id with optional url; select requires real handle/process_id. Maximize/capture use the selected window. Prepare models once for a continuous task and release them when appropriate; cold-start timings are not warm-click timings.
 
-## 源码新增：组合动作 / Source-only input sequences
+## 组合动作 / Input sequences
 
-**test.5 候选已做有限实测 / Bounded live verification for the test.5 candidate.** test.5 提供第七个工具 `instant_run`，接受原命令和 `kind=input_sequence`；默认有限等待后一次返回精简回执与原始后图。836 项测试、真实 Google 连续搜索及只填写已验证；不是跨站点准确率或整体提速保证。完整示例、部分完成与超时读取契约见 [组合动作说明 / Input sequences](docs/verification/EXECUTION_INPUT_SEQUENCE.md)。test.5 candidate provides this entrypoint; older six-tool packages do not. / The seventh tool bundles a bounded wait, compact receipt and original after image. 836 tests and bounded Google continuous/fill-only cases passed; this is not cross-site accuracy or end-to-end speed assurance. Released test.4 has only six tools and does not support this entrypoint.
+**自 test.5 起提供 / Available since test.5.** test.5 提供第七个工具 `instant_run`，接受原命令和 `kind=input_sequence`；默认有限等待后一次返回精简回执与原始后图。836 项测试、真实 Google 连续搜索及只填写已验证；不是跨站点准确率或整体提速保证。完整示例、部分完成与超时读取契约见 [组合动作说明 / Input sequences](docs/verification/EXECUTION_INPUT_SEQUENCE.md)。test.5 provides this entrypoint; older six-tool packages do not. / The seventh tool bundles a bounded wait, compact receipt and original after image. 836 tests and bounded Google continuous/fill-only cases passed; this is not cross-site accuracy or end-to-end speed assurance. Earlier test.4 has only six tools and does not support this entrypoint.
 
 组合仅限 Agent 已决定的“聚焦字段 → 输入 → 核对 → 可选 Enter 搜索”。不要把需要观察后重新决策的结果点击提前加入，不把 `completed` 当成搜索结果正确。`pending` 不等于取消；沿用原 ID 读取，保持 MCP 连接。 / Group only already-decided field input and optional search; inspect the result before choosing a result link. Completion is not task success, and pending is not cancellation. Keep the connection and read the same ID.
+
+## 表单填写 / Form fill（test.6）
+
+新增 `kind=form_fill`：文本、下拉选项、复选状态和单选；不自动提交。部分完成不可重放，必须读原图和 `completed_fields/interrupted_at`。源码、同包连续实测及独立复测记录见验收索引。见 [完整协议 / Contract](docs/verification/EXECUTION_FORM_FILL.md)。 / The release supports bounded text/dropdown/checkbox/radio fields through existing MCP tools, without final submission. Inspect partial results and original images before another request; see the linked contract.
 
 ## 单步输入 / Single-step input
 
@@ -115,15 +139,15 @@ Explicit clear_existing replaces text; default false, without implicit Enter/sub
 - 多候选或无有效坐标会返回候选诊断；使用当前证据明确目标，不凭候选列表盲点。
 - 已输入但后图采集失败时，回执保留 error_code 和 capture_current_state_without_replaying_input 指引；先单独 capture，不能假定尚未输入。
 
-Malformed fields return structured validation errors without echoing input values. State rejections include the next status/result query and do not enqueue input. Ambiguous targeting returns candidate diagnostics. A post-input capture error calls for a separate capture, not another input attempt.
+Runtime command validation returns structured errors without echoing input values. SDK-level outer schema or pre-start invocation errors may instead be generic tool errors; do not include sensitive values when reporting them. Lifecycle admission rejections return status/result guidance where available and do not enqueue input. Ambiguous targeting returns candidate diagnostics. A post-input capture error calls for a separate capture, not another input attempt.
 
 ## Agent 判断结果 / Judge the outcome
 
 ### 回执取值 / Parsing receipts
 
-先解析 MCP 文本块中的 JSON，不把调用方日志包装的 `parsed`/`value` 当成服务端字段。等待 `status=returned` 后，操作细节位于 `receipt.result.response.data.result`；错误或未完成回执可能没有这一层，先检查状态和错误。识别点击的 `selected_click_point` 为 `{"x":333,"y":132}`；`resolved_click_point.bbox` 为 `{"x":310,"y":123,"w":47,"h":18}`，**不是数组**。按键名读取，不能用 `[int(v) for v in bbox]`；那会把 `x` 等键名当数字。示例数字仅说明结构，不可作为操作坐标。
+先解析 MCP 文本块中的 JSON，不把调用方日志包装的 `parsed`/`value` 当成服务端字段。等待 `status=returned` 后，完整单步识别回执的操作细节位于 `receipt.result.response.data.result`；错误或未完成回执可能没有这一层，先检查状态和错误。表单完整回执读取 `receipt.result.fields`、`receipt.result.completed_fields`、`receipt.result.interrupted_at`；默认精简回执对应 `receipt.form.fields`、`receipt.form.completed_fields`、`receipt.form.interrupted_at`，不经过单步的 `response.data.result`。识别点击的 `selected_click_point` 为 `{"x":333,"y":132}`；`resolved_click_point.bbox` 为 `{"x":310,"y":123,"w":47,"h":18}`，**不是数组**。按键名读取，不能用 `[int(v) for v in bbox]`；那会把 `x` 等键名当数字。示例数字仅说明结构，不可作为操作坐标。
 
-Parse the MCP JSON text, not client-log wrappers such as `parsed`/`value`. After completion, action details live at `receipt.result.response.data.result`; failed/pending receipts may omit it. Points and rectangles are named-key objects, not arrays. Never reuse these illustrative coordinates. For screenshots, prefer the top-level `receipt.agent_review.before/after` tool arguments; do not recursively pick the first matching diagnostic field.
+Parse the MCP JSON text, not client-log wrappers such as `parsed`/`value`. Completed full single-recognition-step details live at `receipt.result.response.data.result`; failed/pending receipts may omit it. Full form receipts instead use `receipt.result.fields`, `receipt.result.completed_fields` and `receipt.result.interrupted_at`; default compact form receipts use `receipt.form.fields`, `receipt.form.completed_fields` and `receipt.form.interrupted_at`. Points and rectangles are named-key objects, not arrays. Never reuse these illustrative coordinates. For screenshots, prefer the top-level `receipt.agent_review.before/after` tool arguments; do not recursively pick the first matching diagnostic field.
 
 ### 自行裁剪和OCR取证 / Client-side crops and OCR
 
@@ -143,6 +167,10 @@ Returned/operation_succeeded describes command/input handling, not task success.
 
 ## 重连与结束 / Reconnect and stop
 
+**test.6 修复 / Fix:** `cleanup_pending` 表示原宿主保留所有权、等待清理，不是已停止。读取清理诊断、解除阻塞后，再调用 `instant_stop` 只重试清理并轮询状态；不会重放输入。不要持续盲目调用 stop，也不要删除会话记录以绕过 `previous_session_not_resolved`。宿主日志可能记录 `cleanup_report_error` / `cleanup_signal_error`；日志写入失败时不能用旧 report 判断已结束。已卡死的旧版本宿主不因修改源码而恢复。
+
+`cleanup_pending` retains the original owner until cleanup can be verified. Inspect diagnostics, resolve the blocker, then explicitly call `instant_stop` to retry cleanup only and poll status. Never replay input or delete session records. Report/signal I/O failures may leave a stale report; previously stranded old-version hosts are not retroactively repaired. See [lifecycle evidence and limitations](docs/verification/V5_MODEL_CLEANUP_FIXES.md).
+
 请求 ID 在会话内唯一。同 ID、同命令读取原回执；不同命令不得复用 ID。`pending` 继续查询原 ID，`result_unknown` 先检查现场，不能当作没执行。
 
 先提交 `command={"kind":"close_launched_window","handle":本次launch返回的handle,"process_id":本次launch返回的process_id}` 正常关闭自己的测试窗口；不要填写用户原有窗口。随后调用 `instant_stop`，轮询 `instant_status`，直到 `cleanup_verified=true`，最后断连。第一次返回 false 可能只是仍在清理，不是终态失败。重连先用 `instant_start()` 附着历史；确实需要新任务且旧会话清理完成后才用 new_session=true。
@@ -155,7 +183,24 @@ IDs are unique per session. Reusing an ID retrieves its original receipt and nev
 不要递归抓取第一个 `action_executed`：`recognition_plan.execution_path` 是 planning 快照，实际输入读 `response.data.result.execution_path`、`agent_step_result` 与 `click_result`。目标关闭后 after 不存在不是未派发，也不独自证明成功，需核对当前窗口状态。 / Planning snapshots are not execution receipts. Read the actual execution fields and independently check task effects and target exit.
 
 
-**可选条件等待，仅源码 / Optional conditional wait, source only:** 在 `step` 或搜索型 `input_sequence` 的 command 中提供 `observation_condition={"text":"准确的可访问名称","control_type":"Text"}`，并设正数 `observation_wait_ms`（最高2000）。只接受明确名称和角色；不知道准确标志时省略，不猜名称。`condition_met` 不等于任务成功或全页渲染完成；`timed_out` 不代表输入没执行，不自动重放。同步 UIA/截图 I/O 不受轮询预算硬中断。 / Supply an exact accessible name and role only when known; otherwise omit the condition. Condition success is not task/full-page success, and timeout must not trigger input replay. Polling budgets do not hard-interrupt synchronous UIA/capture I/O. [完整契约与实测 / Contract and tests](docs/verification/EXECUTION_CONDITIONAL_WAIT.md)。
+**可选条件等待，自 test.5 起提供 / Optional conditional wait, available since test.5:** 在 `step` 或搜索型 `input_sequence` 的 command 中提供 `observation_condition={"text":"准确的可访问名称","control_type":"Text"}`，并设正数 `observation_wait_ms`（最高2000）。只接受明确名称和角色；不知道准确标志时省略，不猜名称。`condition_met` 不等于任务成功或全页渲染完成；`timed_out` 不代表输入没执行，不自动重放。同步 UIA/截图 I/O 不受轮询预算硬中断。 / Supply an exact accessible name and role only when known; otherwise omit the condition. Condition success is not task/full-page success, and timeout must not trigger input replay. Polling budgets do not hard-interrupt synchronous UIA/capture I/O. [完整契约与实测 / Contract and tests](docs/verification/EXECUTION_CONDITIONAL_WAIT.md)。
 
 
 请求ID必须为1–80位小写ASCII字母/数字/下划线/连字符，首位为字母或数字；非法ID返回invalid_request_id，不入队，修正后沿用同一连接。条件应选稳定的正文标志，不选天气/轮换广告。 / IDs use 1–80 lowercase ASCII alphanumeric/dash/underscore characters, starting alphanumeric. Invalid IDs are rejected before admission; correct them on the same connection. Prefer stable content markers over weather/rotating ads. [独立实测及已知限制 / Acceptance and limits](docs/verification/EXECUTION_AIONUI_ACCEPTANCE_20260921.md)。
+
+### 明确字段名称 / Explicit field labels
+
+字段名称来自当前界面，不要把产品名当字段名。需要指定标签时用 Click the input field labelled "当前完整名称"；未指定名称时可用 Click the search input field。命名字段缺失返回 named_field_current_uia_missing，不能把合成按钮当成可写字段。核对本次截图与诊断后再提交明确的新指令，不自动重放。 / Use the current full field label, not the application brand. Explicit label goals preserve their literal identity; a missing named field is not replaced by a synthetic button. Inspect current evidence before a new instruction; never replay automatically.
+
+### Field-reading details / 字段读值细节
+
+Plain named field goals tolerate one terminal label separator (`Address` / `Address:`); full words and explicit structured target identities remain intact. Before typing, the original current UIA identity and bounds are checked. After typing, the same focused runtime identity may resize: the read-only check requires a current real box containing the original point and two stable reads, and records `input_check.geometry_change`. It does not authorize another click or reuse new coordinates.
+
+普通命名字段可忽略标签末尾单个冒号，不裁剪标签正文。输入前仍核对原身份与框；输入后同身份字段可扩缩，通过当前焦点、真实框、原点命中与稳定双读核对值，并记录只读几何变化，不据此自动重试输入。
+
+### 焦点字段输入 / Focus-bound keyboard input
+
+组合输入会固定当次识别字段，再核对实际焦点与当前值。浏览器自动填充遮住旧鼠标落点不等于字段失焦；仅该内部已绑定字段的键盘派发使用焦点复核，不会自动点击建议项。窗口、字段身份或焦点变化会中断并返回部分结果，不自动重试。 / A compound input binds the recognized field and checks its live focus/value. Autofill overlapping the old pointer point is not focus loss; only the internally bound keyboard path uses field-based revalidation. Changed identity/focus stops with partial progress, never automatic replay.
+
+
+明确的裸字段描述（例如 Search box at the top-left of the webpage）也会保留当前UIA字段身份；不要求必须以Click开头。链接在UIA中的完整名称可能同时含标题、站点和URL；发生名称冲突时读取完整诊断和当前图，明确消歧，不重复盲点。/ Bare field-role phrases preserve current UIA identity too. Link accessible names may combine title/site/URL; inspect diagnostics and the current image before explicitly resolving ambiguity.

@@ -7,6 +7,7 @@ import ctypes
 from ctypes import wintypes
 from copy import deepcopy
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -464,9 +465,15 @@ def observe_process_scope_cleanup(
     stable_zero_observations: int = 3,
     interval_seconds: float = 0.02,
     retained_process_identities: Sequence[Mapping[str, int]] = (),
+    timeout_seconds: float | None = None,
+    include_diagnostics: bool = False,
 ) -> dict[str, Any]:
     if stable_zero_observations < 2:
         raise ValueError("Hybrid process scope requires multiple stable-zero observations")
+    if timeout_seconds is not None and (isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float)) or not math.isfinite(timeout_seconds)
+            or not 0 < timeout_seconds <= 60 or not math.isfinite(interval_seconds) or interval_seconds <= 0):
+        raise ValueError('cleanup timeout must be finite, positive and at most 60 seconds')
     observed_before: list[int] = []
     scope_absent = False
     try:
@@ -498,7 +505,10 @@ def observe_process_scope_cleanup(
         final_pids: list[int] = []
         final_listeners: list[dict[str, int]] = []
         remaining_owned: list[dict[str, int]] = []
-        for _ in range(max(stable_zero_observations * 3, 6)):
+        deadline = None if timeout_seconds is None else time.monotonic() + timeout_seconds
+        rounds = (max(stable_zero_observations * 3, 6) if deadline is None
+                  else math.ceil(timeout_seconds / interval_seconds) + 1)
+        for _ in range(rounds):
             try:
                 final_pids = [] if scope is None else scope.pids()
                 final_identities = _identities_for_pids(final_pids)
@@ -523,18 +533,24 @@ def observe_process_scope_cleanup(
                     break
             else:
                 zero_rounds = 0
-            time.sleep(interval_seconds)
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            time.sleep(interval_seconds if deadline is None else min(interval_seconds, max(0, deadline - time.monotonic())))
         pid_path = Path(pid_file).resolve() if pid_file else None
+        pid_diagnostic = {'reason': 'not_requested'}
         if remove_owned_pid_file and pid_path and pid_path.exists():
             try:
                 pid_value = int(pid_path.read_text(encoding="utf-8").strip())
-            except (OSError, UnicodeError, ValueError):
+                pid_diagnostic = {'reason': 'identity_not_owned_or_still_alive'}
+            except (OSError, UnicodeError, ValueError) as error:
                 pid_value = 0
+                pid_diagnostic = _cleanup_os_error('read_or_parse_failed', error)
             if pid_value in observed_before or (pid_value > 0 and not psutil.pid_exists(pid_value)):
                 try:
                     pid_path.unlink()
-                except OSError:
-                    pass
+                    pid_diagnostic = {'reason': 'removed'}
+                except OSError as error:
+                    pid_diagnostic = _cleanup_os_error('unlink_failed', error)
         pid_file_remaining = bool(pid_path and pid_path.exists())
         verified = (
             zero_rounds >= stable_zero_observations
@@ -558,10 +574,20 @@ def observe_process_scope_cleanup(
             "pid_file_after": str(pid_path) if pid_file_remaining else None,
             "stable_zero_observations": zero_rounds,
             "samples": samples,
+            **({'pid_file_cleanup': pid_diagnostic} if include_diagnostics else {}),
         }
     finally:
         if scope is not None:
             scope.close()
+
+
+def _cleanup_os_error(reason, error):
+    result = {'reason': reason, 'error_type': type(error).__name__}
+    for key in ('errno', 'winerror'):
+        value = getattr(error, key, None)
+        if type(value) is int:
+            result[key] = value
+    return result
 
 
 def _stdio_source(value: Any, *, readable: bool, opened: list[Any]) -> int:

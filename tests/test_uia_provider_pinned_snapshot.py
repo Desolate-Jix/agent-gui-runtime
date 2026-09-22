@@ -10,6 +10,17 @@ import pytest
 from app.operation.screen_reading import uia_provider as provider_module
 
 
+@pytest.fixture(autouse=True)
+def canonical_identity_boundary(monkeypatch):
+    from app.operation.screen_reading.uia_graph import CanonicalUIAGraph
+    # 合成包装对象显式提供 COM 身份边界；不绕过共用归一化判断。
+    monkeypatch.setattr(provider_module, "CanonicalUIAGraph", lambda node: CanonicalUIAGraph(node,
+        identity=lambda current: (current.element_info.runtime_id, 7,
+            current.element_info.control_type, None, None, 42),
+        parent=lambda current: current._parent.element_info.runtime_id if current._parent else None,
+        compare=lambda left, right: left is right))
+
+
 def _snapshot(handle: int) -> dict:
     return {
         "provider": "windows_uia",

@@ -81,12 +81,21 @@ def explicit_menu_item_goal(goal: str) -> bool:
 
 def _field_target_label(goal):
     """空标签表示泛型字段；字段前的限定词必须保留为完整名称。"""
+    field_pattern = r"\b(?:(?:search\s+)?input\s+(?:box|field)|search\s+(?:box|field)|text\s+(?:box|field|area)|textbox|textarea|combobox)\b"
     # 动作后的方位介词仍指字段本身；框内单词/按钮由下方目标边界排除。
     action = re.match(r"\s*(?:right[ -]?click|double[ -]?click|click|focus|locate)\b\s*(?:(?:on|inside|within|in)\s+)?", goal, re.I)
     if action is None:
+        # 裸名词只能由字段角色起头；后缀仅作方位或明确标签，不吞掉按钮、单词或导航目标。
+        bare = re.match(r"\s*(?:(?:the|an?)\s+)?" + field_pattern, goal, re.I)
+        if bare is not None:
+            suffix = goal[bare.end():].strip()
+            if (not suffix or re.match(r"(?:labelled|labeled|named)\s+", suffix, re.I)
+                    or re.match(r"(?:at|in|on|inside|within|near|above|below|beside|next\s+to)\b", suffix, re.I)
+                    and not re.search(r"[,;\n]|\b(?:then|and)\s+(?:click|focus|locate|select|open|navigate)\b", suffix, re.I)):
+                return ""
         return None
     tail = goal[action.end():]
-    field = re.search(r"\b(?:(?:search\s+)?input\s+(?:box|field)|search\s+(?:box|field)|text\s+(?:box|field|area)|textbox|textarea|combobox)\b", tail, re.I)
+    field = re.search(field_pattern, tail, re.I)
     if field is None:
         return None
     prefix = re.sub(r"^\s*(?:the|an?)\s+", "", tail[:field.start()], count=1, flags=re.I).strip()
@@ -106,6 +115,14 @@ def generic_field_target(goal, *, control_target=None, target_text=None):
     return _field_target_label(goal) == ""
 
 
+def uia_control_has_text_entry_patterns(control):
+    """模式仅证明字段候选能力；只读、密码和焦点仍由现场读取器核验。"""
+    kind = str(control.get("control_type") or "").casefold()
+    patterns = {str(item).casefold() for item in control.get("patterns") or []}
+    return (kind in {"edit", "textbox", "text box"} and bool(patterns & {"value", "text"})
+            or kind in {"combobox", "combo box"} and {"value", "text"} <= patterns)
+
+
 def uia_action_identity_matches(control, *, goal, control_target=None, target_text=None):
     """生产者与消歧消费者共用原始匹配集合，不用选中标签缩小候选集合。"""
     from app.operation.recognition.candidate_ranker import _goal_label_match
@@ -120,19 +137,24 @@ def uia_action_identity_matches(control, *, goal, control_target=None, target_te
         expected = {"menu item": {"menuitem"}, "radio button": {"radiobutton"},
                     "hyperlink": {"hyperlink"}, "link": {"hyperlink"}, "button": {"button", "splitbutton"},
                     "tab": {"tabitem"}, "checkbox": {"checkbox"},
+                    "dropdown": {"combobox"}, "option": {"listitem", "menuitem"},
                     "input": {"edit", "textbox", "combobox"}, "field": {"edit", "textbox", "combobox"}}
         if re.sub(r"\s+", "", str(control.get("control_type") or "").casefold()) not in expected[requested_role]:
+            return False
+        if requested_role in {"input", "field"} and not uia_control_has_text_entry_patterns(control):
             return False
     field_label = _field_target_label(goal) if explicit_target_marker(goal) is None else None
     if generic_field_target(goal, target_text=target_text) or field_label:
         # 动态值不是字段标签；这里只限定角色，唯一几何与状态由当前树消费者核验。
-        kind = str(control.get("control_type") or "").casefold()
-        patterns = {str(item).casefold() for item in control.get("patterns") or []}
-        editable = (kind in {"edit", "textbox", "text box"} and bool(patterns & {"value", "text"})
-                    or kind in {"combobox", "combo box"} and {"value", "text"} <= patterns)
+        editable = uia_control_has_text_entry_patterns(control)
         if field_label:
             label = " ".join(unicodedata.normalize("NFC", str(control.get("name") or "")).split()).casefold()
             requested = field_label.casefold()
+            # 普通字段语句容忍标签末尾的单个冒号；不删内部文字或显式结构化身份。
+            if label.endswith((":", "：")) and not label[:-1].rstrip().endswith((":", "：")):
+                label = label[:-1].rstrip()
+            if requested.endswith((":", "：")) and not requested[:-1].rstrip().endswith((":", "：")):
+                requested = requested[:-1].rstrip()
             return editable and label == requested and (not target_text or label == " ".join(str(target_text).split()).casefold())
         return editable
     target_key = re.sub(r'\s+', ' ', str(target_text or '').strip().casefold())

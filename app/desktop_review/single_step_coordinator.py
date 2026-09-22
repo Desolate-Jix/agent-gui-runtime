@@ -1422,7 +1422,7 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
         if underlying == "model_request_cancelled":
             message = ("识别请求已取消；已确认本次请求不再活动。" if computation_stopped
                        else "识别请求已取消；服务端计算尚未确认停止。")
-        return NativeSingleStepCoordinatorError(
+        mapped = NativeSingleStepCoordinatorError(
             underlying if isinstance(underlying, str) and underlying else code,
             message,
             result_unknown=(
@@ -1431,6 +1431,11 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
             retry_preparation=retry_preparation,
             computation_stopped=computation_stopped,
         )
+        diagnostics = getattr(error, 'diagnostics', None)
+        if isinstance(diagnostics, dict) and diagnostics.get('contract_version') in {
+                'model_service_cleanup_diagnostics_v1', 'model_service_startup_diagnostics_v1'}:
+            mapped.diagnostics = deepcopy(diagnostics)
+        return mapped
 
     def _begin_any(self, phases: set[str], *, preserve_window_preparation: bool = False) -> None:
         with self._guard:

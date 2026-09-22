@@ -34,26 +34,34 @@ class WindowPreparationMixin:
         finally:
             self._end()
 
-    def preview_application_launch(self, *, app_id: str, url: str | None = None) -> dict[str, Any]:
+    def preview_application_launch(self, *, app_id: str | None = None, url: str | None = None,
+                                   name: str | None = None, path: str | None = None,
+                                   prefer_existing: bool = False) -> dict[str, Any]:
         self._begin("idle")
         try:
             self._require_host_ready(require_unattached=True)
             if getattr(self, "_unverified_window_launch", None) is not None:
                 raise self._error("window_launch_requires_inventory", "Inspect existing windows before another launch.")
-            intent = self._owner.call(lambda: self._build_application_launch(app_id=app_id, url=url))
+            intent = self._owner.call(lambda: self._build_application_launch(
+                app_id=app_id, url=url, name=name, path=path, prefer_existing=prefer_existing))
             self._window_preparations[intent["preparation_id"]] = deepcopy(intent)
             return deepcopy(_public_intent(intent))
         finally:
             self._end()
 
-    def _build_application_launch(self, *, app_id: str, url: str | None) -> dict[str, Any]:
+    def _build_application_launch(self, *, app_id=None, url=None, name=None, path=None,
+                                  prefer_existing=False) -> dict[str, Any]:
         from .application_catalog import application_launch_selection
 
         try:
-            selection = application_launch_selection(app_id, url)
+            selection = application_launch_selection(app_id, url, name=name, path=path)
         except (ValueError, TypeError, OSError) as error:
-            raise self._error("window_preparation_launch_invalid", "Catalog application or URL is unavailable or invalid.") from error
+            failure = self._error("window_preparation_launch_invalid", str(error))
+            failure.diagnostics = getattr(error, 'diagnostics', {'error_code': 'application_launch_invalid',
+                'next': 'Use discover, then choose an app_id or supply an absolute local .exe/.lnk path.'})
+            raise failure from error
         return {**selection, "contract_version": "native_window_preparation_v1",
+                "prefer_existing": prefer_existing,
                 "preparation_id": str(uuid4()), "mode": "launch", "identity": None,
                 "expires_at": time.monotonic() + self._WINDOW_PREPARATION_TTL_SECONDS}
 
@@ -185,13 +193,20 @@ class WindowPreparationMixin:
             raise self._error("window_launch_requires_inventory", "Inspect existing windows before another launch.")
         from app.core.application_launch import launch_process
 
+        # 带 URL 或快捷方式参数的启动有额外语义，不得仅聚焦旧窗口而吞掉参数。
+        if checked.get('prefer_existing') and not checked.get('url') and len(checked.get('command', [])) == 1:
+            existing = self._reuse_application_window(checked)
+            if existing is not None:
+                return existing
         # 启动器 PID 不等于 GUI PID；只接受启动后新增且程序身份唯一的窗口。
         before = self._visible_window_handles()
         if self._cancel_wait.is_set():
             raise self._error("window_preparation_cancelled", "Window preparation was cancelled before launch.")
         process_id = None
         try:
-            process = launch_process(checked.get("command", [checked["executable_path"]]))
+            command = checked.get("command", [checked["executable_path"]])
+            process = (launch_process(command, cwd=checked['working_directory'])
+                       if checked.get('working_directory') else launch_process(command))
             if type(process.pid) is int and process.pid > 0:
                 process_id = process.pid
             result = self._await_launched_window(checked, process, before)
@@ -199,6 +214,36 @@ class WindowPreparationMixin:
             result = _launch_unavailable(process_id, "launch_effect_not_undone_after_observation_error")
         self._unverified_window_launch = deepcopy(result) if result["status"] != "launched_window_ready" else None
         return result
+
+    def _reuse_application_window(self, intent):
+        matches = []
+        for handle in sorted(self._visible_window_handles()):
+            try:
+                self._windows().bind_window_by_handle(handle)
+                observed = validate_native_identity_fact(
+                    WindowsNativeIdentityReader(window_manager=self._windows()).read_identity(handle),
+                    target_window_handle=handle)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            if observed is not None and observed['executable_path'] == intent['executable_path']:
+                matches.append(observed)
+        if len(matches) > 1:
+            failure = self._error('application_window_ambiguous', 'Multiple existing windows match; use select with handle/process_id.')
+            failure.diagnostics = {'error_code': 'application_window_ambiguous', 'candidates': matches,
+                                   'next': 'Use select with the desired handle and process_id; no new process was launched.'}
+            raise failure
+        if matches:
+            result = self._focus_existing_application(matches[0])
+            return {**result, 'reused_existing_window': True, 'launch_dispatched': False}
+        return None
+
+    def _focus_existing_application(self, identity):
+        intent = self._build_selected_window_preparation(target_window_handle=identity['target_window_handle'],
+                                                        target_process_id=identity['process_id'])
+        if intent['identity'] != identity:
+            raise self._error('window_preparation_identity_changed', 'Existing application identity changed.')
+        self._window_preparations[intent['preparation_id']] = intent
+        return self._confirm_window_preparation_on_owner(intent['preparation_id'])
 
     def close_launched_window(self, *, target_window_handle: int, target_process_id: int) -> dict[str, Any]:
         """仅关闭本协调器通过 launch 新增且身份仍一致的窗口。"""
@@ -337,8 +382,9 @@ class WindowPreparationMixin:
                 raise self._error("window_preparation_identity_changed", "Selected window identity changed after preview.")
             return intent
         if intent.get("source") == "app_catalog":
-            rebuilt = self._build_application_launch(app_id=intent["app_id"], url=intent["url"])
-            compared = {"app_id", "name", "url", "command", "executable_path", "catalog_entry_sha256", "executable_sha256"}
+            rebuilt = self._build_application_launch(**intent.get('selector', {'app_id': intent['app_id']}),
+                url=intent["url"], prefer_existing=intent.get('prefer_existing', False))
+            compared = {"app_id", "name", "url", "command", "executable_path", "catalog_entry_sha256", "executable_sha256", "working_directory"}
             if any(rebuilt[key] != intent[key] for key in compared):
                 raise self._error("window_preparation_application_changed", "Catalog command or executable changed after preview.")
             return intent
@@ -394,7 +440,9 @@ def _launch_unavailable(process_id, reason):
 
 
 def _public_intent(intent: dict[str, Any]) -> dict[str, Any]:
-    result = {key: value for key, value in intent.items() if key != "expires_at"}
+    result = {key: value for key, value in intent.items()
+              if key not in {"expires_at", "selector", "prefer_existing"}
+              and not (key == 'working_directory' and value is None)}
     result["expires_in_seconds"] = 60
     return result
 

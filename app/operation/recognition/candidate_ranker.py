@@ -6,7 +6,7 @@ from typing import Any, Iterable
 
 from app.operation.page_structure.schemas import InteractionPolicy, PageElement, PageText, VerificationHints
 from app.operation.recognition.schemas import CandidateRankRequest, CandidateRankResult, RecognitionCandidate, ScoreBreakdown
-from app.operation.recognition.control_target import control_target_matches, validate_control_target
+from app.operation.recognition.control_target import control_target_matches, validate_control_target, uia_control_has_text_entry_patterns
 from app.operation.recognition.text_match import explicit_target_label
 from app.vision.schemas import BBox, ImageSize
 
@@ -370,6 +370,10 @@ def _goal_explicitly_requests_action_label(goal: str, element: PageElement) -> b
 
 
 def _is_text_entry_element(element: PageElement) -> bool:
+    if element.role == "combobox":
+        action = element.evidence.get("screen_inventory_action") or {}
+        return (action.get("source") == "windows_uia.controls"
+                and uia_control_has_text_entry_patterns(action.get("metadata") or {}))
     return element.role in {"input", "text_input", "textarea", "edit", "search_box", "search_input"} or element.interaction_type in {"focus", "input"}
 
 
@@ -707,6 +711,10 @@ def _page_element_from_screen_inventory_action(action: dict[str, Any], *, index:
     action_type = str(action.get("action_type") or "").casefold()
     semantic_label = _semantic_screen_inventory_label(raw_label, role=role, action_type=action_type, goal=goal)
     interaction_type = "focus" if action_type == "input_text" or role == "input" else "click"
+    # ComboBox 可能只是下拉选择；仅本次 UIA 的 Value+Text 证据允许字段聚焦语义。
+    if (role == "combobox" and action.get("source") == "windows_uia.controls"
+            and uia_control_has_text_entry_patterns(action.get("metadata") or {})):
+        interaction_type = "focus"
     coordinate_confidence = str(action.get("coordinate_confidence") or "medium")
     source = str(action.get("source") or "screen_inventory")
     priority = "high" if source == "windows_uia.controls" and coordinate_confidence == "high" else "medium"

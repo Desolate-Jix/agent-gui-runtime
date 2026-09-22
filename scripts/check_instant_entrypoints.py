@@ -47,6 +47,26 @@ def check(root):
     ocr = importlib.import_module("app.core.ocr_service")
     instant = importlib.import_module("app.instant_mcp")
     sequence = importlib.import_module("app.desktop_review.input_sequence")
+    form = importlib.import_module("app.desktop_review.form_fill")
+    choices = importlib.import_module("app.agent.windows_form_control_reader")
+    control_target = importlib.import_module("app.core.local_control_target")
+    uia_graph = importlib.import_module("app.operation.screen_reading.uia_graph")
+    if not (callable(form.run_form_fill) and callable(choices.read_form_control)
+            and callable(control_target.LocalControlTarget) and callable(control_target.check_local_control_target)
+            and callable(uia_graph.CanonicalUIAGraph)):
+        raise ValueError("form fill dependencies are unavailable")
+    form_fields = [
+        {"kind": "text", "field_goal": "Name input", "text": "preflight"},
+        {"kind": "dropdown", "label": "Language", "option": "English"},
+        {"kind": "checkbox", "label": "Show details", "checked": True},
+        {"kind": "radio", "label": "Standard"},
+    ]
+    instant.InstantCommand.model_validate({"kind": "form_fill", "request": {"fields": form_fields}}).command()
+    # 内部键盘字段约束与浏览器准备均为真实执行依赖，必须显式预检。
+    keyboard_target = importlib.import_module("app.core.local_keyboard_target")
+    browser_readiness = importlib.import_module("app.operation.screen_reading.browser_content_readiness")
+    if not (callable(keyboard_target.LocalKeyboardTarget) and callable(browser_readiness.prepare_browser_content)):
+        raise ValueError("bound keyboard dependencies are unavailable")
     fields = importlib.import_module("app.agent.windows_text_field_reader")
     receipts = importlib.import_module("app.instant_receipt")
     if not (callable(sequence.run_input_sequence) and callable(fields.WindowsTextFieldReader.read_field)
@@ -82,6 +102,35 @@ def check(root):
     instant.InstantCommand.model_validate({"kind": "close_launched_window", "handle": 1, "process_id": 1})
     window_checked = [{"operation": "close_launched_window", "handler_imported": True,
                        "request_validated": True, "handler_executed": False}]
+    # 执行宿主惰性加载这些入口；预检显式导入，但不枚举、启动、截图或清理真实进程。
+    desktop = importlib.import_module("app.desktop_review.desktop_command")
+    installed = importlib.import_module("app.desktop_review.installed_applications")
+    cleanup = importlib.import_module("app.desktop_review.session_cleanup")
+    catalog = importlib.import_module("app.desktop_review.application_catalog")
+    launcher = importlib.import_module("app.core.application_launch")
+    if not callable(desktop.prepare_desktop_target):
+        raise ValueError("desktop handler is not callable: prepare_desktop_target")
+    if not callable(installed.discover_installed_applications):
+        raise ValueError("application handler is not callable: discover_installed_applications")
+    if not callable(cleanup.shutdown_retaining_owner):
+        raise ValueError("cleanup handler is not callable: shutdown_retaining_owner")
+    if not (callable(catalog.application_launch_selection) and callable(launcher.launch_process)
+            and callable(preparation.WindowPreparationMixin.preview_application_launch)
+            and callable(preparation.WindowPreparationMixin.confirm_window_preparation)):
+        raise ValueError("launch entrypoint dependencies are unavailable")
+    desktop_checked = []
+    for command in ({"kind": "desktop_capture"}, {"kind": "desktop_click", "request": {
+            "goal": "dependency preflight only", "click_kind": "double", "dry_run": True}}):
+        instant.InstantCommand.model_validate(command).command()
+        desktop_checked.append({"operation": command["kind"], "handler_imported": True,
+                                "request_validated": True, "handler_executed": False})
+    launch_checked = []
+    for selector, value in (("app_id", "notepad"), ("name", "Notepad"),
+                            ("path", r"C:\Windows\System32\notepad.exe")):
+        instant.InstantCommand.model_validate({"kind": "launch", selector: value,
+                                              "prefer_existing": True}).command()
+        launch_checked.append({"selector": selector, "handler_imported": True,
+                               "request_validated": True, "handler_executed": False})
     sources = {}
     for name, module in list(sys.modules.items()):
         if name == "app" or name.startswith("app.") or name == "modules" or name.startswith("modules."):
@@ -95,8 +144,12 @@ def check(root):
             "input_executed": False, "screenshots_taken": False, "model_inference_tested": False,
             "operations": checked, "observation_operations": observation_checked,
             "recognition_click_variants": click_variants, "window_operations": window_checked,
+            "desktop_operations": desktop_checked, "launch_selectors": launch_checked,
+            "session_cleanup": {"handler_imported": True, "handler_executed": False},
             "editing_keys_validated": editing_keys,
             "input_sequence": {"handler_imported": True, "request_validated": True, "handler_executed": False},
+            "form_fill": {"handler_imported": True, "request_validated": True, "handler_executed": False,
+                          "field_kinds": [field["kind"] for field in form_fields]},
             "local_module_sources": sources,
             "limitation": "Dependency and request validation only, not real input or end-to-end acceptance"}
 

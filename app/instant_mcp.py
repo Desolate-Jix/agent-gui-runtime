@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-INSTANT_VERSION = "0.1.0-test.5"
+INSTANT_VERSION = "0.1.0-test.6"
 
 
 class InstantAdmissionError(ValueError):
@@ -38,7 +38,7 @@ class InstantImageError(ValueError):
 
 
 class InstantStartError(ValueError):
-    """仅表示创建宿主之前的配置错误，不判断既有会话的执行结果。"""
+    """仅表示创建宿主之前的配置或状态拒绝，不判断既有会话的执行结果。"""
 
     def __init__(self, code, message, next_step):
         super().__init__(message)
@@ -53,8 +53,11 @@ def _validate_request_id(request_id):
 
 class InstantCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "close_launched_window"]
+    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "form_fill", "close_launched_window", "desktop_capture", "desktop_click"]
     app_id: str | None = None
+    name: str | None = None
+    path: str | None = None
+    prefer_existing: bool | None = None
     url: str | None = None
     handle: int | None = Field(default=None, gt=0)
     process_id: int | None = Field(default=None, gt=0)
@@ -67,31 +70,40 @@ class InstantCommand(BaseModel):
     def command(self):
         value = self.model_dump(exclude_none=True)
         fields = {
-            "launch": ({"app_id"}, {"app_id", "url"}),
+            "launch": (set(), {"app_id", "name", "path", "url", "prefer_existing"}),
             "select": ({"handle", "process_id"}, {"handle", "process_id"}),
             "close_launched_window": ({"handle", "process_id"}, {"handle", "process_id"}),
             "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition"}),
             "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition"}),
+            "form_fill": ({"request"}, {"request"}),
             "read_text": (set(), {"max_chars"}),
+            "desktop_click": ({"request"}, {"request", "observation_wait_ms", "observation_condition"}),
         }
         required, allowed = fields.get(self.kind, (set(), set()))
         present = set(value) - {"kind"}
         if not required <= present or present - allowed:
             raise ValueError("command fields do not match kind")
-        if self.kind == "step":
+        if self.kind == "launch":
+            selectors = [value[key] for key in ("app_id", "name", "path") if key in value]
+            if len(selectors) != 1 or not selectors[0].strip():
+                raise ValueError("launch requires exactly one non-empty app_id, name or path")
+        if self.kind in {"step", "desktop_click"}:
             from app.desktop_review.local_action_contract import _validated_request
             # 只验证，运行时再次验证；不在桥接层重写执行请求。
-            _validated_request(self.operation, self.request)
+            _validated_request("execute_recognition_plan" if self.kind == "desktop_click" else self.operation, self.request)
         elif self.kind == "input_sequence":
             from app.desktop_review.input_sequence import InputSequenceRequest
             InputSequenceRequest.model_validate(self.request)
+        elif self.kind == "form_fill":
+            from app.desktop_review.form_fill import FormFillRequest
+            FormFillRequest.model_validate(self.request)
         if self.observation_condition is not None:
             from app.core.observation_policy import resolve_render_grace_ms, local_action_observation_kind
             from app.desktop_review.conditional_observation import validate_condition
             if self.kind == "input_sequence" and not self.request.get("submit_search"):
                 raise ValueError("input_sequence condition requires submit_search")
             action = ("press_enter" if self.kind == "input_sequence" else
-                      local_action_observation_kind(self.operation, self.request))
+                      local_action_observation_kind("execute_recognition_plan" if self.kind == "desktop_click" else self.operation, self.request))
             validate_condition(self.observation_condition, resolve_render_grace_ms(action, self.observation_wait_ms))
         return value
 
@@ -160,7 +172,9 @@ class InstantSession:
                 if not new_session:
                     return status
                 if not status["cleanup_verified"] or status["pending_ids"]:
-                    raise ValueError("previous session needs verified cleanup and resolved receipts before a new session")
+                    raise InstantStartError("previous_session_not_resolved",
+                        "previous session needs verified cleanup and resolved receipts before a new session",
+                        "Inspect instant_status and use instant_result for pending IDs; verify cleanup and resolve receipts before requesting a new session. Do not delete session records or replay commands.")
                 if self.log_file:
                     self.log_file.close()
                 self.session = None
@@ -219,6 +233,7 @@ class InstantSession:
                     and report.get("host_phase") == "stopped" and report.get("cleanup_errors") == []
                     and report.get("sampler_stopped") is True and not alive),
                 "cleanup_errors": report.get("cleanup_errors"), "error_type": report.get("error_type"),
+                **({'next': report['cleanup_next']} if report.get('cleanup_next') else {}),
                 "automatic_retry_allowed": False}
 
     def _path(self, request_id, folder):
@@ -259,6 +274,7 @@ class InstantSession:
                 if progress_path.is_file():
                     progress = read_json(progress_path)
                     pending["partial_execution"] = {"completed_steps": progress.get("completed_steps", []),
+                        "completed_fields": progress.get("completed_fields", []),
                         "phase": progress.get("phase"), "action_executed": progress.get("action_executed"),
                         "progress_path": str(progress_path), "task_effect_verified": None}
                 return pending
@@ -284,7 +300,7 @@ class InstantSession:
                     for key in ("handle", "process_id"))
             receipt = {"request_id": request_id, **response, "operation_succeeded": ok,
                        "task_effect_verified": False, "automatic_retry_allowed": False}
-            sequence = result.get("contract_version") == "input_sequence_v1"
+            sequence = result.get("contract_version") in {"input_sequence_v1", "form_fill_v1"}
             if result.get("contract_version") == "local_direct_step_v1" or sequence:
                 receipt["operation_succeeded"] = (ok and result.get("status") == "completed" if sequence
                                                    else ok and api.get("success") is True)
@@ -370,6 +386,11 @@ class InstantSession:
     def stop(self):
         with self.guard:
             status = self.status()
+            if self.session and status['host_alive'] and (status['phase'] == 'cleanup_pending'
+                    or (self.session / 'closing.json').is_file()):
+                write_json(self.session / 'cleanup-retry.json', {'request_id': 'cleanup-' + uuid4().hex})
+                return {**status, 'cleanup_retry_requested': True,
+                        'next': 'Poll instant_status; cleanup retry never replays input.'}
             if self.session and status["host_alive"] and (self.session / "commands").is_dir():
                 # 不把关闭排到正在执行的动作前面，也不把排队关闭当作已清理。
                 marker = self.session / "closing.json"
@@ -533,14 +554,16 @@ def build_server(session):
 
     descriptions = {
         "instant_run": "Preferred one-call execution: submit one durable command, wait up to wait_ms (0..30000, default 25000), return compact receipt plus exact original after PNG together. images=both adds before; detail=full preserves diagnostics. Same commands as instant_submit, including input_sequence request={field_goal,text,clear_existing:true,submit_search:true|false}. A sequence focuses the field through recognition, types, checks the actual focused UIA value, optionally presses Enter for search, then observes. No arbitrary batch, next-result click or task-success claim. Unsupported/unreadable fields interrupt with partial receipts; do not blindly replay. A wait timeout is NOT cancellation: use next to read the same ID, keeping this MCP connection alive.",
-        "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option. Known preflight configuration failures return isError=true, status=start_rejected, error.code and next guidance; host_launch_attempted=false refers only to this call, not existing sessions.",
+        "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option. Known preflight configuration failures and unresolved previous-session rejection return isError=true, status=start_rejected, error.code and next guidance; host_launch_attempted=false refers only to this call, not existing sessions.",
         "instant_status": "Read host, target, pending IDs and cleanup status; no screenshot or input.",
-        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y, Shift+Left, Shift+Right, Shift+Up, Shift+Down, Shift+Home, Shift+End, Ctrl+Home, Ctrl+End. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
+        "instant_submit": "Submit exactly one command with a unique durable ID. desktop_capture and desktop_click require NO prior select or caller handle: auto-resolve the current desktop icon host. desktop_click request={goal,click_kind:'double'} uses a FRESH desktop capture and the existing recognition route; no raw/stale coordinates. Desktop occlusion may remain; inspect images. After an icon opens an app, discover/select its new window; input dispatch is NOT app-launch verification. discover lists configured plus installed desktop apps/windows (Start Menu/Desktop shortcuts and App Paths); launch requires exactly one of app_id, name or absolute local .exe/.lnk path, optional url for configured browsers. Names resolve exactly then by substring; ambiguity returns diagnostics.candidates, choose app_id. prefer_existing defaults true for argument-free launches: reuse a unique identity-matched window, never silently choose among multiple windows. URL/shortcut arguments still dispatch their intended launch. UWP-only links and launcher-to-different-executable window binding are not guaranteed; unavailable is not launch failure proof. select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y, Shift+Left, Shift+Right, Shift+Up, Shift+Down, Shift+Home, Shift+End, Ctrl+Home, Ctrl+End. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
         "instant_result": "Read original response without executing again. pending means wait; result_unknown means inspect, never retry blindly. For local steps operation_success_scope=input_route_only; check observation_status and agent_review.recovery separately. operation_succeeded is not proof of task outcome.",
         "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Missing/pending/corrupt evidence returns isError=true with status=image_unavailable, error.code and next guidance; it says nothing about whether the original input happened. Do not replay automatically. Compare both frames against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
-        "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. Does not close user apps itself; a Windows MCP client may terminate its launched descendants on disconnect. Explicitly close test-created windows first using close_launched_window and verify window_closed.",
+        "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. If phase=cleanup_pending, inspect cleanup diagnostics and resolve the blocker before calling stop again: it explicitly retries cleanup only, never input. The owner may remain alive while cleanup is unresolved; do not delete session records. Does not close user apps itself; a Windows MCP client may terminate its launched descendants on disconnect. Explicitly close test-created windows first using close_launched_window and verify window_closed.",
     }
     descriptions["instant_submit"] += " Also supports kind=input_sequence, request={field_goal,text,clear_existing:true,submit_search:true|false}; observation_wait_ms applies to the final Enter observation. Use instant_run for bounded waiting and inline final image without separate polling/image calls."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " form_fill accepts request={fields:[...]}, 1..12 declared fields: text {kind,field_goal,text,clear_existing}, dropdown {kind,label,option}, checkbox {kind,label,checked}, radio {kind,label}. Exact current accessible labels are required for choices; read current screenshots first. It never submits a form; already-satisfied choices are not toggled. Unknown/ambiguous/unreadable states interrupt with partial receipts. Dropdown options must belong to the opened control. Inspect original images; completion is not task success."
     descriptions["instant_result"] += " Optional detail=compact omits verbose traces; full (default) keeps the old receipt fields. images=after|both includes original PNGs in this same call; default none preserves JSON-only delivery."
     for name in ("instant_submit", "instant_run"):
         descriptions[name] += " Optional command.observation_condition={text:exact_accessible_name,control_type:Text|Hyperlink|Button|Document} enables read-only early observation for step or submit_search sequences. Requires a positive observation_wait_ms budget (navigation defaults to 2000). Only a newly appearing unique visible match, repeated and rechecked after capture, ends early. Accessible names can differ from screenshot captions. Missing/ambiguous/old matches time out and still return an image; inspect observation.condition, not operation_succeeded, for this outcome. This is not full-page readiness or task verification. Synchronous UIA and capture I/O are outside a hard timeout; no input replay. Omit the condition when no reliable marker is known."

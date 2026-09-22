@@ -7,7 +7,7 @@ import pytest
 
 from app.api import vision
 from app.operation.screen_reading import uia_provider as module
-from tests.test_uia_provider_pinned_snapshot import _TreeWrapper
+from tests.test_uia_provider_pinned_snapshot import _TreeWrapper, canonical_identity_boundary
 
 
 def _tree(monkeypatch, *, process="msedge.exe", budget=4):

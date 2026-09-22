@@ -1,7 +1,21 @@
-# test.5 changes and limits / test.5 变更与边界
+# v0.1.0-test.6 · 执行模式测试版 / Execution-mode test release
 
-- `v0.1.0-test.5` consolidates the seven-tool MCP surface, `instant_run`/`input_sequence`, compact original-image receipts and bounded conditional observation. The release candidate is not uploaded yet.
-- 836 source checks and the final bounded AionUi acceptance are recorded; earlier aborted attempts and receipt-only follow-up remain historical evidence, not a claim of full GUI coverage.
+- Execution-only update: installed application discovery, name/ID/path launch, explicit ambiguity and unique-window reuse; desktop capture/click without caller binding. / 仅执行模式：应用发现与启动、消歧和窗口复用、无需调用方预绑定的桌面操作。
+- Model startup/cleanup diagnostics, PID/Job evidence, cleanup-only retry while retaining the original owner, and actionable unresolved-session rejection. / 模型启动/清理诊断与原 owner 清理恢复。
+- Correct repeated model-download include flags; expanded bilingual README with architecture, setup, usage, troubleshooting and a clearly unshipped learning roadmap. / 修正下载参数，扩充双语架构、部署与使用文档，学习仅介绍不发布。
+- Exclude learning startup entrypoints by exact paths; add isolated checks for all new lazy execution dependencies. Keep shared maintained code. / 精确排除学习入口，补齐惰性执行依赖预检，保留共用代码。
+- Add `form_fill` orchestration for declared text, dropdown, checkbox and radio fields through existing MCP tools. Preserve partial receipts, explicit unknown-state interruption and no automatic retry or final submission; this is not Excel cell editing. / 通过既有 MCP 工具接入文本、下拉、复选和单选表单编排；保留部分执行回执、未知状态中断及不自动重试／提交，不是 Excel 单元格编辑。See / 参见 [form-fill contract / 表单契约](docs/verification/EXECUTION_FORM_FILL.md).
+- Repair shared Chromium TextRange object semantics, label-preserving small-control crops, finite UIA alias identity, initial-content readiness, exact native dropdown popup binding and already-open recovery. Source regressions (1245) and real W3C single/continuous form cases passed; earlier failed runs are retained. / 修复通用 Chromium 文本范围、小控件裁图、有限 UIA 别名身份、首次内容就绪、精确原生下拉归属及已展开恢复；1245 项源码回归与真实表单单项／连续测试通过，保留首次失败。
+- Preserve exact field identity into value reads, permit a stable same-field post-input resize only for readback, prepare current Chromium content before capture, and normalize a single terminal field-label colon. 1396 source regressions and the complete Google/Maps + W3C rerun passed. / 保留读值身份、只读复验允许同字段稳定扩宽、截图前准备当前浏览器正文并规范单个标签末尾冒号；1396项及完整真实连续复验通过。
+- Preserve focus-bound keyboard dispatch through autofill overlays and filter native dropdown options by their actual viewport. Latest source suite: 1499 passed; non-maximized form continuous recovery passed. / 修复自动填充遮挡下的焦点键盘派发与滚动下拉视口筛选；1499 项及非最大化表单连续恢复通过。
+- Earlier candidate05 passed 1499 checks and continuous source/package runs; independent tests exposed small-option and bare-field issues, fixed before candidate06. / 历史candidate05通过1499项及连续检查，独立测试暴露小选项／裸字段问题，随后修入candidate06。
+
+- After independent testing, extend small current listitem context and preserve bare field-phrase identity. Source and frozen candidate06 each passed 1544 checks, original-failure real reruns and independent AionUi targeted retesting. / 源码与冻结candidate06各1544项通过，原失败实测及AionUi同包针对性复测完成。
+
+## Historical test.5 / test.5 历史
+
+- `v0.1.0-test.5` consolidated the seven-tool MCP surface, `instant_run`/`input_sequence`, compact original-image receipts and bounded conditional observation; it was published.
+- Final test.5 source regression: 841 checks; earlier 836-check runs, aborted attempts and receipt-only follow-up remain historical evidence, not full GUI coverage claims. / test.5 最终源码回归 841 项，早期 836 项及失败/仅回执复核保留为历史。
 - No whole-page completion, cross-site accuracy, unattended automation, payment/send/delete/final-submit support, or universal hardware guarantee is claimed. Default waits and explicit confirmation boundaries remain unchanged.
 
 ## Historical test.4 notes / test.4 历史记录

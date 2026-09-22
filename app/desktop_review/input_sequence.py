@@ -23,6 +23,108 @@ def _action_data(step):
     return data.get("result", data)
 
 
+def _focus_field_binding(located, receipt, target):
+    """将刚派发的 UIA 推荐绑定到原识别截图；纯像素目标不伪造字段身份。"""
+    from pathlib import Path
+    from app.agent.native_identity import validate_native_identity_fact
+    from app.operation.recognition.control_target import uia_control_has_text_entry_patterns
+
+    def invalid():
+        raise InputSequenceInterrupted("input_field_binding_invalid")
+    def mapping(value):
+        if not isinstance(value, dict): invalid()
+        return value
+    plan = located.get("recognition_plan")
+    if plan is None:
+        return None
+    plan = mapping(plan)
+    chosen = mapping(plan.get("recommended_target"))
+    element = mapping(chosen.get("element"))
+    evidence = mapping(element.get("evidence") or {})
+    action = evidence.get("screen_inventory_action")
+    declared = (isinstance(action, dict) and action.get("source") == "windows_uia.controls"
+                or "windows_uia.controls" in (element.get("sources") or []))
+    if not declared:
+        return None
+    action = mapping(action)
+    if action.get("source") != "windows_uia.controls" or not action.get("source_id"):
+        invalid()
+    selected_id = chosen.get("candidate_id")
+    ranked = mapping(plan.get("candidate_result"))
+    narrow = mapping(plan.get("narrow_search_result"))
+    point = mapping(located.get("selected_click_point"))
+    if (not selected_id or ranked.get("recommended_candidate_id") != selected_id
+            or narrow.get("recommended_candidate_id") != selected_id
+            or located.get("selected_click_point_coordinate_space") != "capture_image_pixels"
+            or any(type(point.get(k)) is not int for k in ("x", "y"))):
+        invalid()
+    selected = [c for c in ranked.get("candidates", []) if isinstance(c, dict) and c.get("candidate_id") == selected_id]
+    local = [c for c in narrow.get("results", []) if isinstance(c, dict) and c.get("candidate_id") == selected_id]
+    if len(selected) != 1 or len(local) != 1 or local[0].get("refined_click_point") != point:
+        invalid()
+    selected_element = mapping(selected[0].get("element"))
+    selected_action = mapping(mapping(selected_element.get("evidence")).get("screen_inventory_action"))
+    if (selected_action.get("source") != "windows_uia.controls" or selected_action.get("source_id") != action["source_id"]
+            or selected_element.get("bbox") != element.get("bbox")):
+        invalid()
+    parsed = mapping(plan.get("parse_result"))
+    raw = mapping(mapping(parsed.get("execute_fast_inventory")).get("raw_uia_snapshot"))
+    if raw.get("status") != "ok" or raw.get("scan_complete") is not True or raw.get("truncated") is not False:
+        invalid()
+    controls = [c for c in raw.get("controls", []) if isinstance(c, dict) and c.get("control_id") == action["source_id"]]
+    if len(controls) != 1:
+        invalid()
+    control = controls[0]
+    runtime_id, kind = control.get("runtime_id"), control.get("control_type")
+    bbox = mapping(control.get("bbox"))
+    if (type(runtime_id) not in (tuple, list) or not 1 <= len(runtime_id) <= 64
+            or any(type(item) is not int for item in runtime_id) or kind not in {"Edit", "ComboBox"}
+            or not uia_control_has_text_entry_patterns(control)
+            or control.get("visible") is not True or control.get("enabled") is not True
+            or bbox != element.get("bbox") or any(type(bbox.get(k)) is not int for k in ("x", "y", "w", "h"))
+            or bbox["w"] <= 0 or bbox["h"] <= 0
+            or not (bbox["x"] <= point["x"] < bbox["x"]+bbox["w"] and bbox["y"] <= point["y"] < bbox["y"]+bbox["h"])):
+        invalid()
+    identity = validate_native_identity_fact(receipt.get("target_identity"),
+        target_window_handle=target["handle"], expected_process_id=target["process_id"])
+    window = mapping(raw.get("window"))
+    window_box = mapping(window.get("bbox"))
+    geometry = mapping(receipt.get("target_window_geometry"))
+    screen_rect = geometry.get("rect")
+    if (geometry.get("coordinate_space") != "screen_pixels" or geometry.get("rect_format") != "ltrb"
+            or type(screen_rect) not in (list, tuple) or len(screen_rect) != 4
+            or any(type(value) is not int for value in screen_rect)):
+        invalid()
+    left, top, right, bottom = screen_rect
+    reading = mapping(parsed.get("screen_reading"))
+    capture = mapping(located.get("live_capture"))
+    size = mapping(reading.get("image_size"))
+    if (identity is None or window.get("handle") != target["handle"] or window.get("process_id") != target["process_id"]
+            or any(type(window_box.get(k)) is not int for k in ("x", "y", "w", "h"))
+            or window_box != {"x": 0, "y": 0, "w": right - left, "h": bottom - top}
+            or right <= left or bottom <= top
+            or size != {"width": window_box["w"], "height": window_box["h"]} or capture.get("window_size") != size
+            or bbox["x"] < 0 or bbox["y"] < 0 or bbox["x"]+bbox["w"] > size["width"] or bbox["y"]+bbox["h"] > size["height"]):
+        invalid()
+    paths = [plan.get("image_path"), reading.get("image_path"), capture.get("image_path")]
+    if any(not isinstance(p, str) or not p for p in paths):
+        invalid()
+    try:
+        paths = [Path(p).resolve(strict=True) for p in paths]
+        if len(set(paths)) != 1: invalid()
+        digest = sha256(paths[0].read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        raise InputSequenceInterrupted("input_field_binding_capture_unavailable") from None
+    if capture.get("sha256") is not None and capture["sha256"] != digest:
+        invalid()
+    return {"contract_version": "input_sequence_field_binding_v1", "runtime_id": list(runtime_id),
+        "control_type": kind, "bbox": dict(bbox), "source_control_id": action["source_id"],
+        "source_capture_sha256": digest, "window_handle": target["handle"], "process_id": target["process_id"],
+        "process_create_time": identity["process_create_time"],
+        # UIA 框是截图坐标；屏幕原点只取同一步原生身份范围固定的窗口几何。
+        "window_rect": [left, top, right - left, bottom - top]}
+
+
 def _wait_for_focused_field(read):
     from app.agent.windows_text_field_reader import TextFieldReadError
     deadline = perf_counter() + .5
@@ -37,9 +139,11 @@ def _wait_for_focused_field(read):
             sleep(min(.025, remaining))
 
 
-def _read_field(coordinator, target, point, capture, field_id, expected_identity):
+def _read_field(coordinator, target, point, capture, field_id, expected_identity, *, field_binding=None, post_input=False):
     from app.agent.native_identity import WindowsNativeIdentityReader, validate_native_identity_fact
     from app.agent.windows_text_field_reader import WindowsTextFieldReader
+    if type(post_input) is not bool or post_input and field_binding is None:
+        raise InputSequenceInterrupted("input_field_post_input_binding_invalid")
 
     def read():
         manager = coordinator._windows()
@@ -53,14 +157,26 @@ def _read_field(coordinator, target, point, capture, field_id, expected_identity
         size = capture.get("window_size") or {}
         if size != {"width": rect.right - rect.left, "height": rect.bottom - rect.top}:
             raise InputSequenceInterrupted("input_sequence_viewport_changed")
-        # 单像素仅指定读取命中点；快照中的字段框来自真实 UIA，不能用此框证明定位。
+        bound_rect = (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+        binding_args = {}
+        bbox = (point["x"], point["y"], 1, 1)
+        if field_binding is not None:
+            if (field_binding["window_handle"] != target["handle"] or field_binding["process_id"] != target["process_id"]
+                    or field_binding["process_create_time"] != identity["process_create_time"]
+                    or tuple(field_binding["window_rect"]) != bound_rect):
+                raise InputSequenceInterrupted("input_field_binding_changed")
+            bbox = tuple(field_binding["bbox"][k] for k in ("x", "y", "w", "h"))
+            binding_args = {"expected_runtime_id": tuple(field_binding["runtime_id"]),
+                            "expected_control_type": field_binding["control_type"]}
+            if post_input:
+                binding_args["allow_post_input_geometry_rebind"] = True
+        # 有本帧身份时使用原字段框；纯像素路径的单点不能充当字段定位证明。
         return WindowsTextFieldReader(window_manager=manager, native_identity_reader=identity_reader).read_field(
             target_field_id=field_id, capture_id=capture["sha256"],
             target_window_handle=target["handle"], target_process_id=target["process_id"],
             process_create_time=identity["process_create_time"],
-            window_rect=(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top),
-            target_bbox=(point["x"], point["y"], 1, 1),
-            click_point=(point["x"], point["y"]), require_keyboard_focus=True)
+            window_rect=bound_rect, target_bbox=bbox,
+            click_point=(point["x"], point["y"]), require_keyboard_focus=True, **binding_args)
 
     return _wait_for_focused_field(lambda: coordinator._owner.call(read))
 
@@ -80,6 +196,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         observation_condition = validate_condition(observation_condition,
             resolve_render_grace_ms("press_enter", observation_wait_ms))
     group_id = "input-sequence-" + uuid4().hex
+    field_binding = None
     started = perf_counter()
     result = {"contract_version": "input_sequence_v1", "sequence_id": group_id,
         "status": "running", "phase": "focus", "target": dict(target), "steps": [],
@@ -94,7 +211,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         if persist is not None:
             persist(result)
 
-    def action(name, operation, payload, wait_ms):
+    def action(name, operation, payload, wait_ms, *, keyboard_target=None):
         result["phase"] = name
         # 后图必须属于最后一次尝试，不能把上一步的图冒充本次输入后的图。
         result["observation"] = {"status": "unavailable", "reason": "action_in_progress"}
@@ -106,6 +223,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             step = coordinator.execute_local_step(target_window_handle=target["handle"],
                 target_process_id=target["process_id"], operation=operation, request=payload,
                 include_observation=True, observation_wait_ms=wait_ms,
+                **({"keyboard_target": keyboard_target} if keyboard_target is not None else {}),
                 **({"observation_condition": observation_condition}
                    if name == "search" and observation_condition is not None else {}))
         except Exception:
@@ -142,7 +260,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         try:
             capture = result["observation"]["capture"]
             expected_identity = result["steps"][-1]["receipt"].get("target_identity")
-            snapshot = _read_field(coordinator, target, point, capture, group_id, expected_identity)
+            snapshot = _read_field(coordinator, target, point, capture, group_id, expected_identity,
+                **({"field_binding": field_binding, "post_input": name == "check_input"} if field_binding is not None else {}))
             result.setdefault("field_reads", []).append({"name": name, **snapshot.to_reference()})
             return snapshot
         except Exception as error:
@@ -163,6 +282,10 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             raise InputSequenceInterrupted("focus_coordinate_unavailable")
         result["selected_click_point"] = dict(point)
         result["selected_click_point_coordinate_space"] = "capture_image_pixels"
+        result["phase"] = "check_focus"
+        field_binding = _focus_field_binding(located, result["steps"][0]["receipt"], target)
+        if field_binding is not None:
+            result["field_binding"] = field_binding
         before = read("check_focus", point)
         if spec.clear_existing:
             expected = spec.text
@@ -171,8 +294,12 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 raise InputSequenceInterrupted("input_selection_unavailable")
             start, end = before.selection
             expected = before.value[:start] + spec.text + before.value[end:]
+        from app.core.local_keyboard_target import LocalKeyboardTarget
+        keyboard_target = (LocalKeyboardTarget(before, field_binding["control_type"],
+            (point["x"], point["y"]), "type_text", text_sha256=result["text_sha256"],
+            clear_existing=spec.clear_existing) if field_binding is not None else None)
         action("type", "type_text", {"text": spec.text, **point,
-            "click_before_typing": False, "clear_existing": spec.clear_existing}, 0)
+            "click_before_typing": False, "clear_existing": spec.clear_existing}, 0, keyboard_target=keyboard_target)
         after = read("check_input", point)
         from app.agent.text_field_evidence import same_text_field_instance
         if not same_text_field_instance(after.identity, before.identity) or after.source != before.source:
@@ -184,9 +311,15 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             raise InputSequenceInterrupted("input_value_mismatch")
         result["input_check"] = {"status": "matched", "source": after.source,
             "value_sha256": sha256(after.value.encode("utf-8")).hexdigest(), "read_id": after.read_id}
+        if after.identity.control_bbox != before.identity.control_bbox:
+            # 布局演化仅是执行后读取证据，不修改原定位绑定或任何后续点击坐标。
+            result["input_check"]["geometry_change"] = {"before_bbox": list(before.identity.control_bbox),
+                "after_bbox": list(after.identity.control_bbox), "coordinate_space": "capture_image_pixels", "read_only": True}
         result["completed_steps"].append("check_input")
         if spec.submit_search:
-            action("search", "press_key", {"key": "Enter", **point}, observation_wait_ms)
+            keyboard_target = (LocalKeyboardTarget(after, field_binding["control_type"],
+                (point["x"], point["y"]), "press_key") if field_binding is not None else None)
+            action("search", "press_key", {"key": "Enter", **point}, observation_wait_ms, keyboard_target=keyboard_target)
         result.update(status="completed", phase="returned",
             next_action="inspect_returned_image_and_judge_task_effect")
     except Exception as error:
@@ -196,6 +329,12 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         result.update(status="interrupted", interrupted_at=result["phase"],
             error={"code": reason, "type": type(error).__name__},
             next_action="inspect_partial_steps_and_current_state_before_a_new_command")
+        from app.agent.windows_text_field_reader import TextFieldReadError
+        if isinstance(error, TextFieldReadError):
+            # 仅透传读取器重新白名单投影后的阶段状态，不复制任意异常属性。
+            diagnostic = TextFieldReadError.to_reference(error).get("diagnostic")
+            if diagnostic:
+                result["error"]["diagnostic"] = diagnostic
     finally:
         checkpoint()
     return result

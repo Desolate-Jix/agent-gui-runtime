@@ -5,6 +5,7 @@ import hashlib
 import re
 import shutil
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -26,6 +27,10 @@ from app.gate.window import validate_bound_window_for_app
 from app.core.transition_memory import transition_memory
 from app.core.verifier import verifier
 from app.core.window_manager import window_manager
+from app.operation.screen_reading.browser_content_readiness import (
+    BrowserContentReadinessError, prepare_browser_content,
+)
+from app.operation.screen_reading.uia_provider import pinned_uia_snapshot
 from app.core.browser_navigation_guard import probe_after_settle, probe_bound_browser, verify_navigation_policy
 from app.gate.scroll import build_scroll_effect_validation, build_scroll_precondition_decision, build_scroll_safe_point
 from app.operation.mousetester import should_verify_mouse_tester_semantics, target_bbox_from_recommended, verify_mouse_tester_post_click_semantics
@@ -110,6 +115,17 @@ def _run_recognition_plan_for_execution(request: VisionRecognitionPlanRequestMod
     from app.api.vision import recognition_plan
 
     return recognition_plan(request)
+
+
+def _browser_content_readiness_failure(request, error, timer):
+    data = {"failure_reason": error.reason_code, "action_executed": False,
+        "automatic_retry_allowed": False, "browser_content_readiness": error.report,
+        "timings": timer.to_dict()}
+    data["trace_path"] = _write_execute_trace_if_enabled(request, category="actions",
+        operation="execute_recognition_plan", payload={"success": False, "result": data.copy()},
+        name_hint=request.app_name or "recognition_plan")
+    return APIResponse(success=False, message="Browser content observation is unavailable",
+        data=data, error=ErrorModel(code=error.reason_code, details=error.reason_code))
 
 
 def _run_observe_screen_for_execution(request: VisionObserveScreenRequestModel) -> APIResponse:
@@ -1633,6 +1649,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     auto_observe_trace: dict[str, Any] | None = None
     surface_ocr: Any = None
     local_target_validation: dict[str, Any] | None = None
+    browser_content_snapshot: dict[str, Any] | None = None
     effective_provider_mode, effective_metadata = _execute_plan_request_defaults(request)
     effective_observe_trace_path = request.observe_trace_path
     resolved_memory_action_id = request.interface_memory_action_id
@@ -1863,12 +1880,22 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     error=ErrorModel(code="bound_window_mismatch", details=bound_validation),
                 )
             try:
+                content_preparation = None
+                if local_policy_off and request.agent_mode == "execute":
+                    with timer.step("browser_content_preparation"):
+                        content_preparation = prepare_browser_content(window_manager, request.goal)
                 with timer.step("capture_live_window"):
                     live_capture = screenshot_service.capture_window(
                         save_image=True,
                         purpose="recognition_plan_execution",
                         name_hint=request.app_name or "recognition_plan",
                     )
+                if content_preparation is not None:
+                    with timer.step("browser_content_capture_binding"):
+                        browser_content_snapshot = content_preparation.capture_snapshot(live_capture)
+                        live_capture["browser_content_readiness"] = content_preparation.report
+            except BrowserContentReadinessError as exc:
+                return _browser_content_readiness_failure(request, exc, timer)
             except Exception as exc:
                 timings = timer.to_dict()
                 trace_path = _write_execute_trace_if_enabled(
@@ -2217,7 +2244,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             observe_trace_path=effective_observe_trace_path,
         )
         with timer.step("recognition_plan"):
-            plan_response = _run_recognition_plan_for_execution(plan_request)
+            # 只固定新截图之后的树；准备阶段的空树/过渡树不进入候选或模型。
+            with (pinned_uia_snapshot(browser_content_snapshot)
+                    if browser_content_snapshot is not None else nullcontext()):
+                plan_response = _run_recognition_plan_for_execution(plan_request)
         if not plan_response.success or not plan_response.data:
             timings = timer.to_dict()
             fallback_plan = _execute_fallback_plan(
@@ -2654,6 +2684,23 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                                 if type(popup_handle) is int and popup_handle > 0:
                                     visibility_options["expected_owned_popup_handle"] = popup_handle
                                 break
+                    from app.core.local_control_target import LocalControlTargetError, check_local_control_target
+                    try:
+                        control_check = check_local_control_target(selected_point)
+                        if (control_check is not None and control_check.get("status") == "matched"
+                                and control_check.get("option_runtime_id") and control_check.get("expanded") is True):
+                            popup_handle = control_check.get("expected_owned_popup_handle")
+                            if type(popup_handle) is int and popup_handle > 0:
+                                # 仅透传输入前已复核且识别前固定的选项 popup；不能从遮挡命中临时授予。
+                                if visibility_options.get("expected_owned_popup_handle") not in (None, popup_handle):
+                                    raise LocalControlTargetError("local_control_target_popup_scope_conflict")
+                                visibility_options["expected_owned_popup_handle"] = popup_handle
+                    except LocalControlTargetError as error:
+                        base_result["control_target_check"] = {"status": "rejected",
+                            "error_code": error.reason_code, "action_executed": False}
+                        raise
+                    if control_check is not None:
+                        base_result["control_target_check"] = control_check
                     click_result = input_controller.click_point(
                         selected_point["x"],
                         selected_point["y"],

@@ -7,8 +7,26 @@ from app.operation.screen_reading import uia_provider as provider
 
 class Node:
     def __init__(self, identity, kind="Pane", children=()):
-        self.element_info = SimpleNamespace(runtime_id=(identity,), control_type=kind)
+        self.element_info = SimpleNamespace(runtime_id=(identity,), control_type=kind,
+            process_id=20, element=self)
+        self.CurrentProcessId = 20
+        self.parent_node = None
         self.children = list(children)
+        for child in self.children:
+            child.parent_node = self
+
+    def top_level_parent(self):
+        return SimpleNamespace(handle=10)
+
+
+@pytest.fixture(autouse=True)
+def canonical_identity_boundary(monkeypatch):
+    import sys
+    api = SimpleNamespace(iuia=SimpleNamespace(CompareElements=lambda a, b: False,
+        ControlViewWalker=SimpleNamespace(GetParentElement=lambda node: node.parent_node)))
+    monkeypatch.setitem(sys.modules, "pywinauto.uia_defines", SimpleNamespace(IUIA=lambda: api))
+    monkeypatch.setitem(sys.modules, "pywinauto.uia_element_info",
+        SimpleNamespace(UIAElementInfo=lambda node: node.element_info))
 
 
 def run(monkeypatch, root, budget=100, prune=False):
@@ -36,7 +54,8 @@ def test_duplicate_and_cycle_are_not_complete(monkeypatch, kind):
     result = run(monkeypatch, root)
     assert result["scan_complete"] is False
     assert result["truncated"] is False
-    assert result["traversal_errors"][0]["reason"] in {"ancestor_cycle", "duplicate_runtime_id"}
+    assert any(error["reason"] in {"ancestor_cycle", "duplicate_runtime_id"}
+               for error in result["traversal_errors"])
     assert len(result["wrappers"]) < 6
 
 

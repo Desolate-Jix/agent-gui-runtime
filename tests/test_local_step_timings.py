@@ -177,6 +177,15 @@ def run_step(coordinator, operation="execute_recognition_plan", request=None):
         operation=operation, request={"goal": "synthetic target"} if request is None else request)
 
 
+def test_receipt_preserves_native_screen_rect_not_capture_relative_origin(timed_scene):
+    coordinator, _, _, _ = timed_scene
+    bound = coordinator._windows().bind_window_by_handle(321)
+    bound.rect = SimpleNamespace(left=-30, top=40, right=770, bottom=640)
+    result = run_step(coordinator)
+    assert result["target_window_geometry"] == {"coordinate_space": "screen_pixels",
+        "rect_format": "ltrb", "rect": [-30, 40, 770, 640]}
+
+
 def saved_report(coordinator):
     reports = list(coordinator._runtime_output_root.glob("local-direct-steps/*/report.json"))
     assert len(reports) == 1
