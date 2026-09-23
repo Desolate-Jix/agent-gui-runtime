@@ -1345,14 +1345,33 @@ def _vista_point_prompt(
     coordinate_space: str = "screenshot",
 ) -> str:
     candidate_lines = []
+    bound_alias_hints = []
+    bound_button_primary = None
     for candidate in candidates[:8]:
         bbox = _candidate_bbox_for_prompt(candidate, coordinate_transform=coordinate_transform)
-        candidate_lines.append(
+        line = (
             f"- {candidate.candidate_id}: label={candidate.label!r}, role={candidate.role!r}, "
             f"bbox=[{bbox['x']},{bbox['y']},{bbox['w']},{bbox['h']}]"
         )
+        evidence = getattr(candidate.element, "evidence", None)
+        evidence = evidence if isinstance(evidence, dict) else {}
+        binding = evidence.get("current_uia_form_label_binding")
+        if isinstance(binding, dict) and binding.get("label") == candidate.label:
+            raw_name = evidence.get("current_uia_form_control_name")
+            line += f", associated_label={candidate.label!r}, actual_control_name={raw_name!r}"
+            if len(candidates) == 1 and candidate.role == "button" and isinstance(raw_name, str) and raw_name.strip():
+                bound_button_primary = (raw_name.strip(), candidate.label)
+                bound_alias_hints.append(
+                    f"Target constraints: Associated label {candidate.label!r} is separate visible text; "
+                    f"the actual control has role='button', accessibility name={raw_name!r}. "
+                    "This accessibility name may include the field label and current value; "
+                    "it is not necessarily text printed on the button. "
+                    "Locate the button itself, not the printed label."
+                )
+        candidate_lines.append(line)
     candidate_block = "\n".join(candidate_lines) if candidate_lines else "- none"
     from app.operation.recognition.text_match import explicit_target_role, explicit_target_label
+    from app.operation.recognition.control_target import _field_target_label
 
     target_role = explicit_target_role(goal)
     # ComboBox 也可能只用于选择；仅明确字段目标可附加输入区域约束。
@@ -1363,7 +1382,7 @@ def _vista_point_prompt(
     )
     # 在主指令中保留字段角色，不能只在后文解释同名标签与输入框的区别。
     model_goal = f"the editable text input field labeled {goal!r}" if input_only else goal
-    explicit_label = explicit_target_label(goal) if input_only else None
+    explicit_label = (explicit_target_label(goal) or _field_target_label(goal)) if input_only else None
     if explicit_label is not None:
         # 标签只取明确原文；原动作与位置语境仍放在服务端会保留的 Goal 内。
         model_goal = f"the editable text input field labeled {explicit_label!r}. Original instruction: {goal}"
@@ -1371,15 +1390,22 @@ def _vista_point_prompt(
         from app.operation.recognition.control_target import generic_field_target
         if generic_field_target(goal):
             model_goal = f"the editable text input field. Original instruction: {goal}"
+    if bound_button_primary is not None:
+        raw_name, associated_label = bound_button_primary
+        # UIA 名称可能拼接字段标签和当前文件名，不能伪装成可见按钮文案。
+        model_goal = (f"Click the button associated with the visible field label "
+                      f"{associated_label!r}, not the printed label itself. Original instruction: {goal}")
     input_hint = (
         "Target constraints: The target is the editable area of an input field. Locate where text can be entered, "
         "not the printed label, caption, or a text display next to it. The editable area may be empty.\n"
         if input_only else ""
     )
+    bound_label_hint = "\n".join(bound_alias_hints) + ("\n" if bound_alias_hints else "")
     return (
         "Locate the requested GUI target in the screenshot.\n"
         f"Goal: {model_goal}\n"
         f"{input_hint}"
+        f"{bound_label_hint}"
         f"Candidate bboxes are in {coordinate_space} pixel coordinates. Use the candidate list only as context. Return the center point of the actual target.\n"
         "Return normalized 0-1000 coordinates only, preferably as [x, y].\n"
         "Candidates:\n"
@@ -1791,12 +1817,22 @@ def _prepare_vista_candidate_roi_image(
     y1 = min(int(item["y"]) for item in bboxes)
     x2 = max(int(item["x"]) + int(item["w"]) for item in bboxes)
     y2 = max(int(item["y"]) + int(item["h"]) for item in bboxes)
+    small_text_context = (roi_source == "current_uia_candidate_v1" and len(candidates) == 1
+        and candidates[0].role == "input" and 64 <= x2 - x1 <= 512 and 16 <= y2 - y1 <= 32)
     selection_context = (roi_source == "current_uia_candidate_v1" and len(candidates) == 1
         and candidates[0].role in {"checkbox", "radio", "combobox", "listitem"}
         and 0 < x2 - x1 <= (512 if candidates[0].role in {"combobox", "listitem"} else 64) and 0 < y2 - y1 <= 64)
+    wide_form_context = (roi_source == "current_uia_candidate_v1" and len(candidates) == 1
+        and candidates[0].role in {"input", "combobox", "listitem"}
+        and 512 < x2 - x1 and 0 < y2 - y1 <= 64)
+    button_evidence = getattr(candidates[0].element, "evidence", None) or {}
+    button_binding = button_evidence.get("current_uia_form_label_binding") or {}
+    bound_button_context = (roi_source == "current_uia_candidate_v1" and len(candidates) == 1
+        and candidates[0].role == "button" and 0 < x2 - x1 <= 1024 and 0 < y2 - y1 <= 96
+        and button_binding.get("label") == candidates[0].label and button_binding.get("bbox") == bboxes[0])
     context_labels = 0
     context_min_width = context_min_height = None
-    if selection_context:
+    if selection_context or small_text_context:
         # 小控件的标签常在框外；只扩展模型上下文，绝不改候选框或赋予点击许可。
         target = dict(x=x1, y=y1, w=x2-x1, h=y2-y1)
         snapshot = uia_snapshot or {}
@@ -1817,6 +1853,9 @@ def _prepare_vista_candidate_roi_image(
                 context_labels += 1
         context_min_width = 320 if context_labels else min(768, max(320, target["w"]+384))
         context_min_height = 128
+    # 已唯一绑定的按钮只给实际控件像素，避免把框外字段标题作为按钮文案定位。
+    if bound_button_context:
+        padding, min_size = 0, 1
     roi = _expand_bbox_roi(
         {"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1},
         image_size=image_size,
@@ -1841,12 +1880,25 @@ def _prepare_vista_candidate_roi_image(
         processed_width = crop_width
         processed_height = crop_height
         strategy = "pathgraph_union_full_screen_preserve_resolution"
-    elif selection_context:
+    elif bound_button_context:
+        scale = max(1.0, min(3.0, 96.0 / crop_height, 2048.0 / crop_width))
+        processed_width = max(1, int(round(crop_width * scale)))
+        processed_height = max(1, int(round(crop_height * scale)))
+        strategy = "current_bound_button_control_pixels"
+    elif selection_context or small_text_context:
         # 首次定位即提高小控件像素尺寸；仅缩放有界裁图，原目标框与门控不变。
         scale = min(3.0, max(1.0, 40.0 / min(bboxes[0]["w"], bboxes[0]["h"])))
         processed_width = max(1, int(round(crop_width * scale)))
         processed_height = max(1, int(round(crop_height * scale)))
         strategy = "current_selection_control_context_upscale" if scale > 1.0 else "current_selection_control_context_preserve_pixels"
+        if small_text_context:
+            strategy = "current_small_text_field_context_upscale" if scale > 1.0 else "current_small_text_field_context_preserve_pixels"
+    elif wide_form_context:
+        # 细长字段缩到 448 宽会把文字和行高压扁；保留原像素，仅在有界预算内放大。
+        scale = max(1.0, min(3.0, 40.0 / bboxes[0]["h"], 2048.0 / longest))
+        processed_width = max(1, int(round(crop_width * scale)))
+        processed_height = max(1, int(round(crop_height * scale)))
+        strategy = "current_wide_form_control_preserve_pixels"
     elif max_edge > 0 and longest > max_edge:
         scale = float(max_edge) / float(longest)
         processed_width = max(1, int(round(crop_width * scale)))
@@ -1893,9 +1945,13 @@ def _prepare_vista_candidate_roi_image(
         "locate_strategy": "pathgraph_candidate_roi_refine",
         "roi_source": roi_source,
         "roi_padding_px": int(padding),
-        **({"context_reason": "selection_control_label_context", "context_label_count": context_labels,
+        **({"context_reason": "current_bound_button_control_pixels", "control_upscale_factor": scale}
+           if bound_button_context else {}),
+        **({"context_reason": "small_text_field_label_context" if small_text_context else "selection_control_label_context", "context_label_count": context_labels,
             "small_control_pixels_preserved": scale == 1.0, "small_control_upscale_factor": scale,
-            "small_control_min_dimension_px": 40, "small_control_upscale_limit": 3.0} if selection_context else {}),
+            "small_control_min_dimension_px": 40, "small_control_upscale_limit": 3.0} if selection_context or small_text_context else {}),
+        **({"context_reason": "wide_thin_form_control_pixels", "control_pixels_preserved": True,
+            "control_upscale_factor": scale} if wide_form_context else {}),
         "max_edge": max_edge,
         "full_resolution_preserved": preserve_full_resolution,
         "full_resolution_reason": "ambiguous_union_roi_covers_large_screen_fraction" if preserve_full_resolution else None,
@@ -2541,7 +2597,9 @@ def _vista_direct_current_uia_identity(
     fast_inventory: dict[str, Any], candidates: list[RecognitionCandidate],
 ) -> tuple[RecognitionCandidate | None, str | None]:
     """以本次截图模型点和原始 UIA 树共同确认身份，不用列表顺序或旧坐标消歧。"""
-    from app.operation.recognition.control_target import uia_action_identity_matches, generic_field_target, _field_target_label
+    from app.operation.recognition.control_target import (
+        uia_action_identity_matches, uia_control_is_action_identity, uia_form_label, uia_point_form_role_matches,
+        generic_field_target, _field_target_label)
 
     field_target = generic_field_target(goal, control_target=control_target, target_text=target_text)
 
@@ -2575,6 +2633,25 @@ def _vista_direct_current_uia_identity(
         control for control in uia.get("controls", [])
         if uia_action_identity_matches(control, goal=goal, control_target=control_target, target_text=target_text)
     ]
+    point_matches = [
+        control for control in matches
+        if point_hits(control)
+    ]
+    point_form_role = False
+    if not point_matches and uia.get("scan_complete") is True and fast_inventory.get("uia_scan_complete") is True:
+        # 页内标题可在语义排序中压过无名控件；只让同帧点位下唯一真实表单控件证明自身身份。
+        action_hits = [control for control in uia.get("controls", [])
+            if point_hits(control) and uia_control_is_action_identity(control)]
+        form_hits = [control for control in uia.get("controls", [])
+            if point_hits(control) and control.get("visible") is True and control.get("enabled") is True
+            and uia_point_form_role_matches(control, goal=goal, control_target=control_target,
+                                             target_text=target_text)]
+        if len(form_hits) == 1 and len(action_hits) == 1:
+            matches = form_hits
+            point_matches = form_hits
+            point_form_role = True
+        elif form_hits and len(action_hits) > 1:
+            return None, "vista_direct_current_uia_identity_ambiguous"
     if not matches:
         if control_target is not None:
             return None, "control_target_current_uia_missing"
@@ -2582,10 +2659,6 @@ def _vista_direct_current_uia_identity(
             return None, "generic_field_current_uia_point_missing"
         # 命名字段缺失是目标解析失败，不能以模型点周围的合成按钮替代。
         return None, "named_field_current_uia_missing" if _field_target_label(goal) else None
-    point_matches = [
-        control for control in matches
-        if point_hits(control)
-    ]
     if field_target and not point_matches:
         # 完整当前树已证明模型点未命中字段，不能用该点周围的合成按钮替代字段。
         return None, "generic_field_current_uia_point_missing" if uia.get("scan_complete") is True else None
@@ -2602,7 +2675,7 @@ def _vista_direct_current_uia_identity(
     ) != 1:
         return None, "vista_direct_current_uia_identity_not_eligible"
     pool = candidates
-    if len(matches) > 1 or field_target:
+    if len(matches) > 1 or field_target or point_form_role:
         # 原 ranker 在模型点产生前正确拒绝了同名多项；现仅重排当前点唯一命中的 source_id。
         screen_reading = fast_inventory.get("screen_reading") or {}
         inventory = fast_inventory.get("screen_inventory") or {}
@@ -2630,7 +2703,10 @@ def _vista_direct_current_uia_identity(
     exact_candidates = [
         candidate for candidate in pool
         if candidate.eligible and candidate.element.interaction_policy.allowed
-        and label_key(candidate.label) == label_key(control.get("name"))
+        and (point_form_role and (candidate.element.evidence.get("screen_inventory_action") or {}).get("bbox") == control.get("bbox")
+             or label_key(candidate.label) == label_key(control.get("name"))
+             or (label_key(candidate.label) == label_key(uia_form_label(control))
+                 and (candidate.element.evidence.get("screen_inventory_action") or {}).get("bbox") == control.get("bbox")))
         and (control_target is None or control_target["role"] == "control" or candidate.role == control_target["role"])
         and isinstance(candidate.element.evidence.get("screen_inventory_action"), dict)
         and candidate.element.evidence["screen_inventory_action"].get("source") == "windows_uia.controls"
@@ -2639,6 +2715,12 @@ def _vista_direct_current_uia_identity(
     ]
     if len(exact_candidates) != 1:
         return None, "vista_direct_current_uia_identity_not_eligible"
+    if point_form_role:
+        exact_candidates[0].element.evidence["current_uia_point_form_role"] = {
+            "source": "current_screenshot_vista_point_and_uia_form_role_v1",
+            "point": dict(point), "control_id": control_id,
+            "control_type": control.get("control_type"), "bbox": dict(control["bbox"]),
+        }
     if len(matches) > 1:
         exact_candidates[0].element.evidence["current_uia_point_disambiguation"] = {
             "source": "current_screenshot_vista_point_and_uia_bbox_v1",
@@ -3000,8 +3082,10 @@ def _recognition_plan_from_vista_point(
     else:
         native_edit_primary = None
     from app.operation.recognition.text_match import explicit_target_label, explicit_target_role, explicit_word_target
-    from app.operation.recognition.control_target import uia_action_identity_matches
-    literal_label = explicit_target_label(goal)
+    from app.operation.recognition.control_target import uia_action_identity_matches, uia_form_label, _field_target_label
+    explicit_label = explicit_target_label(goal)
+    plain_field_label = _field_target_label(goal) if explicit_label is None else None
+    literal_label = explicit_label or plain_field_label
     literal_identity_diagnostics = {"label": literal_label, "entered": False}
     if (literal_label and not explicit_word_target(goal) and control_target is None and not candidates
             and fast_inventory.get("status") == "ready"):
@@ -3013,7 +3097,7 @@ def _recognition_plan_from_vista_point(
             if literal_role == "button" or literal_role is None:
                 value = re.sub(r"\s*[（(]&?[a-zA-Z][)）]\s*$", "", value)
             return " ".join(value.casefold().split())
-        literal_role = explicit_target_role(goal)
+        literal_role = explicit_target_role(goal) or ("input" if plain_field_label else None)
         literal_control_types = {"button": {"button"}, "link": {"hyperlink"}, "hyperlink": {"hyperlink"},
             "dropdown": {"combobox"}, "option": {"listitem", "menuitem"},
             "checkbox": {"checkbox"}, "radio button": {"radiobutton"},
@@ -3034,16 +3118,45 @@ def _recognition_plan_from_vista_point(
                     or box["x"] + box["w"] <= 0 or box["y"] + box["h"] <= 0)
         matches = [control for control in raw_uia.get("controls", [])
             if str(control.get("control_type") or "").casefold() in literal_control_types
-            and caption_key(str(control.get("name") or "")) == caption_key(literal_label)
+            and (not plain_field_label or caption_key(uia_form_label(control) or "") == caption_key(literal_label))
+            and (caption_key(str(control.get("name") or "")) == caption_key(literal_label)
+                 or caption_key(uia_form_label(control) or "") == caption_key(literal_label))
             and not outside_capture(control)
             and uia_action_identity_matches(control, goal=goal)]
         literal_identity_diagnostics.update(role=literal_role, match_count=len(matches))
         if (raw_uia.get("scan_complete") is True and raw_uia.get("truncated") is not True
                 and len(matches) == 1 and matches[0].get("visible") is True and matches[0].get("enabled") is True):
             control_id = matches[0].get("control_id")
+            bound_alias = uia_form_label(matches[0])
             exact_candidates = [candidate for candidate in current_uia_candidates
                 if candidate.role in literal_candidate_roles and candidate.eligible and candidate.element.interaction_policy.allowed
-                and candidate.element.evidence.get("screen_inventory_action", {}).get("source_id") == control_id]
+                and candidate.element.evidence.get("screen_inventory_action", {}).get("source_id") == control_id
+                and (not bound_alias or candidate.element.evidence["screen_inventory_action"].get("bbox") == matches[0].get("bbox"))]
+            if not exact_candidates and bound_alias and isinstance(screen_inventory, dict):
+                # 无名控件可能被全页 top_k 淘汰；只从同帧原动作重排，不改 UIA Name 或几何。
+                actions = [action for action in screen_inventory.get("available_actions", [])
+                    if isinstance(action, dict) and action.get("source") == "windows_uia.controls"
+                    and action.get("source_id") == control_id and action.get("bbox") == matches[0].get("bbox")]
+                if len(actions) == 1:
+                    focused_reading = {**screen_reading_from_fast_inventory,
+                        "screen_inventory": {**screen_inventory, "available_actions": actions}}
+                    focused = rank_candidates(CandidateRankRequest(goal=goal,
+                        page_structure=PageStructure(image_size=input_image_size,
+                            screen_summary="execute fast inventory", state_guess=request.state_hint,
+                            elements=[], texts=[]), top_k=1, state_hint=request.state_hint,
+                        screen_reading=focused_reading))
+                    exact_candidates = [candidate for candidate in focused.candidates
+                        if candidate.role in literal_candidate_roles and candidate.eligible
+                        and candidate.element.interaction_policy.allowed
+                        and candidate.element.evidence.get("screen_inventory_action", {}).get("source_id") == control_id]
+                    if len(exact_candidates) == 1:
+                        current_uia_candidates.append(exact_candidates[0])
+            if len(exact_candidates) == 1 and bound_alias and caption_key(bound_alias) == caption_key(literal_label):
+                bound = exact_candidates[0]
+                bound.label = literal_label
+                bound.element.label = literal_label
+                bound.element.evidence["current_uia_form_label_binding"] = dict(matches[0]["form_label_binding"])
+                bound.element.evidence["current_uia_form_control_name"] = str(matches[0].get("name") or "")
             literal_identity_diagnostics["eligible_candidate_count"] = len(exact_candidates)
             if control_id and len(exact_candidates) == 1:
                 # 首次推理就给模型本帧唯一控件作为定位上下文，不在模型失败后换点兜底。
@@ -3105,7 +3218,22 @@ def _recognition_plan_from_vista_point(
     vista_current_uia_near_bbox_reconciled = False
     vista_evaluated_candidate_ids: set[str] = set()
     fast_grounding_identifier_reason: str | None = None
-    if native_edit_primary:
+    current_text_primary = None
+    if ((request.metadata or {}).get("text_focus_route") == "current_uia_primary"
+            and current_uia_literal_identity and len(candidates) == 1
+            and literal_role in {"input", "field"} and not explicit_word_target(goal)
+            and control_target is None and seed_candidate is None and not recalled_candidates_available):
+        from app.operation.recognition.current_text_target import current_text_primary_point
+        current_text_primary = current_text_primary_point(fast_inventory, candidate=candidates[0],
+            image_path=image_path, image_size=input_image_size.to_dict(), literal_label=literal_label)
+    if current_text_primary:
+        # 在调用模型之前选择当前字段主路径，绝不在模型拒绝后换点兜底。
+        selected_candidate = candidates[0]
+        selected_candidate.element.click_point = dict(current_text_primary["point"])
+        selected_candidate.element.evidence["current_uia_text_primary"] = {
+            **current_text_primary, "screenshot_sha256": hashlib.sha256(image_path.read_bytes()).hexdigest()}
+        selected_candidate.reasons.append("current_unique_named_text_primary")
+    elif native_edit_primary:
         selected_candidate = candidates[0]
         selected_candidate.reasons.append("current_native_edit_client_primary")
     elif candidates:
@@ -3308,9 +3436,13 @@ def _recognition_plan_from_vista_point(
             point = vista_payload["point"]
             for candidate in roi_candidates:
                 bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
-                if _point_inside_map_bbox(point, bbox, padding=0 if current_uia_literal_identity or current_uia_generic_page_field else 8):
+                # 唯一精确字段只校正已复现的两像素边界偏差；实际派发仍在本帧真实框中心。
+                near_exact_field = (current_uia_literal_identity and len(roi_candidates) == 1
+                    and candidate.role in {"input", "combobox"} and min(bbox["w"], bbox["h"]) >= 16
+                    and _point_inside_map_bbox(point, bbox, padding=2))
+                if near_exact_field or _point_inside_map_bbox(point, bbox, padding=0 if current_uia_literal_identity or current_uia_generic_page_field else 8):
                     selected_candidate = candidate
-                    vista_point_inside_selected_bbox = True
+                    vista_point_inside_selected_bbox = _point_inside_map_bbox(point, bbox, padding=0)
                     break
             if (
                 selected_candidate is None
@@ -3329,6 +3461,8 @@ def _recognition_plan_from_vista_point(
                         *selected_candidate.reasons,
                         "vista_point_inside_candidate_bbox"
                         if vista_point_inside_selected_bbox
+                        else "current_uia_exact_field_point_near_boundary"
+                        if current_uia_literal_identity
                         else "seeded_candidate_primary_point_used_after_vista_disagreement",
                     ]
                 )
@@ -3597,6 +3731,18 @@ def _recognition_plan_from_vista_point(
             point=vista_payload["point"],
             candidates=candidates,
         )
+        point_form_role = bool(identity_candidate is not None and
+            identity_candidate.element.evidence.get("current_uia_point_form_role"))
+        if point_form_role and vista_direct_uia_conflict_ids:
+            # 标题虽在目标语句中，却不是点位下的表单控件；仅忽略与点位分离的非表单冲突。
+            conflicting = [candidate for candidate in candidates
+                if candidate.candidate_id in vista_direct_uia_conflict_ids]
+            if (len(conflicting) == len(vista_direct_uia_conflict_ids)
+                    and all(candidate.role not in {"input", "combobox"}
+                        and not _point_inside_map_bbox(vista_payload["point"],
+                            candidate.refined_bbox or candidate.element.bbox.to_dict(), padding=0)
+                        for candidate in conflicting)):
+                vista_direct_uia_conflict_ids = []
         if identity_candidate is not None and not vista_direct_uia_conflict_ids:
             source_candidate = selected_candidate
             reconciled_candidates = [
@@ -3616,6 +3762,9 @@ def _recognition_plan_from_vista_point(
                 # 字段整体目标由模型点与唯一当前字段框确认，不与页面标题和按钮竞争。
                 reconciled_candidates = [identity_candidate]
                 identity_candidate.reasons.append("generic_field_current_uia_geometry_reconciled")
+            if point_form_role:
+                reconciled_candidates = [identity_candidate]
+                identity_candidate.reasons.append("point_form_role_current_uia_geometry_reconciled")
             point_disambiguation = identity_candidate.element.evidence.get("current_uia_point_disambiguation")
             if isinstance(point_disambiguation, dict):
                 excluded_ids = set(point_disambiguation["excluded_control_ids"])
@@ -3752,6 +3901,15 @@ def _recognition_plan_from_vista_point(
         },
     )
     grounding_results: list[LocalGroundingCandidateResult] = []
+    if current_text_primary and selected_candidate is not None:
+        grounding_results.append(LocalGroundingCandidateResult(
+            candidate_id=selected_candidate.candidate_id, element_id=selected_candidate.element_id,
+            status="grounded", crop_path=None, crop_bbox=current_text_primary["bbox"],
+            refined_click_point=dict(current_text_primary["point"]),
+            coordinate_source=current_text_primary["coordinate_source"], confidence=0.9,
+            matched_text=literal_label, matched_text_bbox=None,
+            reasons=["current_unique_named_text_geometry", "live_focus_and_readback_required",
+                     "task_effect_requires_agent_review"]))
     if native_edit_primary and selected_candidate is not None:
         grounding_results.append(LocalGroundingCandidateResult(
             candidate_id=selected_candidate.candidate_id, element_id=selected_candidate.element_id,
@@ -3915,8 +4073,8 @@ def _recognition_plan_from_vista_point(
         results=grounding_results,
         recommended_candidate_id=recommended_local_candidate_id,
         summary={
-            "provider": "current_native_edit_client_center" if native_edit_primary else "current_uia_unique_match_v1" if fast_grounding_used else "vista_point_grounding",
-            "output_contract": "native_edit_client_target_v1" if native_edit_primary else "vista_point_v1",
+            "provider": "current_uia_named_text_center" if current_text_primary else "current_native_edit_client_center" if native_edit_primary else "current_uia_unique_match_v1" if fast_grounding_used else "vista_point_grounding",
+            "output_contract": "current_named_text_target_v1" if current_text_primary else "native_edit_client_target_v1" if native_edit_primary else "vista_point_v1",
             "candidate_count": len(candidates),
             "grounded_count": sum(1 for result in grounding_results if result.status == "grounded"),
             "error": vista_error,
@@ -3947,6 +4105,9 @@ def _recognition_plan_from_vista_point(
         )
     recommended = recommendation.to_dict() if recommendation is not None else None
     model_io = vista_direct_failure_model_io or _vista_model_io_trace(vista_payload, error=vista_error)
+    if current_text_primary:
+        model_io = {"contract_version": "model_io_trace_v1", "status": "skipped",
+                    "reason": "current_unique_named_text_primary", "attempt_count": 0}
     result_payload = {
         "contract_version": "recognition_plan_v1",
         **_mode_payload(request, fallback_contract="recognition_plan_v1"),
@@ -3964,7 +4125,9 @@ def _recognition_plan_from_vista_point(
             grounding=narrow_search_result,
             selected_candidate=selected_candidate,
             current_candidate_source=(
-                "current_uia_unique_match_v1"
+                "current_uia_named_text_center"
+                if current_text_primary
+                else "current_uia_unique_match_v1"
                 if fast_grounding_used
                 else "current_uia_vista_grounded_v1"
                 if selected_candidate is not None
@@ -3978,13 +4141,14 @@ def _recognition_plan_from_vista_point(
         "parse_result": {
             "vision_regions": {
                 "contract_version": "vision_regions_v1",
-                "provider": "vista_point_grounding",
+                "provider": "current_uia_named_text_center" if current_text_primary else "vista_point_grounding",
                 "image_size": input_image_size.to_dict(),
-                "screen_summary": "VISTA point grounding uses PathGraph recall instead of full-screen region parsing.",
+                "screen_summary": ("Current uniquely labelled writable control geometry; no visual model inference."
+                    if current_text_primary else "VISTA point grounding uses PathGraph recall instead of full-screen region parsing."),
                 "regions": [],
                 "targets": [],
                 "observers": [],
-                "notes": ["vista_point_grounding_only"],
+                "notes": ["current_unique_named_text_primary"] if current_text_primary else ["vista_point_grounding_only"],
             },
             "ocr_result": None,
             "ocr_anchors": observe_reuse.get("ocr_anchors"),
@@ -4001,13 +4165,14 @@ def _recognition_plan_from_vista_point(
         "pre_click_decision": pre_click_decision.to_dict(),
         "verification_plan": {
             "status": "planned_not_executed",
-            "pre_click_checks": [
+            "pre_click_checks": (["current_unique_named_text_geometry", "live_writable_target_identity",
+                "candidate_policy_allowed", "click_point_inside_candidate_bbox"] if current_text_primary else [
                 "path_graph_state_match",
                 "vista_point_inside_candidate_bbox",
                 "vista_direct_point_grounding",
                 "candidate_policy_allowed",
                 "click_point_inside_candidate_bbox",
-            ],
+            ]),
             "post_click_checks": ["ocr_change", "content_change", "focus_or_state_change"],
         },
         "recommended_target": recommended,
@@ -4021,7 +4186,9 @@ def _recognition_plan_from_vista_point(
                 ocr_region_refine_used=False,
             ),
             "vision_provider_used": (
-                "current_native_edit_client_center"
+                "current_uia_named_text_center"
+                if current_text_primary
+                else "current_native_edit_client_center"
                 if native_edit_primary
                 else
                 "current_uia_unique_match_v1"

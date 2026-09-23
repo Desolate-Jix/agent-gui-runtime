@@ -134,6 +134,27 @@ def test_other_application_is_not_probed(monkeypatch, harness):
     assert events == []
 
 
+def test_edge_owned_native_dialog_does_not_require_browser_document(monkeypatch, harness):
+    dialog = snapshot(False)
+    dialog["controls"][0]["class_name"] = "#32770"
+    events = source(monkeypatch, [dialog])
+    with harness.scope():
+        prepared = api().prepare_browser_content(harness.manager,
+            'Click the input field labelled "\u6587\u4ef6\u540d(N):"')
+    assert prepared is None
+    assert events == ["sample"]
+
+
+def test_unknown_browser_process_root_still_fails_closed(monkeypatch, harness):
+    unknown = snapshot(False)
+    unknown["controls"][0]["class_name"] = "OtherWindow"
+    events = source(monkeypatch, [unknown])
+    with harness.scope(), pytest.raises(api().BrowserContentReadinessError,
+            match="browser_content_root_unavailable"):
+        api().prepare_browser_content(harness.manager, 'Click the input field labelled "Address"')
+    assert events == ["sample"]
+
+
 def test_no_local_scope_cannot_start_preparation(monkeypatch, harness):
     events = source(monkeypatch, [])
     with pytest.raises(api().BrowserContentReadinessError, match="identity_changed"):

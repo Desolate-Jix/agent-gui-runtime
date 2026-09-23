@@ -172,13 +172,13 @@ Give `AGENT_GUIDE.md` to the agent. Verify the target and original image, prepar
 
 ## 7. 本预览版边界与反馈 / Limits and useful feedback
 
-**未发布的模型清理修复 / Unreleased model cleanup fix:** 清理失败时请保留回执 `diagnostics`、会话 `report.json`，以及诊断 `evidence_path` 指向的 `cleanup-evidence.json`（先脱敏），无需发整个目录。里面区分进程身份、Job 成员、连续零观测与 PID 文件删除结果。显存下降不等于全部清理通过；10 秒是新增观察预算，不是朋友故障已经解决的证明。`cleanup_pending` 解除阻塞后可再调用 `instant_stop` 只重试清理；不得删除历史指针来强开新会话。
+**test.6 起的模型清理诊断 / Model cleanup diagnostics since test.6:** 清理失败时请保留回执 `diagnostics`、会话 `report.json`，以及诊断 `evidence_path` 指向的 `cleanup-evidence.json`（先脱敏），无需发整个目录。里面区分进程身份、Job 成员、连续零观测与 PID 文件删除结果。显存下降不等于全部清理通过；10 秒是观察预算，不是朋友故障已经解决的证明。`cleanup_pending` 解除阻塞后可再调用 `instant_stop` 只重试清理；不得删除历史指针来强开新会话。
 
 For cleanup failures, share redacted receipt diagnostics, session report and the cleanup-evidence file referenced by `evidence_path`, not the entire data directory. VRAM release alone is insufficient. The new observation budget is not proof of a friend-machine fix. Resolve the blocker before explicitly retrying cleanup with `instant_stop`; preserve session records. [验证记录 / Verification](docs/verification/V5_MODEL_CLEANUP_FIXES.md).
 
-**未发布源码修复 / Unreleased source fix:** 应用“未发现”不等于 MCP 未注册。可使用 launch.name、发现的 app_id 或本地 .exe/.lnk 绝对路径；同名候选必须消歧，UWP 专用启动不保证。现有 test.5 下载包尚未包含，详见 AGENT_GUIDE.md。
+**test.6 起的通用启动 / Generic launch since test.6:** 应用“未发现”不等于 MCP 未注册。可使用 launch.name、发现的 app_id 或本地 .exe/.lnk 绝对路径；同名候选必须消歧，UWP 专用启动不保证。test.6 及本次 test.7包含，旧 test.5 包不包含，详见 AGENT_GUIDE.md。
 
-An undiscovered app is not an unregistered MCP server. The source fix supports name, discovered ID and local executable/shortcut paths; the existing test.5 ZIP is unchanged.
+An undiscovered app is not an unregistered MCP server. Name, discovered ID and local executable/shortcut launch are included since test.6 and in test.7, not in older test.5 bundles.
 
 模型准备错误新增 `diagnostics`：`phase`（preflight/launch/readiness）、`error_code`、`cause_type`，以及可取得的退出码、日志目录/路径、errno/winerror。提供脱敏错误、对应日志末尾、GPU/显存、模型目录及包名；不要发 token 或整个数据目录。模型加载完成前可能还未监听端口，单凭“拒绝连接”不能认定防火墙，也不能认定已修复。
 

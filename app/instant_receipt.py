@@ -20,9 +20,9 @@ def compact_receipt(receipt, *, full_receipt_path=None):
     if result.get("contract_version") == "form_fill_v1":
         value["form"] = {key: deepcopy(result[key]) for key in (
             "status", "phase", "completed_fields", "interrupted_at", "action_executed",
-            "error", "total_ms", "next_action") if key in result}
+            "error", "total_ms", "next_action", "requested_fields", "remaining_fields", "text_navigation") if key in result}
         value["form"]["fields"] = [{key: deepcopy(row[key]) for key in (
-            "index", "kind", "status", "check", "error", "action_executed") if key in row}
+            "index", "kind", "status", "check", "error", "action_executed", "option_match", "available_options") if key in row}
             for row in result.get("fields", [])]
     elif result.get("contract_version") == "input_sequence_v1":
         value["sequence"] = {key: deepcopy(result.get(key)) for key in (

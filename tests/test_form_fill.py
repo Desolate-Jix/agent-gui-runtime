@@ -75,13 +75,15 @@ def reader(monkeypatch, *answers):
 def text_reader(monkeypatch, *values):
     pending = iter(values)
 
-    def read(coordinator, target, point, capture, field_id, expected_identity):
+    def read(coordinator, target, point, capture, field_id, expected_identity, **kwargs):
         value = next(pending)
         identity = TextFieldIdentity(field_id, 1, 2, 100.0, (1,),
             (0, 0, 800, 600), (1, 1, 300, 40))
         return TextFieldSnapshot(identity, capture["sha256"], "read", 1, "uia_value", value, None)
 
     monkeypatch.setattr(input_sequence, "_read_field", read)
+    monkeypatch.setattr(input_sequence, "_focus_field_binding", lambda located, receipt, target: {
+        "control_type": "Edit", "runtime_id": [1], "bbox": {"x": 1, "y": 1, "w": 300, "h": 40}})
 
 
 def run(coordinator, *fields, **kwargs):
@@ -95,7 +97,7 @@ RADIO = {"kind": "radio", "label": "Email"}
 
 
 @pytest.mark.parametrize("payload", [
-    {"fields": []}, {"fields": [CHECK] * 13}, {"fields": [CHECK], "submit": True},
+    {"fields": []}, {"fields": [CHECK] * 33}, {"fields": [CHECK], "submit": True},
     {"fields": [{**CHECK, "checked": "true"}]}, {"fields": [{**CHECK, "label": "  "}]},
     {"fields": [{**CHECK, "label": "a" * 501}]}, {"fields": [{**TEXT, "text": " "}]},
     {"fields": [{**TEXT, "text": "a" * 20001}]}, {"fields": [{**TEXT, "field_goal": "\n"}]},
@@ -187,7 +189,7 @@ def test_dropdown_selects_unique_scoped_option_then_verifies(monkeypatch, select
 
 @pytest.mark.parametrize("options,reason", [([], "form_option_not_visible"),
     ([option(), option()], "form_option_ambiguous"),
-    ([option("nz")], "form_option_not_visible")])
+    ([option("NZD")], "form_option_not_visible")])
 def test_missing_or_duplicate_option_stops_after_open(monkeypatch, options, reason):
     co = Coordinator()
     before = control(kind="dropdown", label="Country", value="AU")

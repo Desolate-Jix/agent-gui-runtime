@@ -61,7 +61,33 @@ def check(root):
         {"kind": "checkbox", "label": "Show details", "checked": True},
         {"kind": "radio", "label": "Standard"},
     ]
+    form_fields.append({"kind": "date", "field_goal": "Date", "value": "2026-09-23",
+                        "format": "YYYY-MM-DD"})
     instant.InstantCommand.model_validate({"kind": "form_fill", "request": {"fields": form_fields}}).command()
+    from pydantic import ValidationError
+    from app.desktop_review.form_fill import FormFillRequest
+    FormFillRequest.model_validate({"fields": [{"kind": "date", "field_goal": "Date",
+        "value": "2026-09-23", "format": "YYYY-MM-DD"}]})
+    try:
+        FormFillRequest.model_validate({"fields": [{"kind": "date", "field_goal": "Date",
+            "value": "2026-02-30", "format": "YYYY-MM-DD"}]})
+    except ValidationError:
+        pass
+    else:
+        raise ValueError("invalid DateField value was accepted")
+    bounded_fields = [{"kind": "text", "field_goal": f"Field {index}", "text": "preflight"}
+                      for index in range(32)]
+    FormFillRequest.model_validate({"fields": bounded_fields})
+    try:
+        FormFillRequest.model_validate({"fields": bounded_fields + [
+            {"kind": "text", "field_goal": "Field 32", "text": "preflight"}]})
+    except ValidationError:
+        pass
+    else:
+        raise ValueError("form field limit above 32 was accepted")
+    FormFillRequest.model_validate({"text_navigation": "tab_sequence", "fields": [
+        {"kind": "text", "field_goal": "First", "text": "preflight", "label": "First name"},
+        {"kind": "text", "field_goal": "Last", "text": "preflight", "label": "Last name"}]})
     # 内部键盘字段约束与浏览器准备均为真实执行依赖，必须显式预检。
     keyboard_target = importlib.import_module("app.core.local_keyboard_target")
     browser_readiness = importlib.import_module("app.operation.screen_reading.browser_content_readiness")
@@ -80,6 +106,19 @@ def check(root):
     instant.InstantCommand.model_validate({"kind": "input_sequence", "request": {
         "field_goal": "Search input", "text": "preflight", "submit_search": True},
         "observation_condition": {"text": "Expected result", "control_type": "Text"}}).command()
+    text_focus = importlib.import_module("app.core.local_text_focus")
+    current_text = importlib.import_module("app.operation.recognition.current_text_target")
+    form_labels = importlib.import_module("app.operation.recognition.form_label_binding")
+    recognition_exports = {
+        "local_text_focus": (text_focus.LocalTextFocusTarget, text_focus.check_local_text_focus,
+                             text_focus.local_text_focus_scope),
+        "current_text_target": (current_text.current_text_primary_point,),
+        "form_label_binding": (form_labels.bind_form_label, form_labels.infer_form_label_bindings),
+    }
+    if not all(callable(symbol) for symbols in recognition_exports.values() for symbol in symbols):
+        raise ValueError("recognition entrypoint export is not callable")
+    recognition_checked = [{"operation": name, "handler_imported": True, "callable": True,
+                            "handler_executed": False} for name in recognition_exports]
     if not callable(reader.read_captured_text) or not callable(ocr.ocr_service.scan_image):
         raise ValueError("observation handler is not callable: read_text")
     instant.InstantCommand.model_validate({"kind": "read_text", "max_chars": 10000})
@@ -149,7 +188,9 @@ def check(root):
             "editing_keys_validated": editing_keys,
             "input_sequence": {"handler_imported": True, "request_validated": True, "handler_executed": False},
             "form_fill": {"handler_imported": True, "request_validated": True, "handler_executed": False,
-                          "field_kinds": [field["kind"] for field in form_fields]},
+                          "field_kinds": [field["kind"] for field in form_fields], "max_fields": 32,
+                          "tab_sequence_validated": True},
+            "recognition_operations": recognition_checked,
             "local_module_sources": sources,
             "limitation": "Dependency and request validation only, not real input or end-to-end acceptance"}
 

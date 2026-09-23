@@ -2,6 +2,10 @@
 
 ## 范围 / Scope
 
+日期字段与外置列表适配（未发布源码）见 [复杂表单适配 / Advanced form adaptation](ADVANCED_FORM_ADAPTATION.md)。其中明确区分日期文本录入和未实现的日历导航；这些改动不在 test.6 下载包中。 / Date fields and external-list support are source-only additions, not part of the test.6 bundle.
+
+未发布源码的真实表单标签关联、输入与文件选择修复单独记录于 [调试记录 / Debug record](FORM_LABEL_FILE_PICKER_DEBUG.md)；下文 test.6 验收数字不覆盖这些新增改动。 / Unreleased real-form fixes have separate evidence; the test.6 results below do not validate new changes.
+
 `test.6` 新增 `kind=form_fill`，仍通过既有 `instant_run` / `instant_submit` 使用，不新增 MCP 工具。本功能是网页和原生软件表单，不是 Excel 单元格编辑；学习模式不在此次发布范围。
 
 The test.6 release adds form filling through existing MCP tools. It targets web/native forms, not spreadsheet cells, and does not ship learning. Source, frozen candidate06 and independent AionUi real-form acceptance passed, with retained first-attempt failures and explicit recovery listed below.
@@ -11,6 +15,7 @@ The test.6 release adds form filling through existing MCP tools. It targets web/
 - `app/instant_mcp.py` 的 `InstantCommand` 校验 `kind=form_fill`，复用 `instant_run` / `instant_submit` 与同 request ID 回执读取；会话须先选定目标窗口。
 - `scripts/run_local_step_session.py` 分派到 `app/desktop_review/form_fill.py` 的 `FormFillRequest` / `run_form_fill`，按声明顺序执行、记录检查点，并在首个失败处保留部分结果。
 - 文本复用 `app/desktop_review/input_sequence.py`，固定 `submit_search=False`；`app/agent/windows_text_field_reader.py` 提供同字段实际值和双读验证。状态控件使用 `app/agent/windows_form_control_reader.py`，在 coordinator 的串行 owner 内只读 UIA，绑定窗口／进程、runtime ID、几何与当前状态；动作仍走既有受控识别单步，不直接调用 UIA 修改模式。
+- 未发布源码的显式文本 `label` 优先使用完整当前 UIA 中唯一可写控件的真实中心；身份、扫描完整性或标签不能确认时保留原视觉路径。此选择发生在模型请求前，不能在模型拒绝后改点重试。点击前复验身份，输入后仍须值读回。/ Unreleased explicit text labels may use unique current writable-control geometry before model inference. Incomplete or ambiguous evidence keeps the visual path; no coordinate substitution after model rejection. Live identity and value readback remain required.
 - `app/core/local_control_target.py` 在原动作派发前复读当前控件身份、状态和真实边界，限定下拉选项归属；不扩大可点击目标。
 - 标准下拉原生弹出层按当前同进程、同根 owner、唯一几何覆盖关系记录精确 HWND；识别前固定、点击前复验后，复用原输入器的 `expected_owned_popup_handle`。不把其他 owned 窗口一律视为目标，也不声称原生 popup 暴露了选项 UIA 子树。`native_popup.rect` 明确为屏幕像素 LTRB。
 - `app/operation/screen_reading/uia_graph.py` 共用有限 UIA 图身份契约；仅 COM 身份、稳定属性和规范父边一致的重复节点视为别名。完整图不等于严格树，诊断分别给出 `graph_scan_complete` 与 `provider_tree_valid`。
@@ -56,9 +61,9 @@ The test.6 release adds form filling through existing MCP tools. It targets web/
 }
 ```
 
-标签和选项只是示例，必须来自当前实际界面／可访问性名称；不得照抄到无关页面。`fields` 为 1–12 项，未知字段拒绝。文本默认替换现有内容，且不会按 Enter 提交。复选框设置 `checked=true/false`，单选框选择指定项；已满足状态不重复点击。下拉框展开后重新读取选项，必须可见且归属于该控件。
+标签和选项只是示例，必须来自当前实际界面／可访问性名称；不得照抄到无关页面。`fields` 已发布 test.6 为 1–12 项，未发布源码为 1–32 项，未知字段拒绝。文本默认替换现有内容，且不会按 Enter 提交。复选框设置 `checked=true/false`，单选框选择指定项；已满足状态不重复点击。下拉框展开后重新读取选项，必须可见且归属于该控件。
 
-Labels/options above are examples, not universal selectors. Supply current accessible names. Requests contain 1–12 strict fields. Text replaces by default without pressing Enter. Checkbox/radio operations set the requested state instead of blindly toggling; satisfied states are skipped. Dropdown choices must be visible and belong to the current control.
+Labels/options above are examples, not universal selectors. Supply current accessible names. Released test.6 requests contain 1–12 fields; unreleased source accepts 1–32 strict fields. Text replaces by default without pressing Enter. Checkbox/radio operations set the requested state instead of blindly toggling; satisfied states are skipped. Dropdown choices must be visible and belong to the current control.
 
 下拉展开状态由原始只读模式双读确认，已展开时直接选择，不再点击开关把它收起；未知、部分展开或模式不可用则中断。请求无效选项后，可在核对部分回执和当前状态后发出有效选项的新命令，不会自动重放前一次填写。
 
@@ -196,3 +201,16 @@ Local evidence identifiers (raw images/logs not published):
 - Codex source: 20260923-test6-form-model-correction; package: 20260923-test6-candidate06-live.
 - Independent: 20260923-test6-aion-candidate06, report SHA-256 f4365e0d682525f20b0012620a95057585b15d86f153cfdcccd1fbe9368479f4.
 - Stored field readbacks, original PNG, command receipts and final cleanup were checked, not only the agent summary.
+
+
+## 2026-09-23 full-form source update / 整表源码更新
+
+Eight-field Selenium journeys passed twice (107.186 s / 107.442 s), plus native test-file selection, repeated-state checks and failure recovery. Quill Chinese rich-text entry/replacement passed. Select2 keyboard selection retained two values; visual Alaska option localization remains unreliable. / 两轮八项整表、原生测试附件、重复状态和恢复通过；中文富文本替换通过；多选键盘路径保留两值，视觉选项仍有失败，不记为通用多选完成。
+
+Source tests: 1633 passed in 34.57 s. No final submit, private CV upload, package, push or AionUi delegation. test.6 download unchanged. / 未最终提交、上传私人简历、打包或推送，未派独立验收，下载包不变。
+
+See docs/verification/FULL_FORM_SOURCE_ACCEPTANCE.md.
+
+
+未发布源码的 32 项组合、可选 Tab 连续输入及真实失败修复见 [批量修复 / Batch repairs](BATCH_FORM_REPAIRS.md)。实机已按用户要求暂停，不把离线通过写成实机通过。
+Unreleased 32-field batches, optional Tab continuation and repair evidence are documented separately; live validation remains pending.

@@ -2701,6 +2701,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         raise
                     if control_check is not None:
                         base_result["control_target_check"] = control_check
+                    from app.core.local_text_focus import check_local_text_focus
+                    focus_check = check_local_text_focus(selected_point, window_manager)
+                    if focus_check is not None:
+                        base_result["local_text_focus_check"] = focus_check
                     click_result = input_controller.click_point(
                         selected_point["x"],
                         selected_point["y"],

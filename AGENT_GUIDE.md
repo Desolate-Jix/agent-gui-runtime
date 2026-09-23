@@ -1,4 +1,6 @@
-# Agent 接入与操作 / Agent usage — v0.1.0-test.6
+# Agent 接入与操作 / Agent usage — v0.1.0-test.7
+
+**适用于 test.7 执行模式测试包。** 不要向旧包发送新增字段；先核对服务端版本。/ For the test.7 execution preview. Check server version before using new fields with older bundles.
 
 ## test.6：通用应用启动 / Installed applications
 
@@ -22,7 +24,7 @@
 
 **输入框聚焦行为 / Input-field focus behavior:** 普通“点击输入框”与结构化 input 目标现在也要求模型定位可编辑区内部，避免边框、占位文字字形或相邻搜索按钮；原目标标签保留。按钮/图标/框内单词不因此改成聚焦整个字段。仍须读图核对焦点、实际文字与跳转，派发不等于成功。仍须按回执与原图独立核验。/ Plain field-click goals and structured input targets now request interior focus without changing the original label or word/button/icon targets. Inspect actual focus, text and navigation; dispatch is not success. Verify the result independently from receipts and original images. [实测边界 / Limits](docs/verification/EXECUTION_INPUT_FOCUS.md).
 
-本指南对应 test.6。Codex 单项／连续实测后已由 AionUi 独立复测，范围与保留失败见 docs/verification/TEST6_CANDIDATE_ACCEPTANCE.md，不作通用可靠性保证。 / test.6 received independent AionUi retesting after Codex single and continuous runs; see the acceptance report for retained failures and limitations.
+test.6 的历史独立验收见 docs/verification/TEST6_CANDIDATE_ACCEPTANCE.md，不沿用为 test.7 通过证据。新表单源码实测见 [批量填写记录](docs/verification/BATCH_FORM_LIVE_ACCEPTANCE.md)。/ Historical test.6 acceptance does not validate this candidate; see the separate source batch-form evidence.
 
 ## 执行契约 / Execution contracts
 
@@ -76,9 +78,21 @@ Launch uses an observed app_id with optional url; select requires real handle/pr
 
 组合仅限 Agent 已决定的“聚焦字段 → 输入 → 核对 → 可选 Enter 搜索”。不要把需要观察后重新决策的结果点击提前加入，不把 `completed` 当成搜索结果正确。`pending` 不等于取消；沿用原 ID 读取，保持 MCP 连接。 / Group only already-decided field input and optional search; inspect the result before choosing a result link. Completion is not task success, and pending is not cancellation. Keep the connection and read the same ID.
 
-## 表单填写 / Form fill（test.6）
+## 表单填写 / Form fill（test.7）
 
-新增 `kind=form_fill`：文本、下拉选项、复选状态和单选；不自动提交。部分完成不可重放，必须读原图和 `completed_fields/interrupted_at`。源码、同包连续实测及独立复测记录见验收索引。见 [完整协议 / Contract](docs/verification/EXECUTION_FORM_FILL.md)。 / The release supports bounded text/dropdown/checkbox/radio fields through existing MCP tools, without final submission. Inspect partial results and original images before another request; see the linked contract.
+`kind=form_fill` 支持最多 32 项文本、日期文本、下拉选项、复选状态和单选，按声明顺序填写，不自动提交。一个批次应尽量包含当前已知字段，避免每字段一次 Agent 往返。失败看 `completed_fields`、`interrupted_at`、`remaining_fields` 和原图；不要重放已完成字段。/ Declare up to 32 known fields in one ordered batch to reduce agent round trips. Read partial progress and images on interruption; never replay completed fields. See [完整协议 / Contract](docs/verification/EXECUTION_FORM_FILL.md).
+
+```json
+{"request_id":"form-batch-01","command":{"kind":"form_fill","request":{"text_navigation":"tab_sequence","fields":[{"kind":"text","field_goal":"Customer name:","label":"Customer name:","text":"Test Person"},{"kind":"text","field_goal":"Telephone:","label":"Telephone:","text":"0000000000"},{"kind":"text","field_goal":"E-mail address:","label":"E-mail address:","text":"test@example.invalid"}]}},"images":"after","detail":"compact","wait_ms":25000}
+```
+
+此例为 `instant_run`，只适用于已观察到的相同标签与 Tab 顺序。默认 `text_navigation=recognize_each` 可混合字段；`tab_sequence` 只接受具名文本，首项定位后每次 Tab 复验下一标签，不对错误焦点继续输入。完整当前 UIA 唯一可写字段可在模型调用前提供真实中心；证据缺失保留视觉路径。/ This example uses `instant_run` and observed labels/order. Default recognize-each supports mixed fields. Tab mode accepts labelled text only, verifies each next focus, and stops on mismatch. Unique current writable-control geometry may be used before inference; missing evidence retains visual localization.
+
+日期示例：`{"kind":"date","field_goal":"Click the input labelled \"Date picker\"","value":"2026-10-15","format":"MM/DD/YYYY"}`。仅日期文本录入与读回，不自动点击日历。文件选择仍是独立流程：按钮→发现并选择原生文件窗口→填写用户批准的确切测试路径→核对→打开→重新选择原表单检查附件名；可能即时上传，不等于最终提交。/ Dates are formatted text input/readback, not calendar navigation. File selection remains an explicit native-dialog journey and may upload immediately; it is not final form submission.
+
+文件控件不是普通文本字段：不要对网页 `File input` 使用 `kind=text` 期待弹出文件窗口。先用 `execute_recognition_plan` 点击当前可见的选择文件按钮，再用 `discover` 取得新对话框的真实 `handle/process_id`，`select` 后才能填写对话框内的文件名。窗口关闭后重新选择原网页并截图核对附件名；无事后帧不等于没执行，禁止盲目重放。原生带助记字母的完整标签如 `打开(O)` 应保留，建议用引号明确标签；修复支持动作宾语中的未加引号助记标题，不将后置用途 `to confirm the file` 当作另一个目标。/ A browser file picker is not a text field. Recognition-click its visible button, discover and select the actual native dialog, then fill its filename. Rebind the web window and inspect the filename after closure. Missing post-action imagery is not proof of no action; do not replay blindly. Preserve full mnemonic captions such as `打开(O)`, preferably quoted. Bare mnemonic action objects are recognized without interpreting a trailing purpose as another target.
+
+`select` 的 `handle`、`process_id` 与 `kind` 同层；`press_key` 的 `x/y` 必填，为当前绑定窗口原图像素。`launch` 不保证有图，后续用 `capture` 观察。/ Put select's handle/process_id beside kind, not inside request. press_key requires x/y in the bound window's current image pixels. launch need not include an image; capture afterward.
 
 ## 单步输入 / Single-step input
 
@@ -204,3 +218,7 @@ Plain named field goals tolerate one terminal label separator (`Address` / `Addr
 
 
 明确的裸字段描述（例如 Search box at the top-left of the webpage）也会保留当前UIA字段身份；不要求必须以Click开头。链接在UIA中的完整名称可能同时含标题、站点和URL；发生名称冲突时读取完整诊断和当前图，明确消歧，不重复盲点。/ Bare field-role phrases preserve current UIA identity too. Link accessible names may combine title/site/URL; inspect diagnostics and the current image before explicitly resolving ambiguity.
+
+### Closed file-picker target / 已关闭文件窗口
+
+`打开(O)` 或取消关闭对话框后，原绑定 HWND 已失效；先 `select` 原浏览器再 `capture`。直接截取旧对话框当前会返回 `ValueError: Window handle is not valid`，尚无结构化重新绑定指引；这不代表之前点击未执行，不要重放。/ After Open or Cancel closes a picker, explicitly select the original browser before capture. Capturing the old handle currently returns a raw invalid-window ValueError without a structured rebind hint. This is not evidence that the prior click failed; do not replay it.

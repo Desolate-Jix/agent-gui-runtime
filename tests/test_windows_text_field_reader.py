@@ -501,3 +501,33 @@ def test_focused_provider_failure_is_sanitized_without_point_fallback(monkeypatc
     assert failure.value.reason_code == "text_field_provider_unavailable"
     assert failure.value.diagnostic == {"phase": "resolve_field", "read_index": 1}
     assert "hit" not in calls
+
+
+def test_owned_dialog_uses_native_root_not_owner_window_for_field_resolution(monkeypatch):
+    dialog_handle, owner_handle = 787188, 197012
+    edit = NS(element_info=NS(handle=329704, process_id=10392, control_type="Edit"))
+    combo = NS(element_info=NS(handle=329888, process_id=10392, control_type="ComboBox"))
+    dialog = NS(element_info=NS(handle=dialog_handle, process_id=10392, control_type="Window"))
+    owner = NS(element_info=NS(handle=owner_handle, process_id=23576, control_type="Window"))
+    edit.parent = lambda: combo
+    combo.parent = lambda: dialog
+    dialog.parent = lambda: owner
+    owner.parent = lambda: None
+    for wrapper in (edit, combo, dialog):
+        wrapper.top_level_parent = lambda: owner
+    owner.top_level_parent = lambda: owner
+    roots = {329704: dialog_handle, 329888: dialog_handle, dialog_handle: dialog_handle,
+             owner_handle: owner_handle}
+    monkeypatch.setattr(module, "_native_root_handle", lambda hwnd: roots.get(hwnd))
+    assert module.WindowsTextFieldReader._resolve_field(edit, dialog_handle) is edit
+
+
+def test_owned_dialog_field_resolution_rejects_other_native_root(monkeypatch):
+    edit = NS(element_info=NS(handle=329704, process_id=23576, control_type="Edit"))
+    owner = NS(element_info=NS(handle=197012, process_id=23576, control_type="Window"))
+    edit.parent = lambda: owner
+    edit.top_level_parent = lambda: owner
+    monkeypatch.setattr(module, "_native_root_handle", lambda hwnd: 197012)
+    with pytest.raises(module.TextFieldReadError) as raised:
+        module.WindowsTextFieldReader._resolve_field(edit, 787188)
+    assert raised.value.reason_code == "text_field_window_or_process_changed"

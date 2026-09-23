@@ -123,6 +123,37 @@ def uia_control_has_text_entry_patterns(control):
             or kind in {"combobox", "combo box"} and {"value", "text"} <= patterns)
 
 
+def uia_form_label(control):
+    """标签关联必须仍属于同一当前控件与矩形，不能移植到另一候选。"""
+    binding = control.get("form_label_binding")
+    if (isinstance(binding, Mapping) and binding.get("source") in {"labeled_by", "visible_label_geometry"}
+            and binding.get("control_id") and binding.get("control_id") == control.get("control_id")
+            and binding.get("runtime_id") and binding.get("runtime_id") == control.get("runtime_id")
+            and binding.get("bbox") and binding.get("bbox") == control.get("bbox")):
+        return str(binding.get("label") or "") or None
+    return None
+
+
+def uia_point_form_role_matches(control, *, goal, control_target=None, target_text=None):
+    """仅在未指定标签时，让模型点位与同帧真实表单控件类型互证。"""
+    from app.operation.recognition.text_match import explicit_target_marker
+
+    if control_target is not None or target_text or explicit_target_marker(goal):
+        return False
+    if not isinstance(control, Mapping) or not uia_control_is_action_identity(control):
+        return False
+    kind = re.sub(r"\s+", "", str(control.get("control_type") or "").casefold())
+    patterns = {str(item).casefold() for item in control.get("patterns") or []}
+    if kind != "combobox" or not patterns & {"expandcollapse", "selection"}:
+        return False
+    return bool(re.match(
+        r"\s*(?:(?:left|single|double)[ -]?)?(?:click|open|focus|locate|select|choose)\s+"
+        r"(?:(?:the|an?)\s+)?(?:(?:empty|blank|visible|current)\s+)*"
+        r"(?:multi[ -]?select(?:\s+(?:box|control|dropdown))?|"
+        r"select(?:ion)?\s+(?:box|control)|dropdown|combo\s*box)\b",
+        goal, re.I))
+
+
 def uia_action_identity_matches(control, *, goal, control_target=None, target_text=None):
     """生产者与消歧消费者共用原始匹配集合，不用选中标签缩小候选集合。"""
     from app.operation.recognition.candidate_ranker import _goal_label_match
@@ -155,9 +186,19 @@ def uia_action_identity_matches(control, *, goal, control_target=None, target_te
                 label = label[:-1].rstrip()
             if requested.endswith((":", "：")) and not requested[:-1].rstrip().endswith((":", "：")):
                 requested = requested[:-1].rstrip()
-            return editable and label == requested and (not target_text or label == " ".join(str(target_text).split()).casefold())
+            labels = {label}
+            alias = uia_form_label(control)
+            if alias:
+                labels.add(" ".join(unicodedata.normalize("NFC", alias).split()).casefold().rstrip(":：").rstrip())
+            return editable and requested in labels and (not target_text or requested == " ".join(str(target_text).split()).casefold())
         return editable
     target_key = re.sub(r'\s+', ' ', str(target_text or '').strip().casefold())
     label_key = re.sub(r'\s+', ' ', str(control.get('name') or '').strip().casefold())
+    if requested_role in {"input", "field", "dropdown", "checkbox", "radio button", "button"}:
+        from app.operation.recognition.text_match import explicit_target_label
+        alias = uia_form_label(control)
+        requested = explicit_target_label(goal)
+        if alias and requested and " ".join(alias.split()).casefold() == " ".join(requested.split()).casefold():
+            return not target_key or target_key == " ".join(alias.split()).casefold()
     return ((not target_key or label_key == target_key)
             and _goal_label_match(goal, [str(control.get('name') or '')], negated=False))

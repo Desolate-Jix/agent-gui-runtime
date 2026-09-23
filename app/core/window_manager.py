@@ -369,9 +369,18 @@ class WindowManager:
             or is_child
             or hit_root == int(bound.handle)
         )
-        # 原生菜单是 owned 顶层窗而非 child；同进程且根 owner 匹配才属于当前目标。
-        owned_popup = bool(type(expected_owned_popup_handle) is int and expected_owned_popup_handle > 0
-                           and hit_root == expected_owned_popup_handle and self._is_owned_popup(hit_root, int(bound.handle))
+        # 原生下拉菜单是 owned 顶层窗而非 child；只在 owner、进程和屏幕矩形均匹配时认可。
+        try:
+            popup_rect = tuple(int(value) for value in win32gui.GetWindowRect(hit_root))
+            popup_contains_point = (len(popup_rect) == 4 and popup_rect[0] <= screen_x < popup_rect[2]
+                                    and popup_rect[1] <= screen_y < popup_rect[3])
+        except Exception:
+            popup_contains_point = False
+        expected_popup_matches = (expected_owned_popup_handle is None
+                                  or (type(expected_owned_popup_handle) is int and expected_owned_popup_handle > 0
+                                      and hit_root == expected_owned_popup_handle))
+        owned_popup = bool(hit_root != int(bound.handle) and expected_popup_matches and popup_contains_point
+                           and self._is_owned_popup(hit_root, int(bound.handle))
                            and bound.process_id and process_id == bound.process_id)
         if expected_owned_popup_handle is not None:
             return {**base, "allowed": owned_popup,

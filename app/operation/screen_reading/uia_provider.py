@@ -15,6 +15,22 @@ DEFAULT_UIA_MAX_CONTROLS = 1000
 HARD_UIA_MAX_CONTROLS = 4000
 
 
+def _annotate_form_labels(snapshot):
+    """只给完整当前快照增加标签关联，不改写提供者的原始 Name。"""
+    from app.operation.recognition.form_label_binding import infer_form_label_bindings
+
+    controls = snapshot.get("controls", [])
+    for control in controls:
+        control.pop("form_label_binding", None)
+    if snapshot.get("status") != "ok" or snapshot.get("scan_complete") is not True or snapshot.get("truncated"):
+        return
+    by_id = {control.get("control_id"): control for control in controls}
+    for binding in infer_form_label_bindings(controls):
+        control = by_id.get(binding["control_id"])
+        if control is not None and control.get("runtime_id") == binding["runtime_id"]:
+            control["form_label_binding"] = {**binding, "bbox": deepcopy(control["bbox"])}
+
+
 class _FiniteUIAChildren:
     def __init__(self, array, wrap):
         self.array, self.wrap = array, wrap
@@ -281,6 +297,7 @@ class WindowsUIAProvider:
                 "control_count": len(controls),
                 "controls": controls,
             }
+            _annotate_form_labels(snapshot)
             try:
                 popup_handles = self._owned_popup_handles(bound)
                 snapshot["owned_popup_probe"] = {"status": "ok", "count": len(popup_handles)}

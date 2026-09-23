@@ -15,6 +15,21 @@ IDENTITY = {
 }
 
 
+def test_complete_form_tree_above_512_still_checks_later_duplicate(setup):
+    target = Node("choice", "CheckBox", (1, 1))
+    target.iface_toggle = NS(CurrentToggleState=0)
+    padding = [Node("", "Group", (2, n)) for n in range(550)]
+    coordinator = setup(target, *padding)
+    result = reader.read_form_control(coordinator, TARGET, "choice", "checkbox")
+    assert result["checked"] is False
+    other = Node("choice", "CheckBox", (3, 1))
+    coordinator = setup(target, *padding, other)
+    with pytest.raises(reader.FormControlReadError, match="form_control_ambiguous") as error:
+        reader.read_form_control(coordinator, TARGET, "choice", "checkbox")
+    assert error.value.diagnostics["graph_scan_complete"] is True
+    assert error.value.diagnostics["node_count"] == 552
+
+
 @pytest.fixture(autouse=True)
 def compare_elements_boundary(monkeypatch):
     monkeypatch.setattr(reader, "_same_element", lambda left, right: left is right, raising=False)
@@ -312,7 +327,7 @@ def test_uia_factory_wraps_raw_com_element_info_before_wrapper(monkeypatch):
 
 
 def test_bounded_window_scan_rejects_overflow(setup):
-    controls = [Node(str(i), "Text", (1, i + 5)) for i in range(512)] + [Node()]
+    controls = [Node(str(i), "Text", (1, i + 5)) for i in range(reader.MAX_FORM_SCAN_EDGES)] + [Node()]
     with pytest.raises(reader.FormControlReadError, match="form_control_scan_limit"):
         reader.read_form_control(setup(*controls), TARGET, "同意", "checkbox")
 
@@ -366,13 +381,13 @@ def test_missing_control_reports_structure_without_labels_or_retry(setup, contro
 
 
 def test_scan_budget_failure_retains_incomplete_count(setup):
-    controls = [Node(str(i), "Text", (1, i + 5)) for i in range(513)]
+    controls = [Node(str(i), "Text", (1, i + 5)) for i in range(reader.MAX_FORM_SCAN_EDGES + 1)]
     with pytest.raises(reader.FormControlReadError) as error:
         reader.read_form_control(setup(*controls), TARGET, "absent", "checkbox")
     assert error.value.reason_code == "form_control_scan_limit"
-    assert error.value.diagnostics["node_count"] == 512
+    assert error.value.diagnostics["node_count"] == reader.MAX_FORM_SCAN_EDGES
     assert error.value.diagnostics["scan_complete"] is False
-    assert error.value.diagnostics["control_type_counts"] == {"Text": 512}
+    assert error.value.diagnostics["control_type_counts"] == {"Text": reader.MAX_FORM_SCAN_EDGES}
 
 
 def test_duplicate_matches_report_count_without_matched_content(setup):
@@ -559,4 +574,4 @@ def test_alias_identity_or_canonical_parent_change_is_rejected(monkeypatch, faul
 def test_many_alias_edges_still_consume_finite_budget(setup):
     node = Node()
     with pytest.raises(reader.FormControlReadError, match="form_control_scan_limit"):
-        reader.read_form_control(setup(*([node] * 513)), TARGET, "同意", "checkbox")
+        reader.read_form_control(setup(*([node] * (reader.MAX_FORM_SCAN_EDGES + 1))), TARGET, "同意", "checkbox")

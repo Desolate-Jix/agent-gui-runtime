@@ -22,11 +22,17 @@ class LocalKeyboardTarget:
     operation: str
     text_sha256: str | None = None
     clear_existing: bool = False
+    focus_reflow: bool = False
+    key: str = "Enter"
 
     def __post_init__(self):
-        if (type(self.snapshot) is not TextFieldSnapshot or self.control_type not in {"Edit", "ComboBox"}
+        if (type(self.snapshot) is not TextFieldSnapshot
+                or self.control_type not in ({"Edit", "ComboBox", "Document", "Group"}
+                    if self.focus_reflow else {"Edit", "ComboBox"})
                 or type(self.point) is not tuple or len(self.point) != 2
                 or any(type(v) is not int for v in self.point) or type(self.clear_existing) is not bool
+                or type(self.focus_reflow) is not bool
+                or type(self.key) is not str or self.key not in {"Enter", "Tab"}
                 or self.operation not in {"type_text", "press_key"}):
             raise ValueError("invalid internal keyboard field target")
         x, y, w, h = self.snapshot.identity.control_bbox
@@ -37,7 +43,7 @@ class LocalKeyboardTarget:
                     or any(c not in "0123456789abcdef" for c in self.text_sha256)):
                 raise ValueError("internal keyboard text binding unavailable")
         elif self.text_sha256 is not None or self.clear_existing:
-            raise ValueError("internal Enter binding is invalid")
+            raise ValueError("internal key binding is invalid")
 
     def validate_command(self, operation, request):
         if (operation != self.operation or (request.get("x"), request.get("y")) != self.point
@@ -50,7 +56,7 @@ class LocalKeyboardTarget:
                     or request.get("click_before_typing", False) is not False
                     or request.get("submit", False) is not False):
                 raise ValueError("internal keyboard command changed")
-        elif request.get("key") != "Enter":
+        elif request.get("key") != self.key:
             raise ValueError("internal keyboard command changed")
 
     def verify(self, manager):
@@ -59,13 +65,15 @@ class LocalKeyboardTarget:
             raise ValueError("internal keyboard scope unavailable")
         before = self.snapshot
         identity = before.identity
-        current = WindowsTextFieldReader(window_manager=manager,
-            native_identity_reader=WindowsNativeIdentityReader(window_manager=manager)).read_field(
-                target_field_id=identity.target_field_id, capture_id=before.capture_id,
-                target_window_handle=identity.window_handle, target_process_id=identity.process_id,
-                process_create_time=identity.process_create_time, window_rect=identity.window_rect,
-                target_bbox=identity.control_bbox, click_point=self.point, require_keyboard_focus=True,
-                expected_runtime_id=identity.runtime_id, expected_control_type=self.control_type)
+        reader = WindowsTextFieldReader(window_manager=manager,
+            native_identity_reader=WindowsNativeIdentityReader(window_manager=manager))
+        common = {"target_field_id": identity.target_field_id, "capture_id": before.capture_id,
+            "target_window_handle": identity.window_handle, "target_process_id": identity.process_id,
+            "process_create_time": identity.process_create_time, "window_rect": identity.window_rect,
+            "expected_runtime_id": identity.runtime_id, "expected_control_type": self.control_type}
+        current = (reader.read_bound_focus(**common) if self.focus_reflow else reader.read_field(
+            **common, target_bbox=identity.control_bbox, click_point=self.point,
+            require_keyboard_focus=True))
         if (type(current) is not TextFieldSnapshot or current.identity != identity
                 or current.value != before.value or current.source != before.source
                 or self.operation == "type_text" and not self.clear_existing and current.selection != before.selection

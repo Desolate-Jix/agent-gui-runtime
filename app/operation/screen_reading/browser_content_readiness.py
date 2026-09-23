@@ -92,6 +92,11 @@ class BrowserContentPreparation:
         controls = snapshot.get("controls") or []
         root = controls[0] if controls else {}
         signature = (root.get("runtime_id"), root.get("class_name"))
+        if (stage == "initial" and root.get("control_type") == "Window" and signature[0]
+                and signature[1] == "#32770"):
+            # 浏览器进程所属的原生对话框不是浏览器正文；后续仍走本帧普通识别安全门。
+            self.report.update(status="not_applicable", reason="native_dialog_root")
+            return snapshot, None
         if (root.get("control_type") != "Window" or not signature[0]
                 or signature[1] != "Chrome_WidgetWin_1"):
             self.fail("browser_content_root_unavailable")
@@ -103,6 +108,8 @@ class BrowserContentPreparation:
 
     def prepare(self):
         _, observed = self.sample("initial")
+        if observed is None:
+            return None
         budget_started = _clock()
         self.report["initial_scan_ms"] = round((budget_started - self.started) * 1000, 3)
         for _ in range(15):

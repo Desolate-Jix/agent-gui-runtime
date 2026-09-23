@@ -213,8 +213,13 @@ def test_listitem_context_does_not_expand_large_or_multiple_candidates(tmp_path,
     with pinned_runtime_output_root(tmp_path):
         result=vision._prepare_vista_candidate_roi_image(image,ImageSize(width=1200,height=900),
             candidates=targets,padding=12,min_size=96,max_edge=448,roi_source="current_uia_candidate_v1")
-    assert "context_reason" not in result
-    assert result["processed_size"]["width"]<=448
+    assert result.get("context_reason") != "selection_control_label_context"
+    if width > 512 and height <= 64 and count == 1:
+        assert result["context_reason"] == "wide_thin_form_control_pixels"
+        assert result["processed_size"]["width"] <= 2048
+    else:
+        assert "context_reason" not in result
+        assert result["processed_size"]["width"] <= 448
 
 
 @pytest.mark.parametrize("point_y,allowed", [(511,False),(524,True),(536,False)])

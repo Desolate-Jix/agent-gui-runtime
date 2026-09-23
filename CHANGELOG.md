@@ -1,3 +1,13 @@
+# v0.1.0-test.7 · 组合表单测试版 / Batch-form test release
+
+- 表单一次最多32项，统一部分结果；可选具名文本Tab组合，减少Agent往返。/ Up to 32 ordered fields, compact partial receipts and optional labelled-text Tab composition.
+- 日期文本、富文本读写身份、独立列表选项、无名控件可见标签绑定，以及原生文件对话框读回与取消恢复。/ Date text, writable rich-text identity, external-list options, visible-label binding and native file-dialog recovery.
+- 具名文本在完整当前UIA唯一可写身份确认后采用真实框主定位；原模型路径、焦点/值读回和证据归属如实保留。不扩大像素容差，不做模型失败后盲点。/ Current unique writable-control geometry can precede visual inference; identity, focus, value checks and honest provenance remain. No blind post-failure fallback.
+- 公共标签解析修复 JSON 转义引号、反斜杠和换行，避免误选截断名称字段；交付预检显式覆盖新增惰性依赖、日期及32项上限。/ Shared label parsing preserves escaped quotes, backslashes and newlines; preflight covers new lazy dependencies, dates and the 32-field limit.
+- 原生助记标题（如打开(O)）与后置用途分离；辅助功能组合名称不冒充可见按钮文字，当前唯一已绑定按钮使用真实控件裁图，保留原坐标检查。/ Preserve native mnemonic captions, distinguish accessible names from visible captions and localize uniquely bound buttons using actual control pixels.
+- 源码与隔离候选03各1759项回归通过；同包四字段连续两轮61.439/53.021秒，原生文件选择、取消、重开、重新选择通过。此前八项与Tab组合覆盖保留，首失败不改记；候选03独立复验完成：四字段64.123/55.881秒，原始打开(O)、取消重开与重选通过；关闭后的失效窗口截图错误保留。/ Source and isolated candidate03 each passed 1759 checks; same-package two-round batches and native-file recovery passed. Prior failures remain recorded; independent candidate03 retesting passed the requested journey, including original Open(O), cancellation/reopening and reselection. The stale-closed-window capture error remains documented.
+- 学习模式不发；不支持任意表单、自动选项滚动、自动最终提交或无人值守。/ No learning release, universal form guarantee, automatic option scrolling, final submission or unattended-use claim.
+
 # v0.1.0-test.6 · 执行模式测试版 / Execution-mode test release
 
 - Execution-only update: installed application discovery, name/ID/path launch, explicit ambiguity and unique-window reuse; desktop capture/click without caller binding. / 仅执行模式：应用发现与启动、消歧和窗口复用、无需调用方预绑定的桌面操作。

@@ -181,9 +181,33 @@ def _read_field(coordinator, target, point, capture, field_id, expected_identity
     return _wait_for_focused_field(lambda: coordinator._owner.call(read))
 
 
-def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None, observation_condition=None, persist=None):
+def _read_local_focus(coordinator, target, capture, field_id, binding, expected_identity):
+    from app.agent.native_identity import WindowsNativeIdentityReader, validate_native_identity_fact
+    from app.agent.windows_text_field_reader import WindowsTextFieldReader
+
+    def read():
+        manager = coordinator._windows()
+        identity = validate_native_identity_fact(WindowsNativeIdentityReader(
+            window_manager=manager).read_identity(target["handle"]),
+            target_window_handle=target["handle"], expected_process_id=target["process_id"])
+        if (identity is None or identity != expected_identity
+                or identity["process_create_time"] != binding["process_create_time"]):
+            raise InputSequenceInterrupted("input_sequence_target_changed")
+        return WindowsTextFieldReader(window_manager=manager,
+            native_identity_reader=WindowsNativeIdentityReader(window_manager=manager)).read_bound_focus(
+                target_field_id=field_id, capture_id=capture["sha256"],
+                target_window_handle=target["handle"], target_process_id=target["process_id"],
+                process_create_time=binding["process_create_time"], window_rect=tuple(binding["window_rect"]),
+                expected_runtime_id=tuple(binding["runtime_id"]), expected_control_type=binding["control_type"])
+    return _wait_for_focused_field(lambda: coordinator._owner.call(read))
+
+
+def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None, observation_condition=None, persist=None,
+                       _tab_from=None, _expected_label=None, _on_field_complete=None, _prefer_current_uia=False):
     """同一宿主串行命令内完成组合；不循环点击、不自动改写目标或重试输入。"""
     spec = InputSequenceRequest.model_validate(request)
+    if _tab_from is not None and (spec.submit_search or not _expected_label):
+        raise ValueError("internal tab continuation requires a named fill-only field")
     if target is None:
         raise ValueError("select a target window before input_sequence")
     from app.core.observation_policy import resolve_render_grace_ms
@@ -197,6 +221,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             resolve_render_grace_ms("press_enter", observation_wait_ms))
     group_id = "input-sequence-" + uuid4().hex
     field_binding = None
+    local_binding = None
     started = perf_counter()
     result = {"contract_version": "input_sequence_v1", "sequence_id": group_id,
         "status": "running", "phase": "focus", "target": dict(target), "steps": [],
@@ -211,7 +236,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         if persist is not None:
             persist(result)
 
-    def action(name, operation, payload, wait_ms, *, keyboard_target=None):
+    def action(name, operation, payload, wait_ms, *, keyboard_target=None, focus_target=None):
         result["phase"] = name
         # 后图必须属于最后一次尝试，不能把上一步的图冒充本次输入后的图。
         result["observation"] = {"status": "unavailable", "reason": "action_in_progress"}
@@ -224,6 +249,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 target_process_id=target["process_id"], operation=operation, request=payload,
                 include_observation=True, observation_wait_ms=wait_ms,
                 **({"keyboard_target": keyboard_target} if keyboard_target is not None else {}),
+                **({"focus_target": focus_target} if focus_target is not None else {}),
                 **({"observation_condition": observation_condition}
                    if name == "search" and observation_condition is not None else {}))
         except Exception:
@@ -260,8 +286,11 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         try:
             capture = result["observation"]["capture"]
             expected_identity = result["steps"][-1]["receipt"].get("target_identity")
-            snapshot = _read_field(coordinator, target, point, capture, group_id, expected_identity,
-                **({"field_binding": field_binding, "post_input": name == "check_input"} if field_binding is not None else {}))
+            snapshot = (_read_local_focus(coordinator, target, capture, group_id, local_binding,
+                expected_identity) if local_binding is not None else _read_field(
+                    coordinator, target, point, capture, group_id, expected_identity,
+                    **({"field_binding": field_binding, "post_input": name == "check_input"}
+                       if field_binding is not None else {})))
             result.setdefault("field_reads", []).append({"name": name, **snapshot.to_reference()})
             return snapshot
         except Exception as error:
@@ -273,20 +302,71 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 "elapsed_ms": round((perf_counter() - at) * 1000, 3)})
 
     try:
-        located = action("focus", "execute_recognition_plan", {
-            "goal": spec.field_goal, "click_kind": "single"}, 0)
+        from app.core.local_text_focus import LocalTextFocusTarget
+        focus_target = LocalTextFocusTarget(target["handle"], target["process_id"])
+        if _tab_from is None:
+            located = action("focus", "execute_recognition_plan", {
+                "goal": spec.field_goal, "click_kind": "single",
+                **({"metadata": {"text_focus_route": "current_uia_primary"}} if _prefer_current_uia else {})},
+                0, focus_target=focus_target)
+        else:
+            from app.core.local_keyboard_target import LocalKeyboardTarget
+            previous, previous_kind = _tab_from
+            x, y, w, h = previous.identity.control_bbox
+            anchor = (x + w // 2, y + h // 2)
+            keyboard = LocalKeyboardTarget(previous, previous_kind, anchor, "press_key",
+                focus_reflow=True, key="Tab")
+            action("focus_next", "press_key", {"key": "Tab", "x": anchor[0], "y": anchor[1]}, 0,
+                keyboard_target=keyboard)
+            from app.agent.windows_text_field_reader import probe_tab_focus_target
+            local_binding = coordinator._owner.call(lambda: probe_tab_focus_target(
+                coordinator._windows(), target["handle"], target["process_id"],
+                _expected_label, previous.identity))
+            x, y, w, h = local_binding["bbox"]
+            located = {"selected_click_point": {"x": x + w // 2, "y": y + h // 2},
+                "selected_click_point_coordinate_space": "capture_image_pixels"}
+            result["focus_route"] = "tab_then_exact_accessible_label"
         point = located.get("selected_click_point")
         if (located.get("selected_click_point_coordinate_space") != "capture_image_pixels"
                 or not isinstance(point, dict)
                 or any(type(point.get(key)) is not int or point[key] < 0 for key in ("x", "y"))):
             raise InputSequenceInterrupted("focus_coordinate_unavailable")
-        result["selected_click_point"] = dict(point)
-        result["selected_click_point_coordinate_space"] = "capture_image_pixels"
+        if _tab_from is None:
+            result["selected_click_point"] = dict(point)
+            result["selected_click_point_coordinate_space"] = "capture_image_pixels"
+        else:
+            result["local_focus_binding"] = dict(local_binding)
         result["phase"] = "check_focus"
-        field_binding = _focus_field_binding(located, result["steps"][0]["receipt"], target)
+        field_binding = (_focus_field_binding(located, result["steps"][0]["receipt"], target)
+                         if _tab_from is None else None)
+        if (field_binding is not None and focus_target.binding is not None
+                and (field_binding["runtime_id"] != focus_target.binding["runtime_id"]
+                     or field_binding["control_type"] != focus_target.binding["control_type"])):
+            raise InputSequenceInterrupted("input_preclick_binding_conflict")
         if field_binding is not None:
             result["field_binding"] = field_binding
+        elif focus_target.binding is not None:
+            local_binding = focus_target.binding
+            result["local_focus_binding"] = {"runtime_id": local_binding["runtime_id"],
+                "control_type": local_binding["control_type"], "bbox": local_binding["bbox"],
+                "window_handle": local_binding["window_handle"], "process_id": local_binding["process_id"]}
+        elif local_binding is None:
+            raise InputSequenceInterrupted("input_preclick_binding_unavailable")
+        if _expected_label is not None and _tab_from is None:
+            from app.agent.windows_text_field_reader import probe_tab_focus_target
+            labelled = coordinator._owner.call(lambda: probe_tab_focus_target(coordinator._windows(),
+                target["handle"], target["process_id"], _expected_label, None))
+            chosen_binding = field_binding or local_binding
+            if (labelled["runtime_id"] != chosen_binding["runtime_id"]
+                    or labelled["control_type"] != chosen_binding["control_type"]):
+                raise InputSequenceInterrupted("text_group_first_field_changed")
         before = read("check_focus", point)
+        keyboard_point = point
+        if local_binding is not None:
+            x, y, width, height = before.identity.control_bbox
+            keyboard_point = {"x": x + width // 2, "y": y + height // 2}
+            result["keyboard_anchor_point"] = dict(keyboard_point)
+            result["keyboard_anchor_coordinate_space"] = "capture_image_pixels"
         if spec.clear_existing:
             expected = spec.text
         else:
@@ -295,10 +375,12 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             start, end = before.selection
             expected = before.value[:start] + spec.text + before.value[end:]
         from app.core.local_keyboard_target import LocalKeyboardTarget
-        keyboard_target = (LocalKeyboardTarget(before, field_binding["control_type"],
-            (point["x"], point["y"]), "type_text", text_sha256=result["text_sha256"],
-            clear_existing=spec.clear_existing) if field_binding is not None else None)
-        action("type", "type_text", {"text": spec.text, **point,
+        keyboard_target = (LocalKeyboardTarget(before,
+            field_binding["control_type"] if field_binding is not None else local_binding["control_type"],
+            (keyboard_point["x"], keyboard_point["y"]), "type_text", text_sha256=result["text_sha256"],
+            clear_existing=spec.clear_existing, focus_reflow=local_binding is not None)
+            if field_binding is not None or local_binding is not None else None)
+        action("type", "type_text", {"text": spec.text, **keyboard_point,
             "click_before_typing": False, "clear_existing": spec.clear_existing}, 0, keyboard_target=keyboard_target)
         after = read("check_input", point)
         from app.agent.text_field_evidence import same_text_field_instance
@@ -316,10 +398,19 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             result["input_check"]["geometry_change"] = {"before_bbox": list(before.identity.control_bbox),
                 "after_bbox": list(after.identity.control_bbox), "coordinate_space": "capture_image_pixels", "read_only": True}
         result["completed_steps"].append("check_input")
+        if _on_field_complete is not None:
+            _on_field_complete(after, (field_binding or local_binding)["control_type"])
         if spec.submit_search:
-            keyboard_target = (LocalKeyboardTarget(after, field_binding["control_type"],
-                (point["x"], point["y"]), "press_key") if field_binding is not None else None)
-            action("search", "press_key", {"key": "Enter", **point}, observation_wait_ms, keyboard_target=keyboard_target)
+            if local_binding is not None:
+                x, y, width, height = after.identity.control_bbox
+                keyboard_point = {"x": x + width // 2, "y": y + height // 2}
+            keyboard_target = (LocalKeyboardTarget(after,
+                field_binding["control_type"] if field_binding is not None else local_binding["control_type"],
+                (keyboard_point["x"], keyboard_point["y"]), "press_key",
+                focus_reflow=local_binding is not None)
+                if field_binding is not None or local_binding is not None else None)
+            action("search", "press_key", {"key": "Enter", **keyboard_point}, observation_wait_ms,
+                keyboard_target=keyboard_target)
         result.update(status="completed", phase="returned",
             next_action="inspect_returned_image_and_judge_task_effect")
     except Exception as error:

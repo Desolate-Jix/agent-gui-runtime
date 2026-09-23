@@ -53,17 +53,40 @@ def test_menu_query_failure_preserves_occlusion(monkeypatch):
     assert result["reason"] == "capture_window_partially_visible"
 
 
-def test_menu_point_requires_exact_observed_menu(monkeypatch):
+def test_verified_native_menu_is_visible_without_explicit_popup_binding(monkeypatch):
     manager, bound, gui = menu_setup(monkeypatch)
     gui.WindowFromPoint = lambda point: 200
     gui.IsChild = lambda *_: False
     gui.GetWindowText = lambda _: ""
-    monkeypatch.setattr(manager, "_get_process_name", lambda _: "notepad.exe")
-    assert not manager.validate_bound_point_visibility(bound=bound, x=80, y=50)["allowed"]
+    # 目标窗口 (10,20,210,120) 内的命中点映射到屏幕 (90,70)，位于 popup rect。
+    assert manager.validate_bound_point_visibility(bound=bound, x=80, y=50)["allowed"]
     assert manager.validate_bound_point_visibility(bound=bound, x=80, y=50,
         expected_owned_popup_handle=200)["allowed"]
     assert not manager.validate_bound_point_visibility(bound=bound, x=80, y=50,
         expected_owned_popup_handle=201)["allowed"]
+
+
+def test_owned_popup_requires_same_process_owner_and_containing_rect(monkeypatch):
+    manager, bound, gui = _setup(monkeypatch, overlay=(75, 65, 180, 120))
+    popup = 302
+    gui.WindowFromPoint = lambda point: popup
+    gui.GetAncestor = lambda hwnd, mode: bound.handle if hwnd == popup and mode == 3 else hwnd
+    gui.IsChild = lambda *_: False
+    gui.GetClassName = lambda hwnd: "ComboLBox"
+    gui.GetWindowText = lambda _: ""
+    monkeypatch.setattr(manager, "_get_process_id", lambda hwnd: 99 if hwnd == popup else 10)
+    monkeypatch.setattr(manager, "_get_process_name", lambda _: "browser.exe")
+    # Owner 链有效但进程不一致，仍拒绝。
+    assert not manager.validate_bound_point_visibility(bound=bound, x=80, y=50)["allowed"]
+    monkeypatch.setattr(manager, "_get_process_id", lambda _: 10)
+    assert manager.validate_bound_point_visibility(bound=bound, x=80, y=50)["allowed"]
+    # 同进程不等于同归属；其它 owner 仍拒绝。
+    gui.GetAncestor = lambda hwnd, mode: 999 if hwnd == popup and mode == 3 else hwnd
+    assert not manager.validate_bound_point_visibility(bound=bound, x=80, y=50)["allowed"]
+    gui.GetAncestor = lambda hwnd, mode: bound.handle if hwnd == popup and mode == 3 else hwnd
+    # 命中API虽报告popup，但点不在其矩形时不可授权。
+    gui.GetWindowRect = lambda hwnd: (95, 75, 180, 120) if hwnd == popup else (10, 20, 210, 120)
+    assert not manager.validate_bound_point_visibility(bound=bound, x=80, y=50)["allowed"]
 
 
 def test_uia_collects_ownerless_menu_but_not_shadow(monkeypatch):

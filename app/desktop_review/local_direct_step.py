@@ -67,7 +67,7 @@ class LocalDirectStepMixin:
     def execute_local_step(self, *, target_window_handle: int, target_process_id: int,
                            operation: str, request: dict, include_observation: bool = False,
                            observation_wait_ms: int | None = None, observation_condition: dict | None = None,
-                           control_target=None, keyboard_target=None) -> dict:
+                           control_target=None, keyboard_target=None, focus_target=None) -> dict:
         """仅本地协调器入口；不经 Agent JSON 关闭策略，也不要求一次性执行凭据。"""
         timer = RuntimeTimer(contract_version="local_step_invocation_timing_v1")
         timing_context = {"invocation_id": "local-invocation-" + uuid4().hex,
@@ -79,6 +79,11 @@ class LocalDirectStepMixin:
                 if control_target is not None and (operation != "execute_recognition_plan"
                         or not isinstance(control_target, LocalControlTarget)):
                     raise ValueError("internal control target requires a recognition click")
+                if focus_target is not None:
+                    from app.core.local_text_focus import LocalTextFocusTarget
+                    if (operation != "execute_recognition_plan" or type(focus_target) is not LocalTextFocusTarget
+                            or focus_target.handle != target_window_handle or focus_target.pid != target_process_id):
+                        raise ValueError("internal text focus target mismatch")
                 if type(include_observation) is not bool:
                     raise TypeError("include_observation must be bool")
                 if observation_wait_ms is not None:
@@ -135,7 +140,8 @@ class LocalDirectStepMixin:
                 return _timed_owner_call(self._owner, timer, "owner_dispatch",
                     lambda stage: self._execute_local_step_on_owner(target_window_handle,
                         target_process_id, operation, request, configuration, timing_context=timing_context,
-                        control_target=control_target, keyboard_target=keyboard_target),
+                        control_target=control_target, keyboard_target=keyboard_target,
+                        focus_target=focus_target),
                     includes="local_step_timings")
             finally:
                 try:
@@ -158,13 +164,14 @@ class LocalDirectStepMixin:
                 failure.add_note("local step timing persistence failed: " + type(timing_error).__name__)
 
     def _execute_local_step_on_owner(self, handle, pid, operation, request, configuration=None,
-                                     *, timing_context, control_target=None, keyboard_target=None):
+                                     *, timing_context, control_target=None, keyboard_target=None, focus_target=None):
         timer = RuntimeTimer(contract_version="local_step_owner_timing_v1")
         try:
             from app.vision.configuration import pinned_vision_configuration
             from app.core.local_control_target import local_control_target_scope
             from app.core.local_keyboard_target import local_keyboard_target_scope
-            with _local_operator_step_scope(), local_control_target_scope(control_target), local_keyboard_target_scope(keyboard_target), (pinned_vision_configuration(configuration) if configuration else nullcontext()):
+            from app.core.local_text_focus import local_text_focus_scope
+            with _local_operator_step_scope(), local_control_target_scope(control_target), local_keyboard_target_scope(keyboard_target), local_text_focus_scope(focus_target), (pinned_vision_configuration(configuration) if configuration else nullcontext()):
                 return self._perform_local_step_on_owner(handle, pid, operation, request, timer, timing_context)
         finally:
             timing_context["local_step_timings"] = {**timer.to_dict(), "scope": "owner_execution",

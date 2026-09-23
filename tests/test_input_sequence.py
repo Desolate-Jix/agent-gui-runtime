@@ -35,7 +35,7 @@ def snapshots(monkeypatch, values, *, selection=None, changed_identity=False):
     pending = iter(values)
     reads = []
 
-    def read(coordinator, target, point, capture, field_id, expected_identity):
+    def read(coordinator, target, point, capture, field_id, expected_identity, **kwargs):
         reads.append(point)
         value = next(pending)
         if isinstance(value, Exception):
@@ -46,6 +46,8 @@ def snapshots(monkeypatch, values, *, selection=None, changed_identity=False):
             "uia_value", value, selection)
 
     monkeypatch.setattr(module, "_read_field", read)
+    monkeypatch.setattr(module, "_focus_field_binding", lambda located, receipt, target: {
+        "control_type": "Edit", "runtime_id": [1], "bbox": {"x": 1, "y": 1, "w": 300, "h": 40}})
     return reads
 
 

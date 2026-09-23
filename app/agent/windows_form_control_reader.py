@@ -6,6 +6,7 @@ import math
 import time
 from pathlib import PureWindowsPath
 from app.operation.screen_reading.uia_graph import CanonicalUIAGraph, UIAGraphError
+from app.operation.recognition.form_label_binding import bind_form_label
 
 from .native_identity import WindowsNativeIdentityReader, validate_native_identity_fact
 from .windows_text_field_reader import (
@@ -22,6 +23,7 @@ _CONTROL_TYPES = frozenset({
 })
 _readiness_clock = time.monotonic
 _readiness_wait = time.sleep
+MAX_FORM_SCAN_EDGES = 1024
 
 
 def _safe_diagnostics(value, *, include_option=True, include_readiness=True):
@@ -36,14 +38,14 @@ def _safe_diagnostics(value, *, include_option=True, include_readiness=True):
             result[key] = value[key]
     for key in ("node_count", "document_count", "match_count", "edge_count", "alias_count", "cycle_count",
                 "viewport_excluded_count"):
-        if type(value.get(key)) is int and 0 <= value[key] <= 512:
+        if type(value.get(key)) is int and 0 <= value[key] <= MAX_FORM_SCAN_EDGES:
             result[key] = value[key]
-    if type(value.get("duplicate_count")) is int and 0 <= value["duplicate_count"] <= 1024:
+    if type(value.get("duplicate_count")) is int and 0 <= value["duplicate_count"] <= 2 * MAX_FORM_SCAN_EDGES:
         result["duplicate_count"] = value["duplicate_count"]
     counts = value.get("control_type_counts")
     if isinstance(counts, dict):
         result["control_type_counts"] = {key: count for key, count in counts.items()
-            if key in _CONTROL_TYPES and type(count) is int and 0 <= count <= 512}
+            if key in _CONTROL_TYPES and type(count) is int and 0 <= count <= MAX_FORM_SCAN_EDGES}
     for key in ("scan_started", "scan_complete", "graph_scan_complete", "provider_tree_valid"):
         if type(value.get(key)) is bool:
             result[key] = value[key]
@@ -185,8 +187,31 @@ def _descendants(root, walker, wrap, *, limit, diagnostics=None):
     diagnostic = {} if diagnostics is None else diagnostics
     diagnostic.update(graph_scan_complete=False, provider_tree_valid=True, edge_count=0,
                       alias_count=0, cycle_count=0)
+    root_identity = _tree_identity(root)
+    scope_handle, scope_pid = root_identity[-1], root_identity[1]
+    owned_scopes = {}
+    observed_facts = {}
+
+    def scoped_identity(node):
+        fact = _tree_identity(node)
+        if observed_facts.setdefault(fact[0], fact) != fact:
+            raise FormControlReadError("form_control_tree_identity_changed")
+        if fact[-1] != scope_handle:
+            # 原生菜单仍有独立 GA_ROOT；仅凭稳定的同进程 owner 链纳入当前读取范围。
+            matches = [item for item in _native_owned_popups(scope_handle, scope_pid)
+                if item.get("handle") == fact[-1] and item.get("process_id") == scope_pid
+                and item.get("root_owner_handle") == scope_handle
+                and type(item.get("owner_handle")) is int and item["owner_handle"] > 0]
+            if len(matches) != 1:
+                raise FormControlReadError("form_control_tree_scope_changed")
+            previous = owned_scopes.setdefault(fact[-1], matches[0])
+            if previous != matches[0]:
+                raise FormControlReadError("form_control_popup_changed")
+        # 原始顶层身份保留在元组内，不能用 owner 覆盖原生窗口事实。
+        return (*fact, scope_handle)
+
     try:
-        graph = CanonicalUIAGraph(root, identity=_tree_identity,
+        graph = CanonicalUIAGraph(root, identity=scoped_identity,
             parent=lambda node: _tree_parent(node, walker, wrap), compare=_same_element)
     except UIAGraphError as error:
         raise FormControlReadError("form_control_" + error.reason) from None
@@ -217,6 +242,10 @@ def _descendants(root, walker, wrap, *, limit, diagnostics=None):
         runtime_id = _runtime_id(node.element_info.runtime_id)
         yield node
         frames.append((iter(_finite_children(node)), depth + 1, runtime_id))
+    if owned_scopes:
+        current = _native_owned_popups(scope_handle, scope_pid)
+        if any(sum(item == expected for item in current) != 1 for expected in owned_scopes.values()):
+            raise FormControlReadError("form_control_popup_changed")
     diagnostic["graph_scan_complete"] = True
 
 
@@ -239,11 +268,11 @@ def _describe(node, handle, pid, window, *, allow_outside_window=False):
             bbox = (screen[0] - window[0], screen[1] - window[1], screen[2], screen[3])
     if bbox is None:
         raise FormControlReadError("form_control_geometry_unavailable")
-    if not isinstance(info.name, str):
+    if info.name is not None and not isinstance(info.name, str):
         raise FormControlReadError("form_control_label_unavailable")
     return {"runtime_id": list(_runtime_id(info.runtime_id)),
             "bbox": dict(zip(("x", "y", "w", "h"), bbox)),
-            "label": _name(info.name), "control_type": info.control_type}
+            "label": _name(info.name or ""), "control_type": info.control_type}
 
 
 def _pattern_property(node, pattern, property_name):
@@ -349,12 +378,40 @@ def _associate_option_popups(options, *, handle, pid, window, identity, diagnost
     return associated
 
 
-def _dropdown(node, walker, wrap, handle, pid, window, diagnostics=None, *, expanded=None):
+def _external_controller_list(node, root, walker, wrap, handle, pid):
+    # 只接受控制器明确指向、且位于同一完整窗口树中的唯一 List。
+    relation = getattr(node.element_info.element, "CurrentControllerFor", None)
+    if relation is None or relation.Length == 0:
+        return None
+    if type(relation.Length) is not int or relation.Length != 1:
+        raise FormControlReadError("form_control_external_list_ambiguous")
+    declared = wrap(relation.GetElement(0))
+    info = declared.element_info
+    if (info.control_type != "List" or info.process_id != pid
+            or getattr(info.element, "CurrentProcessId", None) != pid
+            or _top_window_handle(declared) != handle):
+        raise FormControlReadError("form_control_external_list_unavailable")
+    rid = _runtime_id(info.runtime_id)
+    matches = [item for item in _descendants(root, walker, wrap, limit=MAX_FORM_SCAN_EDGES)
+        if _runtime_id(item.element_info.runtime_id) == rid]
+    if len(matches) != 1 or not _same_element(matches[0], declared):
+        raise FormControlReadError("form_control_external_list_unavailable")
+    return matches[0]
+
+
+def _dropdown(node, walker, wrap, handle, pid, window, diagnostics=None, *, expanded=None, root=None):
     options = []
     option_diagnostics = {}
     if diagnostics is not None:
         diagnostics["option_scan"] = option_diagnostics
-    for item in _descendants(node, walker, wrap, limit=128, diagnostics=option_diagnostics):
+    internal = list(_descendants(node, walker, wrap, limit=128, diagnostics=option_diagnostics))
+    external = False
+    if expanded is True and not any(item.element_info.control_type == "ListItem" for item in internal) and root is not None:
+        listbox = _external_controller_list(node, root, walker, wrap, handle, pid)
+        if listbox is not None:
+            internal = list(_descendants(listbox, walker, wrap, limit=128, diagnostics=option_diagnostics))
+            external = True
+    for item in internal:
         if item.element_info.control_type != "ListItem":
             continue
         if not _explicit_true_call(item, "is_visible") or not _explicit_true_call(item, "is_enabled"):
@@ -363,6 +420,12 @@ def _dropdown(node, walker, wrap, handle, pid, window, diagnostics=None, *, expa
         selected = _checked(item, "radio")
         if before != _describe(item, handle, pid, window, allow_outside_window=expanded is True):
             raise FormControlReadError("form_control_identity_changed")
+        if external:
+            box = before["bbox"]
+            if (box["x"] < 0 or box["y"] < 0 or box["x"] + box["w"] > window[2]
+                    or box["y"] + box["h"] > window[3]):
+                option_diagnostics["viewport_excluded_count"] = option_diagnostics.get("viewport_excluded_count", 0) + 1
+                continue
         options.append({key: before[key] for key in ("label", "bbox", "runtime_id")}
                        | {"selected": selected})
     value = _pattern_property(node, "iface_value", "CurrentValue")
@@ -382,11 +445,12 @@ def _dropdown(node, walker, wrap, handle, pid, window, diagnostics=None, *, expa
     return value, options
 
 
-def _scan_controls(root, walker, wrap, label, control_type, diagnostics):
+def _scan_controls(root, walker, wrap, label, control_type, diagnostics, window):
     matches = []
+    candidates, snapshot = [], []
     diagnostics.update(scan_started=True, scan_complete=False, node_count=0,
                        document_count=0, match_count=0, control_type_counts={})
-    for node in _descendants(root, walker, wrap, limit=512, diagnostics=diagnostics):
+    for node in _descendants(root, walker, wrap, limit=MAX_FORM_SCAN_EDGES, diagnostics=diagnostics):
         info = node.element_info
         actual_type = info.control_type
         diagnostic_type = actual_type if actual_type in _CONTROL_TYPES else "Other"
@@ -397,6 +461,28 @@ def _scan_controls(root, walker, wrap, label, control_type, diagnostics):
         if actual_type == control_type and isinstance(info.name, str) and _name(info.name) == label:
             matches.append(node)
             diagnostics["match_count"] += 1
+        if actual_type in {"Text", "Edit", "ComboBox", "CheckBox", "RadioButton"}:
+            visible = _explicit_true_call(node, "is_visible")
+            box = _relative_rect(info.rectangle, window) if visible else None
+            if box is not None:
+                labeled_by = None
+                if actual_type != "Text":
+                    try:
+                        raw = getattr(info.element, "CurrentLabeledBy", None)
+                        if raw is not None:
+                            labeled_by = _runtime_id(wrap(raw).element_info.runtime_id)
+                    except Exception:
+                        labeled_by = None
+                rid = _runtime_id(info.runtime_id)
+                snapshot.append({"runtime_id": rid, "name": info.name, "control_type": actual_type,
+                    "bbox": box, "parent_id": _tree_parent(node, walker, wrap),
+                    "labeled_by": labeled_by, "visible": True})
+                if actual_type == control_type:
+                    candidates.append(node)
+    if not matches:
+        rid = bind_form_label(label, control_type, snapshot)
+        matches = [node for node in candidates if _runtime_id(node.element_info.runtime_id) == rid]
+        diagnostics["match_count"] = len(matches)
     diagnostics["scan_complete"] = True
     return matches
 
@@ -441,7 +527,7 @@ def _find_control(windows, native, handle, pid, label, kind, identity, window, d
         elif signature != root_signature:
             raise FormControlReadError("form_control_identity_changed")
         try:
-            matches = _scan_controls(root, walker, wrap, label, control_type, diagnostics)
+            matches = _scan_controls(root, walker, wrap, label, control_type, diagnostics, window)
         except Exception:
             if "readiness" in diagnostics:
                 _record_readiness_sample(diagnostics, started)
@@ -458,7 +544,7 @@ def _find_control(windows, native, handle, pid, label, kind, identity, window, d
             _record_readiness_sample(diagnostics, started)
         if len(matches) == 1:
             _finish_readiness(diagnostics, "ready")
-            return matches[0], walker, wrap
+            return matches[0], root, walker, wrap
         if (identity, window) != _window_snapshot(windows, native, handle, pid):
             raise FormControlReadError("form_control_window_changed")
         if matches:
@@ -477,7 +563,7 @@ def _read_on_owner(coordinator, handle, pid, label, kind, expected, diagnostics)
     windows = coordinator._windows()
     native = WindowsNativeIdentityReader(window_manager=windows)
     identity, window = _window_snapshot(windows, native, handle, pid)
-    node, walker, wrap = _find_control(windows, native, handle, pid, label, kind, identity, window, diagnostics,
+    node, root, walker, wrap = _find_control(windows, native, handle, pid, label, kind, identity, window, diagnostics,
                                      allow_readiness=expected is None)
     before = _describe(node, handle, pid, window)
     if expected is not None and tuple(before["runtime_id"]) != expected:
@@ -485,7 +571,7 @@ def _read_on_owner(coordinator, handle, pid, label, kind, expected, diagnostics)
     value, checked, options = None, None, []
     if kind == "dropdown":
         expanded = _expanded(node)
-        value, options = _dropdown(node, walker, wrap, handle, pid, window, diagnostics, expanded=expanded)
+        value, options = _dropdown(node, walker, wrap, handle, pid, window, diagnostics, expanded=expanded, root=root)
         if expanded is True and options:
             options = _associate_option_popups(options, handle=handle, pid=pid, window=window, identity=identity,
                 diagnostics=diagnostics["option_scan"])
@@ -499,7 +585,8 @@ def _read_on_owner(coordinator, handle, pid, label, kind, expected, diagnostics)
         raise FormControlReadError("form_control_expansion_changed")
     result = {"source": "windows_uia", "runtime_id": before["runtime_id"], "bbox": before["bbox"],
             "window_identity": identity, "window_rect": list(window), "kind": kind,
-            "label": before["label"], "value": value, "checked": checked, "options": options,
+            "label": label if not before["label"] else before["label"],
+            "value": value, "checked": checked, "options": options,
             "state_available": value is not None if kind == "dropdown" else checked is not None}
     if kind == "dropdown":
         result["expanded"] = expanded

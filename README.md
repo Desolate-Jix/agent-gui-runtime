@@ -6,8 +6,8 @@ Agent 负责理解任务、决定下一步和判断结果；框架负责观察�
 
 The connected agent plans and judges outcomes. This runtime observes real Windows interfaces, grounds targets, dispatches actions and returns evidence. It is an execution layer, not an autonomous planner or web management console.
 
-> **当前版本：v0.1.0-test.6 · 执行模式测试版。**
-> **Current version: v0.1.0-test.6 · execution-mode test release.**
+> **当前版本：v0.1.0-test.7 · 执行模式测试版。**
+> **Current version: v0.1.0-test.7 · execution-mode test release.**
 >
 > **本次只更新执行模式，学习模式不发布。** 文末介绍是后续方向，不代表下载包已支持。
 > **Execution only. Learning is not shipped.** The roadmap below is not an available feature list.
@@ -18,7 +18,7 @@ The connected agent plans and judges outcomes. This runtime observes real Window
 ## 1. 下载与文档 / Downloads and documentation
 
 - [GitHub Releases / 已发布版本](https://github.com/Desolate-Jix/agent-gui-runtime/releases)
-- [test.6 ZIP / 当前源码包](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.6/AgentReviewInstant-v0.1.0-test.6.zip)
+- [test.7 ZIP / 当前源码包](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.7/AgentReviewInstant-v0.1.0-test.7.zip)
 - [安装、模型下载与配置 / Setup and models](FRIEND_SETUP.md)
 - [Agent 使用指南 / Agent guide](AGENT_GUIDE.md)
 - [发布范围 / Release scope](RELEASE_SCOPE.md) · [变更记录 / Changelog](CHANGELOG.md)
@@ -29,6 +29,8 @@ The connected agent plans and judges outcomes. This runtime observes real Window
 This is a source bundle, not a standalone installer. Prepare dependencies, weights and configuration locally. Keep application, model and data directories separate and preserve unresolved sessions.
 
 ## 2. 功能 / Capabilities
+
+> **test.7：** 最多 32 项组合填写、可选具名文本 Tab 连续输入、日期、真实标签关联、原生文件选择与取消恢复。源码和隔离包各 **1759 项回归通过**（不相加）；Codex 连续实测及 AionUi 同包复验已完成。四字段两轮约 53–64 秒；组合动作减少 Agent 往返，并不等于所有表格已高速通用。/ Up to 32 ordered fields, optional named-text Tab input, dates, label binding and native-file recovery. **1759 checks each** in source and isolated bundle; Codex continuous use and AionUi same-bundle retesting completed. Four-field batches took about 53–64 seconds; fewer agent round trips do not imply universal fast forms. [实测、首失败与限制 / Evidence and limits](docs/verification/TEST7_CANDIDATE_ACCEPTANCE.md).
 
 | 功能 / Capability | 执行模式 / Execution mode |
 |---|---|
@@ -50,7 +52,7 @@ This is a source bundle, not a standalone installer. Prepare dependencies, weigh
 - 模型启动错误包含阶段、错误码和日志位置；清理错误包含进程身份、Job、PID 文件与采样证据。
 - 关闭失败进入 `cleanup_pending`，保留原 owner，允许显式重试清理；旧会话未解决时返回结构化启动拒绝。
 - 修正模型下载参数及跨机器配置说明。
-- `form_fill` 一次声明文本、下拉项、单选和复选状态；按字段执行与核对，失败返回部分结果，不自动提交。[表单协议 / Form contract](docs/verification/EXECUTION_FORM_FILL.md)。
+- test.6 的 `form_fill` 支持一次声明 1–12 项文本、下拉、单选与复选状态，返回部分结果，不自动提交。test.7 的扩展范围见上方 test.7 说明与[表单协议 / Form contract](docs/verification/EXECUTION_FORM_FILL.md)。 / Shipped test.6 supports 1–12 text/dropdown/radio/checkbox fields, partial results and no automatic final submission. test.7 extensions are identified above.
 
 真实 W3C 表单的连续填写、重复设置、中断恢复，以及 Google→Maps 两地点查询已通过 Codex 同包实测和 AionUi 独立复测。独立地图测试首次发生模型点偏左 5px、零输入拒绝；Agent 核对后明确重试成功，不能算首轮全通过。
 
@@ -102,9 +104,9 @@ The adapter validates/persists requests; the serial coordinator owns native reso
 | `app/api/`, `app/application_profiles/` | Maintained action handlers and shared dependencies |
 | `tests/`, `docs/verification/` | Regression and acceptance evidence |
 
-部分历史命名模块仍为执行模式的共用依赖，不能因目录名含 `learn` 就删除。它们不代表学习产品已启用；本候选不配送学习启动入口，MCP 只暴露执行工具。
+部分历史命名模块仍为执行模式的共用依赖，不能因目录名含 `learn` 就删除。它们不代表学习产品已启用；本包不配送学习启动入口，MCP 只暴露执行工具。
 
-Historically named modules may remain shared dependencies. Their presence does not enable learning; the candidate excludes learning startup entrypoints and exposes execution tools only.
+Historically named modules may remain shared dependencies. Their presence does not enable learning; the bundle excludes learning startup entrypoints and exposes execution tools only.
 
 ## 4. 模型与环境 / Models and environment
 
@@ -209,15 +211,16 @@ Data can contain private text/images and may reach the client's model provider. 
 
 ## 8. 验证状态 / Verification status
 
-- 最新源码与同一冻结包各 **1544 项通过**（重叠集合，不相加）；独立目录的依赖入口、真实 MCP stdio 与清理检查通过。
-- Codex 已先做真实单项与连续使用，AionUi 随后独立验收；W3C 四类字段、下拉往返切换、已满足状态零输入、失败后明确恢复和最终清理均有记录。
-- 四字段填写：本机 Codex **65.8s**、AionUi **76.3s**；独立下拉改选约 **26s/项**，重复已满足状态约 **7s**。这些是本轮观测，不是跨机器性能保证。
-- Google→Maps 首次定位有一次拒绝（零输入），明确重试后搜索两个地点并读取结果。保留首次失败，不以成功重跑覆盖。
-- 仍有局限：SDK 外层参数／启动顺序错误可能仅返回工具错误；模糊目标与模型误定位可能被拒；下拉只选择当前可见选项，不自动滚动寻找离屏项。朋友电脑原始清理故障未在同机复现，不宣称所有设备已修复。
+- 源码与隔离冻结包各 **1759 项通过**（重叠集合，不相加）；另有隔离入口及真实 MCP stdio 检查。
+- Codex 先完成单项、连续表单填写与原生文件选择/取消/重开；AionUi 在同一候选独立复验。两轮四字段均正确保留值，原始 `打开(O)` 目标两次确认文件，不使用回车代替。
+- 四字段：Codex **61.439 / 53.021 s**，AionUi **64.123 / 55.881 s**。此前具名三文本 Tab 组合约9–22秒，但并非同条件的提速A/B测量。
+- 保留早期 Open(O) 标签错误和文件按钮重开拒绝；修复后复验通过，不改记首次成功。
+- 本轮是操作员模式，两次独立 Open(O) 的自动判定被旁路；不宣称自动拦截策略通过。关闭对话框后直接截图仍会返回失效窗口 ValueError，需显式重新选择原浏览器。
+- 不保证任意表单、视觉多选、自定义日期部件、自动选项滚动、32项整批实机覆盖、跨设备稳定或无人值守。附件名显示不证明服务器收到文件，本轮未最终提交。
 
-Source and frozen bundle each passed 1544 overlapping checks, isolated entrypoint and MCP verification. Independent acceptance followed Codex's single and continuous real-app runs. Four-field fills took 65.8s / 76.3s; individual independent dropdown changes about 26s and satisfied-state repeats about 7s. One Maps focus failure required explicit recovery. SDK error surfaces, localization refusals, visible-options-only dropdowns and unverified friend-machine compatibility remain known limits.
+Source and isolated bundle each passed 1759 overlapping checks. Independent AionUi testing followed Codex single/continuous runs on the same frozen runtime. Two four-field rounds and native choose/cancel/reopen/reselect passed, with original failures retained. Measured mixed batches remain roughly 53–64 seconds, not a universal speed or accuracy claim. Operator-mode bypass was active; automatic policy acceptance was not demonstrated. A capture against a closed picker still needs explicit browser rebinding.
 
-详细范围、首次失败和修复复验见 [test.6 验收](docs/verification/TEST6_CANDIDATE_ACCEPTANCE.md)与[表单契约](docs/verification/EXECUTION_FORM_FILL.md)。测试数量不是通用准确率；不是无人值守稳定版。 / See linked evidence for scope and retained failures; no universal accuracy or unattended reliability claim.
+详细范围与证据见 [test.7 验收](docs/verification/TEST7_CANDIDATE_ACCEPTANCE.md) 和 [表单契约](docs/verification/EXECUTION_FORM_FILL.md)。/ See acceptance and contract for exact coverage and known limitations.
 
 ## 9. 后续轻量学习模式 / Future lightweight learning
 

@@ -1,6 +1,7 @@
 """只读 UIA 文本字段快照；不执行聚焦、点击、键盘或剪贴板操作。"""
 from __future__ import annotations
 
+import ctypes
 import math
 import logging
 import time
@@ -8,7 +9,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from .native_identity import validate_native_identity_fact
+from .native_identity import WindowsNativeIdentityReader, validate_native_identity_fact
 from .text_field_evidence import TextFieldIdentity, TextFieldSnapshot
 
 # UI Automation 文档定义的 TextPattern IsReadOnly 属性和端点值。
@@ -44,8 +45,9 @@ def _safe_read_diagnostic(value):
         "phase": {"resolve_field", "describe_target", "keyboard_focus", "read_text"},
         "check": {"control_type", "visible", "enabled", "element", "password", "value_readonly", "text_readonly",
                   "value_pattern_missing", "text_pattern_missing"},
-        "control_type": {"Edit", "Document", "ComboBox", "other"},
+        "control_type": {"Edit", "Document", "ComboBox", "Group", "other"},
         "attribute_type": {"bool", "int", "other"},
+        "attribute_class": {"writable", "readonly", "mixed", "not_supported", "unknown"},
         "deadline_stage": {"before_sample", "after_match", "before_wait", "attempt_limit", "exhausted"},
     }
     result = {key: value[key] for key, allowed in enums.items()
@@ -84,9 +86,24 @@ def _read_stage_call(phase, read_index, function, *args, **kwargs):
 
 def _not_writable(check, control_type, attribute=None):
     return TextFieldReadError("text_field_target_not_writable", diagnostic={
-        "check": check, "control_type": control_type if control_type in {"Edit", "Document", "ComboBox"} else "other",
+        "check": check, "control_type": control_type if control_type in {"Edit", "Document", "ComboBox", "Group"} else "other",
         "attribute_type": "bool" if type(attribute) is bool else "int" if type(attribute) is int else "other",
-        "attribute_state": attribute})
+        "attribute_state": attribute, "attribute_class": _readonly_attribute_class(attribute)})
+
+
+def _readonly_attribute_class(value: Any) -> str:
+    if type(value) in (bool, int) and value in (0, 1):
+        return "readonly" if value else "writable"
+    try:
+        from pywinauto.uia_defines import IUIA
+        uia = IUIA().iuia
+        if value == uia.ReservedMixedAttributeValue:
+            return "mixed"
+        if value == uia.ReservedNotSupportedValue:
+            return "not_supported"
+    except Exception:
+        pass
+    return "unknown"
 
 
 def _hit_timeout(stage, attempt, elapsed, matched):
@@ -198,6 +215,42 @@ class WindowsTextFieldReader:
             raise
         except Exception:
             raise TextFieldReadError("text_field_provider_unavailable") from None
+
+    def read_bound_focus(self, *, target_field_id, capture_id, target_window_handle,
+                         target_process_id, process_create_time, window_rect,
+                         expected_runtime_id, expected_control_type):
+        """仅以点击前绑定的 RID 读取当前焦点；布局变化不改变字段身份。"""
+        expected = _expected_field_identity(expected_runtime_id, expected_control_type)
+        if expected is None or expected[1] not in {"Edit", "ComboBox", "Document", "Group"}:
+            raise TextFieldReadError("text_field_expected_identity_invalid")
+        observations = []
+        for index in (1, 2):
+            self._verify_binding(target_window_handle, target_process_id, process_create_time, window_rect)
+            wrapper = _read_stage_call("resolve_field", index, _focused_field)
+            info = getattr(wrapper, "element_info", None)
+            if (tuple(getattr(info, "runtime_id", ()) or ()) != expected[0]
+                    or getattr(info, "control_type", None) != expected[1]):
+                raise TextFieldReadError("text_field_expected_identity_changed")
+            box = _relative_rect(getattr(info, "rectangle", None), window_rect)
+            if box is None:
+                raise TextFieldReadError("text_field_geometry_changed")
+            point = (box[0] + box[2] // 2, box[1] + box[3] // 2)
+            described = _read_stage_call("describe_target", index, self._describe_target, wrapper,
+                target_window_handle, target_process_id, window_rect, box, point)
+            if not _has_keyboard_focus(wrapper):
+                raise TextFieldReadError("text_field_keyboard_focus_unavailable",
+                    diagnostic={"phase": "keyboard_focus", "read_index": index})
+            value, source, selection = _read_stage_call("read_text", index, self._read_text,
+                wrapper, expected[1])
+            observations.append((described, value, source, selection))
+        self._verify_binding(target_window_handle, target_process_id, process_create_time, window_rect)
+        if observations[0] != observations[1]:
+            raise TextFieldReadError("text_field_changed_during_read")
+        described, value, source, selection = observations[0]
+        identity = TextFieldIdentity(target_field_id, target_window_handle, target_process_id,
+            float(process_create_time), described["runtime_id"], tuple(window_rect), described["control_bbox"])
+        return TextFieldSnapshot(identity, capture_id, self._read_id_factory(), self._clock_ns(),
+            source, value, selection)
 
     def _read_field_impl(
         self,
@@ -413,7 +466,7 @@ class WindowsTextFieldReader:
                          click_point: tuple[int, int]) -> dict[str, Any]:
         info = getattr(wrapper, "element_info", None)
         control_type = str(getattr(info, "control_type", ""))
-        if control_type not in {"Edit", "Document", "ComboBox"}:
+        if control_type not in {"Edit", "Document", "ComboBox", "Group"}:
             raise _not_writable("control_type", control_type)
         state_reader = _explicit_true_call if control_type == "ComboBox" else _bool_call
         if not state_reader(wrapper, "is_visible"):
@@ -446,17 +499,20 @@ class WindowsTextFieldReader:
         """从命中子元素向上最多四级，只在该顶层窗口内解析字段。"""
         try:
             root = wrapper.top_level_parent()
-            root_info = getattr(root, "element_info", None)
-            root_handle = int(getattr(root_info, "handle", getattr(root, "handle", 0)) or 0)
         except Exception:
-            raise TextFieldReadError("text_field_window_or_process_changed") from None
-        if root_handle != expected_handle:
+            root = None
+        if _top_window_handle(wrapper) != expected_handle:
             raise TextFieldReadError("text_field_window_or_process_changed")
         current = wrapper
         visits = []
         for depth in range(5):
             control_type = str(getattr(getattr(current, "element_info", None), "control_type", ""))
-            is_root = current is root
+            current_info = getattr(current, "element_info", None)
+            current_handle = getattr(current_info, "handle", getattr(current, "handle", 0))
+            is_root = (control_type == "Window" and type(current_handle) is int
+                       and current_handle == expected_handle)
+            if not is_root and _native_root_handle(current_handle) is None:
+                is_root = current is root
             # 只记录既有路径已取出的类型与对象比较，不额外读取 UIA 或继续遍历。
             visits.append({"control_type": control_type if control_type in _RESOLVE_CONTROL_TYPES else "other",
                            "depth": depth, "is_root": is_root})
@@ -500,8 +556,8 @@ class WindowsTextFieldReader:
         try:
             text_pattern = wrapper.iface_text
             text_readonly = text_pattern.DocumentRange.GetAttributeValue(UIA_IS_READONLY_ATTRIBUTE_ID)
-            if ((require_value_and_text and not _explicit_uia_false(text_readonly))
-                    or (not require_value_and_text and bool(text_readonly))):
+            if ((control_type in {"Group", "Document", "ComboBox"} and not _explicit_uia_false(text_readonly))
+                    or (control_type == "Edit" and bool(text_readonly))):
                 _log_readonly_rejection(control_type, "text", text_readonly)
                 raise _not_writable("text_readonly", control_type, text_readonly)
             text = _require_text(text_pattern.DocumentRange.GetText(-1))
@@ -565,7 +621,8 @@ def _expected_field_identity(runtime_id, control_type):
     if (type(runtime_id) not in (tuple, list) or not 1 <= len(runtime_id) <= 64
             or any(type(item) is not int for item in runtime_id) or not isinstance(control_type, str)):
         raise TextFieldReadError("text_field_expected_identity_invalid")
-    normalized = {"edit":"Edit", "document":"Document", "combobox":"ComboBox", "combo box":"ComboBox"}.get(control_type.casefold())
+    normalized = {"edit":"Edit", "document":"Document", "combobox":"ComboBox", "combo box":"ComboBox",
+        "group":"Group"}.get(control_type.casefold())
     if normalized is None:
         raise TextFieldReadError("text_field_expected_identity_invalid")
     return tuple(runtime_id), normalized
@@ -663,6 +720,95 @@ def _focused_field() -> Any:
     if not element:
         raise TextFieldReadError("text_field_keyboard_focus_unavailable")
     return UIAWrapper(UIAElementInfo(element))
+
+
+def probe_local_focus_target(manager, handle, pid, point):
+    """原动作点击前只读命中；不能用事后焦点倒推点击目标。"""
+    if (type(point) is not tuple or len(point) != 2 or any(type(v) is not int for v in point)):
+        raise TextFieldReadError("text_field_expected_identity_invalid")
+    bound = manager.get_bound_window()
+    if bound is None or bound.handle != handle or bound.process_id != pid:
+        raise TextFieldReadError("text_field_window_binding_changed")
+    window = _bound_rect(bound.rect)
+    native = WindowsNativeIdentityReader(window_manager=manager)
+    fact = validate_native_identity_fact(native.read_identity(handle),
+        target_window_handle=handle, expected_process_id=pid)
+    if window is None or fact is None or not (0 <= point[0] < window[2] and 0 <= point[1] < window[3]):
+        raise TextFieldReadError("text_field_window_binding_changed")
+    reader = WindowsTextFieldReader(window_manager=manager, native_identity_reader=native)
+    raw = reader._from_point(reader._desktop_factory(backend="uia"), window[0] + point[0], window[1] + point[1])
+    if _top_window_handle(raw) != handle or _process_id(raw.element_info, raw.element_info.element) != pid:
+        raise TextFieldReadError("text_field_window_or_process_changed")
+    current = raw
+    for _ in range(8):
+        info = current.element_info
+        kind = info.control_type
+        if kind in {"Edit", "ComboBox", "Document", "Group"}:
+            box = _relative_rect(info.rectangle, window)
+            if box is not None and _contains_point(box, point):
+                if kind in {"Group", "Document"}:
+                    try:
+                        current.iface_text
+                    except _no_pattern_exception():
+                        pass
+                    else:
+                        # 混合或不支持的整段属性不允许全量替换，也不回退到更宽泛祖先。
+                        reader._describe_target(current, handle, pid, window, box, point)
+                        _require_writable_hit_patterns(current, kind)
+                        break
+                else:
+                    reader._describe_target(current, handle, pid, window, box, point)
+                    _require_writable_hit_patterns(current, kind)
+                    break
+        parent = current.parent()
+        if parent is None or parent is current or _top_window_handle(parent) != handle:
+            raise TextFieldReadError("text_field_target_not_writable")
+        current = parent
+    else:
+        raise TextFieldReadError("text_field_target_not_writable")
+    description = reader._describe_target(current, handle, pid, window, box, point)
+    _require_writable_hit_patterns(current, kind)
+    reader._verify_binding(handle, pid, fact["process_create_time"], window)
+    return {"runtime_id": list(description["runtime_id"]), "control_type": kind,
+        "bbox": list(description["control_bbox"]), "window_handle": handle, "process_id": pid,
+        "process_create_time": fact["process_create_time"], "window_rect": list(window)}
+
+
+def probe_tab_focus_target(manager, handle, pid, label, previous):
+    """连续文本组合只接受当前焦点的确切标签，不猜 Tab 顺序、不扫描后自动点击。"""
+    bound = manager.get_bound_window()
+    if bound is None or bound.handle != handle or bound.process_id != pid:
+        raise TextFieldReadError("text_field_window_binding_changed")
+    window = _bound_rect(bound.rect)
+    native = WindowsNativeIdentityReader(window_manager=manager)
+    fact = validate_native_identity_fact(native.read_identity(handle),
+        target_window_handle=handle, expected_process_id=pid)
+    if window is None or fact is None:
+        raise TextFieldReadError("text_field_window_binding_changed")
+    if previous is not None and (previous.window_handle != handle or previous.process_id != pid
+            or previous.process_create_time != fact["process_create_time"]
+            or tuple(window) != previous.window_rect):
+        raise TextFieldReadError("text_group_window_changed")
+    wrapper = _focused_field()
+    info = wrapper.element_info
+    if info.control_type != "Edit" or not _has_keyboard_focus(wrapper):
+        raise TextFieldReadError("text_group_focus_not_edit")
+    normalize = lambda text: " ".join(text.split()).casefold() if isinstance(text, str) else ""
+    if not normalize(label) or normalize(getattr(info.element, "CurrentName", None)) != normalize(label):
+        raise TextFieldReadError("text_group_focus_label_mismatch")
+    box = _relative_rect(info.rectangle, window)
+    if box is None:
+        raise TextFieldReadError("text_field_geometry_changed")
+    reader = WindowsTextFieldReader(window_manager=manager, native_identity_reader=native)
+    point = (box[0] + box[2] // 2, box[1] + box[3] // 2)
+    description = reader._describe_target(wrapper, handle, pid, window, box, point)
+    _require_writable_hit_patterns(wrapper, "Edit")
+    if previous is not None and description["runtime_id"] == previous.runtime_id:
+        raise TextFieldReadError("text_group_focus_did_not_advance")
+    reader._verify_binding(handle, pid, fact["process_create_time"], window)
+    return {"runtime_id": list(description["runtime_id"]), "control_type": "Edit",
+        "bbox": list(box), "window_handle": handle, "process_id": pid,
+        "process_create_time": fact["process_create_time"], "window_rect": list(window)}
 
 
 def _has_keyboard_focus(wrapper: Any) -> bool:
@@ -780,11 +926,27 @@ def _process_id(info: Any, element: Any) -> int | None:
     return None
 
 
+def _native_root_handle(hwnd: Any) -> int | None:
+    """返回 Win32 GA_ROOT（不沿 owned-window 链返回 owner）。"""
+    if type(hwnd) is not int or hwnd <= 0:
+        return None
+    try:
+        value = int(ctypes.windll.user32.GetAncestor(hwnd, 2) or 0)
+        return value if value > 0 else None
+    except Exception:
+        return None
+
+
 def _top_window_handle(wrapper: Any) -> int | None:
     try:
+        info = getattr(wrapper, "element_info", None)
+        value = getattr(info, "handle", getattr(wrapper, "handle", 0))
+        root_handle = _native_root_handle(value)
+        if root_handle is not None:
+            return root_handle
         root = wrapper.top_level_parent()
-        info = getattr(root, "element_info", None)
-        value = getattr(info, "handle", getattr(root, "handle", 0))
+        root_info = getattr(root, "element_info", None)
+        value = getattr(root_info, "handle", getattr(root, "handle", 0))
         return value if type(value) is int and value > 0 else None
     except Exception:
         return None
