@@ -1,0 +1,508 @@
+{
+  "archive": "historical-source-archive-20260924",
+  "format": "historical-source-difference-v1",
+  "scope": "test6-era execution-mode candidate package source differences; not a runnable project",
+  "source_root_relative": "D:/AgentReviewCandidates",
+  "parent_evidence": {
+    "audit_relative_path": "cleanup-archive-audit-20260924.json",
+    "audit_sha256": "46d32a02ac6ae7c9b23969d5f76802231fc463371608b5de870038074bdd43a4",
+    "candidate_list_sha256": "845d7df34f0cf5067366b962f49a0f6710e71e15ee21556e7784fef8b8d67c50",
+    "source_manifest_sha256": {
+      "D:\\AgentReviewCandidates\\execution-20260920-01\\MANIFEST.json": "c63a1b244fc3b0937a1b1e4ff4cb5f66411f810206592807dd7b3f8187f507b8",
+      "D:\\AgentReviewCandidates\\execution-20260920-02\\MANIFEST.json": "57c413f39fcfdb1d644d8bbc8b8794ee6cfb3307996e3f47d6747e95402598dd",
+      "D:\\AgentReviewCandidates\\execution-20260920-03\\MANIFEST.json": "3ade9bfbe836e35b35de5354135ecbe1011c6ce82f8e4dde34924044f95a069d",
+      "D:\\AgentReviewCandidates\\execution-20260920-04\\MANIFEST.json": "78dd90d2eeb8c5b6beabcde31162ea4026106faebb8adf3be9d7584a964e870c",
+      "D:\\AgentReviewCandidates\\execution-20260920-05\\MANIFEST.json": "1b0a9970cf585982d0c89d6b173ec9e44b29e116054b9abf7d306d6d5f796ec6",
+      "D:\\AgentReviewCandidates\\execution-20260920-06\\MANIFEST.json": "832c373aadb7f30548fa2034b91763c3945dcf3ed72e5f434fcff5b4db84e4e6",
+      "D:\\AgentReviewCandidates\\execution-20260920-07\\MANIFEST.json": "539af7a83514ff01c3c29c7589e1fa39bb83cf934bc5bc272886f1bd585e4cae",
+      "D:\\AgentReviewCandidates\\execution-20260920-08\\MANIFEST.json": "322616e27d1c780b66538a80d0843ac85b6a419509af394f29d45adc89751d24",
+      "D:\\AgentReviewCandidates\\execution-20260920-09\\MANIFEST.json": "52692cd6b78a1c554b43d10183ead2b479555a839e8cd4bdacfae66cdfc36215",
+      "D:\\AgentReviewCandidates\\execution-20260921-10\\MANIFEST.json": "21ffdf6cf5e5100559d706d3c34f52a7da43412701fb73002cd471e25f2aec7d",
+      "D:\\AgentReviewCandidates\\test6-candidate-02\\AgentReviewInstant-v0.1.0-test.6\\MANIFEST.json": "724fdf9b2557cd27daab9ef8041a882765982a476bf186745b45d04781604ef5",
+      "D:\\AgentReviewCandidates\\test6-candidate-03\\AgentReviewInstant-v0.1.0-test.6\\MANIFEST.json": "aa9a1618e6a618ef6aac007ea253c5361ed475fa8e635a96554798e5739996ac",
+      "D:\\AgentReviewCandidates\\test6-candidate-04\\AgentReviewInstant-v0.1.0-test.6\\MANIFEST.json": "0767f3a24aaeab780bc72bb8090c11d8e47f1d7b381760288cd62d93627b9c30",
+      "D:\\AgentReviewCandidates\\test6-candidate-05\\AgentReviewInstant-v0.1.0-test.6\\MANIFEST.json": "ea8b2a446d535cc53094bd989900b8c9d21a5544da6167b88d059ba33a686c47"
+    }
+  },
+  "blob_count": 40,
+  "blobs": [
+    {
+      "git_blob_sha1": "0c22b4ac77987570e3fb485824a2742f4769e77e",
+      "archive_path": "blobs/0c22b4ac77987570e3fb485824a2742f4769e77e.py",
+      "bytes": 5782,
+      "sha256": "8373d864b08c4e86a2940aca4fb6479757c7ba43f24ec1cab3a540158ed7c809",
+      "source_paths": [
+        "execution-20260920-03/app/operation/recognition/control_target.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "0e2df6469926c175de7b7a8f5696eaa30f310568",
+      "archive_path": "blobs/0e2df6469926c175de7b7a8f5696eaa30f310568.py",
+      "bytes": 8339,
+      "sha256": "9abe546674556713af9a215125caa3809b864daf9d9f4b1a37e16af3b18c7f0d",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/tests/test_input_sequence_field_binding.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "150f18a84ad96011f586ce3a4b90d428ed9df5d5",
+      "archive_path": "blobs/150f18a84ad96011f586ce3a4b90d428ed9df5d5.py",
+      "bytes": 26593,
+      "sha256": "b3f6a025976bcd4735f7d5db59e49022b6b9c01b298bee74947c4e9d57880355",
+      "source_paths": [
+        "execution-20260920-01/app/instant_mcp.py",
+        "execution-20260920-02/app/instant_mcp.py",
+        "execution-20260920-03/app/instant_mcp.py",
+        "execution-20260920-04/app/instant_mcp.py",
+        "execution-20260920-05/app/instant_mcp.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "15d8a7ae3be4c386f01d5be7edc01a8a64ba1bc3",
+      "archive_path": "blobs/15d8a7ae3be4c386f01d5be7edc01a8a64ba1bc3.py",
+      "bytes": 20594,
+      "sha256": "6f5f6e4973ee9f9cbef3cb71b5cf912da1f8ba00dbad8ae92bd60b8498cffbb7",
+      "source_paths": [
+        "execution-20260920-08/app/desktop_review/local_direct_step.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "16ab83116445371cc143732ab6ed13539165662b",
+      "archive_path": "blobs/16ab83116445371cc143732ab6ed13539165662b.py",
+      "bytes": 9787,
+      "sha256": "27ac3de9a6f1590ac3f89f771cfa2916d91814ee948e7486d961f019a928e259",
+      "source_paths": [
+        "test6-candidate-02/AgentReviewInstant-v0.1.0-test.6/scripts/check_instant_entrypoints.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "2549d9a53a8a9cf9cffedf1be5d937abcdf3280a",
+      "archive_path": "blobs/2549d9a53a8a9cf9cffedf1be5d937abcdf3280a.py",
+      "bytes": 2851,
+      "sha256": "e6a51c1aad8e7db08937e5ae87731cdf20586fd2a779c83aa07ea6c35e653b3d",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/tests/test_instant_execution_entrypoints.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "2da24f91e12ea672a7a08a8d15d6d0020ce217f9",
+      "archive_path": "blobs/2da24f91e12ea672a7a08a8d15d6d0020ce217f9.py",
+      "bytes": 44362,
+      "sha256": "4707e49b050f5cda897360a4dc6aaf0ab2b28a633d708bebd04a187037c3bbcc",
+      "source_paths": [
+        "execution-20260920-08/app/core/input_controller.py",
+        "execution-20260920-09/app/core/input_controller.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "2fcf209ac7d55f2807c476c0866198edcf7c9122",
+      "archive_path": "blobs/2fcf209ac7d55f2807c476c0866198edcf7c9122.py",
+      "bytes": 40584,
+      "sha256": "e39e2321016cf34107e20b678a7aa52c355ca94a5e56ea4e880f7aed13b22bde",
+      "source_paths": [
+        "test6-candidate-02/AgentReviewInstant-v0.1.0-test.6/app/instant_mcp.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "30aa460295246cc097a85b059a77938671249d51",
+      "archive_path": "blobs/30aa460295246cc097a85b059a77938671249d51.py",
+      "bytes": 4402,
+      "sha256": "274349992b3cb4500ad732e1d33b377e2f71108da2f45e707f41472e5f4d5ada",
+      "source_paths": [
+        "execution-20260920-08/tests/test_execution_browser_document_observation.py",
+        "execution-20260920-09/tests/test_execution_browser_document_observation.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "3acae7e0e1c87c4f561b3d5fc587e60f49f7520d",
+      "archive_path": "blobs/3acae7e0e1c87c4f561b3d5fc587e60f49f7520d.py",
+      "bytes": 12539,
+      "sha256": "d5400ef723b8009260656be8fc0267db5cb0b210f7a756e9c94418ee8df85aba",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/tests/test_browser_content_readiness.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "3d7279d10e7e88f495e562ce12f7479db2518f42",
+      "archive_path": "blobs/3d7279d10e7e88f495e562ce12f7479db2518f42.py",
+      "bytes": 408876,
+      "sha256": "78eef0e96aad89a604a61d318b1e3d80e70b61319c3e327461e8cd6ade7ce35b",
+      "source_paths": [
+        "execution-20260920-01/app/api/vision.py",
+        "execution-20260920-02/app/api/vision.py",
+        "execution-20260920-03/app/api/vision.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "3fb6ad0d20fcd101ed27daf2a54b67cb5ca61352",
+      "archive_path": "blobs/3fb6ad0d20fcd101ed27daf2a54b67cb5ca61352.py",
+      "bytes": 29187,
+      "sha256": "fabcac525653b3589dcf87af6ffc339150357299a6dd828560bd706ca2660e9e",
+      "source_paths": [
+        "execution-20260920-07/app/core/clipboard_transaction.py",
+        "execution-20260920-08/app/core/clipboard_transaction.py",
+        "execution-20260920-09/app/core/clipboard_transaction.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "49b57e147b967aa33d206fe2313267584273fa4e",
+      "archive_path": "blobs/49b57e147b967aa33d206fe2313267584273fa4e.py",
+      "bytes": 3831,
+      "sha256": "700c18e56ebbd5061e08e240d582d36db509cddcf02f83ca1e4f12705208a445",
+      "source_paths": [
+        "test6-candidate-02/AgentReviewInstant-v0.1.0-test.6/app/instant_receipt.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "56c95b33afa495a7949162a88a92237d1548bffb",
+      "archive_path": "blobs/56c95b33afa495a7949162a88a92237d1548bffb.py",
+      "bytes": 14778,
+      "sha256": "29150356b537c7f6f57dfd07f32cb34931515ecc17f35a811d48fe6dc8c5407f",
+      "source_paths": [
+        "test6-candidate-02/AgentReviewInstant-v0.1.0-test.6/scripts/run_local_step_session.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "5ee37166403f884220aa8f9b5dd97a0854c76419",
+      "archive_path": "blobs/5ee37166403f884220aa8f9b5dd97a0854c76419.py",
+      "bytes": 40806,
+      "sha256": "005d6ea538fa108a0a48d27edf5bf80b46127848641ea0be193e59837873cbe6",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/app/agent/windows_text_field_reader.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "72feead2a72648a91295657370fdd699e5790783",
+      "archive_path": "blobs/72feead2a72648a91295657370fdd699e5790783.py",
+      "bytes": 23000,
+      "sha256": "9fd0466cd03b9917f85beebdcf0dc7dc14fc686c2b371f14e27aeb1ab58d1a08",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/app/desktop_review/local_direct_step.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "74d07d5d9a525ba61174cfe1c962d4c46b86b177",
+      "archive_path": "blobs/74d07d5d9a525ba61174cfe1c962d4c46b86b177.py",
+      "bytes": 24720,
+      "sha256": "ac565f6fc2d14cd383caba1e7a411745111656f91ec704ba4783df6183f5e519",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/app/agent/windows_form_control_reader.py",
+        "test6-candidate-04/AgentReviewInstant-v0.1.0-test.6/app/agent/windows_form_control_reader.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "8c88c8d80f148fd4dd6b9bc9a7d477dd09ffea5c",
+      "archive_path": "blobs/8c88c8d80f148fd4dd6b9bc9a7d477dd09ffea5c.py",
+      "bytes": 6806,
+      "sha256": "b039722088a2a229e797767da506de34f3a99fd7dca20d23a7f9b32575d878e8",
+      "source_paths": [
+        "execution-20260920-09/tests/test_execution_quoted_button_target.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "963dd88cb51d0d69efee0cb37914010455e32ea7",
+      "archive_path": "blobs/963dd88cb51d0d69efee0cb37914010455e32ea7.py",
+      "bytes": 4988,
+      "sha256": "b6acd2b03b1c074e2b32bf253c86f60d247df0a8017a243ca3c69b15e4354614",
+      "source_paths": [
+        "execution-20260920-08/tests/test_execution_browser_chrome_scope.py",
+        "execution-20260920-09/tests/test_execution_browser_chrome_scope.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "9f16dd3e21e7cd47209821050122b82fd9a38331",
+      "archive_path": "blobs/9f16dd3e21e7cd47209821050122b82fd9a38331.py",
+      "bytes": 14003,
+      "sha256": "b110494d68c0094d4f2e60c3dac72b2590d754457f80b41b5aabf9f538a03e38",
+      "source_paths": [
+        "execution-20260920-01/app/core/ocr_service.py",
+        "execution-20260920-02/app/core/ocr_service.py",
+        "execution-20260920-03/app/core/ocr_service.py",
+        "execution-20260920-04/app/core/ocr_service.py",
+        "execution-20260920-05/app/core/ocr_service.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "a4a30dad7baa3cf67ce65a70388893cf1b423177",
+      "archive_path": "blobs/a4a30dad7baa3cf67ce65a70388893cf1b423177.py",
+      "bytes": 415548,
+      "sha256": "4bcc250aa98fe28081e8a3556918434cee0bb05ea08eca49b5fc1b545cc8c1e9",
+      "source_paths": [
+        "execution-20260920-08/app/api/vision.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "a4adc77660aacbb045450c48a1b9fc9ada1c43b9",
+      "archive_path": "blobs/a4adc77660aacbb045450c48a1b9fc9ada1c43b9.py",
+      "bytes": 11007,
+      "sha256": "d6cd6872fb8cced076c9949b3f4a3d891ab986a211ab50aca9ec447b63b2a8b5",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/scripts/check_instant_entrypoints.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "a6aa0a9b40706da11446b00c0611b942d85aa777",
+      "archive_path": "blobs/a6aa0a9b40706da11446b00c0611b942d85aa777.py",
+      "bytes": 5423,
+      "sha256": "5370739fd8fac0bc2f3cc035e0fa83f7deb5240ab638eae443ad6414b5b00dad",
+      "source_paths": [
+        "execution-20260920-01/tests/test_ocr_word_boxes.py",
+        "execution-20260920-02/tests/test_ocr_word_boxes.py",
+        "execution-20260920-03/tests/test_ocr_word_boxes.py",
+        "execution-20260920-04/tests/test_ocr_word_boxes.py",
+        "execution-20260920-05/tests/test_ocr_word_boxes.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "a6e981d7b33b87778e7a99f49f73026f68808171",
+      "archive_path": "blobs/a6e981d7b33b87778e7a99f49f73026f68808171.py",
+      "bytes": 6680,
+      "sha256": "10754638271e5f33451652ff974cbe658e467034e23827b49ce5637baff8a102",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/app/operation/screen_reading/browser_content_readiness.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "a75dd02ec43a7f06f2093f58f411de0896afe327",
+      "archive_path": "blobs/a75dd02ec43a7f06f2093f58f411de0896afe327.py",
+      "bytes": 7701,
+      "sha256": "5a70e0e1ebb824ff66c14733cafbc8e1a40bf41a95ebb10a9d205581e4b23c43",
+      "source_paths": [
+        "execution-20260920-09/app/operation/recognition/control_target.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "baa7859da813ed8f5e68b45a78b9c3c58c2c6e5c",
+      "archive_path": "blobs/baa7859da813ed8f5e68b45a78b9c3c58c2c6e5c.py",
+      "bytes": 11937,
+      "sha256": "72db5ce179e69da4710525ec056ecd6c61f404068cf1062107aed369cc85744a",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/tests/test_selection_control_roi_context.py",
+        "test6-candidate-04/AgentReviewInstant-v0.1.0-test.6/tests/test_selection_control_roi_context.py",
+        "test6-candidate-05/AgentReviewInstant-v0.1.0-test.6/tests/test_selection_control_roi_context.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "bbd740fa58f5a09f13bd0155cbc519bbba44aa4b",
+      "archive_path": "blobs/bbd740fa58f5a09f13bd0155cbc519bbba44aa4b.py",
+      "bytes": 18561,
+      "sha256": "2bbfebeb2205b66815ccc21b76f30837aeec7ab41c1087e66b6442f97af016f0",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/app/desktop_review/input_sequence.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "bd94c0793785b8c95b6591f4ccf136d88e36114d",
+      "archive_path": "blobs/bd94c0793785b8c95b6591f4ccf136d88e36114d.py",
+      "bytes": 2438,
+      "sha256": "7e8cebc24d5dd2f549987b4345546577b6f5b46c12e73230c07f8a3d96bb2da9",
+      "source_paths": [
+        "test6-candidate-02/AgentReviewInstant-v0.1.0-test.6/tests/test_instant_execution_entrypoints.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "be8400b2c36b6cdf772737ebc54d66384131604a",
+      "archive_path": "blobs/be8400b2c36b6cdf772737ebc54d66384131604a.py",
+      "bytes": 42772,
+      "sha256": "10827311e409ec82866bb6b47fdadf79a3c1ab068341a54d96de8758d70b626c",
+      "source_paths": [
+        "execution-20260920-07/app/core/input_controller.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "c52f1b2c9d357276c54e411ff57f5dbb9caf44b4",
+      "archive_path": "blobs/c52f1b2c9d357276c54e411ff57f5dbb9caf44b4.py",
+      "bytes": 19902,
+      "sha256": "94f0ee1ee9e676e3aba6be21cddb26e2aecfe31ce031f9b28b62704f13113847",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/tests/test_windows_text_field_reader.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "c6b4b01b30ab5d392cb541cd0e4ccc1c159b60d5",
+      "archive_path": "blobs/c6b4b01b30ab5d392cb541cd0e4ccc1c159b60d5.py",
+      "bytes": 434906,
+      "sha256": "a38beca307698175b226e279bfde7b21d26c6b0424bf8277c4f14eb03dda8ac3",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/app/api/vision.py",
+        "test6-candidate-04/AgentReviewInstant-v0.1.0-test.6/app/api/vision.py",
+        "test6-candidate-05/AgentReviewInstant-v0.1.0-test.6/app/api/vision.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "d07f248501f28aeda6e5b31855d92d446c07f50f",
+      "archive_path": "blobs/d07f248501f28aeda6e5b31855d92d446c07f50f.py",
+      "bytes": 2837,
+      "sha256": "7c88afd4d3f6dbabcb2b0f26ef8959e6f4fa729911f7c165897bac8e5f92549e",
+      "source_paths": [
+        "execution-20260920-08/app/operation/recognition/text_match.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "db60a18df0acb336ba5ea02a35b062f62e9927b6",
+      "archive_path": "blobs/db60a18df0acb336ba5ea02a35b062f62e9927b6.py",
+      "bytes": 8092,
+      "sha256": "90992cf1e9a2bbb147854743d9999a67070eab3ccd6710efc191c3a4404b27e8",
+      "source_paths": [
+        "execution-20260920-08/app/operation/recognition/control_target.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "ddadad1b1121c54a00601bf4771b7454cf7cbe6b",
+      "archive_path": "blobs/ddadad1b1121c54a00601bf4771b7454cf7cbe6b.py",
+      "bytes": 9509,
+      "sha256": "2dbee6b07efae8a58e46894779356f3c34c98b1a3da04d5488f996bfbc8c72e8",
+      "source_paths": [
+        "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/app/operation/recognition/control_target.py",
+        "test6-candidate-04/AgentReviewInstant-v0.1.0-test.6/app/operation/recognition/control_target.py",
+        "test6-candidate-05/AgentReviewInstant-v0.1.0-test.6/app/operation/recognition/control_target.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "de143ca75bae5656dd08808d83ef23bd68d3385a",
+      "archive_path": "blobs/de143ca75bae5656dd08808d83ef23bd68d3385a.py",
+      "bytes": 5660,
+      "sha256": "670349449dfa1ab173367c5ca14914144d3d1756aa44467fde03dd47c5ffc06b",
+      "source_paths": [
+        "execution-20260920-01/app/operation/recognition/control_target.py",
+        "execution-20260920-02/app/operation/recognition/control_target.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "e14175225175fa4fb05e4741e60250a4b194c665",
+      "archive_path": "blobs/e14175225175fa4fb05e4741e60250a4b194c665.py",
+      "bytes": 5787,
+      "sha256": "e3f40bf1441f04e6fd9f75df44c470e7d9f7d444b238acac5f2dcc445451b4b2",
+      "source_paths": [
+        "execution-20260920-08/tests/test_post_action_recovery.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "e7b1c44f3a5e42c757b674eeb9da4fa2ac3eda71",
+      "archive_path": "blobs/e7b1c44f3a5e42c757b674eeb9da4fa2ac3eda71.py",
+      "bytes": 418051,
+      "sha256": "265ab5ad002cf46feb8705e351cfb6976e7cfbbe6161cbc2a845b52d8038ca76",
+      "source_paths": [
+        "execution-20260920-09/app/api/vision.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "eb1318ae1879064008701e367c7d78681a3f813b",
+      "archive_path": "blobs/eb1318ae1879064008701e367c7d78681a3f813b.py",
+      "bytes": 1921,
+      "sha256": "2a025b852836eb33b0ea84c66daf7b315ee54d00f80b5ffd2cedcb3c3fdf37ff",
+      "source_paths": [
+        "execution-20260920-08/app/desktop_review/post_action_recovery.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "ee84df3b95644c8619b8f64db670645478efbe68",
+      "archive_path": "blobs/ee84df3b95644c8619b8f64db670645478efbe68.py",
+      "bytes": 25170,
+      "sha256": "5a678608c1ceea5c230c7aa58e5d73c1e87c6f8b7b1cbdb80e37fd6268faf92a",
+      "source_paths": [
+        "execution-20260920-08/app/operation/screen_reading/uia_provider.py",
+        "execution-20260920-09/app/operation/screen_reading/uia_provider.py"
+      ]
+    },
+    {
+      "git_blob_sha1": "fa9712f10a6307b7a7deaaa2774068ef56bea5d0",
+      "archive_path": "blobs/fa9712f10a6307b7a7deaaa2774068ef56bea5d0.py",
+      "bytes": 29004,
+      "sha256": "068c4b492276e3e6660e99fa5dc1e22f97803bf73985c7a545b90df0c0267087",
+      "source_paths": [
+        "execution-20260920-07/tests/test_clipboard_transaction.py",
+        "execution-20260920-08/tests/test_clipboard_transaction.py",
+        "execution-20260920-09/tests/test_clipboard_transaction.py"
+      ]
+    }
+  ],
+  "manifest_count": 14,
+  "manifests": [
+    {
+      "source_path": "execution-20260920-01/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-01__MANIFEST.json",
+      "bytes": 97201,
+      "sha256": "c63a1b244fc3b0937a1b1e4ff4cb5f66411f810206592807dd7b3f8187f507b8"
+    },
+    {
+      "source_path": "execution-20260920-02/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-02__MANIFEST.json",
+      "bytes": 97379,
+      "sha256": "57c413f39fcfdb1d644d8bbc8b8794ee6cfb3307996e3f47d6747e95402598dd"
+    },
+    {
+      "source_path": "execution-20260920-03/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-03__MANIFEST.json",
+      "bytes": 97379,
+      "sha256": "3ade9bfbe836e35b35de5354135ecbe1011c6ce82f8e4dde34924044f95a069d"
+    },
+    {
+      "source_path": "execution-20260920-04/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-04__MANIFEST.json",
+      "bytes": 97736,
+      "sha256": "78dd90d2eeb8c5b6beabcde31162ea4026106faebb8adf3be9d7584a964e870c"
+    },
+    {
+      "source_path": "execution-20260920-05/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-05__MANIFEST.json",
+      "bytes": 97907,
+      "sha256": "1b0a9970cf585982d0c89d6b173ec9e44b29e116054b9abf7d306d6d5f796ec6"
+    },
+    {
+      "source_path": "execution-20260920-06/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-06__MANIFEST.json",
+      "bytes": 97908,
+      "sha256": "832c373aadb7f30548fa2034b91763c3945dcf3ed72e5f434fcff5b4db84e4e6"
+    },
+    {
+      "source_path": "execution-20260920-07/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-07__MANIFEST.json",
+      "bytes": 99071,
+      "sha256": "539af7a83514ff01c3c29c7589e1fa39bb83cf934bc5bc272886f1bd585e4cae"
+    },
+    {
+      "source_path": "execution-20260920-08/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-08__MANIFEST.json",
+      "bytes": 102032,
+      "sha256": "322616e27d1c780b66538a80d0843ac85b6a419509af394f29d45adc89751d24"
+    },
+    {
+      "source_path": "execution-20260920-09/MANIFEST.json",
+      "archive_path": "manifests/execution-20260920-09__MANIFEST.json",
+      "bytes": 102389,
+      "sha256": "52692cd6b78a1c554b43d10183ead2b479555a839e8cd4bdacfae66cdfc36215"
+    },
+    {
+      "source_path": "execution-20260921-10/MANIFEST.json",
+      "archive_path": "manifests/execution-20260921-10__MANIFEST.json",
+      "bytes": 104825,
+      "sha256": "21ffdf6cf5e5100559d706d3c34f52a7da43412701fb73002cd471e25f2aec7d"
+    },
+    {
+      "source_path": "test6-candidate-02/AgentReviewInstant-v0.1.0-test.6/MANIFEST.json",
+      "archive_path": "manifests/test6-candidate-02__AgentReviewInstant-v0.1.0-test.6__MANIFEST.json",
+      "bytes": 111043,
+      "sha256": "724fdf9b2557cd27daab9ef8041a882765982a476bf186745b45d04781604ef5"
+    },
+    {
+      "source_path": "test6-candidate-03/AgentReviewInstant-v0.1.0-test.6/MANIFEST.json",
+      "archive_path": "manifests/test6-candidate-03__AgentReviewInstant-v0.1.0-test.6__MANIFEST.json",
+      "bytes": 115147,
+      "sha256": "aa9a1618e6a618ef6aac007ea253c5361ed475fa8e635a96554798e5739996ac"
+    },
+    {
+      "source_path": "test6-candidate-04/AgentReviewInstant-v0.1.0-test.6/MANIFEST.json",
+      "archive_path": "manifests/test6-candidate-04__AgentReviewInstant-v0.1.0-test.6__MANIFEST.json",
+      "bytes": 115497,
+      "sha256": "0767f3a24aaeab780bc72bb8090c11d8e47f1d7b381760288cd62d93627b9c30"
+    },
+    {
+      "source_path": "test6-candidate-05/AgentReviewInstant-v0.1.0-test.6/MANIFEST.json",
+      "archive_path": "manifests/test6-candidate-05__AgentReviewInstant-v0.1.0-test.6__MANIFEST.json",
+      "bytes": 115671,
+      "sha256": "ea8b2a446d535cc53094bd989900b8c9d21a5544da6167b88d059ba33a686c47"
+    }
+  ],
+  "verification": "Each copied blob was checked by exact-byte equality and recomputed Git blob SHA-1 plus SHA-256; each manifest was byte-compared and SHA-256 checked."
+}
