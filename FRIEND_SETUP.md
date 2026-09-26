@@ -2,7 +2,41 @@
 
 适用范围：Windows x64 即时模式源码预览包。它不是双击即用安装器；包内不含 Python 环境和模型。先完成下面的连接检查，再由人在场监督真实操作。本说明中的 `D:` 路径都只是示例，可换成你自己的磁盘；不要照搬别人电脑生成的 `mcp-config.local.json`。
 
-This guide is for the Windows x64 instant-mode source preview, not a standalone installer. Install dependencies and weights locally, verify the connection, then supervise real input. All `D:` paths are examples. Generate your own configuration instead of copying another machine's local MCP paths.
+This guide is for the Windows x64 instant-mode source preview, not a standalone installer. Install dependencies for the chosen route (weights only for local vision), verify the connection, then supervise real input. All `D:` paths are examples. Generate your own configuration instead of copying another machine's local MCP paths.
+
+## test.8：不装本地模型 / Model-free Agent setup
+
+**以下适用于 test.8 或更新；test.7 不含这些新路由。** `agent_current` 将视觉任务交给当前确实支持图像的 Agent；`agent_delegate` 仅由客户端按显式 profile 选择视觉子 Agent（例如 Astra 主 Agent 显式委派给 Luna）。委派名只是客户端配置标识，不会让宿主继承 API/key、自动创建子 Agent 或切换模型。unknown/unsupported 会停止所选视觉路径，不会偷偷回退到本地 VISTA/OCR 或外部 API。Agent 路线 `read_text` 回传当前原图供 Agent 阅读，不加载本地 OCR。独立 API 仅保留 adapter/config/mock 协议检查，宿主执行路由禁用，不读取或要求 key，也不要求 live-provider 验收；详见[预留接口](docs/development/EXTERNAL_VISION_API.md)。
+
+**Requires test.8 or later; test.7 does not include these routes.** `agent_current` uses the current agent only when it actually supports images. `agent_delegate` asks the client to select a vision delegate by an explicit profile (for example, an Astra planner explicitly delegates to Luna). A profile is just client configuration: it grants no host API/key access and creates or switches no model automatically. Unknown/unsupported capability stops the selected route; there is no silent fallback to local VISTA/OCR or external API. Agent-route `read_text` returns the current original image for the Agent and does not load local OCR. The external API is limited to reserved adapter/config/mock-protocol checks; host execution is disabled, no key is read or required, and no live-provider acceptance is required. See the [reserved adapter](docs/development/EXTERNAL_VISION_API.md).
+
+```powershell
+# 当前 Agent 读图，不安装 VISTA 或本地 OCR。
+.\scripts\setup_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentReviewInstantData"
+
+# 或：客户端已配置视觉委派时使用（vision-luna 是示例配置名）。
+.\scripts\setup_instant.ps1 -RecognitionSource agent_delegate -DelegateProfile "vision-luna" -DataDirectory "D:\AgentReviewInstantData"
+```
+
+安装在独立 `.venv-agent`，不覆盖 `.venv` 本地模型环境；Python 和下载缓存保存在程序目录，不创建全局 Python 命令或注册 Python。直接依赖版本固定，传递依赖仍由安装时解析，并非完整锁定。第一次安装必须联网。Agent 路线不传 `-ModelDirectory` 或 `-DownloadModel`，不运行下文的 `uv sync`，不需要本地识别 GPU 或模型权重。Agent 自身的运行成本和图像权限由它的客户端负责。
+
+Setup uses `.venv-agent` without modifying `.venv`, keeps Python/cache under the application directory, and skips global Python command/registry registration. Direct dependencies are pinned; transitives are resolved during installation, not fully locked. No local recognition GPU/weights are required; the Agent's own compute and image permissions remain client responsibilities. Do not use local-model flags or the `uv sync` instructions below for this route.
+
+只重建配置 / Regenerate configuration only:
+
+```powershell
+.\scripts\configure_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentReviewInstantData"
+```
+
+生成的默认快捷配置仍为管理员入口和真实输入，连接时需要用户处理 UAC；脚本不会自动修改已注册 MCP。先用普通权限做零输入连接自检（不是视觉或点击验收） / The quick config remains elevated real input, requiring UAC on connection, without changing registered MCP entries. First run the non-elevated, no-input connectivity check, which does not validate vision or clicks:
+
+```powershell
+.\.venv-agent\Scripts\python.exe scripts\smoke_instant_mcp.py --recognition-source agent_current --data-dir "D:\AgentReviewInstantSmoke" --report "D:\AgentReviewInstant\smoke-report.json"
+```
+
+委派检查加 `--recognition-source agent_delegate --delegate-profile vision-luna`，它只检查宿主协议，不会实际调用委派模型。Agent 组合命令会在 grounding 等待时暂停；客户端回传后继续原命令，保留已完成字段且不自动重放。test.8 源码和冻结候选均 2010 项全套测试通过；Codex 已完成两轮真实 Luna 委派混合填写与清理。首个 `CaptureVisibilityError` 保留，并通过明确的新截图和重新选择恢复；两轮耗时 139.013s / 126.147s，含 Agent 等待，不是性能基准；24 张原图摘要已核验。AionUi 同一冻结候选独立验收已派发，任务 `test8-independent-20260927-01`，待返回结果，因此不把 test.8 称作发布版或独立验收通过。**Agent 路线 `read_text` 返回原图给 Agent 阅读，不加载本地 OCR；桌面审核 UI 不包含在轻量依赖中**。见 [接入协议](docs/development/AGENT_BATCH_PROTOCOL.md) 和 [test.8 验收记录](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。
+
+For delegate startup use its source/profile flags; this smoke does not invoke the delegate. Grounding waits suspend and resume the original Agent command, preserving completed fields without replay. Source and frozen candidate suites each pass 2010 checks; Codex completed two real Luna-delegated mixed-form runs and cleanup on the frozen candidate. The first `CaptureVisibilityError` is retained; recovery used explicit fresh capture and reselection. Per-run wall times (139.013s / 126.147s) include Agent waits and are not performance benchmarks; 24 original-image hashes were checked. AionUi acceptance of the same candidate has been dispatched (`test8-independent-20260927-01`), with result pending, so test.8 is not called released or independently accepted. **Agent read_text returns the original image without local OCR; the desktop review UI is excluded**. See the [batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md) and [test.8 acceptance record](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md).
 
 ## 本次测试版快捷入口 / Quick setup for this test edition
 

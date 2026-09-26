@@ -142,11 +142,14 @@ class BrowserContentPreparation:
 
 
 def prepare_browser_content(manager, goal):
+    from app.core.local_text_focus import has_local_text_focus
     # 明确命名字段与泛型网页字段共用既有解析；工具栏、菜单和框内文字不是字段动作。
     label = _field_target_label(goal)
     page_scope = re.search(r"\b(?:of|in|on)\s+(?:the\s+)?web\s*page\b", goal, re.I)
     page_field = bool(page_scope and not re.search(r"\b(?:not|except)\s*$", goal[:page_scope.start()], re.I))
-    if (label is None or not (label or explicit_target_label(goal) or page_field)
+    # 组合填写已声明字段动作，不依赖自然语言碰巧命中解析模板来准备 UIA。
+    if ((not has_local_text_focus() and
+            (label is None or not (label or explicit_target_label(goal) or page_field)))
             or re.search(r"\b(?:browser|address\s+bar|toolbar|omnibox)\b", goal, re.I)):
         return None
     bound = manager.get_bound_window()

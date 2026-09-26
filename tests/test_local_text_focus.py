@@ -55,6 +55,29 @@ def test_group_document_range_must_be_explicitly_writable(monkeypatch):
             instance._read_text(wrapper, "Group")
 
 
+@pytest.mark.parametrize('kind', ['value', 'text'])
+def test_preclick_pattern_failure_explains_which_readonly_attribute(kind, monkeypatch):
+    monkeypatch.setattr(reader_module, '_no_pattern_exception', lambda: RuntimeError)
+    wrapper = NS(element_info=NS(element=NS(CurrentIsPassword=0)),
+        iface_value=NS(CurrentIsReadOnly=1 if kind == 'value' else 0),
+        iface_text=NS(DocumentRange=NS(GetAttributeValue=lambda _: True)))
+    with pytest.raises(reader_module.TextFieldReadError) as raised:
+        reader_module._require_writable_hit_patterns(wrapper, 'Edit')
+    diagnostic = raised.value.to_reference()['diagnostic']
+    assert diagnostic['check'] == kind + '_readonly'
+    assert diagnostic['attribute_class'] == 'readonly'
+
+
+def test_preclick_focus_visits_are_bounded_and_sanitized():
+    visits = [{'control_type': 'Pane', 'depth': i, 'is_root': i == 7, 'text': 'PRIVATE'} for i in range(8)]
+    ref = reader_module.TextFieldReadError('text_field_target_not_writable',
+        diagnostic={'focus_visits': visits}).to_reference()
+    assert len(ref['diagnostic']['focus_visits']) == 8
+    assert 'PRIVATE' not in str(ref)
+    assert 'focus_visits' not in reader_module.TextFieldReadError('text_field_target_not_writable',
+        diagnostic={'focus_visits': visits + [visits[-1]]}).to_reference().get('diagnostic', {})
+
+
 def test_reserved_uia_readonly_values_remain_distinct_in_safe_diagnostic(monkeypatch):
     from pywinauto.uia_defines import IUIA
     uia = IUIA().iuia

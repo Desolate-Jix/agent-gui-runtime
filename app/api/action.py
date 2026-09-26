@@ -112,6 +112,18 @@ def _record_operational_memory_feedback(
 
 
 def _run_recognition_plan_for_execution(request: VisionRecognitionPlanRequestModel) -> APIResponse:
+    from app.core.agent_grounding_target import current_agent_grounding
+    from app.core.local_input_policy import current_local_operator_identity
+
+    target = current_agent_grounding()
+    if target is not None:
+        try:
+            plan = target.plan(image_path=request.image_path, goal=request.goal,
+                identity=current_local_operator_identity(window_manager))
+        except (ValueError, PermissionError) as error:
+            return APIResponse(success=False, message="Agent grounding is unavailable",
+                error=ErrorModel(code="agent_grounding_invalid", details=str(error)))
+        return APIResponse(success=True, message="Agent candidate adapted", data={"result": plan})
     from app.api.vision import recognition_plan
 
     return recognition_plan(request)
@@ -2427,6 +2439,11 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             "recognition_plan_overlay_rendered": bool(overlay),
         }
 
+    if plan.get("grounding_evidence"):
+        execution_path.update(page_structure_used=False, candidate_rank_used=False,
+            narrow_search_used=False, external_grounding_used=True, local_model_used=False,
+            coordinate_source="agent_visual", selection_source="grounding.v1")
+
     if "low_risk_visual_fast_lane" not in locals():
         low_risk_visual_fast_lane = _low_risk_visual_fast_lane_profile(
             request=request,
@@ -2705,6 +2722,23 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     focus_check = check_local_text_focus(selected_point, window_manager)
                     if focus_check is not None:
                         base_result["local_text_focus_check"] = focus_check
+                    from app.core.agent_grounding_target import current_agent_grounding
+                    from app.core.local_input_policy import current_local_operator_identity
+                    grounding_target = current_agent_grounding()
+                    if grounding_target is not None:
+                        # 在真正派发前再复核区域，不能沿用计划阶段的旧画面。
+                        with timer.step("agent_grounding_dispatch_scene_check"):
+                            dispatch_capture = screenshot_service.capture_window(
+                                focus_window=False, purpose="agent-grounding-dispatch-check")
+                            dispatch_plan = grounding_target.plan(
+                                image_path=dispatch_capture["image_path"], goal=request.goal,
+                                identity=current_local_operator_identity(window_manager))
+                            base_result["agent_grounding_dispatch_scene"] = {
+                                "image_path": dispatch_capture["image_path"],
+                                "validation_scope": "target_region_consistency_not_atomic_hit_proof",
+                                "region_changed_fraction": dispatch_plan["grounding_evidence"]["region_changed_fraction"]}
+                        grounding_target.before_dispatch(selected_point,
+                            current_local_operator_identity(window_manager))
                     click_result = input_controller.click_point(
                         selected_point["x"],
                         selected_point["y"],
@@ -2842,6 +2876,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         )
     except Exception as exc:
         base_result["execution_path"]["action_executed"] = bool(attempts)
+        from app.agent.windows_text_field_reader import TextFieldReadError
+        if isinstance(exc, TextFieldReadError):
+            # 仅回传读取器的脱敏枚举，不丢失点击前字段校验的真实失败原因。
+            base_result['text_field_diagnostic'] = exc.to_reference()
         _record_click_sequence_failure(base_result, exc)
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="execution_failed")
         base_result["attempts"] = attempts

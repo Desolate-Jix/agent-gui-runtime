@@ -43,6 +43,20 @@ def test_missing_required_source_fails_before_output(tmp_path):
     assert not (tmp_path / "output").exists()
 
 
+def test_delivery_includes_referenced_development_docs_not_private_evidence(tmp_path):
+    seed(tmp_path)
+    for name in ('docs/development/EXTERNAL_VISION_API.md', 'docs/development/AGENT_VISION_IMPLEMENTATION.md',
+                 'docs/development/private-capture.png', 'docs/development/private-config.json'):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'fixture')
+    found = {p.relative_to(tmp_path).as_posix() for p in bundle.collect_sources(tmp_path)}
+    assert 'docs/development/EXTERNAL_VISION_API.md' in found
+    assert 'docs/development/AGENT_VISION_IMPLEMENTATION.md' in found
+    assert 'docs/development/private-capture.png' not in found
+    assert 'docs/development/private-config.json' not in found
+
+
 @pytest.mark.parametrize("entrypoint", (
     "app/desktop_review/entrypoint.py", "app/desktop_review/application.py",
     "app/agent_link/mcp_bridge.py",

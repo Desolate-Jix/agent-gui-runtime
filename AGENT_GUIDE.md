@@ -1,7 +1,13 @@
-# Agent 接入与操作 / Agent usage — v0.1.0-test.7
+# Agent 接入与操作 / Agent usage — v0.1.0-test.8
 
-**适用于 test.7 执行模式测试包。** 不要向旧包发送新增字段；先核对服务端版本。/ For the test.7 execution preview. Check server version before using new fields with older bundles.
+test.8 新增 [Agent 视觉组合命令协议](docs/development/AGENT_BATCH_PROTOCOL.md)：显式声明能力，使用 status/continue/cancel 继续原批次，不重发已完成输入。Agent `read_text` 返回原图，不加载本地 OCR。 / Test.8 adds explicit-capability Agent batches with status/continue/cancel and original-image reading, without replay or local OCR.
 
+**使用新视觉来源前先核对服务端版本为 test.8 或更新。** 不要向 test.7 发送新增字段。 / Verify server version before using the new fields; test.7 does not support them.
+
+识图交接与状态命令本身不点击；`grounding_execute` 仅用于独立单步，暂停中的组合命令须用 `agent_command_continue`。沿用公共执行路由，不自动重放。独立 API [仅保留接口](docs/development/EXTERNAL_VISION_API.md)。新窗口的 500ms 等待不等于页面就绪，仍需核对原图。 / Handoff/status do not click. Use grounding_execute only for standalone grounding and agent_command_continue for suspended batches. API remains reserved; launch waiting is not page-readiness proof.
+
+
+> v0.1.0-test.8：源码与隔离候选各 2025 项通过，本方 local、当前 Agent、实际 Luna 委派的单项及连续操作与清理通过；同候选独立 local、visual 与 cleanup 均已完成。首次失败、恢复与具体覆盖见验收记录。独立 API 仍仅预留接口，宿主禁用。 / Source and isolated candidate each passed 2025 checks. Main-agent local/current/actual-Luna single and continuous journeys passed; same-candidate independent local, visual and cleanup gates are complete. Initial failures and scope remain documented. External API remains interface-only with its host route disabled.
 ## test.6：通用应用启动 / Installed applications
 
 本节适用于 test.6；旧 test.5 包不包含新增接口，不需要为每个软件注册 MCP。 / Available in test.6, not older test.5 bundles. Apps do not need separate MCP registration.
@@ -27,6 +33,36 @@
 test.6 的历史独立验收见 docs/verification/TEST6_CANDIDATE_ACCEPTANCE.md，不沿用为 test.7 通过证据。新表单源码实测见 [批量填写记录](docs/verification/BATCH_FORM_LIVE_ACCEPTANCE.md)。/ Historical test.6 acceptance does not validate this candidate; see the separate source batch-form evidence.
 
 ## 执行契约 / Execution contracts
+
+### 调用方调度 / Caller scheduling
+
+本节调整 Agent 的调用组织，不新增执行权限、模型或自主跨页执行器；适用于后续调用，实际提速尚未复测。 / This changes caller orchestration, not permissions, models or an autonomous cross-page executor. Live speedup is not yet measured.
+
+1. **调用前准备 / Prepare before dispatch.** 一次整理当前可见区域中已知的字段、值、实际标签、可确认的顺序与完成条件，尽量合成一条 `form_fill`（最多 32 项）。缺失资料可并行询问，只暂缓依赖字段，不把其他已知字段一起停住。提前准备下一批的语义参数，不提前固定截图坐标；跳转、滚动或布局变化后使用新证据。 / Prepare known visible fields and completion conditions together, up to 32 per form call. Missing facts block only dependent fields. Prepare semantic arguments, never stale coordinates; reacquire evidence after layout changes.
+2. **单连接连续调用 / Keep one connection.** 同一 MCP 连接和目标会话连续使用，输入命令串行；不在每组前重复 discover/select/prepare_models。窗口切换、身份变化、宿主重启或证据失效时才重新绑定、准备。 / Keep the MCP session alive and serialize input. Rediscover/rebind/reprepare only when state or evidence requires it.
+3. **等待结果而不是闲置结果 / Await, do not abandon.** 优先 `instant_run`，显式设定当前版本支持且小于客户端超时的 `wait_ms`；客户端允许时，约 30 秒的批次使用 45000 ms 预算。这是最长等待，不是固定睡眠。客户端不足以等待时保留较短预算；收到 pending 后，立即进入原 `request_id` 的只读 `instant_result` 读取循环，不先插入分析、代码查询或新输入。仍 pending 时由调用方做约 1 秒有界间隔（若接口有 next 指引则遵循），不忙轮询；超过调用方总等待预算则报告 pending 并保留请求，禁止重放。 / Prefer an explicit supported wait below the client timeout; use 45 s for a roughly 30 s batch when supported. On pending, follow next and poll only the original ID with bounded intervals, without unrelated work or new input. An elapsed budget is not cancellation or permission to replay.
+4. **一次检查有效结果 / Inspect once.** 默认请求 compact 回执和 after 原图，先看字段完成/中断情况，再看返回图判断效果。证据完整且结果符合预期时，直接发已准备的下一批；不例行再取 full JSON、再截相同画面或逐字段复述。图片缺失、过期、不清晰或状态变化时补取所需证据，不以减少往返为由盲目继续。 / Inspect compact progress and the original after-image, then dispatch the prepared next batch. Fetch additional evidence only when needed; missing or stale images never justify blind continuation.
+5. **诊断与执行分开 / Separate diagnosis.** 正常链路内不读源码、不调研模型、不更新文档；失败则停止正常链路，提取该失败的必要日志、修复，再按项目要求复验。文字进度在开始占用键鼠、阻塞或收尾时集中报告，不让逐字段旁白拉长批次间隔。 / Keep unrelated investigation out of healthy batches. On failure, diagnose before resuming. Consolidate narration around input ownership, blockers and completion.
+6. **诚实计时 / Honest timing.** 调用方计时应记录 dispatch、pending received、result received、review complete、next dispatch；资料问题另记 asked/answered。能获取服务端 finished_at 时单列“结果完成到取回”的延迟。没有主模型请求起止数据时，review 到 dispatch 只叫调用方处理时间，不叫纯推理时间；用户等待可能与执行重叠，不能重复相加。 / Record dispatch/pending/result/review/next-dispatch and separate question timestamps where instrumentation is available. Report retrieval lag against server completion; do not call uninstrumented caller processing model inference or double-count overlapping user waits.
+
+单步章节中的“返回后再决定”适用于依赖新观察的动作；不要求把已支持、已规划的 `form_fill` 或 `input_sequence` 拆成逐键调用。调度规则不是已有自动调度器，也不意味着当前宿主或发布包已更新。 / Single-step guidance applies to observation-dependent actions, not splitting supported preplanned batches into individual keystrokes. This is a caller policy, not a shipped autonomous scheduler or a running-host update.
+
+### test.8 组合填写 / Batch composition
+
+以下能力要求 test.8；早期 130 项契约检查已纳入完整回归，实际覆盖与限制见 [本版验收](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。Tab 分组仍要求调用方确认真实连续焦点顺序，不保证任意表单。 / These features require test.8. Earlier 130 contract checks are included in full regression; see release acceptance for live scope and limits. Tab groups require known contiguous focus order and are not a universal form guarantee.
+
+- 先收齐当前已知值，将同页独立字段放入一条 `form_fill`；缺失值另问另补，不阻塞已知字段。准备好请求后直接执行，不在批次间插入无关代码/日志调查。 / Prepare all currently known values in one form request; ask separately for missing facts and avoid unrelated investigation between batches.
+- 新增 `text_navigation:"tab_groups"`。只给已确认实际 Tab 顺序的连续文本字段相同 `tab_group`；不确定的字段省略该属性，新段使用另一个组名。非文本字段自动断组；不会因选择了下拉框就直接 Tab 到未确认的文本框。 / Explicit same-named groups apply only to consecutive text fields with known real Tab order; omit the group when uncertain. Non-text controls and group changes reset recognition.
+- 每段首项重新定位，之后仍检查焦点标签、身份和输入后的实际值。错焦点中断，不自动补点、不自动重放。 / Each group head is freshly recognized; every continuation retains exact focus/identity/readback checks and interrupts on mismatch.
+- `instant_run` 省略 `wait_ms` 或传 null：表格最多等 45000 ms，其他命令 25000 ms；显式范围为 0–120000 ms。结果就绪立即返回，不是额外睡眠。客户端工具超时应大于该预算并留传输余量；较短客户端可显式用 25000。 / Omitted/null wait uses 45 s for forms, 25 s otherwise; explicit 0–120 s is supported. This is a maximum response wait, not a fixed delay; client timeout must exceed it.
+- 使用 `detail:"compact", images:"after"`；直接核对内联后图和字段结果。只有失败或需要诊断时取 full 回执，不例行追加 capture/image 请求；需要新观察时仍正常截图。 / Review the inline after-image and compact fields; retrieve full traces on demand rather than routinely recapturing.
+- 报告总等待、框架执行、批间空档三项，区分等待用户补充信息与调用方空档；不能把框架毫秒数当用户全程耗时。 / Report elapsed user time, executor time and inter-batch gaps separately, including user-input waits.
+
+混合分组参数示例（只用于已观察到匹配标签/顺序的表单） / Mixed-group request example, requiring observed matching labels/order:
+
+```json
+{"request_id":"mixed-form-01","command":{"kind":"form_fill","request":{"text_navigation":"tab_groups","fields":[{"kind":"text","field_goal":"First name","label":"First name","text":"Test","tab_group":"identity"},{"kind":"text","field_goal":"Last name","label":"Last name","text":"Person","tab_group":"identity"},{"kind":"dropdown","label":"Region","option":"Example Region"},{"kind":"text","field_goal":"City","label":"City","text":"Example City","tab_group":"location"},{"kind":"text","field_goal":"Postal code","label":"Postal code","text":"0000","tab_group":"location"}]}},"detail":"compact","images":"after"}
+```
 
 - 精确网页链接可用 `Click the result link labelled "完整可见标题"`；唯一性按本帧范围核对，完全离屏同名项不冒充可点目标，部分可见重名仍参与消歧。点击后仍须读原图确认网址/正文变化。 / Exact quoted links use current-frame identity; inspect post-images for navigation rather than trusting dispatch. See docs/verification/EXECUTION_BROWSER_RETEST_20260921.md.
 

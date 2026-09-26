@@ -45,6 +45,7 @@ class TextField(_StrictField):
     text: Text
     clear_existing: bool = True
     label: Label | None = None
+    tab_group: Label | None = None
 
 
 class DateField(_StrictField):
@@ -77,16 +78,33 @@ FormField = Annotated[TextField | DateField | DropdownField | CheckboxField | Ra
 
 class FormFillRequest(_StrictField):
     fields: list[FormField] = Field(min_length=1, max_length=32)
-    text_navigation: Literal["recognize_each", "tab_sequence"] = "recognize_each"
+    text_navigation: Literal["recognize_each", "tab_sequence", "tab_groups"] = "recognize_each"
 
     @model_validator(mode="after")
     def check_tab_group(self):
+        if self.text_navigation != "tab_groups" and any(
+                isinstance(item, TextField) and item.tab_group is not None for item in self.fields):
+            raise ValueError("tab_group requires text_navigation=tab_groups")
         if self.text_navigation == "tab_sequence":
             if any(not isinstance(item, TextField) or not item.label for item in self.fields):
                 raise ValueError("tab_sequence requires only text fields with exact accessible labels")
             labels = [" ".join(item.label.split()).casefold() for item in self.fields]
             if len(labels) != len(set(labels)):
                 raise ValueError("tab_sequence requires distinct field labels")
+        elif self.text_navigation == "tab_groups":
+            previous_group, labels = None, set()
+            for item in self.fields:
+                group = item.tab_group if isinstance(item, TextField) else None
+                if group is None or group != previous_group:
+                    labels = set()
+                if group is not None:
+                    if not item.label:
+                        raise ValueError("tab_groups requires exact labels for grouped text fields")
+                    key = " ".join(item.label.split()).casefold()
+                    if key in labels:
+                        raise ValueError("each consecutive tab group requires distinct field labels")
+                    labels.add(key)
+                previous_group = group
         return self
 
 
@@ -112,6 +130,7 @@ def run_form_fill(coordinator, target, request, *, persist=None):
         raise ValueError("select a target window before form_fill")
     started = perf_counter()
     previous_text = None
+    previous_group = None
     result = {"contract_version": "form_fill_v1", "status": "running", "phase": "starting",
         "fields": [], "completed_fields": [], "interrupted_at": None,
         "action_executed": False, "capture": None, "observation": {"status": "not_requested"},
@@ -138,8 +157,16 @@ def run_form_fill(coordinator, target, request, *, persist=None):
     def action(row, name, goal, field, before, option=None):
         from app.agent.windows_form_control_reader import read_form_control
         from app.core.local_control_target import LocalControlTarget
-        binding = LocalControlTarget(lambda: read_form_control(coordinator, target, field.label, field.kind,
-            expected_runtime_id=before["runtime_id"]), before, expected_option=option)
+        def current_control():
+            at = perf_counter()
+            try:
+                return read_form_control(coordinator, target, field.label, field.kind,
+                    expected_runtime_id=before["runtime_id"])
+            finally:
+                # 属于 action 耗时的子项，不再重复计入字段 read_ms。
+                row.setdefault("action_read_timings", []).append({"name": name,
+                    "elapsed_ms": round((perf_counter() - at) * 1000, 3)})
+        binding = LocalControlTarget(current_control, before, expected_option=option)
         result["phase"] = name
         result["observation"] = {"status": "unavailable", "reason": "action_in_progress"}
         step = {"name": name, "operation": "execute_recognition_plan",
@@ -186,6 +213,7 @@ def run_form_fill(coordinator, target, request, *, persist=None):
         from app.agent.windows_form_control_reader import read_form_control
         result["phase"] = "read_control" if before is None else "check_control"
         checkpoint()
+        at = perf_counter()
         try:
             snapshot = read_form_control(coordinator, target, field.label, field.kind,
                 expected_runtime_id=None if before is None else before["runtime_id"])
@@ -208,6 +236,8 @@ def run_form_fill(coordinator, target, request, *, persist=None):
                 result["observation"]["diagnostics"] = error.to_reference()["diagnostics"]
             raise
         finally:
+            row.setdefault("check_timings", []).append({"name": "read_control" if before is None else "check_control",
+                "elapsed_ms": round((perf_counter() - at) * 1000, 3)})
             checkpoint()
 
     def reason_code(error):
@@ -279,6 +309,7 @@ def run_form_fill(coordinator, target, request, *, persist=None):
             row["status"] = child["status"]
             row["error"] = child.get("error")
             row["input_sequence"] = child
+            row["check_timings"] = child.get("check_timings", [])
             result["phase"] = child["phase"]
             frames(child)
             merge_action(child["action_executed"])
@@ -288,22 +319,40 @@ def run_form_fill(coordinator, target, request, *, persist=None):
             nonlocal previous_text
             previous_text = (snapshot, kind)
 
-        grouped = spec.text_navigation == "tab_sequence"
+        grouped = (spec.text_navigation == "tab_sequence" or spec.text_navigation == "tab_groups"
+                   and isinstance(field, TextField) and field.tab_group is not None)
         # 显式标签优先，避免名称里的 input/field 被误当成语法而截断。
         goal = (f"Click the input labelled {json.dumps(field.label, ensure_ascii=False)}"
                 if isinstance(field, TextField) and field.label else field.field_goal)
         child = run_input_sequence(coordinator, target, {"field_goal": goal,
             "text": text, "clear_existing": True if field.kind == "date" else field.clear_existing,
             "submit_search": False},
-            persist=progress, _prefer_current_uia=isinstance(field, TextField) and bool(field.label),
+                    persist=progress, _prefer_current_uia=isinstance(field, TextField) and bool(field.label),
+                    _declared_label=field.label if isinstance(field, TextField) else None,
             **({"_tab_from": previous_text, "_expected_label": field.label,
                 "_on_field_complete": completed} if grouped else {}))
         progress(child)
         if child["status"] != "completed":
             raise FormFillInterrupted((child.get("error") or {}).get("code", "form_text_interrupted"))
 
+    field_started = None
+
+    def field_timing(row):
+        total = (perf_counter() - field_started) * 1000
+        action_ms = sum(step.get("elapsed_ms", 0) for step in row["steps"])
+        read_ms = sum(check.get("elapsed_ms", 0) for check in row.get("check_timings", []))
+        row["timings"] = {"field_total_ms": round(total, 3), "action_ms": round(action_ms, 3),
+            "read_ms": round(read_ms, 3), "other_ms": round(max(0, total - action_ms - read_ms), 3)}
+
     try:
         for index, field in enumerate(spec.fields):
+            field_started = perf_counter()
+            group = field.tab_group if isinstance(field, TextField) else None
+            if spec.text_navigation == "tab_groups":
+                # 仅同一连续显式组内传递焦点；控件、未分组字段和新组均重新识别。
+                if group is None or group != previous_group:
+                    previous_text = None
+                previous_group = group
             row = {"index": index, "kind": field.kind, "status": "running", "steps": [],
                 "check": {"status": "not_checked"}, "error": None}
             result["fields"].append(row)
@@ -324,6 +373,7 @@ def run_form_fill(coordinator, target, request, *, persist=None):
                 fill_control(row, field)
             row["status"] = "completed"
             result["completed_fields"].append(index)
+            field_timing(row)
             checkpoint()
         result.update(status="completed", phase="returned",
             next_action="inspect_returned_image_and_judge_task_effect")
@@ -332,6 +382,7 @@ def run_form_fill(coordinator, target, request, *, persist=None):
         if failure["code"] in {"form_control_state_unavailable", "form_control_expansion_unavailable"}:
             current_state_unavailable(row, failure["code"])
         row.update(status="interrupted", error=row.get("error") or failure)
+        field_timing(row)
         result.update(status="interrupted", interrupted_at=row["index"], error=row["error"],
             next_action="inspect_partial_fields_and_current_state_before_a_new_command")
     finally:

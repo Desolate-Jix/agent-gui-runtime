@@ -90,7 +90,9 @@ def make_ticket(args, sid, session):
     payload = {"pipe": "\\\\.\\pipe\\agent-review-instant-admin-" + secrets.token_hex(24),
                "auth": secrets.token_hex(32), "sid": sid, "session": session,
                "expires": time.time() + args.connect_timeout + 120,
-               "data": str(args.data_dir.resolve()), "model": str(args.model_directory.resolve()),
+               "data": str(args.data_dir.resolve()),
+               "model": str(args.model_directory.resolve()) if args.model_directory is not None else None,
+               "source": args.recognition_source, "delegate_profile": args.delegate_profile,
                "allow_input": args.allow_local_input}
     try:
         with path.open("x", encoding="utf-8") as stream:
@@ -156,7 +158,10 @@ def relay(connection, stdin, stdout, stderr, report=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--model-directory", type=Path, required=True)
+    parser.add_argument("--model-directory", type=Path)
+    parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"],
+                        default="local")
+    parser.add_argument("--delegate-profile")
     parser.add_argument("--allow-local-input", action="store_true")
     parser.add_argument("--connect-timeout", "--uac-timeout", type=int, default=90,
                         help="Pipe connection timeout AFTER UAC confirmation; --uac-timeout is a legacy alias. "
@@ -165,8 +170,16 @@ def main():
     args = parser.parse_args()
     if os.name != "nt":
         parser.error("Windows administrator relay only")
-    if not 5 <= args.connect_timeout <= 300 or not args.model_directory.is_dir():
-        parser.error("valid model directory and connect timeout 5..300 required")
+    if not 5 <= args.connect_timeout <= 300:
+        parser.error("connect timeout 5..300 required")
+    if args.recognition_source == "external_api":
+        parser.error("external_api recognition source is not implemented")
+    if args.recognition_source == "local" and (args.model_directory is None or not args.model_directory.is_dir()):
+        parser.error("local recognition requires a valid model directory")
+    if args.recognition_source == "agent_delegate" and not (args.delegate_profile or "").strip():
+        parser.error("agent_delegate requires --delegate-profile")
+    if args.recognition_source != "agent_delegate" and args.delegate_profile is not None:
+        parser.error("--delegate-profile is only valid for agent_delegate")
     ticket = pipe = process = connection = None
     report = {"mode": "administrator_stdio_relay", "connected": False,
               "relay_cleanup_verified": False, "host_cleanup_verified": None,

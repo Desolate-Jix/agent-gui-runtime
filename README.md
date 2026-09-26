@@ -1,13 +1,16 @@
 # Agent Review Instant
 
+
+
+> v0.1.0-test.8：源码与隔离候选各 2025 项通过，本方 local、当前 Agent、实际 Luna 委派的单项及连续操作与清理通过；同候选独立 local、visual 与 cleanup 均已完成。首次失败、恢复与具体覆盖见验收记录。独立 API 仍仅预留接口，宿主禁用。 / Source and isolated candidate each passed 2025 checks. Main-agent local/current/actual-Luna single and continuous journeys passed; same-candidate independent local, visual and cleanup gates are complete. Initial failures and scope remain documented. External API remains interface-only with its host route disabled.
 **Windows GUI execution runtime for MCP agents / 面向 MCP Agent 的 Windows 图形界面执行框架**
 
 Agent 负责理解任务、决定下一步和判断结果；框架负责观察真实界面、定位目标、派发操作、返回证据与管理本地资源。它不是另一个自主决策 Agent，也不是网页管理面板。
 
 The connected agent plans and judges outcomes. This runtime observes real Windows interfaces, grounds targets, dispatches actions and returns evidence. It is an execution layer, not an autonomous planner or web management console.
 
-> **当前版本：v0.1.0-test.7 · 执行模式测试版。**
-> **Current version: v0.1.0-test.7 · execution-mode test release.**
+> **当前版本：v0.1.0-test.8 · 执行模式测试版。**
+> **Current version: v0.1.0-test.8 · execution-mode test release.**
 >
 > **本次只更新执行模式，学习模式不发布。** 文末介绍是后续方向，不代表下载包已支持。
 > **Execution only. Learning is not shipped.** The roadmap below is not an available feature list.
@@ -18,9 +21,12 @@ The connected agent plans and judges outcomes. This runtime observes real Window
 ## 1. 下载与文档 / Downloads and documentation
 
 - [GitHub Releases / 已发布版本](https://github.com/Desolate-Jix/agent-gui-runtime/releases)
-- [test.7 ZIP / 当前源码包](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.7/AgentReviewInstant-v0.1.0-test.7.zip)
+- [已发布 test.8 ZIP / Published test.8 download](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.8/AgentReviewInstant-v0.1.0-test.8.zip)
 - [安装、模型下载与配置 / Setup and models](FRIEND_SETUP.md)
 - [Agent 使用指南 / Agent guide](AGENT_GUIDE.md)
+- [test.8 验收与限制 / Acceptance and limits](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)
+- [Agent 视觉路由与组合协议 / Agent routing and batch protocol](docs/development/AGENT_VISION_BACKENDS_DESIGN.md) · [组合协议细节 / Batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md) · [独立 API 预留接口 / Reserved API adapter](docs/development/EXTERNAL_VISION_API.md)
+- [调用方调度 / Caller scheduling](AGENT_GUIDE.md#执行契约--execution-contracts)：已知字段先合批、及时读取 pending 结果、直接核对回执原图；属于调用指引调整，尚无本轮实机提速数据。 / Batch known fields, promptly retrieve pending results and inspect inline evidence; caller guidance only, without a new live speed measurement.
 - [发布范围 / Release scope](RELEASE_SCOPE.md) · [变更记录 / Changelog](CHANGELOG.md)
 - [历史网页与学习工作台归档 / Historical workbench archive](https://github.com/Desolate-Jix/agent-gui-runtime/tree/codex/archive-learning-workbench)
 
@@ -30,7 +36,19 @@ This is a source bundle, not a standalone installer. Prepare dependencies, weigh
 
 ## 2. 功能 / Capabilities
 
-> **test.7：** 最多 32 项组合填写、可选具名文本 Tab 连续输入、日期、真实标签关联、原生文件选择与取消恢复。源码和隔离包各 **1759 项回归通过**（不相加）；Codex 连续实测及 AionUi 同包复验已完成。四字段两轮约 53–64 秒；组合动作减少 Agent 往返，并不等于所有表格已高速通用。/ Up to 32 ordered fields, optional named-text Tab input, dates, label binding and native-file recovery. **1759 checks each** in source and isolated bundle; Codex continuous use and AionUi same-bundle retesting completed. Four-field batches took about 53–64 seconds; fewer agent round trips do not imply universal fast forms. [实测、首失败与限制 / Evidence and limits](docs/verification/TEST7_CANDIDATE_ACCEPTANCE.md).
+**本地兼容能力 / Local compatibility:** 保留原有 VISTA 操作与 1–32 项 `form_fill`；新增视觉来源仍使用同一执行器。具体范围见 [发布范围](RELEASE_SCOPE.md)。 / Existing local VISTA actions and 1–32-field form filling remain available through the shared executor.
+
+**test.8 新增 / New in test.8:** 当前 Agent、客户端显式委派 Agent、原图交接、可恢复组合命令与原图文字阅读；外部 API 仅预留接口。 / Current/delegated Agent grounding, resumable batches and image-based reading; external API is interface-only.
+
+| Agent 路由 / Agent route | 行为与边界 / Behavior and boundary |
+|---|---|
+| `agent_current` | 使用当前具备图像能力的 Agent；无本地模型/VISTA/OCR 权重要求。当前 Agent 不具备所需视觉能力时为 unknown/unsupported 并停止该视觉路径，不静默转调本地模型或 API。 / Uses the current image-capable agent; no local model/VISTA/OCR weights. Unknown or unsupported capability stops this route; no silent local/API fallback. |
+| `agent_delegate` | 仅由客户端按显式配置/profile 选择和调用视觉子 Agent，例如 Astra 主 Agent 显式委派给 Luna；宿主不继承 API/key，也不自动创建或切换子 Agent。 / The client explicitly selects/invokes a delegate (e.g. Astra planner to Luna vision); no host credential inheritance or automatic model switching. |
+| `read_text` on Agent routes | 返回当前原图供 Agent 阅读，不运行本地 OCR。 / Returns the current original image for the Agent; does not run local OCR. |
+| resumable batch | grounding 等待通过 pending/status/resume 继续原命令，保留已完成项并禁止自动重放。 / Pending grounding suspends and resumes the same command without replaying completed fields. |
+| external API | 仅保留 adapter/config/mock 协议检查；宿主路由禁用，无 key/live-provider 验收要求，也不宣称服务商支持。 / Adapter/config/mock checks only; host route disabled, no key or live-provider requirement, and no provider-support claim. |
+
+Historical candidate01 isolated verification: source and frozen candidate each passed 2010 checks, with 283 module origins and 715 manifest hashes. These are historical results, not the current candidate03 results. / candidate01 历史隔离验证：源码与冻结包各 2010 项，283 个模块来源与 715 项 manifest 摘要均已核对，这些不是当前 candidate03 结果。
 
 | 功能 / Capability | 执行模式 / Execution mode |
 |---|---|
@@ -43,22 +61,18 @@ This is a source bundle, not a standalone installer. Prepare dependencies, weigh
 | 回执 / Receipts | 一次返回精简结果与原图，按需读取完整诊断，不自动重放 / Compact result plus images; full diagnostics; no automatic replay |
 | 模型 / Models | 显式准备、驻留复用、释放与清理验证 / Prepare, reuse resident models, release and verify cleanup |
 
-### test.6 新增 / New in test.6
+### 本地兼容能力 / Local compatibility
 
-**以下功能随 test.6 配送。 / Included in test.6.**
+以下本地能力继续保留；逐版本历史单独归档，不替代本轮新视觉来源验收。 / Local capabilities remain supported; historical acceptance does not substitute for this release’s new visual-route checks.
 
 - 自动发现开始菜单／桌面快捷方式及 Windows App Paths；按名称、发现 ID 或本地 `.exe/.lnk` 路径启动。同名返回候选，默认复用唯一现有窗口。
 - `desktop_capture` / `desktop_click` 无需调用方预先绑定；运行时自动确认桌面图标宿主，沿用现有识别执行链。
 - 模型启动错误包含阶段、错误码和日志位置；清理错误包含进程身份、Job、PID 文件与采样证据。
 - 关闭失败进入 `cleanup_pending`，保留原 owner，允许显式重试清理；旧会话未解决时返回结构化启动拒绝。
 - 修正模型下载参数及跨机器配置说明。
-- test.6 的 `form_fill` 支持一次声明 1–12 项文本、下拉、单选与复选状态，返回部分结果，不自动提交。test.7 的扩展范围见上方 test.7 说明与[表单协议 / Form contract](docs/verification/EXECUTION_FORM_FILL.md)。 / Shipped test.6 supports 1–12 text/dropdown/radio/checkbox fields, partial results and no automatic final submission. test.7 extensions are identified above.
+- `form_fill` supports 1–32 text/date/dropdown/radio/checkbox fields with partial receipts and no automatic final submission. See [form-fill contract](docs/verification/EXECUTION_FORM_FILL.md); historical test.7 acceptance remains separately archived.
 
-真实 W3C 表单的连续填写、重复设置、中断恢复，以及 Google→Maps 两地点查询已通过 Codex 同包实测和 AionUi 独立复测。独立地图测试首次发生模型点偏左 5px、零输入拒绝；Agent 核对后明确重试成功，不能算首轮全通过。
-
-Real W3C forms and Google-to-Maps two-place queries passed same-package Codex checks and independent AionUi retesting. The independent Maps first attempt was refused without input after a 5px model mislocalization; an explicit agent-reviewed retry succeeded. This is not first-attempt perfection or universal widget support.
-
-The release adds installed-app name/ID/path launch, desktop commands without caller-side binding, model diagnostics, cleanup-only recovery and corrected download instructions. UWP-only links, cross-executable launchers and ambiguous windows are not universally supported.
+The published test.7 live acceptance and its retained failure details are historical evidence for that exact package, not test.8 acceptance. See [test.7 acceptance](docs/verification/TEST7_CANDIDATE_ACCEPTANCE.md). The test.8 candidate record is the only source for current candidate verification; do not infer universal website/widget support.
 
 ## 3. 系统架构 / System architecture
 
@@ -75,7 +89,11 @@ Session host / 会话宿主            scripts/run_local_step_session.py
 Coordinator + Runtime owner / 协调器与串行运行线程
     |-- Window/app lifecycle / 应用发现、窗口准备
     |-- Capture + OCR + UIA / 原图、文字、可访问性结构
-    |-- VISTA model worker / 视觉目标定位
+    |-- Explicit grounding route / 显式定位路线
+    |     |-- local: VISTA worker / 本地模型
+    |     |-- agent_current: caller reads original image / 当前 Agent 读原图
+    |     `-- agent_delegate: client-selected vision delegate / 客户端显式委派
+    |-- Pending grounding -> resolve -> resume / 暂停→回传→续接
     |-- Existing action API / 点击、输入、按键、滚动
     |-- After observation / 操作后截图与诊断
     v
@@ -87,9 +105,9 @@ Receipts + original images + cleanup evidence / 回执、原图、清理证据
 
 1. **MCP 层**验证参数、管理请求 ID、落盘与查询回执。管理员入口通过 stdio 中继连接提权宿主，UAC 由用户确认，不给整个 Agent 提权。
 2. **会话／执行层**串行处理命令，维护目标窗口和进程身份。专用线程维持原生资源生命周期；不要求每次点击都关闭、重载模型。
-3. **观察／定位层**以截图提供当前像素，OCR 提供文字与框，UIA 提供可用控件和焦点，VISTA 根据图像和目标生成定位。它们是不同来源，不把模型点或合成搜索框当独立验证。
+3. **观察／定位层**以截图提供当前像素，OCR 提供文字与框，UIA 提供可用控件和焦点；识别来源必须显式选择。`local` 可用 VISTA；`agent_current` 由当前图像 Agent 读取原图；`agent_delegate` 由客户端按指定 profile 调用视觉子 Agent。unknown/unsupported 只停止所选路径，不隐式回退。Agent 路线的 `read_text` 返回图像，不运行本地 OCR。
 4. **动作层**复用现有窗口与输入实现，不为每个网站另写点击引擎。输入已派发、后图有变化、任务成功分别表达。
-5. **证据／资源层**持久化命令、回执、原图和清理记录。`verified=null` / `awaiting_agent_review` 把任务判定交给 Agent；进程资源清理则按自身证据验证。
+5. **证据／资源层**持久化命令、pending grounding、续接状态、回执、原图和清理记录。暂停/恢复续用同一命令并保留已完成项，不能自动重放。`verified=null` / `awaiting_agent_review` 把任务判定交给 Agent；进程资源清理则按自身证据验证。
 
 The adapter validates/persists requests; the serial coordinator owns native resources; capture, OCR, UIA and VISTA supply distinct observations; existing handlers dispatch input. Dispatch, observed change, task success and cleanup success are separate concepts. Elevation applies to the host, not the whole client.
 
@@ -211,16 +229,10 @@ Data can contain private text/images and may reach the client's model provider. 
 
 ## 8. 验证状态 / Verification status
 
-- 源码与隔离冻结包各 **1759 项通过**（重叠集合，不相加）；另有隔离入口及真实 MCP stdio 检查。
-- Codex 先完成单项、连续表单填写与原生文件选择/取消/重开；AionUi 在同一候选独立复验。两轮四字段均正确保留值，原始 `打开(O)` 目标两次确认文件，不使用回车代替。
-- 四字段：Codex **61.439 / 53.021 s**，AionUi **64.123 / 55.881 s**。此前具名三文本 Tab 组合约9–22秒，但并非同条件的提速A/B测量。
-- 保留早期 Open(O) 标签错误和文件按钮重开拒绝；修复后复验通过，不改记首次成功。
-- 本轮是操作员模式，两次独立 Open(O) 的自动判定被旁路；不宣称自动拦截策略通过。关闭对话框后直接截图仍会返回失效窗口 ValueError，需显式重新选择原浏览器。
-- 不保证任意表单、视觉多选、自定义日期部件、自动选项滚动、32项整批实机覆盖、跨设备稳定或无人值守。附件名显示不证明服务器收到文件，本轮未最终提交。
+**candidate01 历史 / Historical candidate01:** 原源码与隔离包各 2010 项，283 个模块、715 项清单；两轮 Luna 混合表单为 139.013 / 126.147 秒，含调用方等待。首次 CaptureVisibilityError 和 AionUi PARTIAL 均保留。当前交付依据为 candidate03，结果见验收文档。 / Preserve the original 2010-check candidate, its initial capture failure and PARTIAL independent report. These are historical; current delivery is based on candidate03 acceptance.
 
-Source and isolated bundle each passed 1759 overlapping checks. Independent AionUi testing followed Codex single/continuous runs on the same frozen runtime. Two four-field rounds and native choose/cancel/reopen/reselect passed, with original failures retained. Measured mixed batches remain roughly 53–64 seconds, not a universal speed or accuracy claim. Operator-mode bypass was active; automatic policy acceptance was not demonstrated. A capture against a closed picker still needs explicit browser rebinding.
 
-详细范围与证据见 [test.7 验收](docs/verification/TEST7_CANDIDATE_ACCEPTANCE.md) 和 [表单契约](docs/verification/EXECUTION_FORM_FILL.md)。/ See acceptance and contract for exact coverage and known limitations.
+Published test.7 results, failures and scope remain in the [test.7 acceptance record](docs/verification/TEST7_CANDIDATE_ACCEPTANCE.md); do not treat them as test.8 evidence. See [test.8 candidate acceptance](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md) and the [form contract](docs/verification/EXECUTION_FORM_FILL.md) for current evidence and limits.
 
 ## 9. 后续轻量学习模式 / Future lightweight learning
 

@@ -11,7 +11,10 @@ sys.path.insert(0, str(ROOT))
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--model-directory", type=Path, required=True)
+    parser.add_argument("--model-directory", type=Path)
+    parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"],
+                        default="local")
+    parser.add_argument("--delegate-profile")
     parser.add_argument("--allow-local-input", action="store_true",
                         help="Operator explicitly enables existing non-learning direct input, automatic risk interception OFF")
     args = parser.parse_args()
@@ -20,7 +23,8 @@ def main():
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     sys.stdout = sys.stderr
     from app.instant_mcp import InstantSession, build_server
-    session = InstantSession(ROOT, args.data_dir, args.model_directory, allow_local_input=args.allow_local_input)
+    session = InstantSession(ROOT, args.data_dir, args.model_directory, allow_local_input=args.allow_local_input,
+                             recognition_source=args.recognition_source, delegate_profile=args.delegate_profile)
     try:
         import anyio
         from mcp.server.stdio import stdio_server

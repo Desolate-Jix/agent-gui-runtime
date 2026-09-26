@@ -1,3 +1,15 @@
+# v0.1.0-test.8 · 可切换 Agent 视觉 / Switchable Agent vision
+
+验收与保留的首次失败见 [test.8 验收](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。 / See acceptance for verified scope and retained first failures.
+
+- 当前 Agent 或客户端显式委派视觉模型提供定位，沿用公共执行器；能力未知不自动启用视觉或加载本地模型。 / Current or client-delegated visual grounding reuses the shared executor without silent local-model fallback.
+- 单步、组合输入和表单支持持久化定位交接、状态/继续/取消；不重放已完成输入。Agent 文字读取返回原图。 / Durable grounding handoff and status/continue/cancel for steps and batches; image-based reading and no input replay.
+- 轻量 .venv-agent 安装、按来源配置和连接检查；独立 API 仅预留接口，不要求额外密钥。 / Lightweight source-aware setup and smoke; external API remains reserved only.
+- 修复浏览器初始 UIA 文档准备依赖目标句式、派发中旧图误标和取消竞态；自定义组合框支持显式 ARIA 展开状态，冲突拒绝并标注来源。 / Repair browser preparation, inflight evidence and cancellation; read explicit ARIA expansion with honest provenance.
+- 中断表单的精简回执保留底层步骤错误与失败原因，不放宽模型/UIA 冲突拒绝。已知精确字段名时同时提供 `label`。 / Compact interrupted-form receipts retain step errors and failure reasons without weakening model/UIA conflict rejection. Supply `label` when the exact field name is known.
+- 修复明确文本标签可能误填另一字段的问题：公共点击前校验唯一标签身份、控件命中与别名歧义，操作员模式不能跳过。 / Verify explicit text-label identity and hit-control equality before input, including mixed-name/alias ambiguity; operator mode cannot bypass this check.
+- 源码与隔离候选各 2025 项通过；同一候选的 local、当前 Agent、实际 Luna 委派单项及连续混合填写、弹窗取消恢复与清理通过。首次失败和调用方错误保留；独立验收另行记录。 / Source and isolated candidate each passed 2025 checks. Same-candidate local/current/delegated single and continuous operations, popup cancellation/recovery and cleanup passed. Initial failures and caller errors remain recorded; independent acceptance is tracked separately.
+
 # v0.1.0-test.7 · 组合表单测试版 / Batch-form test release
 
 - 表单一次最多32项，统一部分结果；可选具名文本Tab组合，减少Agent往返。/ Up to 32 ordered fields, compact partial receipts and optional labelled-text Tab composition.

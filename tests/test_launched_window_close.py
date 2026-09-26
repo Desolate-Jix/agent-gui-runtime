@@ -90,6 +90,35 @@ def test_launch_observation_registers_identity_for_later_close(monkeypatch):
     assert coordinator._launched_window_identities[(101, 202)] == IDENTITY
 
 
+@pytest.mark.parametrize("outcome", ["stable", "cancelled", "changed"])
+def test_launch_waits_for_initial_presentation_and_rechecks_identity(monkeypatch, outcome):
+    coordinator = Coordinator(Windows())
+    coordinator._launched_window_identities.clear()
+    waited = []
+    changed = [False]
+    def wait(seconds):
+        waited.append(seconds)
+        assert coordinator._launched_window_identities[(101, 202)] == IDENTITY
+        changed[0] = outcome == "changed"
+        return outcome == "cancelled"
+    coordinator._cancel_wait = SimpleNamespace(is_set=lambda: False, wait=wait)
+    monkeypatch.setattr(module.WindowsNativeIdentityReader, "read_identity",
+        lambda *_: {**IDENTITY, "process_create_time": 99.0} if changed[0] else deepcopy(IDENTITY))
+    result = coordinator._await_launched_window(
+        {"executable_path": IDENTITY["executable_path"], "source": "app_catalog"},
+        SimpleNamespace(pid=202), set())
+    assert waited == [0.5]
+    if outcome == "stable":
+        assert result["status"] == "launched_window_ready"
+        assert result["presentation_wait_ms"] == 500
+        assert result["content_ready"] is None
+        assert result["next_action"] == "capture_and_inspect_current_content"
+    else:
+        assert result["status"] == "launched_window_unavailable"
+        assert result["reason"] == ("launch_effect_not_undone_after_cancel" if outcome == "cancelled"
+                                    else "launched_window_identity_changed")
+
+
 def test_close_launched_window_rejects_window_not_launched_by_this_coordinator():
     coordinator = Coordinator(Windows())
     with pytest.raises(Exception) as exc:

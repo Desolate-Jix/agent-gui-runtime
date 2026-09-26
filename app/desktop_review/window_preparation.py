@@ -19,6 +19,7 @@ from app.core.window_close import observe_close_wait, post_window_close, window_
 
 class WindowPreparationMixin:
     _WINDOW_PREPARATION_TTL_SECONDS = 60.0
+    _LAUNCH_PRESENTATION_WAIT_SECONDS = 0.5
 
     def discover_applications(self) -> dict[str, Any]:
         from .application_catalog import application_catalog_view
@@ -425,11 +426,23 @@ class WindowPreparationMixin:
                     return _launch_unavailable(process_id, "launched_window_identity_changed")
                 if self._cancel_wait.is_set():
                     return _launch_unavailable(process_id, "launch_effect_not_undone_after_cancel")
-                self._cache_prepared_identity(intent, matched)
                 if not hasattr(self, "_launched_window_identities"):
                     self._launched_window_identities = {}
                 self._launched_window_identities[(matched["target_window_handle"], matched["process_id"])] = deepcopy(matched)
-                return {"status": "launched_window_ready", "process_id": process_id, "window": _bound(bound)}
+                # HWND 可见早于首帧绘制；只对新启动窗口等待显示过渡，不宣称页面已加载。
+                # 先保留启动归属，取消或身份变化后仍可检查并清理本次副作用。
+                if self._cancel_wait.wait(self._LAUNCH_PRESENTATION_WAIT_SECONDS):
+                    return _launch_unavailable(process_id, "launch_effect_not_undone_after_cancel")
+                bound = self._windows().bind_window_by_handle(handle)
+                current = WindowsNativeIdentityReader(window_manager=self._windows()).read_identity(handle)
+                if validate_native_identity_fact(current, target_window_handle=handle) != matched:
+                    return _launch_unavailable(process_id, "launched_window_identity_changed")
+                if self._cancel_wait.is_set():
+                    return _launch_unavailable(process_id, "launch_effect_not_undone_after_cancel")
+                self._cache_prepared_identity(intent, matched)
+                return {"status": "launched_window_ready", "process_id": process_id, "window": _bound(bound),
+                        "presentation_wait_ms": round(self._LAUNCH_PRESENTATION_WAIT_SECONDS * 1000),
+                        "content_ready": None, "next_action": "capture_and_inspect_current_content"}
             self._cancel_wait.wait(min(0.05, max(0, deadline - time.monotonic())))
         return _launch_unavailable(process_id, "launched_window_timeout")
 

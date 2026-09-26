@@ -23,6 +23,27 @@ def write(path, data):
     write_json_snapshot(path, data)
 
 
+def configure_recognition_startup(coordinator, args, report):
+    from app.vision.recognition_source import RecognitionSourceConfig
+    if args.recognition_source == "external_api":
+        raise ValueError("external_api recognition source is not implemented")
+    config = RecognitionSourceConfig.model_validate({"source": args.recognition_source,
+        "delegate_profile": args.delegate_profile})
+    if config.source == "local" and (args.model_directory is None or not args.model_directory.is_dir()):
+        raise ValueError("local recognition requires an existing --model-directory")
+    report["recognition_source"] = config.source
+    report["delegate_profile"] = config.delegate_profile
+    # Agent 视觉路线不配置、加载或预热本地 VISTA。
+    report["model_configuration"] = (coordinator.configure_vista_model(
+        model_directory=str(args.model_directory.resolve())) if config.source == "local" else None)
+
+
+def prepare_models_for_source(coordinator, recognition_source):
+    return (coordinator.prepare_local_step_models(prepare_ocr=True)
+        if recognition_source == "local" else
+        {"status": "model_not_required", "recognition_source": recognition_source})
+
+
 def run_step_command(coordinator, target, command):
     operation = command["operation"]
     request = command["request"]
@@ -35,18 +56,111 @@ def run_step_command(coordinator, target, command):
            if command.get("observation_condition") is not None else {}))
 
 
-def run_read_text_command(capture_current, command):
-    from app.operation.screen_reading.captured_text import read_captured_text
+def run_read_text_command(capture_current, command, *, recognition_source="local"):
     observation = {**capture_current(), 'capture_id': 'text-' + secrets.token_hex(16),
                    'captured_at': now()}
+    if recognition_source != 'local':
+        return {'status': 'agent_read_required', 'recognition_source': recognition_source,
+            'text': None, 'next_action': 'read_returned_original_image',
+            'max_chars': command.get('max_chars', 10000), 'action_executed': False}, observation
+    from app.operation.screen_reading.captured_text import read_captured_text
     result = read_captured_text(observation, max_chars=command.get('max_chars', 10000))
     return result, observation
+
+
+def check_agent_command_admission(jobs, kind):
+    if jobs is not None and jobs.active and kind not in {
+            'close', 'agent_command_status', 'agent_command_continue', 'agent_command_cancel',
+            'grounding_resolve', 'grounding_status', 'grounding_cancel'}:
+        raise ValueError('agent_command_in_progress: continue, inspect or cancel the original command')
+
+
+def dispatch_agent_command(jobs, request_id, command, target):
+    from app.vision.agent_command_contract import AGENT_COMMANDS
+    kind = command['kind']
+    if kind in AGENT_COMMANDS:
+        if jobs is None:
+            raise ValueError('agent_command_requires_agent_source')
+        request = AGENT_COMMANDS[kind].model_validate(command['request'])
+        if kind == 'agent_command_continue':
+            return jobs.resume(request.command_id, request.grounding_request_id, request_id)
+        return (jobs.cancel if kind == 'agent_command_cancel' else jobs.get)(request.command_id)
+    if jobs is not None and (kind in {'form_fill', 'input_sequence'} or
+            kind == 'step' and command.get('operation') == 'execute_recognition_plan'):
+        return jobs.start(request_id, command, target, command.get('vision_capabilities') or {})
+    return None
+
+
+def run_grounding_command(store, capture_current, request_id, command, *, session_configuration=None):
+    from app.vision.grounding_commands import validate_grounding_command
+    from app.vision.grounding_contract import GroundingResult
+    from app.vision.grounding_handoff import GroundingHandoffError
+    from app.vision.recognition_source import resolve_recognition_route
+    request = validate_grounding_command(command["kind"], command["request"])
+    if command["kind"] == "grounding_execute":
+        raise GroundingHandoffError("use_grounding_execution_dispatch")
+    if command["kind"] == "grounding_prepare":
+        if session_configuration is not None and request.configuration != session_configuration:
+            raise GroundingHandoffError("session_recognition_source_mismatch")
+        route = resolve_recognition_route(request.configuration, request.capabilities)
+        if route.status != "eligible":
+            raise GroundingHandoffError(route.code)
+        if route.dispatch_owner != "agent_client":
+            raise GroundingHandoffError("handoff_requires_agent_source")
+        observation = {**capture_current(), "capture_id": "grounding-" + secrets.token_hex(16)}
+        state = store.prepare(request_id, goal=request.goal, capture=observation,
+                              configuration=request.configuration, capabilities=request.capabilities)
+    elif command["kind"] == "grounding_resolve":
+        state = store.resolve(request.grounding_request_id, request.result)
+    elif command["kind"] == "grounding_cancel":
+        state = store.cancel(request.grounding_request_id)
+    else:
+        state = store.get(request.grounding_request_id)
+    result = {**state, "execution_available": state["phase"] == "grounding_ready"}
+    if state["phase"] == "awaiting_grounding":
+        result["output_schema"] = GroundingResult.model_json_schema()
+    elif state["phase"] == "grounding_ready":
+        result["next_action"] = "submit_grounding_execute_with_original_request_id"
+    return result, state["capture"]
+
+
+def run_grounding_execution(store, coordinator, selected, request_id, command):
+    from app.core.agent_grounding_target import AgentGroundingTarget
+    from app.vision.grounding_commands import validate_grounding_command
+    from app.vision.grounding_handoff import GroundingHandoffError
+    request = validate_grounding_command(command["kind"], command["request"])
+    state = store.get(request.grounding_request_id)
+    identity = state["capture"]["window_identity"]
+    if (not isinstance(selected, dict)
+            or any(selected.get(key) != identity[key] for key in ("handle", "process_id"))):
+        raise GroundingHandoffError("selected_target_changed")
+    claimed = store.claim_execution(request.grounding_request_id, request_id)
+    target = None
+    try:
+        target = AgentGroundingTarget(claimed)
+        result = coordinator.execute_local_step(target_window_handle=identity["handle"],
+            target_process_id=identity["process_id"], operation="execute_recognition_plan",
+            request={"goal": target.goal}, grounding_target=target, include_observation=True)
+        result["grounding_request_id"] = request.grounding_request_id
+    except Exception as error:
+        # 输入异常可能发生在派发之后，记录不确定性，绝不退回可执行状态。
+        store.finish_execution(request.grounding_request_id, request_id,
+            {"phase": "result_unknown" if target and target.input_claimed else "failed",
+             "error_type": type(error).__name__, "automatic_retry_allowed": False},
+            input_attempted=bool(target and target.input_claimed))
+        raise
+    store.finish_execution(request.grounding_request_id, request_id, result,
+                           input_attempted=target.input_claimed)
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--model-directory", type=Path, required=True)
+    parser.add_argument("--model-directory", type=Path)
+    parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"],
+                        default="local")
+    parser.add_argument("--delegate-profile")
     parser.add_argument("--local-no-learning", action="store_true", required=True)
     parser.add_argument("--observer", choices=["minimal", "original"], default="minimal")
     parser.add_argument("--parent-pid", type=int)
@@ -64,6 +178,7 @@ def main():
         (out / name).mkdir()
     host = None
     co = None
+    agent_jobs = None
     target = None
     stop = threading.Event()
     sampler_thread = None
@@ -118,9 +233,14 @@ def main():
         bound = co._windows().bind_window_by_handle(target["handle"])
         if bound is None or bound.process_id != target["process_id"]:
             raise ValueError("target window identity changed")
+        process_created = psutil.Process(bound.process_id).create_time()
         image = ScreenshotService(window_manager=co._windows(), capture_dir=out / "captures").capture_window(
             focus_window=False, purpose="live-latency-observation")
+        if psutil.Process(bound.process_id).create_time() != process_created:
+            raise ValueError("target process identity changed during capture")
         return {**image, "window": {"handle": bound.handle, "process_id": bound.process_id},
+                "window_identity": {"handle": bound.handle, "process_id": bound.process_id,
+                                    "process_create_time": process_created},
                 "sha256": hashlib.sha256(Path(image["image_path"]).read_bytes()).hexdigest()}
 
     try:
@@ -130,9 +250,18 @@ def main():
             runtime_output_root=out / "runtime-output", vision_config_path=out / "configs/vision.json")
         co.set_automatic_safety_interception(False)
         co.set_keep_models_loaded(True)
-        report["model_configuration"] = co.configure_vista_model(model_directory=str(args.model_directory.resolve()))
+        configure_recognition_startup(co, args, report)
         report["phase"] = "ready"
         write(out / "report.json", report)
+        from app.vision.grounding_handoff import GroundingHandoffStore
+        from app.vision.grounding_commands import GROUNDING_COMMANDS
+        from app.vision.recognition_source import RecognitionSourceConfig
+        session_configuration = RecognitionSourceConfig(source=args.recognition_source,
+                                                        delegate_profile=args.delegate_profile)
+        grounding_store = GroundingHandoffStore(out, owner_id="host-" + secrets.token_hex(16))
+        if args.recognition_source != 'local':
+            from app.vision.agent_command_jobs import AgentCommandJobs
+            agent_jobs = AgentCommandJobs(co, grounding_store, capture, session_configuration)
         sampler_thread = threading.Thread(target=sample_loop, daemon=True, name="live-process-sampler")
         sampler_thread.start()
         done = set()
@@ -163,7 +292,19 @@ def main():
                 command = json.loads(path.read_text(encoding="utf-8"))
                 response["command"] = command
                 kind = command["kind"]
-                if kind == "discover":
+                check_agent_command_admission(agent_jobs, kind)
+                agent_result = dispatch_agent_command(agent_jobs, path.stem, command, target)
+                if agent_result is not None:
+                    response['result'] = agent_result
+                    response['observation'] = (agent_result.get('observation') or {}).get('capture')
+                elif kind == "grounding_execute":
+                    response["result"] = run_grounding_execution(grounding_store, co, target, path.stem, command)
+                    response["observation"] = response["result"].get("observation", {}).get("capture")
+                elif kind in GROUNDING_COMMANDS:
+                    response["result"], response["observation"] = co._owner.call(
+                        lambda: run_grounding_command(grounding_store, capture, path.stem, command,
+                                                      session_configuration=session_configuration))
+                elif kind == "discover":
                     response["result"] = co.discover_applications()
                 elif kind in {"desktop_capture", "desktop_click"}:
                     from app.desktop_review.desktop_command import prepare_desktop_target
@@ -177,8 +318,9 @@ def main():
                                               "binding_mode": "automatic_desktop_host"}
                         response["observation"] = co._owner.call(capture)
                     else:
-                        response["result"] = run_step_command(co, target,
-                            {**command, "operation": "execute_recognition_plan"})
+                        step = {**command, 'kind': 'step', "operation": "execute_recognition_plan"}
+                        response["result"] = (dispatch_agent_command(agent_jobs, path.stem, step, target)
+                            if agent_jobs is not None else run_step_command(co, target, step))
                         response["observation"] = response["result"].get("observation", {}).get("capture")
                 elif kind == "select":
                     preview = co.preview_selected_window_preparation(
@@ -209,14 +351,14 @@ def main():
                             and target["process_id"] == command["process_id"]):
                         target = None
                 elif kind == "prepare_models":
-                    response["result"] = co.prepare_local_step_models(prepare_ocr=True)
+                    response["result"] = prepare_models_for_source(co, args.recognition_source)
                 elif kind == "release_models":
                     response["result"] = co.release_resident_models()
                 elif kind == "capture":
                     response["observation"] = co._owner.call(capture)
                 elif kind == "read_text":
                     response["result"], response["observation"] = co._owner.call(
-                        lambda: run_read_text_command(capture, command))
+                        lambda: run_read_text_command(capture, command, recognition_source=args.recognition_source))
                 elif kind == "step":
                     response["result"] = run_step_command(co, target, command)
                     observed = response["result"].get("observation", {})
@@ -265,6 +407,13 @@ def main():
         raise
     finally:
         terminal_phase = report.get('phase')
+        if agent_jobs is not None:
+            # 先停止组合命令再销毁协调器，未退出的输入线程不算清理完成。
+            while not agent_jobs.close(timeout=5):
+                report.update(phase='cleanup_pending', cleanup_verified=False,
+                    agent_command_cleanup={'status': 'waiting_for_worker', 'automatic_retry_allowed': False})
+                write(out / 'report.json', report)
+            report['agent_command_cleanup'] = {'status': 'stopped'}
         if co is not None:
             from app.desktop_review.session_cleanup import shutdown_retaining_owner
             from app.core.json_snapshot import read_json_snapshot

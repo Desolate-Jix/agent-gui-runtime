@@ -289,10 +289,38 @@ def _checked(node, kind):
     return bool(value) if type(value) in (bool, int) and value in (0, 1) else None
 
 
-def _expanded(node):
-    # 直接读取原始模式；包装器的缺模式回退会猜测 collapsed，不能作为切换依据。
+def _aria_expanded(node):
+    # Chromium 自定义组合框可能仅以 ARIA 暴露展开状态，不能把 LeafNode 猜成收起。
+    try:
+        element = node.element_info.element
+        role, properties = element.CurrentAriaRole, element.CurrentAriaProperties
+    except Exception:
+        return None
+    if (node.element_info.control_type != "ComboBox" or role != "combobox"
+            or not isinstance(properties, str) or len(properties) > 8192 or "\\" in properties):
+        return None
+    values = []
+    for token in properties.split(";"):
+        key, separator, value = token.partition("=")
+        if key.strip() == "expanded":
+            if not separator:
+                return None
+            values.append(value.strip())
+    return values[0] == "true" if len(values) == 1 and values[0] in {"true", "false"} else None
+
+
+def _expansion_state(node):
+    # 原生模式优先；两种明确状态矛盾时拒绝，保留部分展开等原生状态的未知语义。
     value = _pattern_property(node, "iface_expand_collapse", "CurrentExpandCollapseState")
-    return bool(value) if type(value) is int and value in (0, 1) else None
+    aria = _aria_expanded(node)
+    if type(value) is int and value in (0, 1):
+        native = bool(value)
+        if aria is not None and aria is not native:
+            raise FormControlReadError("form_control_expansion_conflict")
+        return native, "uia_expand_collapse"
+    if (value is None or type(value) is int and value == 3) and aria is not None:
+        return aria, "uia_aria_expanded"
+    return None, "unavailable"
 
 
 def _native_owned_popups(handle, pid):
@@ -445,12 +473,14 @@ def _dropdown(node, walker, wrap, handle, pid, window, diagnostics=None, *, expa
     return value, options
 
 
-def _scan_controls(root, walker, wrap, label, control_type, diagnostics, window):
+def _scan_controls(root, walker, wrap, label, control_type, diagnostics, window, *, normalize_name=_name,
+                   include_aliases=False):
     matches = []
-    candidates, snapshot = [], []
+    nodes = []
     diagnostics.update(scan_started=True, scan_complete=False, node_count=0,
                        document_count=0, match_count=0, control_type_counts={})
     for node in _descendants(root, walker, wrap, limit=MAX_FORM_SCAN_EDGES, diagnostics=diagnostics):
+        nodes.append(node)
         info = node.element_info
         actual_type = info.control_type
         diagnostic_type = actual_type if actual_type in _CONTROL_TYPES else "Other"
@@ -458,9 +488,17 @@ def _scan_controls(root, walker, wrap, label, control_type, diagnostics, window)
         counts = diagnostics["control_type_counts"]
         counts[diagnostic_type] = counts.get(diagnostic_type, 0) + 1
         diagnostics["document_count"] += int(diagnostic_type == "Document")
-        if actual_type == control_type and isinstance(info.name, str) and _name(info.name) == label:
+        if actual_type == control_type and isinstance(info.name, str) and normalize_name(info.name) == label:
             matches.append(node)
             diagnostics["match_count"] += 1
+    # 完整遍历仍检查迟到重名和树身份；只有无直接名称时才构建几何标签索引。
+    if matches and not include_aliases:
+        diagnostics["scan_complete"] = True
+        return matches
+    candidates, snapshot = [], []
+    for node in nodes:
+        info = node.element_info
+        actual_type = info.control_type
         if actual_type in {"Text", "Edit", "ComboBox", "CheckBox", "RadioButton"}:
             visible = _explicit_true_call(node, "is_visible")
             box = _relative_rect(info.rectangle, window) if visible else None
@@ -474,14 +512,16 @@ def _scan_controls(root, walker, wrap, label, control_type, diagnostics, window)
                     except Exception:
                         labeled_by = None
                 rid = _runtime_id(info.runtime_id)
-                snapshot.append({"runtime_id": rid, "name": info.name, "control_type": actual_type,
+                snapshot.append({"runtime_id": rid, "name": normalize_name(info.name), "control_type": actual_type,
                     "bbox": box, "parent_id": _tree_parent(node, walker, wrap),
                     "labeled_by": labeled_by, "visible": True})
                 if actual_type == control_type:
                     candidates.append(node)
-    if not matches:
+    if not matches or include_aliases:
         rid = bind_form_label(label, control_type, snapshot)
-        matches = [node for node in candidates if _runtime_id(node.element_info.runtime_id) == rid]
+        existing = {_runtime_id(node.element_info.runtime_id) for node in matches}
+        matches.extend(node for node in candidates if _runtime_id(node.element_info.runtime_id) == rid
+                       and rid not in existing)
         diagnostics["match_count"] = len(matches)
     diagnostics["scan_complete"] = True
     return matches
@@ -570,7 +610,7 @@ def _read_on_owner(coordinator, handle, pid, label, kind, expected, diagnostics)
         raise FormControlReadError("form_control_identity_changed")
     value, checked, options = None, None, []
     if kind == "dropdown":
-        expanded = _expanded(node)
+        expanded, expansion_source = _expansion_state(node)
         value, options = _dropdown(node, walker, wrap, handle, pid, window, diagnostics, expanded=expanded, root=root)
         if expanded is True and options:
             options = _associate_option_popups(options, handle=handle, pid=pid, window=window, identity=identity,
@@ -581,7 +621,7 @@ def _read_on_owner(coordinator, handle, pid, label, kind, expected, diagnostics)
         raise FormControlReadError("form_control_identity_changed")
     if (identity, window) != _window_snapshot(windows, native, handle, pid):
         raise FormControlReadError("form_control_window_changed")
-    if kind == "dropdown" and _expanded(node) is not expanded:
+    if kind == "dropdown" and _expansion_state(node) != (expanded, expansion_source):
         raise FormControlReadError("form_control_expansion_changed")
     result = {"source": "windows_uia", "runtime_id": before["runtime_id"], "bbox": before["bbox"],
             "window_identity": identity, "window_rect": list(window), "kind": kind,
@@ -590,6 +630,7 @@ def _read_on_owner(coordinator, handle, pid, label, kind, expected, diagnostics)
             "state_available": value is not None if kind == "dropdown" else checked is not None}
     if kind == "dropdown":
         result["expanded"] = expanded
+        result["expansion_source"] = expansion_source
     if ("readiness" in diagnostics or diagnostics.get("alias_count")
             or diagnostics.get("option_scan", {}).get("alias_count")
             or "viewport_source" in diagnostics.get("option_scan", {})):

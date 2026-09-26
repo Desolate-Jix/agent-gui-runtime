@@ -203,7 +203,8 @@ def _read_local_focus(coordinator, target, capture, field_id, binding, expected_
 
 
 def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None, observation_condition=None, persist=None,
-                       _tab_from=None, _expected_label=None, _on_field_complete=None, _prefer_current_uia=False):
+                       _tab_from=None, _expected_label=None, _on_field_complete=None, _prefer_current_uia=False,
+                       _declared_label=None):
     """同一宿主串行命令内完成组合；不循环点击、不自动改写目标或重试输入。"""
     spec = InputSequenceRequest.model_validate(request)
     if _tab_from is not None and (spec.submit_search or not _expected_label):
@@ -303,7 +304,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
 
     try:
         from app.core.local_text_focus import LocalTextFocusTarget
-        focus_target = LocalTextFocusTarget(target["handle"], target["process_id"])
+        focus_target = LocalTextFocusTarget(target["handle"], target["process_id"],
+            expected_label=_declared_label)
         if _tab_from is None:
             located = action("focus", "execute_recognition_plan", {
                 "goal": spec.field_goal, "click_kind": "single",

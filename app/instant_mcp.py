@@ -16,7 +16,16 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-INSTANT_VERSION = "0.1.0-test.7"
+INSTANT_VERSION = "0.1.0-test.8"
+
+
+def _run_wait_budget(kind, requested):
+    # 只延长回执等待，不延长动作等待、不持锁，也不重发输入。
+    if requested is None:
+        return 45000 if kind == "form_fill" else 25000
+    if type(requested) is not int or not 0 <= requested <= 120000:
+        raise ValueError("wait_ms must be an integer from 0 to 120000, or null for command defaults")
+    return requested
 
 
 class InstantAdmissionError(ValueError):
@@ -53,7 +62,7 @@ def _validate_request_id(request_id):
 
 class InstantCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "form_fill", "close_launched_window", "desktop_capture", "desktop_click"]
+    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "form_fill", "close_launched_window", "desktop_capture", "desktop_click", "grounding_prepare", "grounding_resolve", "grounding_status", "grounding_cancel", "grounding_execute", "agent_command_status", "agent_command_continue", "agent_command_cancel"]
     app_id: str | None = None
     name: str | None = None
     path: str | None = None
@@ -66,23 +75,34 @@ class InstantCommand(BaseModel):
     observation_wait_ms: int | None = Field(default=None, ge=0, le=2000)
     observation_condition: dict | None = None
     max_chars: int | None = Field(default=None, ge=1, le=20000)
+    vision_capabilities: dict | None = None
 
     def command(self):
+        from app.vision.grounding_commands import GROUNDING_COMMANDS, validate_grounding_command
+        from app.vision.agent_command_contract import AGENT_COMMANDS
         value = self.model_dump(exclude_none=True)
         fields = {
             "launch": (set(), {"app_id", "name", "path", "url", "prefer_existing"}),
             "select": ({"handle", "process_id"}, {"handle", "process_id"}),
             "close_launched_window": ({"handle", "process_id"}, {"handle", "process_id"}),
-            "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition"}),
-            "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition"}),
-            "form_fill": ({"request"}, {"request"}),
+            "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
+            "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
+            "form_fill": ({"request"}, {"request", "vision_capabilities"}),
             "read_text": (set(), {"max_chars"}),
-            "desktop_click": ({"request"}, {"request", "observation_wait_ms", "observation_condition"}),
+            "desktop_click": ({"request"}, {"request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
         }
-        required, allowed = fields.get(self.kind, (set(), set()))
+        required, allowed = (({"request"}, {"request"}) if self.kind in GROUNDING_COMMANDS or self.kind in AGENT_COMMANDS
+                             else fields.get(self.kind, (set(), set())))
         present = set(value) - {"kind"}
         if not required <= present or present - allowed:
             raise ValueError("command fields do not match kind")
+        if self.kind in GROUNDING_COMMANDS:
+            validate_grounding_command(self.kind, self.request)
+        if self.kind in AGENT_COMMANDS:
+            AGENT_COMMANDS[self.kind].model_validate(self.request)
+        if self.vision_capabilities is not None:
+            from app.vision.recognition_source import ClientVisionCapabilities
+            ClientVisionCapabilities.model_validate(self.vision_capabilities)
         if self.kind == "launch":
             selectors = [value[key] for key in ("app_id", "name", "path") if key in value]
             if len(selectors) != 1 or not selectors[0].strip():
@@ -119,10 +139,13 @@ def write_json(path, value):
 
 
 class InstantSession:
-    def __init__(self, root, data_root, model_directory, *, allow_local_input=False):
+    def __init__(self, root, data_root, model_directory=None, *, allow_local_input=False,
+                 recognition_source="local", delegate_profile=None):
         self.root = Path(root).resolve()
         self.data_root = Path(data_root).resolve()
-        self.model_directory = Path(model_directory).resolve()
+        self.model_directory = Path(model_directory).resolve() if model_directory is not None else None
+        self.recognition_source = recognition_source
+        self.delegate_profile = delegate_profile
         self.allow_local_input = allow_local_input
         self.guard = RLock()
         self.process = None
@@ -155,13 +178,26 @@ class InstantSession:
                 raise InstantStartError("local_input_not_enabled",
                     "Local operator must explicitly launch with --allow-local-input; tools cannot change this",
                     "Ask the operator to check the MCP launch configuration; do not change input authorization automatically.")
-            if not self.model_directory.is_dir():
+            if self.recognition_source == "external_api":
+                raise InstantStartError("external_api_not_implemented",
+                    "external_api recognition source is not implemented",
+                    "Choose local, agent_current or agent_delegate; external_api cannot be started yet.")
+            from app.vision.recognition_source import RecognitionSourceConfig
+            from pydantic import ValidationError
+            try:
+                config = RecognitionSourceConfig.model_validate({"source": self.recognition_source,
+                    "delegate_profile": self.delegate_profile})
+            except ValidationError:
+                raise InstantStartError("invalid_recognition_configuration",
+                    "invalid recognition source or delegate profile",
+                    "Check --recognition-source and use --delegate-profile only with agent_delegate.") from None
+            if config.source == "local" and (self.model_directory is None or not self.model_directory.is_dir()):
                 raise InstantStartError("model_directory_unavailable", "configured model directory does not exist",
                     "Check --model-directory is an existing directory; use forward slashes or escaped backslashes in configuration, then reconnect.")
             self._lock()
             pointer = self.data_root / "latest-session.json"
+            saved = read_json(pointer) if pointer.is_file() else {}
             if self.session is None and pointer.is_file():
-                saved = read_json(pointer)
                 previous = (self.data_root / saved["name"]).resolve()
                 if previous.parent != self.data_root or not re.fullmatch(r"session-[0-9a-f]{32}", previous.name):
                     raise ValueError("invalid persisted session pointer")
@@ -169,6 +205,12 @@ class InstantSession:
                 self.host_identity = saved.get("host_identity")
             if self.session is not None:
                 status = self.status()
+                if (saved.get("recognition_source", "local") != config.source
+                        or saved.get("delegate_profile") != config.delegate_profile):
+                    if not new_session or not status["cleanup_verified"] or status["pending_ids"]:
+                        raise InstantStartError("recognition_source_mismatch",
+                            "existing session uses a different recognition source",
+                            "Verify previous cleanup and receipts, then start a new session with the chosen source.")
                 if not new_session:
                     return status
                 if not status["cleanup_verified"] or status["pending_ids"]:
@@ -190,13 +232,19 @@ class InstantSession:
             self.log_file = (self.data_root / (self.session.name + ".log")).open("ab")
             env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", HF_HUB_OFFLINE="1")
             env.pop("PYTHONPATH", None)
-            self.process = subprocess.Popen([sys.executable, str(self.root / "scripts/run_local_step_session.py"),
-                "--output", str(self.session), "--model-directory", str(self.model_directory),
-                "--local-no-learning", "--parent-pid", str(os.getpid())], cwd=self.root,
+            command = [sys.executable, str(self.root / "scripts/run_local_step_session.py"),
+                "--output", str(self.session), "--recognition-source", config.source,
+                "--local-no-learning", "--parent-pid", str(os.getpid())]
+            if config.source == "local":
+                command.extend(["--model-directory", str(self.model_directory)])
+            if config.delegate_profile:
+                command.extend(["--delegate-profile", config.delegate_profile])
+            self.process = subprocess.Popen(command, cwd=self.root,
                 stdin=subprocess.DEVNULL, stdout=self.log_file, stderr=self.log_file,
                 env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             self.host_identity = {"pid": self.process.pid, "created": psutil.Process(self.process.pid).create_time()}
-            write_json(pointer, {"name": self.session.name, "host_identity": self.host_identity})
+            write_json(pointer, {"name": self.session.name, "host_identity": self.host_identity,
+                "recognition_source": config.source, "delegate_profile": config.delegate_profile})
             return self.status()
 
     def _host_alive(self):
@@ -224,6 +272,7 @@ class InstantSession:
                 pending = [p.stem for p in (self.session / "commands").glob("*.json")
                            if not (self.session / "responses" / p.name).exists()]
             return {"mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
+                "recognition_source": self.recognition_source, "delegate_profile": self.delegate_profile,
                 "learning_enabled": False, "automatic_safety_interception": False if alive else None,
                 "local_input_enabled_by_operator": self.allow_local_input,
                 "host_is_admin": report.get("host_is_admin"),
@@ -300,6 +349,27 @@ class InstantSession:
                     for key in ("handle", "process_id"))
             receipt = {"request_id": request_id, **response, "operation_succeeded": ok,
                        "task_effect_verified": False, "automatic_retry_allowed": False}
+            if result.get("contract_version") == "agent_command.v1":
+                waiting = outcome in {"running", "awaiting_grounding"}
+                receipt.update(operation_succeeded=None if waiting else ok and outcome == "completed",
+                    operation_success_scope="agent_command_progress", task_effect_verified=None,
+                    action_executed=result.get("action_executed"))
+                if waiting:
+                    receipt['next_action'] = ('read_pending_image_then_grounding_resolve_and_agent_command_continue'
+                        if outcome == 'awaiting_grounding' else 'poll_agent_command_status_with_new_request_id')
+                    receipt["next"] = {"tool": "instant_run", "arguments": {
+                        "request_id": "agent-status-" + uuid4().hex,
+                        "command": {"kind": "agent_command_status", "request": {
+                            "command_id": result["command_id"]}}, "images": "after"}}
+            if outcome == "agent_read_required":
+                receipt.update(operation_succeeded=None, operation_success_scope="image_for_agent_reading",
+                               task_effect_verified=None, action_executed=False)
+            if result.get("contract_version") == "grounding_handoff.v1":
+                receipt.update(operation_success_scope="grounding_only", task_effect_verified=None,
+                               action_executed=False if result.get("input_dispatched") is False else None)
+                if result.get("execution_id"):
+                    receipt.update(input_attempted=result.get("input_attempted"),
+                                   execution_request_id=result["execution_id"])
             sequence = result.get("contract_version") in {"input_sequence_v1", "form_fill_v1"}
             if result.get("contract_version") == "local_direct_step_v1" or sequence:
                 receipt["operation_succeeded"] = (ok and result.get("status") == "completed" if sequence
@@ -361,7 +431,10 @@ class InstantSession:
             raise InstantImageError("image_result_unknown", "the request has no completed receipt and its host is not alive",
                                     "Inspect instant_status and the original request receipt; input may have occurred. Do not replay automatically.")
         if view == "before":
-            capture = (response.get("result") or {}).get("capture") or {}
+            result = response.get('result') or {}
+            if result.get('contract_version') == 'agent_command.v1':
+                result = result.get('result') or {}
+            capture = result.get("capture") or {}
         else:
             capture = response.get("observation") or {}
             if not capture:
@@ -512,14 +585,16 @@ def build_server(session):
                        images: Literal["none", "after", "both"] = "none") -> CallToolResult:
         return result_bundle(request_id, detail=detail, images=images)
 
-    async def instant_run(request_id: str, command: InstantCommand, wait_ms: int = 25000,
+    async def instant_run(request_id: str, command: InstantCommand, wait_ms: int | None = None,
                           detail: Literal["compact", "full"] = "compact",
                           images: Literal["after", "both", "none"] = "after") -> CallToolResult:
         # 等待只查磁盘回执，不占用会话锁、不重新派发；超时后原命令仍可能在执行。
-        if type(wait_ms) is not int or not 0 <= wait_ms <= 30000:
+        try:
+            wait_ms = _run_wait_budget(command.kind, wait_ms)
+        except ValueError as error:
             value = {"request_id": request_id, "status": "validation_rejected", "accepted": False,
                 "automatic_retry_allowed": False, "error": {"code": "invalid_wait_ms",
-                "message": "wait_ms must be an integer from 0 to 30000"}}
+                "message": str(error)}}
             return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value))],
                                   structuredContent=value)
         sent = instant_submit(request_id, command)
@@ -553,7 +628,7 @@ def build_server(session):
         return session.stop()
 
     descriptions = {
-        "instant_run": "Preferred one-call execution: submit one durable command, wait up to wait_ms (0..30000, default 25000), return compact receipt plus exact original after PNG together. images=both adds before; detail=full preserves diagnostics. Same commands as instant_submit, including input_sequence request={field_goal,text,clear_existing:true,submit_search:true|false}. A sequence focuses the field through recognition, types, checks the actual focused UIA value, optionally presses Enter for search, then observes. No arbitrary batch, next-result click or task-success claim. Unsupported/unreadable fields interrupt with partial receipts; do not blindly replay. A wait timeout is NOT cancellation: use next to read the same ID, keeping this MCP connection alive.",
+        "instant_run": "Preferred one-call execution: submit one durable command, wait up to wait_ms (0..120000; omitted/null uses 45000 for form_fill, 25000 otherwise), return compact receipt plus exact original after PNG together. This is a maximum receipt wait, NOT an added action delay: ready results return immediately. Configure client timeout above this budget. images=both adds before; detail=full preserves diagnostics. Same commands as instant_submit, including input_sequence request={field_goal,text,clear_existing:true,submit_search:true|false}. A sequence focuses the field through recognition, types, checks the actual focused UIA value, optionally presses Enter for search, then observes. No arbitrary batch, next-result click or task-success claim. Unsupported/unreadable fields interrupt with partial receipts; do not blindly replay. A wait timeout is NOT cancellation: use next to read the same ID, keeping this MCP connection alive.",
         "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option. Known preflight configuration failures and unresolved previous-session rejection return isError=true, status=start_rejected, error.code and next guidance; host_launch_attempted=false refers only to this call, not existing sessions.",
         "instant_status": "Read host, target, pending IDs and cleanup status; no screenshot or input.",
         "instant_submit": "Submit exactly one command with a unique durable ID. desktop_capture and desktop_click require NO prior select or caller handle: auto-resolve the current desktop icon host. desktop_click request={goal,click_kind:'double'} uses a FRESH desktop capture and the existing recognition route; no raw/stale coordinates. Desktop occlusion may remain; inspect images. After an icon opens an app, discover/select its new window; input dispatch is NOT app-launch verification. discover lists configured plus installed desktop apps/windows (Start Menu/Desktop shortcuts and App Paths); launch requires exactly one of app_id, name or absolute local .exe/.lnk path, optional url for configured browsers. Names resolve exactly then by substring; ambiguity returns diagnostics.candidates, choose app_id. prefer_existing defaults true for argument-free launches: reuse a unique identity-matched window, never silently choose among multiple windows. URL/shortcut arguments still dispatch their intended launch. UWP-only links and launcher-to-different-executable window binding are not guaranteed; unavailable is not launch failure proof. select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y, Shift+Left, Shift+Right, Shift+Up, Shift+Down, Shift+Home, Shift+End, Ctrl+Home, Ctrl+End. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
@@ -563,7 +638,9 @@ def build_server(session):
     }
     descriptions["instant_submit"] += " Also supports kind=input_sequence, request={field_goal,text,clear_existing:true,submit_search:true|false}; observation_wait_ms applies to the final Enter observation. Use instant_run for bounded waiting and inline final image without separate polling/image calls."
     for name in ("instant_submit", "instant_run"):
-        descriptions[name] += " form_fill accepts request={fields:[...],text_navigation:'recognize_each'|'tab_sequence'}, 1..32 declared fields: text {kind,field_goal,text,clear_existing,label?}, date {kind,field_goal,value,format}, dropdown {kind,label,option}, checkbox {kind,label,checked}, radio {kind,label}. Prefer one grouped call for multiple known fields, not one tool call per field. Optional tab_sequence requires ONLY consecutive text fields with distinct exact accessible labels: recognize first field once, then Tab, verify focused field label/identity, fill and read back locally; return one batch receipt and final image. A wrong focus interrupts BEFORE typing; never guesses/skips fields or auto-replays. Default recognize_each preserves mixed control handling. Date value must be a real ISO YYYY-MM-DD date; format is explicitly YYYY-MM-DD, DD/MM/YYYY or MM/DD/YYYY. Date fills an editable text field and checks exact displayed text; it does NOT navigate calendars, guess locale or verify server acceptance. Exact current accessible labels are required for choices; read current screenshots first. It never submits a form; already-satisfied choices are not toggled. Unknown/ambiguous/unreadable states interrupt with partial receipts. Dropdown options must belong to the opened control. Inspect original images; completion is not task success."
+        descriptions[name] += " With an agent_current/agent_delegate session, step recognition, desktop_click, input_sequence and form_fill require top-level vision_capabilities (same fields as grounding capabilities). They return agent_command.v1 rather than blocking for vision. Poll agent_command_status request={command_id} using a NEW outer request_id. At awaiting_grounding read the returned original image and pending_grounding.output_schema; submit grounding_resolve for pending_grounding.request_id, then agent_command_continue request={command_id,grounding_request_id} with another new outer request_id. Never resubmit the original batch or use grounding_execute for a suspended batch. It resumes the original worker and may request further grounding. agent_command_cancel request={command_id} requests cooperative cancellation; wait for terminal status, since input may already have occurred. Active jobs reject competing input or target changes. Read_text on Agent sources returns agent_read_required plus original PNG, text=null, with no local OCR; the agent must read it. Agent routes do not automatically invoke another model or assume image capability."
+        descriptions[name] += " Experimental grounding handoff: grounding_prepare request={goal,configuration:{source:'agent_current'|'agent_delegate',delegate_profile?:name},capabilities:{image_transport:'supported'|'unsupported'|'unknown',current_vision?:state,delegation?:state,model_selection?:state,delegate_vision?:state}} captures selected window and returns awaiting_grounding plus immutable image. grounding_resolve request={grounding_request_id:original_prepare_id,result:grounding.v1_object}; grounding_status/grounding_cancel request={grounding_request_id}. These four commands never click. Explicit grounding_execute request={grounding_request_id} dispatches one click through the existing action route only when the candidate is ready and live identity, viewport and target-region consistency checks pass. It does not load a local vision model or prove semantic hit. Execution is claimed durably before input and cannot be replayed: poll the original execution request ID and inspect its before/after images. Never turn coordinates into unchecked input."
+        descriptions[name] += " form_fill accepts request={fields:[...],text_navigation:'recognize_each'|'tab_sequence'|'tab_groups'}, 1..32 declared fields: text {kind,field_goal,text,clear_existing,label?,tab_group?}, date {kind,field_goal,value,format}, dropdown {kind,label,option}, checkbox {kind,label,checked}, radio {kind,label}. Prefer one grouped call for all currently known fields, not one tool call per field; missing facts need not block independent known fields. Optional tab_sequence requires ONLY consecutive text fields with distinct exact accessible labels. tab_groups accepts mixed fields: assign identical tab_group strings only to adjacent text fields whose actual Tab order is known; labels must be exact and distinct within each run. New group, non-text or omitted tab_group always starts fresh recognition; tab_group is invalid outside tab_groups mode. Recognize each group head, then Tab, verify focused field label/identity, fill and read back locally; return one batch receipt and final image. Wrong focus interrupts BEFORE typing; never guesses/skips fields or auto-replays. Default recognize_each preserves mixed control handling. Compact fields include aggregate timings; full diagnostics remain available by ID. Date value must be a real ISO YYYY-MM-DD date; format is explicitly YYYY-MM-DD, DD/MM/YYYY or MM/DD/YYYY. Date fills an editable text field and checks exact displayed text; it does NOT navigate calendars, guess locale or verify server acceptance. Exact current accessible labels are required for choices; read current screenshots first. It never submits a form; already-satisfied choices are not toggled. Unknown/ambiguous/unreadable states interrupt with partial receipts. Dropdown options must belong to the opened control. Inspect original images; completion is not task success."
     descriptions["instant_result"] += " Optional detail=compact omits verbose traces; full (default) keeps the old receipt fields. images=after|both includes original PNGs in this same call; default none preserves JSON-only delivery."
     for name in ("instant_submit", "instant_run"):
         descriptions[name] += " Optional command.observation_condition={text:exact_accessible_name,control_type:Text|Hyperlink|Button|Document} enables read-only early observation for step or submit_search sequences. Requires a positive observation_wait_ms budget (navigation defaults to 2000). Only a newly appearing unique visible match, repeated and rechecked after capture, ends early. Accessible names can differ from screenshot captions. Missing/ambiguous/old matches time out and still return an image; inspect observation.condition, not operation_succeeded, for this outcome. This is not full-page readiness or task verification. Synchronous UIA and capture I/O are outside a hard timeout; no input replay. Omit the condition when no reliable marker is known."

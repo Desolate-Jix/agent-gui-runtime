@@ -66,6 +66,31 @@ def test_wait_expiry_is_pending_not_cancel_or_replay(session):
     assert len(list((session.session / "commands").glob("*.json"))) == 1
 
 
+@pytest.mark.parametrize("kind,requested,expected", [
+    ("form_fill", None, 45000), ("capture", None, 25000),
+    ("form_fill", 0, 0), ("form_fill", 25000, 25000), ("form_fill", 120000, 120000),
+])
+def test_run_wait_budget_is_command_aware_and_explicit_wait_wins(kind, requested, expected):
+    from app.instant_mcp import _run_wait_budget
+    assert _run_wait_budget(kind, requested) == expected
+
+
+@pytest.mark.parametrize("requested", [-1, 120001, True, 1.5, "45000"])
+def test_run_wait_budget_rejects_invalid_values(requested):
+    from app.instant_mcp import _run_wait_budget
+    with pytest.raises(ValueError):
+        _run_wait_budget("form_fill", requested)
+
+
+def test_run_accepts_long_wait_without_replaying_completed_command(session):
+    command, _ = completed(session)
+    before = session._path("one", "commands").read_bytes()
+    result, value = call(session, "instant_run", {
+        "request_id": "one", "command": command, "wait_ms": 60000})
+    assert not result.is_error and value["operation_succeeded"] is True
+    assert session._path("one", "commands").read_bytes() == before
+
+
 def test_invalid_sequence_reports_error_without_queuing(session):
     result, value = call(session, "instant_run", {"request_id": "bad", "command": {
         "kind": "input_sequence", "request": {"field_goal": "Search", "text": "private-value"}}})

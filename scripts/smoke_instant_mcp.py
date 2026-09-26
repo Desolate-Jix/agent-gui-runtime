@@ -8,21 +8,42 @@ import sys
 import time
 
 
-async def run(root, model, data, administrator=False):
+def server_arguments(root, model, data, administrator=False, recognition_source="local", delegate_profile=None):
+    if recognition_source not in {"local", "agent_current", "agent_delegate"}:
+        raise ValueError("unsupported recognition source: " + recognition_source)
+    if recognition_source == "local" and model is None:
+        raise ValueError("local recognition requires a model directory")
+    if recognition_source != "local" and model is not None:
+        raise ValueError("Agent recognition does not use a model directory")
+    if recognition_source == "agent_delegate" and not (delegate_profile or "").strip():
+        raise ValueError("agent_delegate requires a delegate profile")
+    if recognition_source != "agent_delegate" and delegate_profile is not None:
+        raise ValueError("delegate profile is only valid for agent_delegate")
+    entry = "start_instant_mcp_admin.py" if administrator else "start_instant_mcp.py"
+    result = [str(root / "scripts" / entry), "--data-dir", str(data),
+              "--recognition-source", recognition_source, "--allow-local-input"]
+    if model is not None:
+        result.extend(["--model-directory", str(model)])
+    if delegate_profile is not None:
+        result.extend(["--delegate-profile", delegate_profile])
+    return result
+
+
+async def run(root, model, data, administrator=False, recognition_source="local", delegate_profile=None):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     env.pop("PYTHONPATH", None)
-    entry = "start_instant_mcp_admin.py" if administrator else "start_instant_mcp.py"
-    params = StdioServerParameters(command=sys.executable, args=[str(root / "scripts" / entry),
-        "--data-dir", str(data), "--model-directory", str(model), "--allow-local-input"], env=env, cwd=str(root))
+    arguments = server_arguments(root, model, data, administrator, recognition_source, delegate_profile)
+    params = StdioServerParameters(command=sys.executable, args=arguments, env=env, cwd=str(root))
     evidence = {"actual_input_executed": False, "model_inference_tested": False,
-                "administrator_requested": administrator}
+                "administrator_requested": administrator, "recognition_source": recognition_source,
+                "delegate_profile": delegate_profile}
     async with stdio_client(params) as streams:
         async with ClientSession(*streams) as client:
             initialized = await client.initialize()
             evidence["server_version"] = initialized.server_info.version
-            assert evidence["server_version"] == "0.1.0-test.7"
+            assert evidence["server_version"] == "0.1.0-test.8"
             tools = await client.list_tools()
             evidence["tools"] = [t.name for t in tools.tools]
             assert set(evidence["tools"]) == {"instant_start", "instant_status", "instant_submit",
@@ -127,11 +148,20 @@ async def run(root, model, data, administrator=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model-directory", type=Path, required=True)
+    parser.add_argument("--model-directory", type=Path)
+    parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate"], default="local")
+    parser.add_argument("--delegate-profile")
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--administrator", action="store_true", help="Use UAC bridge; reconnection prompts again")
     args = parser.parse_args()
-    result = asyncio.run(run(Path(__file__).resolve().parents[1], args.model_directory.resolve(), args.data_dir.resolve(), args.administrator))
+    root = Path(__file__).resolve().parents[1]
+    model = args.model_directory.resolve() if args.model_directory is not None else None
+    try:
+        server_arguments(root, model, args.data_dir, args.administrator, args.recognition_source, args.delegate_profile)
+    except ValueError as error:
+        parser.error(str(error))
+    result = asyncio.run(run(root, model, args.data_dir.resolve(), args.administrator,
+                            args.recognition_source, args.delegate_profile))
     args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))

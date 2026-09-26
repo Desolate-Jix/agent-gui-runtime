@@ -15,6 +15,23 @@ IDENTITY = {
 }
 
 
+def test_exact_named_control_does_not_build_unrelated_label_geometry(setup):
+    target = Node("choice", "CheckBox", (1, 1))
+    target.iface_toggle = NS(CurrentToggleState=0)
+    unrelated = Node("Some unrelated caption", "Text", (1, 2))
+    unrelated.is_visible = lambda: pytest.fail("exact named target must not build a page label index")
+    result = reader.read_form_control(setup(target, unrelated), TARGET, "choice", "checkbox")
+    assert result["checked"] is False and result["runtime_id"] == [1, 1]
+
+
+def test_named_scan_still_rejects_duplicate_after_unrelated_nodes(setup):
+    target = Node("choice", "CheckBox", (1, 1))
+    duplicate = Node("choice", "CheckBox", (1, 3))
+    unrelated = Node("caption", "Text", (1, 2))
+    with pytest.raises(reader.FormControlReadError, match="form_control_ambiguous"):
+        reader.read_form_control(setup(target, unrelated, duplicate), TARGET, "choice", "checkbox")
+
+
 def test_complete_form_tree_above_512_still_checks_later_duplicate(setup):
     target = Node("choice", "CheckBox", (1, 1))
     target.iface_toggle = NS(CurrentToggleState=0)
@@ -148,6 +165,83 @@ def test_dropdown_missing_expand_pattern_is_unknown_not_collapsed(setup):
     node = Node(kind="ComboBox")
     node.get_expand_state = lambda: False
     assert read(setup, node, "dropdown")["expanded"] is None
+
+
+@pytest.mark.parametrize("native", [3, None])
+@pytest.mark.parametrize("aria,expected", [("false", False), ("true", True)])
+def test_custom_combobox_reads_explicit_aria_expansion(setup, native, aria, expected):
+    node = Node(kind="ComboBox")
+    node.iface_expand_collapse = NS(CurrentExpandCollapseState=native)
+    node.CurrentAriaRole = "combobox"
+    node.CurrentAriaProperties = f"expanded={aria};haspopup=listbox;multiline=false"
+    result = read(setup, node, "dropdown")
+    assert result["expanded"] is expected
+    assert result["expansion_source"] == "uia_aria_expanded"
+
+
+@pytest.mark.parametrize("properties,role", [
+    ("haspopup=listbox", "combobox"), ("expanded=unknown", "combobox"),
+    ("expanded=true;expanded=false", "combobox"), ("expanded=true", "button"),
+    ("notexpanded=true", "combobox"), ("expanded=1", "combobox"),
+    (r"label=a\;expanded=true", "combobox"), (None, "combobox"),
+])
+def test_custom_combobox_never_invents_aria_expansion(setup, properties, role):
+    node = Node(kind="ComboBox")
+    node.iface_expand_collapse = NS(CurrentExpandCollapseState=3)
+    node.CurrentAriaRole = role
+    node.CurrentAriaProperties = properties
+    assert read(setup, node, "dropdown")["expanded"] is None
+
+
+def test_native_and_aria_expansion_disagreement_is_rejected(setup):
+    node = Node(kind="ComboBox")
+    node.iface_expand_collapse = NS(CurrentExpandCollapseState=0)
+    node.CurrentAriaRole = "combobox"
+    node.CurrentAriaProperties = "expanded=true"
+    with pytest.raises(reader.FormControlReadError, match="form_control_expansion_conflict"):
+        read(setup, node, "dropdown")
+
+
+def test_aria_expansion_change_during_read_is_rejected(setup):
+    class Changing(Node):
+        @property
+        def CurrentAriaProperties(self):
+            return next(self.states)
+    node = Changing(kind="ComboBox")
+    node.states = iter(["expanded=false", "expanded=true"])
+    node.CurrentAriaRole = "combobox"
+    node.iface_expand_collapse = NS(CurrentExpandCollapseState=3)
+    with pytest.raises(reader.FormControlReadError, match="form_control_expansion_changed"):
+        read(setup, node, "dropdown")
+
+
+@pytest.mark.parametrize("native,aria,expected,source", [
+    (0, "false", False, "uia_expand_collapse"),
+    (1, "true", True, "uia_expand_collapse"),
+    (2, "true", None, "unavailable"),
+])
+def test_aria_does_not_override_native_expansion_semantics(setup, native, aria, expected, source):
+    node = Node(kind="ComboBox")
+    node.iface_expand_collapse = NS(CurrentExpandCollapseState=native)
+    node.CurrentAriaRole = "combobox"
+    node.CurrentAriaProperties = f"expanded={aria}"
+    result = read(setup, node, "dropdown")
+    assert result["expanded"] is expected and result["expansion_source"] == source
+
+
+def test_expansion_source_change_with_same_state_is_rejected(setup):
+    class Pattern:
+        def __init__(self):
+            self.states = iter([0, 3])
+        @property
+        def CurrentExpandCollapseState(self):
+            return next(self.states)
+    node = Node(kind="ComboBox")
+    node.iface_expand_collapse = Pattern()
+    node.CurrentAriaRole = "combobox"
+    node.CurrentAriaProperties = "expanded=false"
+    with pytest.raises(reader.FormControlReadError, match="form_control_expansion_changed"):
+        read(setup, node, "dropdown")
 
 
 def test_dropdown_expansion_change_during_snapshot_is_rejected(setup):

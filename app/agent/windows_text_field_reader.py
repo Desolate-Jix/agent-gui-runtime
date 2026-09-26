@@ -63,13 +63,14 @@ def _safe_read_diagnostic(value):
         result["elapsed_ms"] = value["elapsed_ms"]
     if type(value.get("matched")) is bool:
         result["matched"] = value["matched"]
-    visits = value.get("resolve_visits")
-    if (type(visits) is list and 1 <= len(visits) <= 5 and all(
-            type(item) is dict and type(item.get("control_type")) is str
-            and item["control_type"] in _RESOLVE_CONTROL_TYPES
-            and type(item.get("depth")) is int and item["depth"] == index
-            and type(item.get("is_root")) is bool for index, item in enumerate(visits))):
-        result["resolve_visits"] = [{key: item[key] for key in ("control_type", "depth", "is_root")} for item in visits]
+    for name, limit in (('resolve_visits', 5), ('focus_visits', 8)):
+        visits = value.get(name)
+        if (type(visits) is list and 1 <= len(visits) <= limit and all(
+                type(item) is dict and type(item.get("control_type")) is str
+                and item["control_type"] in _RESOLVE_CONTROL_TYPES
+                and type(item.get("depth")) is int and item["depth"] == index
+                and type(item.get("is_root")) is bool for index, item in enumerate(visits))):
+            result[name] = [{key: item[key] for key in ("control_type", "depth", "is_root")} for item in visits]
     return result
 
 
@@ -597,7 +598,7 @@ def _require_writable_hit_patterns(wrapper, control_type):
     """只读模式属性，不调用 CurrentValue、GetText 或选区接口。"""
     element = getattr(getattr(wrapper, "element_info", None), "element", None)
     if not _explicit_uia_false(getattr(element, "CurrentIsPassword", None)):
-        raise TextFieldReadError("text_field_target_not_writable")
+        raise _not_writable('password', control_type, getattr(element, 'CurrentIsPassword', None))
     no_pattern = _no_pattern_exception()
     available = set()
     for kind in (("value", "text") if control_type != "Document" else ("text",)):
@@ -607,12 +608,13 @@ def _require_writable_hit_patterns(wrapper, control_type):
             else:
                 readonly = wrapper.iface_text.DocumentRange.GetAttributeValue(UIA_IS_READONLY_ATTRIBUTE_ID)
             if not _explicit_uia_false(readonly):
-                raise TextFieldReadError("text_field_target_not_writable")
+                raise _not_writable(kind + '_readonly', control_type, readonly)
             available.add(kind)
         except no_pattern:
             continue
     if not available or (control_type == "ComboBox" and available != {"value", "text"}):
-        raise TextFieldReadError("text_field_target_not_writable")
+        raise _not_writable('value_pattern_missing' if 'value' not in available else 'text_pattern_missing',
+                            control_type)
 
 
 def _expected_field_identity(runtime_id, control_type):
@@ -722,7 +724,38 @@ def _focused_field() -> Any:
     return UIAWrapper(UIAElementInfo(element))
 
 
-def probe_local_focus_target(manager, handle, pid, point):
+def _verify_named_focus_hit(hit, handle, pid, window, label):
+    """点击前完整扫描并核对标签与命中 RID；操作员模式也不能绕过。"""
+    import unicodedata
+    from app.agent import windows_form_control_reader as forms
+
+    def normalize(value):
+        return " ".join(unicodedata.normalize("NFC", value).split()).casefold().rstrip(":：").strip() if isinstance(value, str) else ""
+
+    expected = normalize(label)
+    if not expected:
+        raise TextFieldReadError("text_field_label_invalid")
+    try:
+        desktop, walker, wrap = forms._uia_factory()
+        root = desktop.window(handle=handle).wrapper_object()
+        if _top_window_handle(root) != handle or root.element_info.process_id != pid:
+            raise TextFieldReadError("text_field_window_or_process_changed")
+        matches = forms._scan_controls(root, walker, wrap, expected,
+            hit.element_info.control_type, {}, window, normalize_name=normalize, include_aliases=True)
+        if not matches:
+            raise TextFieldReadError("text_field_label_not_found")
+        if len(matches) != 1:
+            raise TextFieldReadError("text_field_label_ambiguous")
+        if (tuple(matches[0].element_info.runtime_id) != tuple(hit.element_info.runtime_id)
+                or not forms._same_element(matches[0], hit)):
+            raise TextFieldReadError("text_field_label_mismatch")
+    except TextFieldReadError:
+        raise
+    except Exception:
+        raise TextFieldReadError("text_field_label_unavailable") from None
+
+
+def probe_local_focus_target(manager, handle, pid, point, *, expected_label=None):
     """原动作点击前只读命中；不能用事后焦点倒推点击目标。"""
     if (type(point) is not tuple or len(point) != 2 or any(type(v) is not int for v in point)):
         raise TextFieldReadError("text_field_expected_identity_invalid")
@@ -740,9 +773,12 @@ def probe_local_focus_target(manager, handle, pid, point):
     if _top_window_handle(raw) != handle or _process_id(raw.element_info, raw.element_info.element) != pid:
         raise TextFieldReadError("text_field_window_or_process_changed")
     current = raw
-    for _ in range(8):
+    visits = []
+    for depth in range(8):
         info = current.element_info
         kind = info.control_type
+        visits.append({'depth': depth, 'control_type': kind if kind in _RESOLVE_CONTROL_TYPES else 'other',
+            'is_root': kind == 'Window' and getattr(info, 'handle', None) == handle})
         if kind in {"Edit", "ComboBox", "Document", "Group"}:
             box = _relative_rect(info.rectangle, window)
             if box is not None and _contains_point(box, point):
@@ -762,12 +798,16 @@ def probe_local_focus_target(manager, handle, pid, point):
                     break
         parent = current.parent()
         if parent is None or parent is current or _top_window_handle(parent) != handle:
-            raise TextFieldReadError("text_field_target_not_writable")
+            raise TextFieldReadError("text_field_target_not_writable", diagnostic={'focus_visits': visits})
         current = parent
     else:
-        raise TextFieldReadError("text_field_target_not_writable")
+        raise TextFieldReadError("text_field_target_not_writable", diagnostic={'focus_visits': visits})
     description = reader._describe_target(current, handle, pid, window, box, point)
     _require_writable_hit_patterns(current, kind)
+    if expected_label is not None:
+        _verify_named_focus_hit(current, handle, pid, window, expected_label)
+        if description != reader._describe_target(current, handle, pid, window, box, point):
+            raise TextFieldReadError("text_field_expected_identity_changed")
     reader._verify_binding(handle, pid, fact["process_create_time"], window)
     return {"runtime_id": list(description["runtime_id"]), "control_type": kind,
         "bbox": list(description["control_bbox"]), "window_handle": handle, "process_id": pid,

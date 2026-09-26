@@ -1,6 +1,14 @@
-# v0.1.0-test.7 发布范围 / Release scope
+# v0.1.0-test.8 发布范围 / Release scope
+
+> v0.1.0-test.8：源码与隔离候选各 2025 项通过，本方 local、当前 Agent、实际 Luna 委派的单项及连续操作与清理通过；同候选独立 local、visual 与 cleanup 均已完成。首次失败、恢复与具体覆盖见验收记录。独立 API 仍仅预留接口，宿主禁用。 / Source and isolated candidate each passed 2025 checks. Main-agent local/current/actual-Luna single and continuous journeys passed; same-candidate independent local, visual and cleanup gates are complete. Initial failures and scope remain documented. External API remains interface-only with its host route disabled.
 
 执行模式的有人看护测试版，不是稳定版；学习模式不发布。/ Supervised execution-mode test release, not production-stable. Learning is excluded.
+
+**验收范围 / Acceptance scope:** 同一 candidate03 运行时经本方三来源连续测试及同候选独立 local、visual 与 cleanup 复验；最终包仅更新文档，所有非文档源文件与冻结候选逐字节一致。 / The same candidate03 runtime passed main-agent three-source journeys and independent local, visual and cleanup checks. Only documentation changed for delivery; every non-document source matches the frozen candidate byte for byte.
+
+test.8 新增 `agent_current`、`agent_delegate` 路由和可恢复 Agent 组合命令。Agent 路线不需本地 VISTA/模型/OCR 权重；`read_text` 返回原图给 Agent，不运行本地 OCR。能力 unknown/unsupported 时停止所选路线，不隐式回退。委派模型由客户端明确选择（例如 Astra 委派给 Luna），宿主不继承 API 凭据。独立 API 仅保留 adapter/config/mock 协议检查：宿主路由禁用、不要求 key 或 live-provider，也不宣称服务商兼容。这些新增能力要求 test.8。详见 [test.8 候选验收](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)、[Agent 组合协议](docs/development/AGENT_BATCH_PROTOCOL.md) 与 [Agent 视觉设计](docs/development/AGENT_VISION_BACKENDS_DESIGN.md)。
+
+Test.8 adds `agent_current` and `agent_delegate` routes and resumable Agent commands. Agent routes require no local VISTA/model/OCR weights; `read_text` returns the original image for the Agent instead of running local OCR. Unknown or unsupported capability stops the selected route without implicit fallback. Delegate model selection is explicit and client-owned (for example, Astra delegates to Luna); the host does not inherit API credentials. External API support is reserved to adapter/config/mock protocol checks: host route disabled, no key or live-provider requirement, and no provider compatibility claim. These additions require test.8. See [test.8 candidate acceptance](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md), [Agent batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md) and [Agent vision design](docs/development/AGENT_VISION_BACKENDS_DESIGN.md).
 
 ## Included / 包含
 

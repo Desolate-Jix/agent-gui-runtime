@@ -90,6 +90,18 @@ def test_existing_document_never_waits(monkeypatch, harness):
     assert prepared.report["status"] == "observed"
 
 
+def test_explicit_batch_focus_prepares_browser_without_goal_grammar(monkeypatch, harness):
+    from app.core.local_text_focus import LocalTextFocusTarget, local_text_focus_scope
+    goal = 'Focus the first text input labelled \u4ee5\u4e0b\u6240\u6709\u5b57\u8bcd'
+    events = source(monkeypatch, [snapshot()])
+    with harness.scope(), local_text_focus_scope(LocalTextFocusTarget(321, 12)):
+        prepared = api().prepare_browser_content(harness.manager, goal)
+    assert prepared is not None
+    assert events == ['sample']
+    with harness.scope():
+        assert api().prepare_browser_content(harness.manager, goal) is None
+
+
 @pytest.mark.parametrize("edge", ["sibling", "self", "root", "cross_parent"])
 def test_canonical_complete_alias_graph_remains_usable(monkeypatch, harness, edge):
     from tests.test_uia_alias_normalization import Node, install

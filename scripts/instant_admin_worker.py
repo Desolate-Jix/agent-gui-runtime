@@ -123,7 +123,8 @@ def load_ticket(path):
     if win32security.ConvertSidToStringSid(descriptor.GetSecurityDescriptorOwner()) != sid:
         raise RuntimeError("ticket_owner_mismatch")
     ticket = json.loads(path.read_text(encoding="utf-8"))
-    if set(ticket) != {"pipe", "auth", "sid", "session", "expires", "data", "model", "allow_input"}:
+    if set(ticket) != {"pipe", "auth", "sid", "session", "expires", "data", "model", "source",
+                       "delegate_profile", "allow_input"}:
         raise ValueError("invalid_ticket_fields")
     if ticket["sid"] != sid or ticket["session"] != session_id:
         raise RuntimeError("same_user_and_session_required")
@@ -134,16 +135,34 @@ def load_ticket(path):
     auth = bytes.fromhex(ticket["auth"])
     if len(auth) != 32 or type(ticket["allow_input"]) is not bool:
         raise ValueError("invalid_ticket")
-    for key in ("data", "model"):
-        if not isinstance(ticket[key], str) or not Path(ticket[key]).is_absolute():
-            raise ValueError("absolute_directories_required")
+    if not isinstance(ticket["data"], str) or not Path(ticket["data"]).is_absolute():
+        raise ValueError("absolute_directories_required")
+    from pydantic import ValidationError
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from app.vision.recognition_source import RecognitionSourceConfig
+    try:
+        config = RecognitionSourceConfig.model_validate({"source": ticket["source"],
+            "delegate_profile": ticket["delegate_profile"]})
+    except ValidationError:
+        raise ValueError("invalid_recognition_configuration") from None
+    if config.source == "external_api":
+        raise ValueError("external_api_not_implemented")
+    if config.source == "local" and (not isinstance(ticket["model"], str)
+                                     or not Path(ticket["model"]).is_absolute()):
+        raise ValueError("absolute_model_directory_required")
+    if config.source != "local" and ticket["model"] is not None:
+        raise ValueError("agent_source_must_not_use_model_directory")
     return ticket, auth
 
 
 def server_command(ticket):
     script = Path(__file__).resolve().with_name("start_instant_mcp.py")
     command = [sys.executable, "-I", str(script), "--data-dir", ticket["data"],
-               "--model-directory", ticket["model"]]
+               "--recognition-source", ticket["source"]]
+    if ticket["model"] is not None:
+        command.extend(["--model-directory", ticket["model"]])
+    if ticket["delegate_profile"] is not None:
+        command.extend(["--delegate-profile", ticket["delegate_profile"]])
     if ticket["allow_input"]:
         command.append("--allow-local-input")
     return command

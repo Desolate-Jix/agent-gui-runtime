@@ -109,3 +109,55 @@ def test_internal_tab_binding_cannot_dispatch_enter():
     bound.validate_command("press_key", {"key": "Tab", "x": 10, "y": 20})
     with pytest.raises(ValueError):
         bound.validate_command("press_key", {"key": "Enter", "x": 10, "y": 20})
+
+
+def test_named_tab_group_uses_existing_checked_sequence(monkeypatch):
+    co = setup(monkeypatch)
+    fields = [{**field, "tab_group": "identity"} for field in FIELDS]
+    result = run_form_fill(co, TARGET, {"text_navigation": "tab_groups", "fields": fields})
+    assert result["status"] == "completed", result
+    assert [c["operation"] for c in co.calls] == ["execute_recognition_plan", "type_text",
+        "press_key", "type_text", "press_key", "type_text"]
+    assert all(f["timings"]["field_total_ms"] >= 0 for f in result["fields"])
+
+
+def test_named_tab_group_keeps_wrong_focus_interruption(monkeypatch):
+    co = setup(monkeypatch, wrong_label=True)
+    result = run_form_fill(co, TARGET, {"text_navigation": "tab_groups",
+        "fields": [{**field, "tab_group": "identity"} for field in FIELDS]})
+    assert result["status"] == "interrupted" and result["completed_fields"] == [0]
+    assert result["error"]["code"] == "text_group_focus_label_mismatch"
+    assert [c["operation"] for c in co.calls] == ["execute_recognition_plan", "type_text", "press_key"]
+
+
+@pytest.mark.parametrize("separator", ["new_group", "ungrouped", "dropdown"])
+def test_tab_groups_restart_recognition_at_boundaries(monkeypatch, separator):
+    from app.agent import windows_text_field_reader as text_reader
+    from app.agent import windows_form_control_reader as control_reader
+    from test_form_fill import control
+    co = setup(monkeypatch)
+    # 每个新段的首字段都重新定位；仅桌面读取边界用独立快照代替。
+    snapshots(monkeypatch, ["", "Ada", "", "Lovelace"])
+    monkeypatch.setattr(text_reader, "probe_tab_focus_target", lambda *args: {
+        "runtime_id": [1], "control_type": "Edit"})
+    fields = [{**FIELDS[0], "tab_group": "one"}]
+    if separator == "dropdown":
+        monkeypatch.setattr(control_reader, "read_form_control", lambda *args, **kwargs:
+            control(kind="dropdown", label="Country", value="NZ"))
+        fields.append({"kind": "dropdown", "label": "Country", "option": "NZ"})
+    fields.append({**FIELDS[1], **({"tab_group": "two" if separator == "new_group" else "one"}
+                                 if separator != "ungrouped" else {})})
+    result = run_form_fill(co, TARGET, {"text_navigation": "tab_groups", "fields": fields})
+    assert result["status"] == "completed", result
+    assert [c["operation"] for c in co.calls] == ["execute_recognition_plan", "type_text"] * 2
+
+
+@pytest.mark.parametrize("payload", [
+    {"fields": [{**FIELDS[0], "tab_group": "one"}]},
+    {"text_navigation": "tab_groups", "fields": [{"kind": "text", "field_goal": "Name",
+        "text": "Ada", "tab_group": "one"}]},
+    {"text_navigation": "tab_groups", "fields": [{**FIELDS[0], "tab_group": "one"}] * 2},
+])
+def test_invalid_group_declarations_fail_before_input(payload):
+    with pytest.raises(ValueError):
+        FormFillRequest.model_validate(payload)

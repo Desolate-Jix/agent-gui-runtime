@@ -1,0 +1,14 @@
+# Windows / Python 3.11 instant MCP with agent_current or agent_delegate grounding.
+# Install this file directly, without pyproject.toml's local-model dependencies.
+# This is not the local OCR/VISTA or PySide6 desktop-review UI environment.
+mcp==2.1.1
+fastapi==0.135.2
+pydantic==2.12.5
+uvicorn==0.52.4
+httpx==0.28.1
+Pillow==12.3.0
+psutil==7.2.2
+loguru==0.7.3
+mss==10.1.0
+pywinauto==0.6.9
+pywin32==311

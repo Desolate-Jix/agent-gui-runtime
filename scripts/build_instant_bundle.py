@@ -55,7 +55,8 @@ def collect_sources(root):
     for folder, suffixes in (("modules", {".py", ".json"}), ("tests", {".py", ".json"}),
                              ("requirements", {".txt", ".in", ".toml"}),
                              ("scripts/model_servers", {".py", ".ps1"}),
-                             ("docs/verification", {".md"}), ("docs/history", {".md"})):
+                             ("docs/verification", {".md"}), ("docs/history", {".md"}),
+                             ("docs/development", {".md"})):
         files += [p for p in (root / folder).rglob("*") if p.is_file()
                   and p.suffix in suffixes and "__pycache__" not in p.parts]
     for path in files:

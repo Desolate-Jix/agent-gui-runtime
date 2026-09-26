@@ -26,6 +26,43 @@ def test_form_command_cannot_smuggle_extra_actions(extra):
             {'kind':'radio','label':'Small'}]}, **extra}).command()
 
 
+def test_compact_form_exposes_only_aggregate_timing_not_raw_traces():
+    raw = {"result": {"contract_version": "form_fill_v1", "fields": [{
+        "index": 0, "kind": "text", "status": "completed",
+        "timings": {"field_total_ms": 12.0, "action_ms": 6.0, "read_ms": 4.0,
+                    "other_ms": 2.0},
+        "steps": [{"receipt": {"private": "must-not-leak"}}]}]}}
+    compact = compact_receipt(raw)
+    assert compact["form"]["fields"][0]["timings"] == raw["result"]["fields"][0]["timings"]
+    assert "must-not-leak" not in str(compact)
+
+
+@pytest.mark.parametrize('agent_wrapped', [False, True])
+def test_compact_form_preserves_failed_focus_diagnostics_without_raw_plan(agent_wrapped):
+    form = {"contract_version": "form_fill_v1", "status": "interrupted",
+        "completed_fields": [0], "interrupted_at": 1, "action_executed": True,
+        "fields": [{"index": 1, "kind": "text", "status": "interrupted", "steps": [{
+            "name": "focus", "operation": "execute_recognition_plan", "status": "result_unknown",
+            "action_executed": False, "elapsed_ms": 6065.0,
+            "receipt": {"response": {"success": False,
+                "error": {"code": "local_recognition_invalid", "details": "no unique candidate"},
+                "data": {"failure_reason": "local_recognition_invalid", "action_executed": False,
+                    "recognition_plan": {"private_trace": "must-not-leak"}}}}}]}]}
+    result = {"contract_version": "agent_command.v1", "progress": form} if agent_wrapped else form
+    projected = compact_receipt({"request_id": "failed-form", "result": result})
+    compact = projected['agent_command']['progress']['form'] if agent_wrapped else projected['form']
+    step = compact['fields'][0]['steps'][0]
+    assert step['error']['code'] == 'local_recognition_invalid'
+    assert step['failure_reason'] == 'local_recognition_invalid'
+    assert step['action_executed'] is False
+    assert step['elapsed_ms'] == 6065.0
+    assert compact['completed_fields'] == [0]
+    assert compact['action_executed'] is True
+    assert 'must-not-leak' not in str(projected)
+    step['error']['code'] = 'changed projection'
+    assert form['fields'][0]['steps'][0]['receipt']['response']['error']['code'] == 'local_recognition_invalid'
+
+
 @pytest.mark.parametrize('status,ok', [('completed',True),('interrupted',False)])
 def test_form_receipt_keeps_partial_fields_and_never_claims_task_success(tmp_path,status,ok):
     session = InstantSession(Path(__file__).resolve().parents[1],tmp_path,tmp_path,allow_local_input=True)

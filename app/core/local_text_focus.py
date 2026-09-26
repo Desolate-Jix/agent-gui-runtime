@@ -11,11 +11,20 @@ _SCOPE = ContextVar("local_text_focus", default=None)
 
 
 class LocalTextFocusTarget:
-    def __init__(self, handle, pid):
+    def __init__(self, handle, pid, *, expected_label=None):
         if any(type(value) is not int or value <= 0 for value in (handle, pid)):
             raise ValueError("invalid local text focus target")
         self.handle, self.pid = handle, pid
+        if expected_label is not None and (not isinstance(expected_label, str) or not expected_label.strip()):
+            raise ValueError("invalid local text focus label")
+        self.expected_label = expected_label
         self.binding = None
+
+
+def has_local_text_focus():
+    scope = _SCOPE.get()
+    return bool(scope is not None and scope['active'] and scope['owner'] == get_ident()
+                and not scope['claimed'])
 
 
 def check_local_text_focus(point, manager):
@@ -31,9 +40,11 @@ def check_local_text_focus(point, manager):
     require_local_operator_input(manager)
     scope["claimed"] = True
     target.binding = probe_local_focus_target(manager, target.handle, target.pid,
-        (point["x"], point["y"]))
+        (point["x"], point["y"]),
+        **({"expected_label": target.expected_label} if target.expected_label is not None else {}))
     return {"status": "bound", "control_type": target.binding["control_type"],
-        "runtime_id": target.binding["runtime_id"]}
+        "runtime_id": target.binding["runtime_id"],
+        **({"declared_label_verified": True} if target.expected_label is not None else {})}
 
 
 @contextmanager

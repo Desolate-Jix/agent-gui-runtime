@@ -58,6 +58,12 @@ def require_local_operator_input(manager) -> bool:
     return True
 
 
+def current_local_operator_identity(manager) -> dict:
+    if not require_local_operator_input(manager):
+        raise PermissionError("local operator input scope is required")
+    return deepcopy(_LOCAL_INPUT_POLICY.get()["identity"])
+
+
 @contextmanager
 def _local_operator_input_scope(*, manager, identity_reader, identity, window_rect, enabled):
     if _LOCAL_INPUT_POLICY.get() is not None:
