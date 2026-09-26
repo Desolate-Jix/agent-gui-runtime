@@ -1,3 +1,5 @@
+> **2026-09-27 后续源码，未发布 / Unreleased source follow-up:** `external_api` 已接入现有执行链；配置完整 API 端点、视觉模型和密钥环境变量名后，可用原有单步与组合命令，API 自动定位，执行仍走公共检查。已发布 test.8 ZIP 仍仅预留 API 适配器，不能按本段当成已更新。 / External API grounding is now wired into the common execution path in source. The published test.8 ZIP remains adapter-only and has not been replaced.
+
 # Agent 接入与操作 / Agent usage — v0.1.0-test.8
 
 test.8 新增 [Agent 视觉组合命令协议](docs/development/AGENT_BATCH_PROTOCOL.md)：显式声明能力，使用 status/continue/cancel 继续原批次，不重发已完成输入。Agent `read_text` 返回原图，不加载本地 OCR。 / Test.8 adds explicit-capability Agent batches with status/continue/cancel and original-image reading, without replay or local OCR.
@@ -46,6 +48,10 @@ test.6 的历史独立验收见 docs/verification/TEST6_CANDIDATE_ACCEPTANCE.md�
 6. **诚实计时 / Honest timing.** 调用方计时应记录 dispatch、pending received、result received、review complete、next dispatch；资料问题另记 asked/answered。能获取服务端 finished_at 时单列“结果完成到取回”的延迟。没有主模型请求起止数据时，review 到 dispatch 只叫调用方处理时间，不叫纯推理时间；用户等待可能与执行重叠，不能重复相加。 / Record dispatch/pending/result/review/next-dispatch and separate question timestamps where instrumentation is available. Report retrieval lag against server completion; do not call uninstrumented caller processing model inference or double-count overlapping user waits.
 
 单步章节中的“返回后再决定”适用于依赖新观察的动作；不要求把已支持、已规划的 `form_fill` 或 `input_sequence` 拆成逐键调用。调度规则不是已有自动调度器，也不意味着当前宿主或发布包已更新。 / Single-step guidance applies to observation-dependent actions, not splitting supported preplanned batches into individual keystrokes. This is a caller policy, not a shipped autonomous scheduler or a running-host update.
+
+### Codex 连续视觉会话适配 / Codex visual-session adapter
+
+Codex 使用 `agent_delegate` 时读取 [codex-vision-session 技能](skills/codex-vision-session/SKILL.md)：保留同一视觉子 Agent ID，后续以 `followup_task` 处理新截图，不逐图 `spawn_agent`。每次仍使用新请求与原图证据，原会话不可用则报告阻塞。这是 Codex 客户端技能，不改变通用 MCP 协议；其他客户端沿用自己的委派机制。 / The Codex skill reuses one visual worker with fresh evidence and request correlation; it does not change the generic MCP protocol or other clients.
 
 ### test.8 组合填写 / Batch composition
 

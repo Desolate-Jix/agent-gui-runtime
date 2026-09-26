@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"],
                         default="local")
     parser.add_argument("--delegate-profile")
+    parser.add_argument("--api-profile", type=Path)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--enable-local-input", action="store_true",
                         help="Explicitly include --allow-local-input in generated config")
@@ -22,7 +23,18 @@ def main():
     if not args.python.is_file():
         parser.error("Python executable must exist")
     if args.recognition_source == "external_api":
-        parser.error("external_api recognition source is not implemented")
+        if args.api_profile is None:
+            parser.error("external_api requires --api-profile")
+        if not args.api_profile.is_absolute() or not args.api_profile.is_file():
+            parser.error("--api-profile must be an existing absolute JSON path")
+        sys.path.insert(0, str(root))
+        from app.vision.external_grounding_api import ApiGroundingError, load_api_grounding_profile
+        try:
+            load_api_grounding_profile(args.api_profile)
+        except ApiGroundingError:
+            parser.error("--api-profile has an invalid schema")
+    elif args.api_profile is not None:
+        parser.error("--api-profile is only valid for external_api")
     if args.recognition_source == "local" and (args.model_directory is None or not args.model_directory.is_dir()):
         parser.error("local recognition requires an existing model directory")
     if args.recognition_source == "agent_delegate" and not (args.delegate_profile or "").strip():
@@ -43,6 +55,8 @@ def main():
         arguments.extend(["--model-directory", str(args.model_directory.resolve())])
     if args.delegate_profile is not None:
         arguments.extend(["--delegate-profile", args.delegate_profile])
+    if args.api_profile is not None:
+        arguments.extend(["--api-profile", str(args.api_profile.resolve())])
     if args.enable_local_input:
         arguments.append("--allow-local-input")
     server = {"command": str(args.python.resolve()), "args": arguments,

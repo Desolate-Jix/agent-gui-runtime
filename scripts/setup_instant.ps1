@@ -2,8 +2,9 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$ModelDirectory,
-    [ValidateSet('local', 'agent_current', 'agent_delegate')][string]$RecognitionSource = 'local',
+    [ValidateSet('local', 'agent_current', 'agent_delegate', 'external_api')][string]$RecognitionSource = 'local',
     [string]$DelegateProfile,
+    [string]$ApiProfile,
     [string]$DataDirectory,
     [switch]$DownloadModel,
     [switch]$SkipEnvironment
@@ -12,6 +13,8 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $agentSource = $RecognitionSource -ne 'local'
 if (-not $agentSource -and -not $ModelDirectory) { throw 'local requires -ModelDirectory.' }
+if ($RecognitionSource -eq 'external_api' -and -not $ApiProfile) { throw 'external_api requires -ApiProfile.' }
+if ($RecognitionSource -ne 'external_api' -and $ApiProfile) { throw '-ApiProfile is only valid for external_api.' }
 if ($agentSource -and ($ModelDirectory -or $DownloadModel)) { throw 'Agent sources do not accept -ModelDirectory or -DownloadModel.' }
 if ($RecognitionSource -eq 'agent_delegate' -and [string]::IsNullOrWhiteSpace($DelegateProfile)) { throw 'agent_delegate requires -DelegateProfile.' }
 if ($RecognitionSource -ne 'agent_delegate' -and $DelegateProfile) { throw '-DelegateProfile is only valid for agent_delegate.' }
@@ -59,6 +62,7 @@ try {
     $configuration = @{RecognitionSource = $RecognitionSource; DataDirectory = $DataDirectory; Python = $python}
     if ($ModelDirectory) { $configuration.ModelDirectory = $ModelDirectory }
     if ($DelegateProfile) { $configuration.DelegateProfile = $DelegateProfile }
+    if ($ApiProfile) { $configuration.ApiProfile = $ApiProfile }
     & (Join-Path $PSScriptRoot 'configure_instant.ps1') @configuration -WhatIf:$WhatIfPreference
 } finally {
     Pop-Location

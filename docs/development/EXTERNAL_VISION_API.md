@@ -1,10 +1,10 @@
-# 独立视觉 API 预留接口 / Reserved external vision API
+# 外部视觉 API 接口 / External vision API
 
-test.8：仅交付预留适配器，未接入执行宿主 / Reserved adapter shipped in test.8; not wired to the execution host
+2026-09-27 后续源码，未发布；已发布 test.8 ZIP 不含本次接线。 / Unreleased source follow-up; the published test.8 ZIP does not contain this host integration.
 
-用户目前没有独立 API，本版保留配置、传输适配和契约检查，不要求提供密钥，不把付费服务实测作为本版发布前置条件。`--recognition-source external_api` 仍明确拒绝启动；配置文件存在不代表该路线已启用。当前 Agent 和指定视觉子 Agent 路线不需要这个额外 API。
+用户要求保证 API 接口可跑通执行流程，不把服务商识别准确率作为本轮门槛。`external_api` 现已接入宿主：每步捕获原图，经配置的 Chat Completions HTTP 端点返回 `grounding.v1`，校验截图关联后进入现有公共执行器，回传动作结果与操作后原图。不加载本地模型，不自动挑选服务或切换路线。
 
-The operator has no independent API. This version reserves configuration, transport adaptation and contract checks, without requiring credentials or a paid-provider test. The host still rejects `external_api`; a saved profile does not enable it. Current-agent and delegated-agent routes do not require this additional API.
+The requested scope is API flow connectivity, not provider recognition accuracy. The host now sends each frozen screenshot to the configured Chat Completions endpoint, validates its grounding.v1 response, uses the existing guarded executor and returns the receipt plus after-image. No local model, provider discovery or fallback is involved.
 
 ## 配置格式 / Profile format
 
@@ -42,12 +42,32 @@ The module exposes a profile loader and context-managed grounder. Pass a frozen 
 - 回执记录请求模型、返回模型、可用 token 用量和本地耗时；不推断服务商计费或实际底层型号。 / Metadata is reported, not inferred billing or backend-model proof.
 - 不重试；调用方必须区分 `api_key_missing`、`api_authentication_failed`、`api_access_denied`、`api_rate_limited`、`api_timeout`、`api_network_error`、`api_busy` 和格式/截图错误。公开错误不包含响应正文、Authorization 或底层异常链。 / Explicit, non-retrying errors omit response bodies, credentials and exception chains.
 
+## 启动与调用 / Startup and calls
+
+将上方配置另存为绝对路径 JSON。密钥在启动 MCP 的进程环境中设置，配置只保存变量名。管理员宿主从其自身环境读取密钥；UAC 桥不把密钥写进票据或转存。修改配置或环境后需重启连接。
+
+Save the profile as an absolute JSON path. Set its named secret variable in the process launching MCP. Elevated hosts read their own environment; UAC tickets never contain the key. Restart the connection after configuration/environment changes.
+
+```powershell
+python scripts/start_instant_mcp.py --data-dir D:/AgentReviewData/api-fresh --recognition-source external_api --api-profile D:/AgentReviewConfig/vision-api.json --allow-local-input
+```
+
+也可用 `scripts/setup_instant.ps1 -RecognitionSource external_api -ApiProfile D:/AgentReviewConfig/vision-api.json` 安装轻量运行依赖并生成配置，不需要本地权重。配置生成不调用服务；宿主启动检查配置和密钥是否存在，不能把它当成服务商连通性证明。
+
+The setup script supports external_api and ApiProfile with the lightweight runtime and no local weights. Configuration generation makes no provider call; startup validates the profile and credential presence, not provider connectivity.
+
+使用 `instant_run` 的 `step/execute_recognition_plan`、`desktop_click`、`input_sequence` 或 `form_fill`；沿用 `agent_command.v1` 回执和 `agent_command_status` 查询。API 会在同一命令的每次定位时自行请求，无须客户端调用 `grounding_resolve/agent_command_continue`，也不要重发原批次。`agent_command_cancel` 请求停止；已派发输入不会撤回。HTTP 返回后、派发前再检查取消、窗口身份、截图新鲜度及目标边界。
+
+Use the existing step/desktop-click/input-sequence/form-fill commands and agent_command_status. Each localization runs automatically through the API; clients do not resolve or continue API grounding manually. Cancellation remains cooperative and never rolls back dispatched input. Existing live identity, freshness and geometry checks remain required.
+
+API 只定位，不自动判断整项任务成功。`read_text` 仍返回原图交调用方读取；动作后原图与回执由主 Agent 核对。`recognition_calls` 在完整及精简回执中保留服务商返回模型、用量、耗时；`api_request` 表示请求阶段。缺少密钥、鉴权失败、限流、超时、畸形输出或目标缺失均明确报错，零自动重试，不退回 VISTA 或 Luna。
+
+The API localizes targets rather than judging task success. read_text remains original-image handoff to the caller. The main agent reviews after-images and receipts. Full/compact receipts retain provider model, usage and timing in recognition_calls plus api_request phase. Missing credentials, authentication/rate/timeout errors, malformed output and absent targets stop without retry or fallback.
+
 ## 已验证与未验证 / Verification boundary
 
-24 项隔离协议测试覆盖请求图像、UTF-8、模型配置、结果关联、畸形输出、拒绝/截断、超时/限流、并发占用与释放、错误脱敏，以及非法端口、NUL 路径和损坏 PNG。使用模拟 HTTP transport，没有调用付费服务。
+- 源码回归：2040 项通过。新增回环 HTTP 测试走真实 PNG 编码、网络请求、结构化候选、公共 `execute_recognition_plan` 路由及操作后图片；只有系统窗口、截图来源和物理输入边界被测试替身隔离。覆盖连续两步、错误后恢复、HTTP 期间取消及候选占用后取消，确认取消后不派发。 / 2040 source checks passed. New loopback-HTTP tests exercise PNG transport, structured grounding, the real shared action route and after-images while isolating OS window/capture/input boundaries. Consecutive operations, error recovery and cancellation are covered.
+- 真实 STDIO MCP 在无本地模型环境中启动 external_api，验证工具发现、配置、非法请求拒绝、窗口目录读取、停止清理和重连回执；没有请求付费服务，也没有真实点击。 / Real STDIO MCP startup, discovery, request rejection, cleanup and reconnect passed in the model-free environment, without paid-provider requests or physical clicks.
+- 未验证：任意服务商的在线兼容性、识别准确率、速度与费用，以及本次 API 来源的真实 GUI 输入和管理员环境密钥继承。配置符合 Chat Completions JSON 图像协议是接入前提，不宣称所有 OpenAI-compatible 服务均可直接使用。 / Unverified: live provider compatibility/accuracy/latency/cost, physical GUI input for this API source and elevated-process credential inheritance. Matching the documented image/JSON protocol remains a prerequisite.
 
-Twenty-four isolated protocol checks cover image requests, UTF-8, configuration, correlation, malformed/refused/truncated responses, timeout/rate errors, bounded concurrency and sanitized failures, including invalid ports/paths and corrupt PNGs. Tests use a mock HTTP transport, not a paid provider.
-
-**未验证：** 任意具体服务商的图像兼容性、准确率、速度、价格；API 路线的 MCP 启动和真实点击。后续有服务后先验证协议，再接入统一候选/执行链，不能把此适配器直接算作完整 API 执行模式。
-
-**Not verified:** provider compatibility, accuracy, latency, price, API-mode MCP startup or real clicks. Validate a real provider before wiring the shared candidate/execution route; this reserved adapter is not an operational API execution mode.
+本轮证据：`D:/AgentReviewAcceptance/20260927-api-flow-01`。旧版本验收不改记为本次 API 实测。 / Evidence root is listed above; prior acceptance is not relabelled as API live-provider verification.

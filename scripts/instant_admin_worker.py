@@ -123,8 +123,9 @@ def load_ticket(path):
     if win32security.ConvertSidToStringSid(descriptor.GetSecurityDescriptorOwner()) != sid:
         raise RuntimeError("ticket_owner_mismatch")
     ticket = json.loads(path.read_text(encoding="utf-8"))
-    if set(ticket) != {"pipe", "auth", "sid", "session", "expires", "data", "model", "source",
-                       "delegate_profile", "allow_input"}:
+    required = {"pipe", "auth", "sid", "session", "expires", "data", "model", "source",
+                "delegate_profile", "allow_input"}
+    if not required.issubset(ticket) or set(ticket) - required - {"api_profile"}:
         raise ValueError("invalid_ticket_fields")
     if ticket["sid"] != sid or ticket["session"] != session_id:
         raise RuntimeError("same_user_and_session_required")
@@ -142,11 +143,20 @@ def load_ticket(path):
     from app.vision.recognition_source import RecognitionSourceConfig
     try:
         config = RecognitionSourceConfig.model_validate({"source": ticket["source"],
-            "delegate_profile": ticket["delegate_profile"]})
+            "delegate_profile": ticket["delegate_profile"],
+            "api_profile": ticket.get("api_profile")})
     except ValidationError:
         raise ValueError("invalid_recognition_configuration") from None
     if config.source == "external_api":
-        raise ValueError("external_api_not_implemented")
+        if not isinstance(ticket.get("api_profile"), str) or not Path(ticket["api_profile"]).is_absolute():
+            raise ValueError("absolute_api_profile_required")
+        from app.vision.external_grounding_api import ApiGroundingError, load_api_grounding_profile
+        try:
+            load_api_grounding_profile(ticket["api_profile"])
+        except ApiGroundingError:
+            raise ValueError("invalid_api_profile") from None
+    elif ticket.get("api_profile") is not None:
+        raise ValueError("api_profile_only_for_external_api")
     if config.source == "local" and (not isinstance(ticket["model"], str)
                                      or not Path(ticket["model"]).is_absolute()):
         raise ValueError("absolute_model_directory_required")
@@ -163,6 +173,8 @@ def server_command(ticket):
         command.extend(["--model-directory", ticket["model"]])
     if ticket["delegate_profile"] is not None:
         command.extend(["--delegate-profile", ticket["delegate_profile"]])
+    if ticket.get("api_profile") is not None:
+        command.extend(["--api-profile", ticket["api_profile"]])
     if ticket["allow_input"]:
         command.append("--allow-local-input")
     return command

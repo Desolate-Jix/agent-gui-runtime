@@ -28,6 +28,7 @@ class AgentGroundingTarget:
         if self._result.status != "found":
             raise ValueError("agent_grounding_target_not_found")
         self._candidate = next(c for c in self._result.candidates if c.id == self._result.selected_candidate_id)
+        self._source = self._candidate.evidence_source
         self._planned = False
         self._claimed = False
 
@@ -77,7 +78,12 @@ class AgentGroundingTarget:
         element_id = "agent-" + self._candidate.id
         candidate = {"candidate_id": self._candidate.id, "element_id": element_id,
             "text": self._candidate.label, "score": self._candidate.confidence,
-            "bbox_refine_reason": "agent_visual_bbox", "refined_bbox": bbox,
+            "capture_id": capture["capture_id"], "viewport_size": self._result.image_size.model_dump(),
+            "source": self._source, "bbox": bbox, "click_point": point,
+            "freshness": {"status": "revalidated", "source_sha256": capture["sha256"],
+                "current_sha256": sha256(Path(image_path).read_bytes()).hexdigest(),
+                "expires_at": self._state["expires_at"], "region_changed_fraction": changed},
+            "bbox_refine_reason": self._source + "_bbox", "refined_bbox": bbox,
             "element": {"element_id": element_id, "text": self._candidate.label, "bbox": bbox}}
         pre_click = {"allowed": True, "selected_candidate_id": self._candidate.id,
             "selected_element_id": element_id, "selected_click_point": point,
@@ -90,10 +96,11 @@ class AgentGroundingTarget:
             "recommended_target": candidate, "pre_click_decision": pre_click,
             "narrow_search_result": {"results": [{"candidate_id": self._candidate.id,
                 "element_id": element_id, "status": "agent_proposed", "refined_click_point": point,
-                "coordinate_source": "agent_visual", "reasons": ["not_local_ocr_corroborated"]}]},
+                "coordinate_source": self._source, "reasons": ["not_local_ocr_corroborated"]}]},
             "grounding_evidence": {"request_id": self._state["request_id"], "capture_id": capture["capture_id"],
                 "source_sha256": capture["sha256"], "region_changed_fraction": changed,
-                "source": self._state["configuration"]["source"], "target_hit_verified": None,
+                "source": self._state["configuration"]["source"], "evidence_source": self._source,
+                "target_hit_verified": None,
                 "task_effect_verified": None},
             "execution_path": {"vision_model_used": False, "local_model_used": False,
                 "external_grounding_used": True, "action_executed": False}}

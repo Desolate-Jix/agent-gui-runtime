@@ -140,12 +140,13 @@ def write_json(path, value):
 
 class InstantSession:
     def __init__(self, root, data_root, model_directory=None, *, allow_local_input=False,
-                 recognition_source="local", delegate_profile=None):
+                 recognition_source="local", delegate_profile=None, api_profile=None):
         self.root = Path(root).resolve()
         self.data_root = Path(data_root).resolve()
         self.model_directory = Path(model_directory).resolve() if model_directory is not None else None
         self.recognition_source = recognition_source
         self.delegate_profile = delegate_profile
+        self.api_profile = str(Path(api_profile).resolve()) if api_profile is not None else None
         self.allow_local_input = allow_local_input
         self.guard = RLock()
         self.process = None
@@ -178,19 +179,24 @@ class InstantSession:
                 raise InstantStartError("local_input_not_enabled",
                     "Local operator must explicitly launch with --allow-local-input; tools cannot change this",
                     "Ask the operator to check the MCP launch configuration; do not change input authorization automatically.")
-            if self.recognition_source == "external_api":
-                raise InstantStartError("external_api_not_implemented",
-                    "external_api recognition source is not implemented",
-                    "Choose local, agent_current or agent_delegate; external_api cannot be started yet.")
             from app.vision.recognition_source import RecognitionSourceConfig
             from pydantic import ValidationError
             try:
                 config = RecognitionSourceConfig.model_validate({"source": self.recognition_source,
-                    "delegate_profile": self.delegate_profile})
+                    "delegate_profile": self.delegate_profile, "api_profile": self.api_profile})
             except ValidationError:
                 raise InstantStartError("invalid_recognition_configuration",
-                    "invalid recognition source or delegate profile",
-                    "Check --recognition-source and use --delegate-profile only with agent_delegate.") from None
+                    "invalid recognition source or profile",
+                    "Check --recognition-source, --delegate-profile and --api-profile match the chosen route.") from None
+            if config.source == "external_api":
+                from app.vision.external_grounding_api import load_api_grounding_profile, ApiGroundingError
+                try:
+                    profile = load_api_grounding_profile(config.api_profile)
+                    if not os.environ.get(profile.api_key_env, "").strip():
+                        raise ApiGroundingError("api_key_missing")
+                except ApiGroundingError as error:
+                    raise InstantStartError(error.code, error.code,
+                        "Check the API profile JSON and its named environment variable in the server process; then reconnect.") from None
             if config.source == "local" and (self.model_directory is None or not self.model_directory.is_dir()):
                 raise InstantStartError("model_directory_unavailable", "configured model directory does not exist",
                     "Check --model-directory is an existing directory; use forward slashes or escaped backslashes in configuration, then reconnect.")
@@ -206,7 +212,8 @@ class InstantSession:
             if self.session is not None:
                 status = self.status()
                 if (saved.get("recognition_source", "local") != config.source
-                        or saved.get("delegate_profile") != config.delegate_profile):
+                        or saved.get("delegate_profile") != config.delegate_profile
+                        or saved.get("api_profile") != config.api_profile):
                     if not new_session or not status["cleanup_verified"] or status["pending_ids"]:
                         raise InstantStartError("recognition_source_mismatch",
                             "existing session uses a different recognition source",
@@ -239,12 +246,15 @@ class InstantSession:
                 command.extend(["--model-directory", str(self.model_directory)])
             if config.delegate_profile:
                 command.extend(["--delegate-profile", config.delegate_profile])
+            if config.api_profile:
+                command.extend(["--api-profile", config.api_profile])
             self.process = subprocess.Popen(command, cwd=self.root,
                 stdin=subprocess.DEVNULL, stdout=self.log_file, stderr=self.log_file,
                 env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             self.host_identity = {"pid": self.process.pid, "created": psutil.Process(self.process.pid).create_time()}
             write_json(pointer, {"name": self.session.name, "host_identity": self.host_identity,
-                "recognition_source": config.source, "delegate_profile": config.delegate_profile})
+                "recognition_source": config.source, "delegate_profile": config.delegate_profile,
+                "api_profile": config.api_profile})
             return self.status()
 
     def _host_alive(self):
@@ -273,6 +283,7 @@ class InstantSession:
                            if not (self.session / "responses" / p.name).exists()]
             return {"mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
                 "recognition_source": self.recognition_source, "delegate_profile": self.delegate_profile,
+                "api_profile": self.api_profile,
                 "learning_enabled": False, "automatic_safety_interception": False if alive else None,
                 "local_input_enabled_by_operator": self.allow_local_input,
                 "host_is_admin": report.get("host_is_admin"),

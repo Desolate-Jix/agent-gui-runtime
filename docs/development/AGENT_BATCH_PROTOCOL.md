@@ -1,3 +1,5 @@
+> **后续源码 / Source follow-up:** API 已从预留适配器接入宿主，下面的 test.8 状态为发布历史；当前接口与验证边界见 [API 接入](EXTERNAL_VISION_API.md)。 / The API host route is now connected in unreleased source; test.8 descriptions below are historical.
+
 # Agent 视觉组合命令 / Agent-vision batch commands
 
 test.8 · Agent 组合命令协议 / Agent batch command protocol
@@ -27,6 +29,10 @@ Agent-source sessions reuse the existing executor with suspendable grounding. De
 5. 到 `completed/failed/cancelled` 才是终态；检查完整结果及原图，由 Agent 判断实际效果。`completed` 仅表示声明的组合动作路径完成，不证明整个用户任务成功。
 
 Submit once; query fresh status receipts, ground the pending original image, then explicitly continue the original command. Each outer request ID is unique. The same worker resumes without replaying earlier fields. Only terminal statuses end the command, and task-effect judgment remains with the Agent.
+
+## Codex 适配 / Codex adapter
+
+Codex 的连续会话复用由 [codex-vision-session](../../skills/codex-vision-session/SKILL.md) 客户端技能实现；通用协议只要求本次原图、请求关联与按原命令续接，不要求其他客户端提供 Codex collaboration 工具。 / Codex session reuse is a client skill; the generic protocol does not require Codex collaboration APIs from other clients.
 
 ## 中断、取消与图像 / Interruption, cancellation and images
 

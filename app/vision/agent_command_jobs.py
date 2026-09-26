@@ -81,16 +81,23 @@ class _CoordinatorProxy:
         request_id = "ag-" + uuid4().hex
         pending = manager.store.prepare(request_id, goal=goal, capture=capture,
             configuration=manager.configuration, capabilities=job.capabilities)
+        if manager.api_grounder is not None:
+            manager._resolve_api(job, pending)
         with manager._condition:
             if job.cancelled:
-                manager.store.cancel(request_id)
+                if job.resume_state is not None and manager.api_grounder is not None:
+                    manager.store.finish_execution(request_id, job.execution_id,
+                        {"phase": "cancelled_before_dispatch"}, input_attempted=False)
+                else:
+                    manager.store.cancel(request_id)
                 raise _Cancelled("agent_command_cancelled")
-            job.pending_id = request_id
-            job.resume_state = None
-            job.execution_id = None
-            manager._update(job, status="awaiting_grounding", pending_grounding={
-                **pending, "output_schema": GroundingResult.model_json_schema()},
-                observation={"status": "captured", "capture": pending["capture"]})
+            if manager.api_grounder is None:
+                job.pending_id = request_id
+                job.resume_state = None
+                job.execution_id = None
+                manager._update(job, status="awaiting_grounding", pending_grounding={
+                    **pending, "output_schema": GroundingResult.model_json_schema()},
+                    observation={"status": "captured", "capture": pending["capture"]})
             manager._condition.notify_all()
             while job.resume_state is None and not job.cancelled:
                 manager._condition.wait(timeout=.1)
@@ -174,17 +181,58 @@ class _Job:
 class AgentCommandJobs:
     """单宿主单活动命令；磁盘记录只供诊断，重启绝不恢复输入。"""
 
-    def __init__(self, coordinator, store, capture_current, configuration):
+    def __init__(self, coordinator, store, capture_current, configuration, *, api_grounder=None):
         self.coordinator = coordinator
         self.store = store
         self.capture_current = capture_current
         self.configuration = configuration
+        self.api_grounder = api_grounder
+        if (configuration.source == "external_api") != (api_grounder is not None):
+            raise AgentCommandError("api_grounder_configuration_mismatch")
         self._condition = Condition()
         self._jobs = {}
         self._snapshots = {}
         self._active_id = None
         self._closed = False
         self._root = Path(store.session_root) / "agent-commands"
+
+    def _resolve_api(self, job, pending):
+        request_id = pending["request_id"]
+        with self._condition:
+            if job.cancelled:
+                self.store.cancel(request_id)
+                raise _Cancelled("agent_command_cancelled")
+            job.pending_id = request_id
+            job.resume_state = None
+            job.execution_id = None
+            self._update(job, status="running", pending_grounding=None,
+                observation={"status": "captured", "capture": pending["capture"]},
+                api_request={"request_id": request_id, "phase": "requesting"})
+        # 网络等待不持有命令锁，取消和状态查询仍可处理；只发送此步冻结原图。
+        try:
+            response = self.api_grounder.ground(request_id=request_id,
+                capture=pending["capture"], goal=pending["goal"])
+            with self._condition:
+                if job.cancelled:
+                    raise _Cancelled("agent_command_cancelled")
+                state = self.store.resolve(request_id, response["result"])
+                calls = self._snapshots[job.command_id].get("recognition_calls", [])
+                self._update(job, recognition_calls=[*calls, {"request_id": request_id,
+                    "capture_id": pending["capture"]["capture_id"], "provider": response["provider"]}],
+                    api_request={"request_id": request_id, "phase": state["phase"]})
+                if state["phase"] != "grounding_ready":
+                    raise AgentCommandError("request_" + state["phase"])
+                job.execution_id = "api-" + uuid4().hex
+                job.resume_state = self.store.claim_execution(request_id, job.execution_id)
+        except Exception as error:
+            with self._condition:
+                self.store.cancel(request_id)
+                self._update(job, api_request={"request_id": request_id,
+                    "phase": "cancelled" if job.cancelled else "failed"})
+                if job.cancelled:
+                    raise _Cancelled("agent_command_cancelled") from None
+                job.failure_code = getattr(error, "code", None) or str(error)
+            raise
 
     def _path(self, command_id):
         if not isinstance(command_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", command_id):
@@ -217,7 +265,7 @@ class AgentCommandJobs:
         route = resolve_recognition_route(self.configuration, capabilities)
         if route.status != "eligible":
             raise AgentCommandError(route.code)
-        if route.dispatch_owner != "agent_client":
+        if route.dispatch_owner != "agent_client" and self.configuration.source != "external_api":
             raise AgentCommandError("handoff_requires_agent_source")
         if not isinstance(target, dict) or any(type(target.get(k)) is not int or target[k] <= 0
                 for k in ("handle", "process_id")):
@@ -328,6 +376,8 @@ class AgentCommandJobs:
             return deepcopy(self._snapshots[command_id])
 
     def resume(self, command_id, grounding_request_id, execution_id):
+        if self.api_grounder is not None:
+            raise AgentCommandError("api_grounding_managed_by_host")
         self._path(command_id)
         with self._condition:
             job = self._jobs.get(command_id)

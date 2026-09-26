@@ -8,13 +8,17 @@ import sys
 import time
 
 
-def server_arguments(root, model, data, administrator=False, recognition_source="local", delegate_profile=None):
-    if recognition_source not in {"local", "agent_current", "agent_delegate"}:
+def server_arguments(root, model, data, administrator=False, recognition_source="local", delegate_profile=None, api_profile=None):
+    if recognition_source not in {"local", "agent_current", "agent_delegate", "external_api"}:
         raise ValueError("unsupported recognition source: " + recognition_source)
     if recognition_source == "local" and model is None:
         raise ValueError("local recognition requires a model directory")
     if recognition_source != "local" and model is not None:
         raise ValueError("Agent recognition does not use a model directory")
+    if recognition_source == "external_api" and (api_profile is None or not Path(api_profile).is_absolute()):
+        raise ValueError("external_api requires an absolute api profile path")
+    if recognition_source != "external_api" and api_profile is not None:
+        raise ValueError("api profile is only valid for external_api")
     if recognition_source == "agent_delegate" and not (delegate_profile or "").strip():
         raise ValueError("agent_delegate requires a delegate profile")
     if recognition_source != "agent_delegate" and delegate_profile is not None:
@@ -26,19 +30,21 @@ def server_arguments(root, model, data, administrator=False, recognition_source=
         result.extend(["--model-directory", str(model)])
     if delegate_profile is not None:
         result.extend(["--delegate-profile", delegate_profile])
+    if api_profile is not None:
+        result.extend(["--api-profile", str(api_profile)])
     return result
 
 
-async def run(root, model, data, administrator=False, recognition_source="local", delegate_profile=None):
+async def run(root, model, data, administrator=False, recognition_source="local", delegate_profile=None, api_profile=None):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     env.pop("PYTHONPATH", None)
-    arguments = server_arguments(root, model, data, administrator, recognition_source, delegate_profile)
+    arguments = server_arguments(root, model, data, administrator, recognition_source, delegate_profile, api_profile)
     params = StdioServerParameters(command=sys.executable, args=arguments, env=env, cwd=str(root))
     evidence = {"actual_input_executed": False, "model_inference_tested": False,
                 "administrator_requested": administrator, "recognition_source": recognition_source,
-                "delegate_profile": delegate_profile}
+                "delegate_profile": delegate_profile, "api_profile": str(api_profile) if api_profile else None}
     async with stdio_client(params) as streams:
         async with ClientSession(*streams) as client:
             initialized = await client.initialize()
@@ -149,8 +155,9 @@ async def run(root, model, data, administrator=False, recognition_source="local"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-directory", type=Path)
-    parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate"], default="local")
+    parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"], default="local")
     parser.add_argument("--delegate-profile")
+    parser.add_argument("--api-profile", type=Path)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--administrator", action="store_true", help="Use UAC bridge; reconnection prompts again")
@@ -158,10 +165,10 @@ if __name__ == "__main__":
     root = Path(__file__).resolve().parents[1]
     model = args.model_directory.resolve() if args.model_directory is not None else None
     try:
-        server_arguments(root, model, args.data_dir, args.administrator, args.recognition_source, args.delegate_profile)
+        server_arguments(root, model, args.data_dir, args.administrator, args.recognition_source, args.delegate_profile, args.api_profile)
     except ValueError as error:
         parser.error(str(error))
     result = asyncio.run(run(root, model, args.data_dir.resolve(), args.administrator,
-                            args.recognition_source, args.delegate_profile))
+                            args.recognition_source, args.delegate_profile, args.api_profile))
     args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False))

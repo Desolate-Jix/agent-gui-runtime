@@ -1,3 +1,5 @@
+> **后续源码 / Source follow-up:** API 已从预留适配器接入宿主，下面的 test.8 状态为发布历史；当前接口与验证边界见 [API 接入](EXTERNAL_VISION_API.md)。 / The API host route is now connected in unreleased source; test.8 descriptions below are historical.
+
 # 可切换视觉识别设计 / Switchable visual recognition design
 
 > v0.1.0-test.8：源码与隔离候选各 2025 项通过，本方 local、当前 Agent、实际 Luna 委派的单项及连续操作与清理通过；同候选独立 local、visual 与 cleanup 均已完成。首次失败、恢复与具体覆盖见验收记录。独立 API 仍仅预留接口，宿主禁用。 / Source and isolated candidate each passed 2025 checks. Main-agent local/current/actual-Luna single and continuous journeys passed; same-candidate independent local, visual and cleanup gates are complete. Initial failures and scope remain documented. External API remains interface-only with its host route disabled.
@@ -68,12 +70,12 @@ The source changes where candidates originate, not the input backend. Existing t
 ### 4.1 客户端可委派 / Client supports delegation
 
 1. Astra 决定目标，例如“定位搜索框”。框架返回当前截图及精简定位任务。
-2. 客户端把同一原图或带明确变换的裁剪图交给指定 Luna 子 Agent；不把整个会话、个人资料和无关历史复制过去。
+2. Codex 客户端通过 `codex-vision-session` 技能保存并复用指定 Luna 子 Agent 的会话 ID，后续以 `followup_task` 交接本次原图或带明确变换的裁剪图，不逐图新建；不把整个会话、个人资料和无关历史复制过去。
 3. Luna 只返回结构化识别结果，不操作鼠标，不自行继续任务。
 4. 调用方把结果提交回原请求；公共执行器校验后执行明确请求的动作。
 5. 返回前后图。默认 Astra 判断结果；也可配置 Luna 先给出判断，Astra 负责下一步。
 
-The client delegates a bounded image-grounding request to Luna, submits its result to the original request, and retains exclusive input ownership. Workers cannot click or independently continue the task. Evidence review may be delegated explicitly; planning remains with Astra.
+The Codex client adapter retains one Luna session ID and uses followup_task for subsequent fresh image-grounding requests without spawning per image, submits its result to the original request, and retains exclusive input ownership. Workers cannot click or independently continue the task. Evidence review may be delegated explicitly; planning remains with Astra.
 
 **框架不能仅凭 MCP 配置把任何 Agent 的主模型切成 Luna。** 子 Agent 启动、模型选择和配额归客户端管理。普通 MCP 工具返回图像，不等于客户端支持模型委派，也不能假设客户端实现了 MCP sampling。
 

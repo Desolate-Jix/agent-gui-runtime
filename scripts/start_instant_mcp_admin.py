@@ -93,6 +93,7 @@ def make_ticket(args, sid, session):
                "data": str(args.data_dir.resolve()),
                "model": str(args.model_directory.resolve()) if args.model_directory is not None else None,
                "source": args.recognition_source, "delegate_profile": args.delegate_profile,
+               "api_profile": str(args.api_profile.resolve()) if getattr(args, "api_profile", None) else None,
                "allow_input": args.allow_local_input}
     try:
         with path.open("x", encoding="utf-8") as stream:
@@ -162,6 +163,7 @@ def main():
     parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"],
                         default="local")
     parser.add_argument("--delegate-profile")
+    parser.add_argument("--api-profile", type=Path)
     parser.add_argument("--allow-local-input", action="store_true")
     parser.add_argument("--connect-timeout", "--uac-timeout", type=int, default=90,
                         help="Pipe connection timeout AFTER UAC confirmation; --uac-timeout is a legacy alias. "
@@ -173,7 +175,18 @@ def main():
     if not 5 <= args.connect_timeout <= 300:
         parser.error("connect timeout 5..300 required")
     if args.recognition_source == "external_api":
-        parser.error("external_api recognition source is not implemented")
+        if args.api_profile is None:
+            parser.error("external_api requires --api-profile")
+        if not args.api_profile.is_absolute() or not args.api_profile.is_file():
+            parser.error("--api-profile must be an existing absolute JSON path")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from app.vision.external_grounding_api import ApiGroundingError, load_api_grounding_profile
+        try:
+            load_api_grounding_profile(args.api_profile)
+        except ApiGroundingError:
+            parser.error("--api-profile has an invalid schema")
+    elif args.api_profile is not None:
+        parser.error("--api-profile is only valid for external_api")
     if args.recognition_source == "local" and (args.model_directory is None or not args.model_directory.is_dir()):
         parser.error("local recognition requires a valid model directory")
     if args.recognition_source == "agent_delegate" and not (args.delegate_profile or "").strip():

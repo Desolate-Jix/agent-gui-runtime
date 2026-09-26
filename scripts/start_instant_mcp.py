@@ -15,16 +15,28 @@ def main():
     parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"],
                         default="local")
     parser.add_argument("--delegate-profile")
+    parser.add_argument("--api-profile", type=Path)
     parser.add_argument("--allow-local-input", action="store_true",
                         help="Operator explicitly enables existing non-learning direct input, automatic risk interception OFF")
     args = parser.parse_args()
+    if args.recognition_source == "external_api":
+        if args.api_profile is None or not args.api_profile.is_absolute() or not args.api_profile.is_file():
+            parser.error("external_api requires an existing absolute --api-profile JSON path")
+        from app.vision.external_grounding_api import ApiGroundingError, load_api_grounding_profile
+        try:
+            load_api_grounding_profile(args.api_profile)
+        except ApiGroundingError:
+            parser.error("--api-profile has an invalid schema")
+    elif args.api_profile is not None:
+        parser.error("--api-profile is only valid for external_api")
     # SDK 保存协议流，普通 Python print 和本机库的 stdout 改到 stderr。
     protocol = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8", buffering=1)
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     sys.stdout = sys.stderr
     from app.instant_mcp import InstantSession, build_server
     session = InstantSession(ROOT, args.data_dir, args.model_directory, allow_local_input=args.allow_local_input,
-                             recognition_source=args.recognition_source, delegate_profile=args.delegate_profile)
+                             recognition_source=args.recognition_source, delegate_profile=args.delegate_profile,
+                             api_profile=getattr(args, "api_profile", None))
     try:
         import anyio
         from mcp.server.stdio import stdio_server

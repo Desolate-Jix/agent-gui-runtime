@@ -117,7 +117,7 @@ class GroundingHandoffStore:
             route = resolve_recognition_route(configuration, capabilities)
             if route.status != "eligible":
                 raise GroundingHandoffError(route.code)
-            if route.dispatch_owner != "agent_client":
+            if route.dispatch_owner != "agent_client" and configuration.source != "external_api":
                 raise GroundingHandoffError("handoff_requires_agent_source")
             intent = {"goal": goal, "capture": self._capture(capture),
                       "configuration": configuration.model_dump()}
@@ -142,7 +142,8 @@ class GroundingHandoffStore:
                     image_size=(capture["image_size"]["width"], capture["image_size"]["height"]))
             except ValueError as error:
                 raise GroundingHandoffError("grounding_invalid", str(error)) from None
-            if any(candidate.evidence_source != "agent_visual" for candidate in result.candidates):
+            expected_source = "api_visual" if state["configuration"]["source"] == "external_api" else "agent_visual"
+            if any(candidate.evidence_source != expected_source for candidate in result.candidates):
                 raise GroundingHandoffError("source_mismatch")
             value = result.model_dump()
             if "result" in state:

@@ -2,14 +2,17 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$ModelDirectory,
-    [ValidateSet('local', 'agent_current', 'agent_delegate')][string]$RecognitionSource = 'local',
+    [ValidateSet('local', 'agent_current', 'agent_delegate', 'external_api')][string]$RecognitionSource = 'local',
     [string]$DelegateProfile,
+    [string]$ApiProfile,
     [string]$DataDirectory,
     [string]$Python
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if ($RecognitionSource -eq 'local' -and -not $ModelDirectory) { throw 'local requires -ModelDirectory.' }
+if ($RecognitionSource -eq 'external_api' -and -not $ApiProfile) { throw 'external_api requires -ApiProfile.' }
+if ($RecognitionSource -ne 'external_api' -and $ApiProfile) { throw '-ApiProfile is only valid for external_api.' }
 if ($RecognitionSource -ne 'local' -and $ModelDirectory) { throw 'Agent sources do not accept -ModelDirectory.' }
 if ($RecognitionSource -eq 'agent_delegate' -and [string]::IsNullOrWhiteSpace($DelegateProfile)) { throw 'agent_delegate requires -DelegateProfile.' }
 if ($RecognitionSource -ne 'agent_delegate' -and $DelegateProfile) { throw '-DelegateProfile is only valid for agent_delegate.' }
@@ -24,6 +27,7 @@ if ($PSCmdlet.ShouldProcess($root, 'Generate ADMINISTRATOR MCP configuration wit
         '--recognition-source', $RecognitionSource, '--data-dir', $DataDirectory, '--enable-local-input', '--administrator')
     if ($ModelDirectory) { $arguments += @('--model-directory', $ModelDirectory) }
     if ($DelegateProfile) { $arguments += @('--delegate-profile', $DelegateProfile) }
+    if ($ApiProfile) { $arguments += @('--api-profile', $ApiProfile) }
     & $Python @arguments
     if ($LASTEXITCODE -ne 0) { throw "Configuration failed (exit $LASTEXITCODE)." }
     Write-Host 'Merge the single agent-review-instant entry into your Agent, then reconnect and confirm UAC.'

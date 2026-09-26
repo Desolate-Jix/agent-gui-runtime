@@ -35,6 +35,7 @@ def verify_entrypoints(output):
 
 
 ROOT_FILES = ("LICENSE", ".gitignore", ".gitattributes", "pyproject.toml", "uv.lock",
+              "skills/codex-vision-session/SKILL.md",
               "README.md", "AGENT_GUIDE.md", "FRIEND_SETUP.md", "CHANGELOG.md", "RELEASE_SCOPE.md",
               "configs/model_profiles/vista_4b_transformers.json")
 SCRIPTS = tuple("scripts/" + name for name in (

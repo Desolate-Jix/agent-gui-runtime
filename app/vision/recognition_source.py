@@ -15,7 +15,7 @@ class RecognitionSourceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
     source: Source = "local"
     delegate_profile: str | None = Field(default=None, min_length=1, max_length=128)
-    api_profile: str | None = Field(default=None, min_length=1, max_length=128)
+    api_profile: str | None = Field(default=None, min_length=1, max_length=2048)
     fallback_policy: Literal["explicit_only"] = "explicit_only"
 
     @model_validator(mode="after")

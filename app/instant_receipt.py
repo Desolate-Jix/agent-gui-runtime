@@ -36,7 +36,8 @@ def compact_receipt(receipt, *, full_receipt_path=None):
     if result.get('contract_version') == 'agent_command.v1':
         value['agent_command'] = {key: deepcopy(result[key]) for key in (
             'contract_version', 'command_id', 'status', 'pending_grounding',
-            'action_executed', 'cancel_requested', 'error', 'automatic_retry_allowed') if key in result}
+            'action_executed', 'cancel_requested', 'error', 'automatic_retry_allowed',
+            'api_request', 'recognition_calls') if key in result}
         for key in ('progress', 'result'):
             if isinstance(result.get(key), dict):
                 projected = compact_receipt({'request_id': receipt.get('request_id'), 'result': result[key]})

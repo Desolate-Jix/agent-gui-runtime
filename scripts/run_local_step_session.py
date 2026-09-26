@@ -25,17 +25,23 @@ def write(path, data):
 
 def configure_recognition_startup(coordinator, args, report):
     from app.vision.recognition_source import RecognitionSourceConfig
-    if args.recognition_source == "external_api":
-        raise ValueError("external_api recognition source is not implemented")
     config = RecognitionSourceConfig.model_validate({"source": args.recognition_source,
-        "delegate_profile": args.delegate_profile})
+        "delegate_profile": args.delegate_profile, "api_profile": getattr(args, "api_profile", None)})
+    api_profile = None
+    if config.source == "external_api":
+        from app.vision.external_grounding_api import load_api_grounding_profile, ApiGroundingError
+        api_profile = load_api_grounding_profile(config.api_profile)
+        if not os.environ.get(api_profile.api_key_env, "").strip():
+            raise ApiGroundingError("api_key_missing")
     if config.source == "local" and (args.model_directory is None or not args.model_directory.is_dir()):
         raise ValueError("local recognition requires an existing --model-directory")
     report["recognition_source"] = config.source
     report["delegate_profile"] = config.delegate_profile
+    report["api_profile"] = config.api_profile
     # Agent 视觉路线不配置、加载或预热本地 VISTA。
     report["model_configuration"] = (coordinator.configure_vista_model(
         model_directory=str(args.model_directory.resolve())) if config.source == "local" else None)
+    return api_profile
 
 
 def prepare_models_for_source(coordinator, recognition_source):
@@ -97,6 +103,8 @@ def run_grounding_command(store, capture_current, request_id, command, *, sessio
     from app.vision.grounding_handoff import GroundingHandoffError
     from app.vision.recognition_source import resolve_recognition_route
     request = validate_grounding_command(command["kind"], command["request"])
+    if session_configuration is not None and session_configuration.source == "external_api":
+        raise GroundingHandoffError("api_grounding_managed_by_host: use step, input_sequence or form_fill")
     if command["kind"] == "grounding_execute":
         raise GroundingHandoffError("use_grounding_execution_dispatch")
     if command["kind"] == "grounding_prepare":
@@ -161,6 +169,7 @@ def main():
     parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"],
                         default="local")
     parser.add_argument("--delegate-profile")
+    parser.add_argument("--api-profile")
     parser.add_argument("--local-no-learning", action="store_true", required=True)
     parser.add_argument("--observer", choices=["minimal", "original"], default="minimal")
     parser.add_argument("--parent-pid", type=int)
@@ -179,6 +188,7 @@ def main():
     host = None
     co = None
     agent_jobs = None
+    api_grounder = None
     target = None
     stop = threading.Event()
     sampler_thread = None
@@ -250,18 +260,22 @@ def main():
             runtime_output_root=out / "runtime-output", vision_config_path=out / "configs/vision.json")
         co.set_automatic_safety_interception(False)
         co.set_keep_models_loaded(True)
-        configure_recognition_startup(co, args, report)
+        api_profile = configure_recognition_startup(co, args, report)
         report["phase"] = "ready"
         write(out / "report.json", report)
         from app.vision.grounding_handoff import GroundingHandoffStore
         from app.vision.grounding_commands import GROUNDING_COMMANDS
         from app.vision.recognition_source import RecognitionSourceConfig
         session_configuration = RecognitionSourceConfig(source=args.recognition_source,
-                                                        delegate_profile=args.delegate_profile)
+            delegate_profile=args.delegate_profile, api_profile=args.api_profile)
         grounding_store = GroundingHandoffStore(out, owner_id="host-" + secrets.token_hex(16))
         if args.recognition_source != 'local':
             from app.vision.agent_command_jobs import AgentCommandJobs
-            agent_jobs = AgentCommandJobs(co, grounding_store, capture, session_configuration)
+            if api_profile is not None:
+                from app.vision.external_grounding_api import ChatCompletionsGrounder
+                api_grounder = ChatCompletionsGrounder(api_profile)
+            agent_jobs = AgentCommandJobs(co, grounding_store, capture, session_configuration,
+                api_grounder=api_grounder)
         sampler_thread = threading.Thread(target=sample_loop, daemon=True, name="live-process-sampler")
         sampler_thread.start()
         done = set()
@@ -414,6 +428,8 @@ def main():
                     agent_command_cleanup={'status': 'waiting_for_worker', 'automatic_retry_allowed': False})
                 write(out / 'report.json', report)
             report['agent_command_cleanup'] = {'status': 'stopped'}
+        if api_grounder is not None:
+            api_grounder.close()
         if co is not None:
             from app.desktop_review.session_cleanup import shutdown_retaining_owner
             from app.core.json_snapshot import read_json_snapshot

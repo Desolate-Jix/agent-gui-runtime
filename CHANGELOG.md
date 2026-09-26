@@ -1,3 +1,10 @@
+# 未发布源码 / Unreleased source
+
+- 新增 Codex 专用视觉会话技能，连续任务复用同一子 Agent ID；通用 MCP 接口不绑定 Codex 调度工具，版本号与已发布 ZIP 不变。 / Add a Codex-only skill that reuses one visual worker per continuous task, without changing generic MCP APIs, version numbers or published ZIP assets.
+- 接通显式 `external_api` 配置、启动、原图 HTTP 请求、候选校验、公共执行及结果回传；支持现有单步与组合调度，不新增执行器。 / Wire external API configuration, startup, original-image HTTP grounding, validation, shared execution and receipts.
+- API 请求可查询状态、合作取消；无自动重试或静默回退；精简回执保留调用模型、用量和耗时。 / Poll/cancel active requests; no retry or fallback, with provider metadata retained in compact receipts.
+- 验证限于接口及运行时契约，不评估服务商识别准确率。详见 [API 接入](docs/development/EXTERNAL_VISION_API.md)。 / Verification covers interface/runtime contracts rather than provider accuracy.
+
 # v0.1.0-test.8 · 可切换 Agent 视觉 / Switchable Agent vision
 
 验收与保留的首次失败见 [test.8 验收](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。 / See acceptance for verified scope and retained first failures.

@@ -54,7 +54,7 @@ def test_agent_start_skips_missing_model_and_passes_route(tmp_path, monkeypatch,
 
 @pytest.mark.parametrize("source,profile,code", [
     ("agent_delegate", None, "invalid_recognition_configuration"),
-    ("external_api", None, "external_api_not_implemented"),
+    ("external_api", None, "invalid_recognition_configuration"),
 ])
 def test_unsupported_source_rejected_before_launch(tmp_path, source, profile, code):
     session = InstantSession(tmp_path, tmp_path / "data", None, allow_local_input=True,
@@ -107,10 +107,10 @@ def test_prepare_models_command_is_noop_for_agent_source():
         "status": "model_not_required", "recognition_source": "agent_current"}
 
 
-def test_runner_rejects_external_api_explicitly():
+def test_runner_rejects_external_api_without_profile():
     from scripts.run_local_step_session import configure_recognition_startup
 
-    with pytest.raises(ValueError, match="external_api.*not implemented"):
+    with pytest.raises(ValueError, match="external_api requires"):
         configure_recognition_startup(object(), Namespace(recognition_source="external_api",
             delegate_profile=None, model_directory=None), {})
 

@@ -1,3 +1,5 @@
+> **后续源码 / Source follow-up:** API 已从预留适配器接入宿主，下面的 test.8 状态为发布历史；当前接口与验证边界见 [API 接入](EXTERNAL_VISION_API.md)。 / The API host route is now connected in unreleased source; test.8 descriptions below are historical.
+
 # Agent 视觉开发状态 / Agent vision implementation status
 
 > v0.1.0-test.8：源码与隔离候选各 2025 项通过，本方 local、当前 Agent、实际 Luna 委派的单项及连续操作与清理通过；同候选独立 local、visual 与 cleanup 均已完成。首次失败、恢复与具体覆盖见验收记录。独立 API 仍仅预留接口，宿主禁用。 / Source and isolated candidate each passed 2025 checks. Main-agent local/current/actual-Luna single and continuous journeys passed; same-candidate independent local, visual and cleanup gates are complete. Initial failures and scope remain documented. External API remains interface-only with its host route disabled.

@@ -1,3 +1,5 @@
+> **2026-09-27 后续源码，未发布 / Unreleased source follow-up:** `external_api` 已接入现有执行链；配置完整 API 端点、视觉模型和密钥环境变量名后，可用原有单步与组合命令，API 自动定位，执行仍走公共检查。已发布 test.8 ZIP 仍仅预留 API 适配器，不能按本段当成已更新。 / External API grounding is now wired into the common execution path in source. The published test.8 ZIP remains adapter-only and has not been replaced.
+
 # Agent Review Instant
 
 
@@ -24,6 +26,7 @@ The connected agent plans and judges outcomes. This runtime observes real Window
 - [已发布 test.8 ZIP / Published test.8 download](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.8/AgentReviewInstant-v0.1.0-test.8.zip)
 - [安装、模型下载与配置 / Setup and models](FRIEND_SETUP.md)
 - [Agent 使用指南 / Agent guide](AGENT_GUIDE.md)
+- [Codex 视觉会话适配 / Codex visual-session adapter](skills/codex-vision-session/SKILL.md)：Codex 委派识图连续复用同一个子 Agent；其他 MCP 客户端不受影响。 / Reuse one Codex visual worker across consecutive screenshots without changing other MCP clients.
 - [test.8 验收与限制 / Acceptance and limits](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)
 - [Agent 视觉路由与组合协议 / Agent routing and batch protocol](docs/development/AGENT_VISION_BACKENDS_DESIGN.md) · [组合协议细节 / Batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md) · [独立 API 预留接口 / Reserved API adapter](docs/development/EXTERNAL_VISION_API.md)
 - [调用方调度 / Caller scheduling](AGENT_GUIDE.md#执行契约--execution-contracts)：已知字段先合批、及时读取 pending 结果、直接核对回执原图；属于调用指引调整，尚无本轮实机提速数据。 / Batch known fields, promptly retrieve pending results and inspect inline evidence; caller guidance only, without a new live speed measurement.

@@ -2442,7 +2442,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     if plan.get("grounding_evidence"):
         execution_path.update(page_structure_used=False, candidate_rank_used=False,
             narrow_search_used=False, external_grounding_used=True, local_model_used=False,
-            coordinate_source="agent_visual", selection_source="grounding.v1")
+            coordinate_source=plan["grounding_evidence"].get("evidence_source", "agent_visual"),
+            selection_source="grounding.v1")
 
     if "low_risk_visual_fast_lane" not in locals():
         low_risk_visual_fast_lane = _low_risk_visual_fast_lane_profile(
