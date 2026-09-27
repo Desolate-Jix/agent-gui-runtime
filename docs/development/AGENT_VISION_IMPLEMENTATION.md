@@ -1,4 +1,4 @@
-> **后续源码 / Source follow-up:** API 已从预留适配器接入宿主，下面的 test.8 状态为发布历史；当前接口与验证边界见 [API 接入](EXTERNAL_VISION_API.md)。 / The API host route is now connected in unreleased source; test.8 descriptions below are historical.
+> **v0.1.0 当前说明 / Current release:** API 宿主接线已纳入 v0.1.0；下文 test.8 的“预留/禁用”和候选结果属于历史，不描述当前 API 行为。当前配置与验收边界见 [API 接入](EXTERNAL_VISION_API.md) 和 [正式版验收](../verification/V010_RELEASE_ACCEPTANCE.md)。 / API host integration ships in v0.1.0. Any test.8 reserved/disabled wording and candidate results below are historical; use the linked current API guide and release acceptance.
 
 # Agent 视觉开发状态 / Agent vision implementation status
 

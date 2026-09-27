@@ -1,15 +1,13 @@
-> **2026-09-27 后续源码，未发布 / Unreleased source follow-up:** `external_api` 已接入现有执行链；配置完整 API 端点、视觉模型和密钥环境变量名后，可用原有单步与组合命令，API 自动定位，执行仍走公共检查。已发布 test.8 ZIP 仍仅预留 API 适配器，不能按本段当成已更新。 / External API grounding is now wired into the common execution path in source. The published test.8 ZIP remains adapter-only and has not been replaced.
+# Agent 接入与操作 / Agent usage — v0.1.0
 
-# Agent 接入与操作 / Agent usage — v0.1.0-test.8
+本版包含 [Agent 视觉组合命令协议](docs/development/AGENT_BATCH_PROTOCOL.md)：显式声明能力，使用 status/continue/cancel 继续原批次，不重发已完成输入。Agent `read_text` 返回原图，不加载本地 OCR。 / This release includes explicit-capability Agent batches with status/continue/cancel and original-image reading, without replay or local OCR.
 
-test.8 新增 [Agent 视觉组合命令协议](docs/development/AGENT_BATCH_PROTOCOL.md)：显式声明能力，使用 status/continue/cancel 继续原批次，不重发已完成输入。Agent `read_text` 返回原图，不加载本地 OCR。 / Test.8 adds explicit-capability Agent batches with status/continue/cancel and original-image reading, without replay or local OCR.
+**使用新增视觉路由前，确认连接的是 v0.1.0 或更新的服务端。** 旧版 test.7 不支持这些字段。 / Confirm the server is v0.1.0 or later before using the added vision routes; test.7 does not support these fields.
 
-**使用新视觉来源前先核对服务端版本为 test.8 或更新。** 不要向 test.7 发送新增字段。 / Verify server version before using the new fields; test.7 does not support them.
-
-识图交接与状态命令本身不点击；`grounding_execute` 仅用于独立单步，暂停中的组合命令须用 `agent_command_continue`。沿用公共执行路由，不自动重放。独立 API [仅保留接口](docs/development/EXTERNAL_VISION_API.md)。新窗口的 500ms 等待不等于页面就绪，仍需核对原图。 / Handoff/status do not click. Use grounding_execute only for standalone grounding and agent_command_continue for suspended batches. API remains reserved; launch waiting is not page-readiness proof.
+识图交接与状态命令本身不点击；`grounding_execute` 仅用于独立单步，暂停中的组合命令须用 `agent_command_continue`。所有路线沿用公共执行路由，不自动重放。外部 API 的截图会发往配置的服务，错误不自动重试或切换服务，详见 [API 接入](docs/development/EXTERNAL_VISION_API.md)。新窗口的 500ms 等待不等于页面就绪，仍需核对原图。 / Handoff/status do not click. Use grounding_execute only for standalone grounding and agent_command_continue for suspended batches. All routes use the shared executor without replay. External API screenshots go to the configured service; errors do not trigger retries or provider fallback. See the API guide. A 500 ms launch wait does not prove page readiness; inspect the image.
 
 
-> v0.1.0-test.8：源码与隔离候选各 2025 项通过，本方 local、当前 Agent、实际 Luna 委派的单项及连续操作与清理通过；同候选独立 local、visual 与 cleanup 均已完成。首次失败、恢复与具体覆盖见验收记录。独立 API 仍仅预留接口，宿主禁用。 / Source and isolated candidate each passed 2025 checks. Main-agent local/current/actual-Luna single and continuous journeys passed; same-candidate independent local, visual and cleanup gates are complete. Initial failures and scope remain documented. External API remains interface-only with its host route disabled.
+v0.1.0 的本轮测试、连续使用、清理和首次失败见 [验收记录](docs/verification/V010_RELEASE_ACCEPTANCE.md)。test.8 的测试数字和实机经历只属于历史版本。 / See the v0.1.0 acceptance record for current checks, continuous journeys, cleanup and first failures. test.8 counts and live results remain historical.
 ## test.6：通用应用启动 / Installed applications
 
 本节适用于 test.6；旧 test.5 包不包含新增接口，不需要为每个软件注册 MCP。 / Available in test.6, not older test.5 bundles. Apps do not need separate MCP registration.
@@ -53,9 +51,9 @@ test.6 的历史独立验收见 docs/verification/TEST6_CANDIDATE_ACCEPTANCE.md�
 
 Codex 使用 `agent_delegate` 时读取 [codex-vision-session 技能](skills/codex-vision-session/SKILL.md)：保留同一视觉子 Agent ID，后续以 `followup_task` 处理新截图，不逐图 `spawn_agent`。每次仍使用新请求与原图证据，原会话不可用则报告阻塞。这是 Codex 客户端技能，不改变通用 MCP 协议；其他客户端沿用自己的委派机制。 / The Codex skill reuses one visual worker with fresh evidence and request correlation; it does not change the generic MCP protocol or other clients.
 
-### test.8 组合填写 / Batch composition
+### 可恢复组合填写 / Resumable batch composition
 
-以下能力要求 test.8；早期 130 项契约检查已纳入完整回归，实际覆盖与限制见 [本版验收](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。Tab 分组仍要求调用方确认真实连续焦点顺序，不保证任意表单。 / These features require test.8. Earlier 130 contract checks are included in full regression; see release acceptance for live scope and limits. Tab groups require known contiguous focus order and are not a universal form guarantee.
+组合能力适用于 v0.1.0 或更新；test.8 验收记录是历史材料，本版实际覆盖和限制见 [v0.1.0 验收](docs/verification/V010_RELEASE_ACCEPTANCE.md)。Tab 分组仍要求调用方确认真实连续焦点顺序，不保证任意表单。 / These batch features require v0.1.0 or later. The test.8 record is historical; see the v0.1.0 acceptance report for current coverage and limits. Tab groups require known contiguous focus order and are not a universal form guarantee.
 
 - 先收齐当前已知值，将同页独立字段放入一条 `form_fill`；缺失值另问另补，不阻塞已知字段。准备好请求后直接执行，不在批次间插入无关代码/日志调查。 / Prepare all currently known values in one form request; ask separately for missing facts and avoid unrelated investigation between batches.
 - 新增 `text_navigation:"tab_groups"`。只给已确认实际 Tab 顺序的连续文本字段相同 `tab_group`；不确定的字段省略该属性，新段使用另一个组名。非文本字段自动断组；不会因选择了下拉框就直接 Tab 到未确认的文本框。 / Explicit same-named groups apply only to consecutive text fields with known real Tab order; omit the group when uncertain. Non-text controls and group changes reset recognition.
@@ -82,9 +80,9 @@ Codex 使用 `agent_delegate` 时读取 [codex-vision-session 技能](skills/cod
 
 **test.5 窗口观察 / Window observation：** `close_launched_window` 等待时增加 `close_observation` 和 `next_action`；收到 `inspect_owned_window` 后保持会话，读取并选择确切弹窗，解决已授权选项后再核验原窗口消失。动作关闭目标时，派发成功与事后图缺失必须分开判断，不根据外层 `operation_succeeded=false` 重放；先检查退出诊断；目标仍存在时才明确选窗补图，已退出时不要重新选择不存在的窗口。`instant_stop.cleanup_verified` 只代表宿主收尾。 / Pending closure now carries owned-window diagnostics; inspect the exact dialog, resolve an authorized choice and verify disappearance before stopping. Dispatch may succeed with unavailable post-images; inspect rather than replay. [详细契约 / Details](docs/verification/EXECUTION_WINDOW_TRANSITIONS.md)。
 
-本包只提供即时操作，不是学习桥。按用户指定的低风险任务使用本包接口，不使用另一套鼠标工具冒充本包测试。快捷入口使用管理员宿主且自动风险拦截关闭；一次只允许一个 Agent 控制桌面。付款、发送、删除、最终提交等不可逆操作不在本次测试范围。
+本包只提供执行操作，不是学习桥。按用户指定的低风险任务使用本包接口，不使用另一套鼠标工具冒充本包测试。快捷入口使用管理员宿主且自动风险拦截关闭；一次只允许一个 Agent 控制桌面。付款、发送、删除、最终提交等不可逆操作不在支持范围。
 
-Instant-mode operations only, not learning. Use this framework for the user's supervised low-risk task; do not substitute another input backend and claim package coverage. Quick setup uses an administrator host with automatic risk interception disabled. Only one Agent may operate the desktop. Payments, sending, deletion and final submissions are outside trial scope.
+Execution operations only, not learning. Use this framework for the user's supervised low-risk task; do not substitute another input backend and claim package coverage. Quick setup uses an administrator host with automatic risk interception disabled. Only one Agent may operate the desktop. Payments, sending, deletion and final submissions are outside supported scope.
 
 ## 撤销的判定 / Undo interpretation
 

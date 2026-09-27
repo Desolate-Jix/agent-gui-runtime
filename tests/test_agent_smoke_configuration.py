@@ -25,6 +25,6 @@ def test_smoke_delegate_requires_profile_before_start():
         smoke.server_arguments(Path('bundle'), None, Path('data'), False, 'agent_delegate', None)
 
 
-def test_smoke_does_not_enable_reserved_external_api():
+def test_smoke_external_api_requires_profile_before_start():
     with pytest.raises(ValueError, match='external_api'):
         smoke.server_arguments(Path('bundle'), None, Path('data'), False, 'external_api', None)

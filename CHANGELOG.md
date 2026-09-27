@@ -1,21 +1,22 @@
-# 未发布源码 / Unreleased source
+# v0.1.0 · 执行模式正式版 / Execution-mode release
 
-- 新增 Codex 专用视觉会话技能，连续任务复用同一子 Agent ID；通用 MCP 接口不绑定 Codex 调度工具，版本号与已发布 ZIP 不变。 / Add a Codex-only skill that reuses one visual worker per continuous task, without changing generic MCP APIs, version numbers or published ZIP assets.
+- 新增 Codex 专用视觉会话技能，连续任务复用同一子 Agent ID；通用 MCP 接口不绑定 Codex 调度工具。 / Add a Codex-only skill that reuses one visual worker per continuous task, without changing generic MCP APIs.
 - 接通显式 `external_api` 配置、启动、原图 HTTP 请求、候选校验、公共执行及结果回传；支持现有单步与组合调度，不新增执行器。 / Wire external API configuration, startup, original-image HTTP grounding, validation, shared execution and receipts.
 - API 请求可查询状态、合作取消；无自动重试或静默回退；精简回执保留调用模型、用量和耗时。 / Poll/cancel active requests; no retry or fallback, with provider metadata retained in compact receipts.
-- 验证限于接口及运行时契约，不评估服务商识别准确率。详见 [API 接入](docs/development/EXTERNAL_VISION_API.md)。 / Verification covers interface/runtime contracts rather than provider accuracy.
+- 截图按配置发送至视觉服务；缺少密钥、鉴权、限流、超时、网络或响应格式错误均停止，不自动重试或回退。`read_text` 仍回传原图。 / Screenshots go to the configured visual service; credential, auth, rate, timeout, network and response errors stop without retry or fallback. `read_text` still returns the original image.
+- 不保证任意供应商兼容或准确率。源码及隔离包各 2040 项通过；本方及同候选独立实机验收与首次失败详见 [验收记录](docs/verification/V010_RELEASE_ACCEPTANCE.md)。 / No universal provider-compatibility or accuracy claim. 2040 checks passed in each source/bundle suite; see acceptance for main-agent and independent live results and first failures.
 
-# v0.1.0-test.8 · 可切换 Agent 视觉 / Switchable Agent vision
+# 历史版本：v0.1.0-test.8 · 可切换 Agent 视觉 / Historical version: switchable Agent vision
 
 验收与保留的首次失败见 [test.8 验收](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。 / See acceptance for verified scope and retained first failures.
 
 - 当前 Agent 或客户端显式委派视觉模型提供定位，沿用公共执行器；能力未知不自动启用视觉或加载本地模型。 / Current or client-delegated visual grounding reuses the shared executor without silent local-model fallback.
 - 单步、组合输入和表单支持持久化定位交接、状态/继续/取消；不重放已完成输入。Agent 文字读取返回原图。 / Durable grounding handoff and status/continue/cancel for steps and batches; image-based reading and no input replay.
-- 轻量 .venv-agent 安装、按来源配置和连接检查；独立 API 仅预留接口，不要求额外密钥。 / Lightweight source-aware setup and smoke; external API remains reserved only.
+- 轻量 .venv-agent 安装、按来源配置和连接检查。 / Lightweight source-aware setup and smoke.
 - 修复浏览器初始 UIA 文档准备依赖目标句式、派发中旧图误标和取消竞态；自定义组合框支持显式 ARIA 展开状态，冲突拒绝并标注来源。 / Repair browser preparation, inflight evidence and cancellation; read explicit ARIA expansion with honest provenance.
 - 中断表单的精简回执保留底层步骤错误与失败原因，不放宽模型/UIA 冲突拒绝。已知精确字段名时同时提供 `label`。 / Compact interrupted-form receipts retain step errors and failure reasons without weakening model/UIA conflict rejection. Supply `label` when the exact field name is known.
 - 修复明确文本标签可能误填另一字段的问题：公共点击前校验唯一标签身份、控件命中与别名歧义，操作员模式不能跳过。 / Verify explicit text-label identity and hit-control equality before input, including mixed-name/alias ambiguity; operator mode cannot bypass this check.
-- 源码与隔离候选各 2025 项通过；同一候选的 local、当前 Agent、实际 Luna 委派单项及连续混合填写、弹窗取消恢复与清理通过。首次失败和调用方错误保留；独立验收另行记录。 / Source and isolated candidate each passed 2025 checks. Same-candidate local/current/delegated single and continuous operations, popup cancellation/recovery and cleanup passed. Initial failures and caller errors remain recorded; independent acceptance is tracked separately.
+- 历史 test.8 源码与隔离候选各 2025 项通过；这些计数及同候选操作经历仅属于 test.8，不作为 v0.1.0 验收证据。首次失败和调用方错误仍保留在对应记录。 / Historical test.8 source and isolated candidate each passed 2025 checks. These counts and journeys apply only to test.8, not v0.1.0 acceptance; retain first failures in the versioned record.
 
 # v0.1.0-test.7 · 组合表单测试版 / Batch-form test release
 

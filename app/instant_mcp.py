@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-INSTANT_VERSION = "0.1.0-test.8"
+INSTANT_VERSION = "0.1.0"
 
 
 def _run_wait_budget(kind, requested):

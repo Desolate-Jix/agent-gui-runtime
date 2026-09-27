@@ -15,7 +15,7 @@ def create_runtime_app() -> FastAPI:
     from app.api.vision import router as vision_router
     from app.api.models.response import APIResponse, HealthData
 
-    application = FastAPI(title="agent-gui-runtime", version="0.3.0")
+    application = FastAPI(title="agent-gui-runtime", version="0.1.0")
     application.include_router(apps_router)
     application.include_router(runtime_router)
     application.include_router(session_router)

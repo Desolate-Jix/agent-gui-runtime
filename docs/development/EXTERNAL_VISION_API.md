@@ -1,7 +1,5 @@
 # 外部视觉 API 接口 / External vision API
 
-2026-09-27 后续源码，未发布；已发布 test.8 ZIP 不含本次接线。 / Unreleased source follow-up; the published test.8 ZIP does not contain this host integration.
-
 用户要求保证 API 接口可跑通执行流程，不把服务商识别准确率作为本轮门槛。`external_api` 现已接入宿主：每步捕获原图，经配置的 Chat Completions HTTP 端点返回 `grounding.v1`，校验截图关联后进入现有公共执行器，回传动作结果与操作后原图。不加载本地模型，不自动挑选服务或切换路线。
 
 The requested scope is API flow connectivity, not provider recognition accuracy. The host now sends each frozen screenshot to the configured Chat Completions endpoint, validates its grounding.v1 response, uses the existing guarded executor and returns the receipt plus after-image. No local model, provider discovery or fallback is involved.
@@ -64,10 +62,9 @@ API 只定位，不自动判断整项任务成功。`read_text` 仍返回原图�
 
 The API localizes targets rather than judging task success. read_text remains original-image handoff to the caller. The main agent reviews after-images and receipts. Full/compact receipts retain provider model, usage and timing in recognition_calls plus api_request phase. Missing credentials, authentication/rate/timeout errors, malformed output and absent targets stop without retry or fallback.
 
-## 已验证与未验证 / Verification boundary
+## 验收边界 / Acceptance boundary
 
-- 源码回归：2040 项通过。新增回环 HTTP 测试走真实 PNG 编码、网络请求、结构化候选、公共 `execute_recognition_plan` 路由及操作后图片；只有系统窗口、截图来源和物理输入边界被测试替身隔离。覆盖连续两步、错误后恢复、HTTP 期间取消及候选占用后取消，确认取消后不派发。 / 2040 source checks passed. New loopback-HTTP tests exercise PNG transport, structured grounding, the real shared action route and after-images while isolating OS window/capture/input boundaries. Consecutive operations, error recovery and cancellation are covered.
-- 真实 STDIO MCP 在无本地模型环境中启动 external_api，验证工具发现、配置、非法请求拒绝、窗口目录读取、停止清理和重连回执；没有请求付费服务，也没有真实点击。 / Real STDIO MCP startup, discovery, request rejection, cleanup and reconnect passed in the model-free environment, without paid-provider requests or physical clicks.
-- 未验证：任意服务商的在线兼容性、识别准确率、速度与费用，以及本次 API 来源的真实 GUI 输入和管理员环境密钥继承。配置符合 Chat Completions JSON 图像协议是接入前提，不宣称所有 OpenAI-compatible 服务均可直接使用。 / Unverified: live provider compatibility/accuracy/latency/cost, physical GUI input for this API source and elevated-process credential inheritance. Matching the documented image/JSON protocol remains a prerequisite.
+- v0.1.0 源码与隔离候选各 2040 项通过；真实 STDIO 无大模型环境的启动、清理与重连通过；回环 HTTP 配合原生窗口完成本方及独立 Agent 的真实单项、两轮填写、弹窗与异常恢复和清理。测试服务定位测试控件，不证明供应商视觉能力。详见 [验收记录](../verification/V010_RELEASE_ACCEPTANCE.md)。 / 2040 checks passed per source/bundle suite; model-free STDIO startup, cleanup and reconnect passed. Main-agent and independent loopback-HTTP native journeys covered single actions, two form rounds, dialogs, error recovery and cleanup. The fixture grounds test controls; it does not establish provider vision accuracy.
+- 尚不验证或保证任意服务商在线兼容性、识别准确率、速度、费用，或管理员进程可继承密钥。Chat Completions 图像 JSON 协议是接入前提，不代表所有 OpenAI-compatible 服务都可直接使用。 / No claim is made for arbitrary provider compatibility, accuracy, latency, cost or elevated-process secret inheritance. Conformance to the image/JSON protocol is required but does not guarantee all OpenAI-compatible providers work.
 
-本轮证据：`D:/AgentReviewAcceptance/20260927-api-flow-01`。旧版本验收不改记为本次 API 实测。 / Evidence root is listed above; prior acceptance is not relabelled as API live-provider verification.
+API 截图数据边界与错误处理要求见上文；本版实测状态以验收记录为准。 / Screenshot-data boundaries and error handling are specified above; consult the acceptance record for this release's test status.
