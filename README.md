@@ -1,5 +1,14 @@
 # Agent Review Instant
 
+> **不强制使用本地模型。** 可以选择外部视觉 API、当前支持图像的 Agent，或客户端指定的视觉子 Agent；这些路线都不需要下载 VISTA 权重。只有选择 `local` 时，才需要安装本地识别依赖并准备模型。使用 API 仍需在本机运行执行框架，但识图由所配置的服务完成。
+> **Local models are optional.** Choose an external vision API, the current image-capable agent or an explicitly selected vision delegate without downloading VISTA weights. Only `local` requires local recognition dependencies and weights. The execution runtime still runs on your PC when using an API; the configured service handles visual grounding.
+
+| 使用方式 / Mode | 本地模型是否必需 / Local model required? | 需要准备 / Setup |
+|---|---|---|
+| 外部视觉 API / `external_api` | **不需要 / No** | 支持图像与 JSON 协议的服务端点、视觉模型 ID、密钥环境变量 / Image/JSON endpoint, vision model ID and secret environment variable |
+| 当前 Agent 或视觉子 Agent / `agent_current`, `agent_delegate` | **不需要 / No** | 支持图像的当前 Agent，或客户端显式配置的视觉委派 / Image-capable current agent or client-configured vision delegate |
+| 本地模型 / `local` | **需要 / Yes** | VISTA 权重、本地识别依赖与相应硬件 / VISTA weights, local recognition dependencies and suitable hardware |
+
 
 
 > v0.1.0 执行模式正式版：源码和隔离包各 2040 项检查通过，外部 API 在全新原生窗口完成本方与独立 Agent 的连续使用、异常恢复和清理验收。具体范围与首次失败见 [验收记录](docs/verification/V010_RELEASE_ACCEPTANCE.md)。 / v0.1.0 execution release: 2040 source and 2040 isolated-bundle checks passed, plus main-agent and independent external-API native journeys, recovery and cleanup. See acceptance for scope and retained first failures.
@@ -33,7 +42,7 @@ The connected agent plans and judges outcomes. This runtime observes real Window
 
 这是小型源码包，不是独立 EXE 安装器。不包含模型权重、Python 环境、用户截图、账号或本机 MCP 配置。程序、模型、数据分开存放；升级不要覆盖未清理的运行会话。
 
-This is a source bundle, not a standalone installer. Prepare dependencies, weights and configuration locally. Keep application, model and data directories separate and preserve unresolved sessions.
+This is a source bundle, not a standalone installer. Prepare runtime dependencies and configuration; weights are required only for the local route. Keep application, optional model and data directories separate and preserve unresolved sessions.
 
 ## 2. 功能 / Capabilities
 
@@ -158,22 +167,50 @@ Historically named modules may remain shared dependencies. Their presence does n
 
 ## 4. 模型与环境 / Models and environment
 
-- Windows x64、**Python 3.11**，使用仓库 `uv.lock`，不随意替换版本。
-- 视觉定位使用官方 [inclusionAI/VISTA-4B](https://huggingface.co/inclusionAI/VISTA-4B)，走 Transformers 格式，不是 GGUF；保留配置、分词器、处理器、模板与全部权重。
+- 所有路线都需要 Windows x64、**Python 3.11** 和本机执行框架。**外部 API / Agent 路线安装轻量执行依赖，不需要 VISTA 权重、CUDA 或用于本地识图的 GPU**；服务或 Agent 自身的要求由其提供方决定。
+- **以下模型、CUDA、显存和磁盘规划只适用于 `local` 路线，不是 API / Agent 使用门槛。** 本地路线使用仓库 `uv.lock`，不随意替换依赖版本。
+- 本地视觉定位使用官方 [inclusionAI/VISTA-4B](https://huggingface.co/inclusionAI/VISTA-4B)，走 Transformers 格式，不是 GGUF；保留配置、分词器、处理器、模板与全部权重。
 - OCR 是另一个本地组件，UIA 是 Windows 可访问性接口，决策大模型由外部 Agent 提供。因此“只下载一个 VISTA 目录”不等于只有一个算法，**也无需额外部署三套大模型**。
 - 锁定 GPU 路径使用 CUDA 13.0 PyTorch；CPU／AMD／所有 NVIDIA 驱动组合尚未认证。本机最近生命周期测试使用 RTX 4070 SUPER 12 GB，不代表该显存满足所有截图与并行负载。
 - 模型约 9.1 GB；Python、依赖、缓存和截图另外占空间。可按 32 GB RAM、16 GB VRAM、35–45 GB 空闲磁盘做试用规划，**不是已验证最低配置**。
 
-Use Windows x64, Python 3.11 and locked dependencies. VISTA grounds visual targets; OCR/UIA and the external planning agent have different roles. Hardware numbers are trial-planning estimates, not certified minima. See [full setup guidance](FRIEND_SETUP.md).
+All routes require Windows x64, Python 3.11 and the local execution runtime. API/Agent routes use lightweight dependencies without VISTA weights, CUDA or a GPU for local grounding. The model, GPU and disk estimates above apply only to `local`; they are not API/Agent requirements or certified minima. The local route uses locked dependencies. See [full setup guidance](FRIEND_SETUP.md).
 
 ## 5. 安装与配置 / Install and configure
 
 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，解压到例如 `D:\AgentReviewInstant`。路径均为示例，请按本机修改。/ Install uv, extract the source and adjust paths.
 
+**按所选识图方式执行其中一组命令，不需要全部安装。** / **Choose one setup route; you do not need to install every option.**
+
+### A. 使用外部视觉 API，不下载本地模型 / External vision API, no local weights
+
+先按上方“外部视觉 API”说明准备 JSON 配置和密钥环境变量，然后运行： / Prepare the API profile and secret environment variable described above, then run:
+
 ```powershell
 Set-Location "D:\AgentReviewInstant"
-.\scripts\setup_instant.ps1 -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel -WhatIf
-.\scripts\setup_instant.ps1 -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel
+.\scripts\setup_instant.ps1 -RecognitionSource external_api -ApiProfile "D:\AgentReviewConfig\vision-api.json" -DataDirectory "D:\AgentReviewInstantData"
+```
+
+这一路线不传 `-ModelDirectory` 或 `-DownloadModel`，无需执行下方本地模型下载步骤。 / Do not pass `-ModelDirectory` or `-DownloadModel`; skip the local-model download steps below.
+
+### B. 使用当前 Agent 或视觉子 Agent，不下载本地模型 / Current or delegated agent, no local weights
+
+当前 Agent 确实支持图像时使用： / When the current agent supports images:
+
+```powershell
+.\scripts\setup_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentReviewInstantData"
+```
+
+客户端已配置视觉委派时，可改用 `-RecognitionSource agent_delegate -DelegateProfile "vision-luna"`；`vision-luna` 是示例配置名。 / For a client-configured delegate, use `-RecognitionSource agent_delegate -DelegateProfile "vision-luna"`; the profile name is an example.
+
+### C. 使用本地 VISTA 模型 / Local VISTA model
+
+**只有选择本地识图才需要以下模型安装与下载。** / **These model installation/download steps are required only for local grounding.**
+
+```powershell
+Set-Location "D:\AgentReviewInstant"
+.\scripts\setup_instant.ps1 -RecognitionSource local -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel -WhatIf
+.\scripts\setup_instant.ps1 -RecognitionSource local -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel
 ```
 
 已有环境与模型，只生成配置 / Reuse existing environment and weights:
@@ -206,12 +243,12 @@ Repeat `--include` per pattern. Merge the generated server entry without replaci
 
 1. `instant_start` → 轮询到 `ready`。
 2. `discover` → `launch` 或 `select` → `capture`，检查目标和原图。
-3. 需要识别时 `prepare_models`，同一会话保持驻留，不要每步关模型。
+3. 仅本地模型路线在需要识别时调用 `prepare_models`，同一会话保持驻留；API / Agent 路线无需加载本地模型。
 4. `instant_run` 执行一项动作或一个支持的 `input_sequence`。
 5. 根据回执与后图判断 success / failure / uncertain，再决定下一步。
 6. 正常关闭本轮创建的测试窗口 → `instant_stop` → `cleanup_verified=true` 且宿主退出，再断连。
 
-Start/reattach, inspect the target, prepare models, execute and inspect each result. Keep one connection and one desktop controller. Finish with verified owned-window and resource cleanup.
+Start/reattach, inspect the target, prepare models only for local recognition, then execute and inspect each result. API/Agent routes do not load local models. Keep one connection and one desktop controller. Finish with verified owned-window and resource cleanup.
 
 已选定并确认目标后，以下是 `instant_run` 参数示例，只提交搜索，不自动点击结果。/ After selecting and inspecting the target, this example submits a search only.
 
