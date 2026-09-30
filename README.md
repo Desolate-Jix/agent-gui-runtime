@@ -11,15 +11,15 @@
 
 
 
-> v0.1.0 执行模式正式版：源码和隔离包各 2040 项检查通过，外部 API 在全新原生窗口完成本方与独立 Agent 的连续使用、异常恢复和清理验收。具体范围与首次失败见 [验收记录](docs/verification/V010_RELEASE_ACCEPTANCE.md)。 / v0.1.0 execution release: 2040 source and 2040 isolated-bundle checks passed, plus main-agent and independent external-API native journeys, recovery and cleanup. See acceptance for scope and retained first failures.
+> v0.1.1 执行模式正式补丁：源码与隔离包各 2086 项、STDIO 七工具检查通过。本方与独立 Agent 在同一冻结运行时完成全新原生连续使用、429 恢复和最终清理，双方原始回执／PNG／trace 审计通过。首次 identity 拒绝原因未定；Note 定位 fixture 修复经 19 项离线检查、长中英前缀本方回归及独立复测通过，未修改冻结运行时。见 [验收记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)。 / v0.1.1 execution patch: source and isolated bundle each passed 2086 checks, plus seven-tool STDIO. Main-agent and independent fresh native continuous journeys, 429 recovery and cleanup passed on the same frozen runtime, with original receipt/PNG/trace audit. The initial identity-rejection cause remains unresolved; the Note-target fixture correction passed 19 offline checks, long Chinese/English-prefix regression and independent retesting without changing the frozen runtime.
 **Windows GUI execution runtime for MCP agents / 面向 MCP Agent 的 Windows 图形界面执行框架**
 
 Agent 负责理解任务、决定下一步和判断结果；框架负责观察真实界面、定位目标、派发操作、返回证据与管理本地资源。它不是另一个自主决策 Agent，也不是网页管理面板。
 
 The connected agent plans and judges outcomes. This runtime observes real Windows interfaces, grounds targets, dispatches actions and returns evidence. It is an execution layer, not an autonomous planner or web management console.
 
-> **当前版本：v0.1.0 · 执行模式正式版。**
-> **Current version: v0.1.0 · execution-mode release.**
+> **当前版本：v0.1.1 · 执行模式正式补丁。**
+> **Current version: v0.1.1 · execution-mode patch release.**
 >
 > **本次只更新执行模式，学习模式不发布。** 文末介绍是后续方向，不代表下载包已支持。
 > **Execution only. Learning is not shipped.** The roadmap below is not an available feature list.
@@ -30,11 +30,12 @@ The connected agent plans and judges outcomes. This runtime observes real Window
 ## 1. 下载与文档 / Downloads and documentation
 
 - [GitHub Releases / 已发布版本](https://github.com/Desolate-Jix/agent-gui-runtime/releases)
-- [程序包下载 / Download the release package](https://github.com/Desolate-Jix/agent-gui-runtime/releases)
+- [v0.1.1 发布与下载 / Release and downloads](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.1)
 - [安装、模型下载与配置 / Setup and models](FRIEND_SETUP.md)
 - [Agent 使用指南 / Agent guide](AGENT_GUIDE.md)
 - [Codex 视觉会话适配 / Codex visual-session adapter](skills/codex-vision-session/SKILL.md)：Codex 委派识图连续复用同一个子 Agent；其他 MCP 客户端不受影响。 / Reuse one Codex visual worker across consecutive screenshots without changing other MCP clients.
-- [v0.1.0 验收与限制 / Acceptance and limits](docs/verification/V010_RELEASE_ACCEPTANCE.md)
+- [v0.1.1 验收与限制 / Acceptance and limits](docs/verification/V011_RELEASE_ACCEPTANCE.md)
+- [v0.1.0 历史验收 / Historical acceptance](docs/verification/V010_RELEASE_ACCEPTANCE.md)
 - [Agent 视觉路由与组合协议 / Agent routing and batch protocol](docs/development/AGENT_VISION_BACKENDS_DESIGN.md) · [组合协议细节 / Batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md) · [外部视觉 API 接入 / External vision API](docs/development/EXTERNAL_VISION_API.md)
 - [调用方调度 / Caller scheduling](AGENT_GUIDE.md#执行契约--execution-contracts)：已知字段先合批、及时读取 pending 结果、直接核对回执原图；属于调用指引调整，尚无本轮实机提速数据。 / Batch known fields, promptly retrieve pending results and inspect inline evidence; caller guidance only, without a new live speed measurement.
 - [发布范围 / Release scope](RELEASE_SCOPE.md) · [变更记录 / Changelog](CHANGELOG.md)
@@ -111,7 +112,7 @@ Run this from the application directory. It installs the lightweight execution d
 - 修正模型下载参数及跨机器配置说明。
 - `form_fill` supports 1–32 text/date/dropdown/radio/checkbox fields with partial receipts and no automatic final submission. See [form-fill contract](docs/verification/EXECUTION_FORM_FILL.md); historical test.7 acceptance remains separately archived.
 
-The published test.7 and test.8 acceptance records preserve results for those exact historical packages. Current v0.1.0 checks belong in the [v0.1.0 acceptance record](docs/verification/V010_RELEASE_ACCEPTANCE.md); do not infer universal website/widget support.
+The published test.7 and test.8 acceptance records preserve results for those exact historical packages. Current v0.1.1 progress belongs in the [v0.1.1 acceptance record](docs/verification/V011_RELEASE_ACCEPTANCE.md); do not infer universal website/widget support.
 
 ## 3. 系统架构 / System architecture
 
@@ -155,11 +156,14 @@ The adapter validates/persists requests; the serial coordinator owns native reso
 | `app/instant_mcp.py`, `app/instant_receipt.py` | MCP tools, admission, compact/full receipts |
 | `scripts/start_instant_mcp.py`, `scripts/start_instant_mcp_admin.py` | Normal/elevated entrypoints |
 | `scripts/run_local_step_session.py` | Session loop and evidence |
-| `app/desktop_review/` | Coordinator, ownership, app preparation, input sequences, recovery |
+| `app/execution/` | Eight maintained execution modules; legacy imports alias the same objects / 八个维护执行模块，旧导入为同对象别名 |
+| `app/desktop_review/` | Coordinator and app preparation; compatible execution imports / 协调器、应用准备与执行兼容导入 |
 | `app/core/`, `app/agent/` | Capture, Win32/UIA, input, target identity |
 | `app/vision/`, `modules/ocr/` | Model service/worker and OCR contracts |
 | `app/api/`, `app/application_profiles/` | Maintained action handlers and shared dependencies |
 | `tests/`, `docs/verification/` | Regression and acceptance evidence |
+
+v0.1.1 收拢八个既有执行模块，沿用原 owner、公共动作 API、七个 MCP 工具及全部视觉路线；不增加执行器。可选 `OptionalJudgment` 与 `ModelUsage` 仅为共享合同，未生产接线，默认不调用判断模型；未知用量保持 null，不代表全量 Agent 用量。见 [模块边界](docs/EXECUTION_MODULE_BOUNDARIES.md) 与 [判断／用量合同](docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md)。 / v0.1.1 consolidates eight existing execution modules while retaining the original owner, action API, seven MCP tools and all vision routes. Optional judgment and usage are unwired shared contracts: no default judgment-model invocation; unknown usage stays null and does not represent total Agent usage.
 
 部分历史命名模块仍为执行模式的共用依赖，不能因目录名含 `learn` 就删除。它们不代表学习产品已启用；本包不配送学习启动入口，MCP 只暴露执行工具。
 
@@ -296,10 +300,10 @@ Data can contain private text/images and may reach the client's model provider. 
 
 ## 8. 验证状态 / Verification status
 
-本版源码和隔离候选各 2040 项（覆盖重叠，不相加）；283 个项目模块均来自独立包目录，723 项冻结清单摘要一致。外部 API 的真实输入使用本机回环测试服务，不等于供应商视觉准确率验证。 / Source and isolated candidate each passed 2040 overlapping checks; 283 project modules resolved inside the bundle and 723 manifest hashes matched. Real API-route input used a loopback fixture, not a provider-accuracy benchmark.
+v0.1.1 源码与隔离候选各 2086 项（覆盖重叠，不相加）；294 个项目模块来自独立包目录，739 项冻结清单摘要一致，STDIO 七工具通过。双方同冻结候选连续使用与清理及原始证据审计通过。外部 API 的真实输入使用本机回环测试服务，不等于真实供应商连通性或识别准确率验证。[v0.1.0 验收](docs/verification/V010_RELEASE_ACCEPTANCE.md) 另行保留为历史证据。 / v0.1.1 source and isolated candidate each passed 2086 overlapping checks; 294 project modules resolved inside the bundle, 739 manifest hashes matched and seven-tool STDIO passed. Main-agent and independent same-candidate continuous journeys, cleanup and original-evidence audit passed. Real API input used a loopback fixture, not a live-provider connectivity or accuracy benchmark; v0.1.0 acceptance remains separate historical evidence.
 
 
-Published test.7 and test.8 results, failures and scope remain in their versioned acceptance records as historical evidence. See the [v0.1.0 acceptance record](docs/verification/V010_RELEASE_ACCEPTANCE.md) and [form contract](docs/verification/EXECUTION_FORM_FILL.md) for this release's evidence and limits.
+Published test.7 and test.8 results, failures and scope remain in their versioned acceptance records as historical evidence. See the [v0.1.1 acceptance record](docs/verification/V011_RELEASE_ACCEPTANCE.md) and [form contract](docs/verification/EXECUTION_FORM_FILL.md) for this patch's progress and limits; [v0.1.0 acceptance](docs/verification/V010_RELEASE_ACCEPTANCE.md) remains historical.
 
 ## 9. 后续轻量学习模式 / Future lightweight learning
 

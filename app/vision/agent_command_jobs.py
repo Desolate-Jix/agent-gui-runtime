@@ -9,8 +9,8 @@ from uuid import uuid4
 
 from app.core.agent_grounding_target import AgentGroundingTarget
 from app.core.json_snapshot import write_json_snapshot
-from app.desktop_review.form_fill import run_form_fill
-from app.desktop_review.input_sequence import run_input_sequence
+from app.execution.form_fill import run_form_fill
+from app.execution.input_sequence import run_input_sequence
 from app.vision.grounding_contract import GroundingResult
 from app.vision.recognition_source import ClientVisionCapabilities, resolve_recognition_route
 
@@ -277,8 +277,8 @@ class AgentCommandJobs:
             raise AgentCommandError("command_request_invalid")
         # 在副本上验证，避免线程启动后才发现请求合同无效。
         frozen = deepcopy(command)
-        from app.desktop_review.form_fill import FormFillRequest
-        from app.desktop_review.input_sequence import InputSequenceRequest
+        from app.execution.form_fill import FormFillRequest
+        from app.execution.input_sequence import InputSequenceRequest
         if frozen["kind"] == "form_fill":
             FormFillRequest.model_validate(frozen["request"])
         elif frozen["kind"] == "input_sequence":

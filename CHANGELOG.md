@@ -1,3 +1,10 @@
+# v0.1.1 · 执行模式正式补丁 / Execution-mode patch release
+
+- 八个既有执行模块收拢到 `app.execution`，旧路径保留同一模块对象别名；沿用原 owner、公共执行 API 与键盘／校验语义，不新增执行器。 / Consolidate eight existing execution modules under `app.execution`; legacy paths alias the same objects, preserving the original owner, public execution API and keyboard/validation semantics.
+- 增加可选判断及 `ModelUsage` 共享合同，未接入生产调用；默认不调用判断模型，不生成坐标、不授权输入、不自动重试，未知用量保持 null。 / Add unwired optional judgment and usage contracts, with no default judgment-model call, coordinates, input authority or automatic retry; unknown usage remains null.
+- 原七个 MCP 工具、外部 API、当前／委派 Agent 视觉及 local 路线保留；API／Agent 使用不需要本地权重。学习产品不在本补丁。 / Retain seven MCP tools and external API, current/delegated Agent and local vision routes. API/Agent routes need no local weights; learning is excluded.
+- 源码与隔离包各 2086 项、STDIO 七工具检查通过；294 个包内项目模块、739 项冻结清单核验通过。本方与独立 Agent 同冻结运行时完成全新原生单项／连续／429 恢复／清理，原始回执／PNG／trace 审计通过。首次 identity 拒绝原因未定；Note fixture 修复经 19 项离线检查、长中英前缀本方回归及独立复测通过，未修改冻结运行时。详见 [v0.1.1 验收](docs/verification/V011_RELEASE_ACCEPTANCE.md)、[模块边界](docs/EXECUTION_MODULE_BOUNDARIES.md) 与 [判断／用量合同](docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md)。 / Source and isolated bundle each passed 2086 checks, plus seven-tool STDIO, 294 bundle-local module and 739 manifest checks. Main-agent and independent fresh native single/continuous/429-recovery/cleanup journeys and original-evidence audit passed on the same frozen runtime. The initial identity-rejection cause remains unresolved; the Note fixture correction passed 19 offline checks, long Chinese/English-prefix main regression and independent retesting without changing the frozen runtime.
+
 # v0.1.0 · 执行模式正式版 / Execution-mode release
 
 - 新增 Codex 专用视觉会话技能，连续任务复用同一子 Agent ID；通用 MCP 接口不绑定 Codex 调度工具。 / Add a Codex-only skill that reuses one visual worker per continuous task, without changing generic MCP APIs.

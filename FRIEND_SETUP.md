@@ -1,8 +1,10 @@
 # 朋友试用：安装、模型下载与 Agent 连接 / Friend trial setup
 
-适用范围：Windows x64 v0.1.0 执行模式源码包。它不是双击即用安装器；包内不含 Python 环境和模型。先完成下面的连接检查，再由人在场监督真实操作。本说明中的 `D:` 路径都只是示例，可换成你自己的磁盘；不要照搬别人电脑生成的 `mcp-config.local.json`。
+适用范围：Windows x64 v0.1.1 执行模式正式补丁源码包。它不是双击即用安装器；包内不含 Python 环境和模型。先完成下面的连接检查，再由人在场监督真实操作。本说明中的 `D:` 路径都只是示例，可换成你自己的磁盘；不要照搬别人电脑生成的 `mcp-config.local.json`。
 
-This guide is for the Windows x64 v0.1.0 execution-mode source package, not a standalone installer. Install dependencies for the chosen route (weights only for local vision), verify the connection, then supervise real input. All `D:` paths are examples. Generate your own configuration instead of copying another machine's local MCP paths.
+This guide is for the Windows x64 v0.1.1 execution-mode patch source package, not a standalone installer. Install dependencies for the chosen route (weights only for local vision), verify the connection, then supervise real input. All `D:` paths are examples. Generate your own configuration instead of copying another machine's local MCP paths.
+
+本补丁保留原七个 MCP 工具与全部视觉路线；API／Agent 无需本地模型，只有 `local` 需要权重。模块归属调整及可选判断／用量合同不要求你增加模型；判断供应商未生产接线，默认不调用判断模型。学习产品不发布。本方与独立 Agent 同冻结运行时连续使用及清理验收通过，证据与首次失败见 [v0.1.1 验收](docs/verification/V011_RELEASE_ACCEPTANCE.md)；下载页为 [instant-v0.1.1](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.1)。 / The patch retains seven tools and all vision routes. Only local vision requires weights; API/Agent routes do not. Module relocation and unwired optional judgment/usage require no extra model or default judgment-model call. Learning is excluded. Main-agent and independent same-runtime continuous journeys and cleanup passed; see acceptance for evidence and first failures, and the linked release page for downloads.
 
 ## 无本地模型视觉路线 / Model-free vision routes
 
@@ -41,11 +43,11 @@ Setup uses `.venv-agent` without modifying `.venv`, keeps Python/cache under the
 .\.venv-agent\Scripts\python.exe scripts\smoke_instant_mcp.py --recognition-source agent_current --data-dir "D:\AgentReviewInstantSmoke" --report "D:\AgentReviewInstant\smoke-report.json"
 ```
 
-组合命令在视觉定位等待时暂停；客户端回传后继续原命令，保留已完成字段且不自动重放。此前 test.8 的数字、失败和实机经历属于历史证据，不是 v0.1.0 验收结果；本版进展见 [v0.1.0 验收记录](docs/verification/V010_RELEASE_ACCEPTANCE.md)。Agent 路线 `read_text` 返回原图供 Agent 阅读，不加载本地 OCR；桌面审核 UI 不在轻量依赖中。见 [接入协议](docs/development/AGENT_BATCH_PROTOCOL.md)。
+组合命令在视觉定位等待时暂停；客户端回传后继续原命令，保留已完成字段且不自动重放。此前 test.8 的数字、失败和实机经历属于历史证据，不是 v0.1.1 验收结果；本版进展见 [v0.1.1 验收记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)。Agent 路线 `read_text` 返回原图供 Agent 阅读，不加载本地 OCR；桌面审核 UI 不在轻量依赖中。见 [接入协议](docs/development/AGENT_BATCH_PROTOCOL.md)。
 
-Grounding waits suspend and resume the original command while preserving completed work. Historical test.8 runs and counts do not stand in for v0.1.0 acceptance; see the [v0.1.0 acceptance record](docs/verification/V010_RELEASE_ACCEPTANCE.md). **Agent read_text returns the original image without local OCR; the desktop review UI is excluded**. See the [batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md).
+Grounding waits suspend and resume the original command while preserving completed work. Historical test.8 runs and counts do not stand in for v0.1.1 acceptance; see the [v0.1.1 acceptance record](docs/verification/V011_RELEASE_ACCEPTANCE.md). **Agent read_text returns the original image without local OCR; the desktop review UI is excluded**. See the [batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md).
 
-## 正式版快捷入口 / Quick setup for this execution release
+## local 路线快捷入口 / Quick setup for local vision
 
 本版快捷方式使用 **管理员 MCP + 自动安全拦截关闭**。脚本不提升整个 Agent 软件权限。真实操作必须有人监督；Windows 的 UAC 和窗口／坐标完整性检查仍保留。
 

@@ -22,10 +22,10 @@ from app.vision.configuration import (
 )
 from app.vision.model_service import FormalModelService, ModelServiceError, freeze_model_service
 
-from .single_step_runtime_owner import RuntimeOwnerProxy, SerialRuntimeOwner
+from app.execution.single_step_runtime_owner import RuntimeOwnerProxy, SerialRuntimeOwner
 from .grounded_history import GroundedHistoryMixin
 from .window_preparation import WindowPreparationMixin
-from .local_direct_step import LocalDirectStepMixin
+from app.execution.local_direct_step import LocalDirectStepMixin
 from .model_setup import initialize_vista_configuration
 
 

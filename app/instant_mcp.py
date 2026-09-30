@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-INSTANT_VERSION = "0.1.0"
+INSTANT_VERSION = "0.1.1"
 
 
 def _run_wait_budget(kind, requested):
@@ -108,18 +108,18 @@ class InstantCommand(BaseModel):
             if len(selectors) != 1 or not selectors[0].strip():
                 raise ValueError("launch requires exactly one non-empty app_id, name or path")
         if self.kind in {"step", "desktop_click"}:
-            from app.desktop_review.local_action_contract import _validated_request
+            from app.execution.local_action_contract import _validated_request
             # 只验证，运行时再次验证；不在桥接层重写执行请求。
             _validated_request("execute_recognition_plan" if self.kind == "desktop_click" else self.operation, self.request)
         elif self.kind == "input_sequence":
-            from app.desktop_review.input_sequence import InputSequenceRequest
+            from app.execution.input_sequence import InputSequenceRequest
             InputSequenceRequest.model_validate(self.request)
         elif self.kind == "form_fill":
-            from app.desktop_review.form_fill import FormFillRequest
+            from app.execution.form_fill import FormFillRequest
             FormFillRequest.model_validate(self.request)
         if self.observation_condition is not None:
             from app.core.observation_policy import resolve_render_grace_ms, local_action_observation_kind
-            from app.desktop_review.conditional_observation import validate_condition
+            from app.execution.conditional_observation import validate_condition
             if self.kind == "input_sequence" and not self.request.get("submit_search"):
                 raise ValueError("input_sequence condition requires submit_search")
             action = ("press_enter" if self.kind == "input_sequence" else

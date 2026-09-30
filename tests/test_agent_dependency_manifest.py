@@ -22,7 +22,8 @@ RUNTIME_PATHS = (
     "scripts/start_instant_mcp.py", "scripts/run_local_step_session.py",
     "app/instant_mcp.py", "app/desktop_review/host.py",
     "app/desktop_review/single_step_coordinator.py",
-    "app/desktop_review/local_direct_step.py", "app/desktop_review/single_step.py",
+    "app/execution/local_direct_step.py", "app/execution/post_action_recovery.py",
+    "app/core/outcome_judgment.py", "app/desktop_review/single_step.py",
     "app/api/action.py", "app/core/screenshot.py",
     "app/core/window_manager.py", "app/core/input_controller.py",
     "app/core/process_sampler.py", "app/agent_link/host.py",
@@ -71,7 +72,8 @@ class Deny(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, Deny())
 for name in ('app.instant_mcp', 'app.desktop_review.host',
              'app.desktop_review.single_step_coordinator',
-             'app.desktop_review.local_direct_step', 'app.api.action'):
+             'app.execution.local_direct_step', 'app.execution.post_action_recovery',
+             'app.core.outcome_judgment', 'app.api.action'):
     __import__(name)
 """
     completed = subprocess.run([sys.executable, "-c", code], cwd=ROOT,

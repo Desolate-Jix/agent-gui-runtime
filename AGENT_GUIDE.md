@@ -1,4 +1,4 @@
-# Agent 接入与操作 / Agent usage — v0.1.0
+# Agent 接入与操作 / Agent usage — v0.1.1
 
 本版包含 [Agent 视觉组合命令协议](docs/development/AGENT_BATCH_PROTOCOL.md)：显式声明能力，使用 status/continue/cancel 继续原批次，不重发已完成输入。Agent `read_text` 返回原图，不加载本地 OCR。 / This release includes explicit-capability Agent batches with status/continue/cancel and original-image reading, without replay or local OCR.
 
@@ -7,7 +7,9 @@
 识图交接与状态命令本身不点击；`grounding_execute` 仅用于独立单步，暂停中的组合命令须用 `agent_command_continue`。所有路线沿用公共执行路由，不自动重放。外部 API 的截图会发往配置的服务，错误不自动重试或切换服务，详见 [API 接入](docs/development/EXTERNAL_VISION_API.md)。新窗口的 500ms 等待不等于页面就绪，仍需核对原图。 / Handoff/status do not click. Use grounding_execute only for standalone grounding and agent_command_continue for suspended batches. All routes use the shared executor without replay. External API screenshots go to the configured service; errors do not trigger retries or provider fallback. See the API guide. A 500 ms launch wait does not prove page readiness; inspect the image.
 
 
-v0.1.0 的本轮测试、连续使用、清理和首次失败见 [验收记录](docs/verification/V010_RELEASE_ACCEPTANCE.md)。test.8 的测试数字和实机经历只属于历史版本。 / See the v0.1.0 acceptance record for current checks, continuous journeys, cleanup and first failures. test.8 counts and live results remain historical.
+v0.1.1 本轮单项、连续使用、429 恢复、最终清理及同冻结运行时独立验收通过；双方原始证据审计通过。首次拒绝与 fixture 修复／复测记录见 [验收记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)，不据此声称修复了未知的首次 identity 拒绝根因。[v0.1.0](docs/verification/V010_RELEASE_ACCEPTANCE.md) 与 test.8 结果保留为历史。 / v0.1.1 single/continuous/429-recovery/cleanup and independent same-runtime acceptance passed, with both original-evidence sets audited. See acceptance for first failures and fixture correction/retests; no fix of the unknown initial identity-rejection cause is claimed. v0.1.0 and test.8 remain historical.
+
+本补丁不改变七个 MCP 工具或外部 API／Agent／local 视觉选择，API／Agent 不需要本地权重。八个执行模块的 `app.execution` 归属与旧路径同对象别名属于维护调整。可选判断／`ModelUsage` 合同未生产接线，不提供新判断工具、不自动调用判断模型，也不接管你的结果核验或授权输入；未知用量保持 null，不是全量 Agent 用量。见 [模块边界](docs/EXECUTION_MODULE_BOUNDARIES.md) 与 [判断／用量合同](docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md)。 / The patch retains seven MCP tools and API/Agent/local vision choices, with no local weights required for API/Agent. Canonical execution paths and same-object aliases are maintenance changes. Unwired optional judgment/usage adds no judgment tool or automatic judgment-model call, replaces no Agent review and grants no input authority. Unknown usage stays null, not total Agent usage.
 ## test.6：通用应用启动 / Installed applications
 
 本节适用于 test.6；旧 test.5 包不包含新增接口，不需要为每个软件注册 MCP。 / Available in test.6, not older test.5 bundles. Apps do not need separate MCP registration.
@@ -53,7 +55,7 @@ Codex 使用 `agent_delegate` 时读取 [codex-vision-session 技能](skills/cod
 
 ### 可恢复组合填写 / Resumable batch composition
 
-组合能力适用于 v0.1.0 或更新；test.8 验收记录是历史材料，本版实际覆盖和限制见 [v0.1.0 验收](docs/verification/V010_RELEASE_ACCEPTANCE.md)。Tab 分组仍要求调用方确认真实连续焦点顺序，不保证任意表单。 / These batch features require v0.1.0 or later. The test.8 record is historical; see the v0.1.0 acceptance report for current coverage and limits. Tab groups require known contiguous focus order and are not a universal form guarantee.
+组合能力适用于 v0.1.0 或更新；test.8 验收记录是历史材料，本补丁进展和限制见 [v0.1.1 验收](docs/verification/V011_RELEASE_ACCEPTANCE.md)。Tab 分组仍要求调用方确认真实连续焦点顺序，不保证任意表单。 / These batch features require v0.1.0 or later. The test.8 record is historical; see the v0.1.1 acceptance report for current progress and limits. Tab groups require known contiguous focus order and are not a universal form guarantee.
 
 - 先收齐当前已知值，将同页独立字段放入一条 `form_fill`；缺失值另问另补，不阻塞已知字段。准备好请求后直接执行，不在批次间插入无关代码/日志调查。 / Prepare all currently known values in one form request; ask separately for missing facts and avoid unrelated investigation between batches.
 - 新增 `text_navigation:"tab_groups"`。只给已确认实际 Tab 顺序的连续文本字段相同 `tab_group`；不确定的字段省略该属性，新段使用另一个组名。非文本字段自动断组；不会因选择了下拉框就直接 Tab 到未确认的文本框。 / Explicit same-named groups apply only to consecutive text fields with known real Tab order; omit the group when uncertain. Non-text controls and group changes reset recognition.

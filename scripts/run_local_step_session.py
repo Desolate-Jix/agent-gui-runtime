@@ -378,14 +378,14 @@ def main():
                     observed = response["result"].get("observation", {})
                     response["observation"] = observed.get("capture")
                 elif kind == "form_fill":
-                    from app.desktop_review.form_fill import run_form_fill
+                    from app.execution.form_fill import run_form_fill
                     progress = out / "sequence-progress"
                     progress.mkdir(exist_ok=True)
                     response["result"] = run_form_fill(co, target, command["request"],
                         persist=lambda value: write(progress / path.name, value))
                     response["observation"] = response["result"].get("observation", {}).get("capture")
                 elif kind == "input_sequence":
-                    from app.desktop_review.input_sequence import run_input_sequence
+                    from app.execution.input_sequence import run_input_sequence
                     progress = out / "sequence-progress"
                     progress.mkdir(exist_ok=True)
                     response["result"] = run_input_sequence(co, target, command["request"],
