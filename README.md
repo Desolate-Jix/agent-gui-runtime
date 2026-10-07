@@ -11,6 +11,25 @@
 
 
 
+## 可选学习工作台测试版已发布 / Optional learning preview released
+
+2026-10-07 已发布学习工作台 **0.1.0-preview.1** 与兼容执行组件 **0.1.2-preview.1**：[下载两个独立安装器 / Download independent installers](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1)。稳定执行版 `v0.1.1` 继续保留。 / The optional learning preview and compatible execution preview are published; stable execution v0.1.1 remains available.
+
+| 安装器 / Installer | 用途 / Purpose |
+|---|---|
+| `AgentGUIRuntimeExecutionPreview-Setup.exe` | 独立执行框架；可使用外部视觉 API、当前 Agent、视觉子 Agent 或本地模型 / Standalone execution with configured API, current/delegated Agent or local grounding |
+| `AgentLearningWorkbenchPreview-Setup.exe` | 可选学习库界面；生成的工作流可审核、修改、保存和重开，支持简体中文与 English / Optional bilingual workbench for review, editing, saving and reopening learned workflows |
+
+**学习模式不是执行模式的必需品，本地模型也不是必需品。** 学习工作台可以离线管理库；采集教学或运行任务时，显式连接兼容执行组件的已有会话。API / Agent 识图与本地图像匹配均不要求 VISTA 权重。 / **Learning and local models are optional.** Edit libraries offline; explicitly attach to compatible execution for teaching/trials. API/Agent vision and local template matching need no VISTA weights.
+
+有判别证据的学习跳转默认提议图像核验；审核后明确匹配便继续，不匹配或不确定时保留原请求交给 Agent 审核。用户可修改稳定区域和阈值，或关闭后保存。 / Distinguishable learned transitions propose image checks by default. Reviewed matches advance; unmatched/uncertain evidence preserves the original request for Agent review. Users can edit stable regions/thresholds or persistently disable checks.
+
+[预览安装与使用 / Preview quickstart](https://github.com/Desolate-Jix/agent-gui-runtime/blob/3cd9b989c11592595ae5e63bd6dd183d33554068/docs/LEARNING_PREVIEW_QUICKSTART.md) · [图像核验说明 / Image checks](https://github.com/Desolate-Jix/agent-gui-runtime/blob/3cd9b989c11592595ae5e63bd6dd183d33554068/docs/LEARNING_IMAGE_VERIFICATION.md) · [验收范围与限制 / Acceptance and limits](https://github.com/Desolate-Jix/agent-gui-runtime/blob/3cd9b989c11592595ae5e63bd6dd183d33554068/docs/verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)
+
+同一最终安装载荷完成 Main 与独立 Sol 的全新教学、连续使用、保存后截图、关闭重开和正常清理；仅为本轮受控场景，不宣称通用准确率、速度或模型用量收益，本轮没有新增真实 API 供应商测试。 / Fresh same-payload acceptance covers teaching, continuous use, Save observation, reopening and cleanup within controlled cases; no general accuracy, performance, model-usage or new live-provider claim.
+
+本 `main` 分支保留稳定执行版源码；学习预览源码以 `learning-v0.1.0-preview.1` 标签为准。下方执行配置说明主要针对稳定源码版，预览 EXE 的安装方法见上方使用说明。 / This main branch retains stable execution source; use the learning preview tag for preview source. The execution setup below primarily describes the stable source bundle; see the quickstart above for preview EXE installation.
+
 > v0.1.1 执行模式正式补丁：源码与隔离包各 2086 项、STDIO 七工具检查通过。本方与独立 Agent 在同一冻结运行时完成全新原生连续使用、429 恢复和最终清理，双方原始回执／PNG／trace 审计通过。首次 identity 拒绝原因未定；Note 定位 fixture 修复经 19 项离线检查、长中英前缀本方回归及独立复测通过，未修改冻结运行时。见 [验收记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)。 / v0.1.1 execution patch: source and isolated bundle each passed 2086 checks, plus seven-tool STDIO. Main-agent and independent fresh native continuous journeys, 429 recovery and cleanup passed on the same frozen runtime, with original receipt/PNG/trace audit. The initial identity-rejection cause remains unresolved; the Note-target fixture correction passed 19 offline checks, long Chinese/English-prefix regression and independent retesting without changing the frozen runtime.
 **Windows GUI execution runtime for MCP agents / 面向 MCP Agent 的 Windows 图形界面执行框架**
 
@@ -18,11 +37,11 @@ Agent 负责理解任务、决定下一步和判断结果；框架负责观察�
 
 The connected agent plans and judges outcomes. This runtime observes real Windows interfaces, grounds targets, dispatches actions and returns evidence. It is an execution layer, not an autonomous planner or web management console.
 
-> **当前版本：v0.1.1 · 执行模式正式补丁。**
-> **Current version: v0.1.1 · execution-mode patch release.**
+> **稳定执行版：v0.1.1 · 学习测试版：0.1.0-preview.1（可选独立安装）。**
+> **Stable execution: v0.1.1 · optional learning preview: 0.1.0-preview.1.**
 >
-> **本次只更新执行模式，学习模式不发布。** 文末介绍是后续方向，不代表下载包已支持。
-> **Execution only. Learning is not shipped.** The roadmap below is not an available feature list.
+> **稳定 v0.1.1 包只包含执行模式；学习测试版已经发布，使用上方两个独立安装器。**
+> **Stable v0.1.1 is execution only; the learning preview is published through the separate installers above.**
 >
 > 真实键鼠操作必须有人看护。快捷配置启用管理员宿主并关闭自动风险拦截；UAC、窗口身份与坐标有效性检查仍存在。不得用于付款、发送、删除或最终提交。
 > Supervise all real input. Quick setup enables an elevated host and disables automatic risk interception; UAC, window identity and coordinate checks remain. Do not use it for payment, sending, deletion or final submission.
@@ -30,6 +49,7 @@ The connected agent plans and judges outcomes. This runtime observes real Window
 ## 1. 下载与文档 / Downloads and documentation
 
 - [GitHub Releases / 已发布版本](https://github.com/Desolate-Jix/agent-gui-runtime/releases)
+- [学习测试版与兼容执行组件 / Learning and compatible execution preview](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1)
 - [v0.1.1 发布与下载 / Release and downloads](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.1)
 - [安装、模型下载与配置 / Setup and models](FRIEND_SETUP.md)
 - [Agent 使用指南 / Agent guide](AGENT_GUIDE.md)
@@ -41,9 +61,9 @@ The connected agent plans and judges outcomes. This runtime observes real Window
 - [发布范围 / Release scope](RELEASE_SCOPE.md) · [变更记录 / Changelog](CHANGELOG.md)
 - [历史网页与学习工作台归档 / Historical workbench archive](https://github.com/Desolate-Jix/agent-gui-runtime/tree/codex/archive-learning-workbench)
 
-这是小型源码包，不是独立 EXE 安装器。不包含模型权重、Python 环境、用户截图、账号或本机 MCP 配置。程序、模型、数据分开存放；升级不要覆盖未清理的运行会话。
+稳定 v0.1.1 下载为小型源码包；学习 0.1.0-preview.1 与执行 0.1.2-preview.1 提供独立 EXE 安装器。不包含模型权重、用户库、原始截图、账号或本机 MCP 配置。程序、可选模型与数据分开存放；升级不要覆盖未清理的运行会话。
 
-This is a source bundle, not a standalone installer. Prepare runtime dependencies and configuration; weights are required only for the local route. Keep application, optional model and data directories separate and preserve unresolved sessions.
+Stable v0.1.1 uses a source bundle; the learning/execution preview pair provides separate EXE installers. Weights are required only for local grounding. Keep application, optional model and data directories separate and preserve unresolved sessions.
 
 ## 2. 功能 / Capabilities
 
@@ -165,9 +185,9 @@ The adapter validates/persists requests; the serial coordinator owns native reso
 
 v0.1.1 收拢八个既有执行模块，沿用原 owner、公共动作 API、七个 MCP 工具及全部视觉路线；不增加执行器。可选 `OptionalJudgment` 与 `ModelUsage` 仅为共享合同，未生产接线，默认不调用判断模型；未知用量保持 null，不代表全量 Agent 用量。见 [模块边界](docs/EXECUTION_MODULE_BOUNDARIES.md) 与 [判断／用量合同](docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md)。 / v0.1.1 consolidates eight existing execution modules while retaining the original owner, action API, seven MCP tools and all vision routes. Optional judgment and usage are unwired shared contracts: no default judgment-model invocation; unknown usage stays null and does not represent total Agent usage.
 
-部分历史命名模块仍为执行模式的共用依赖，不能因目录名含 `learn` 就删除。它们不代表学习产品已启用；本包不配送学习启动入口，MCP 只暴露执行工具。
+稳定 v0.1.1 源码中部分历史命名模块仍为执行模式共用依赖，不能因目录名含 `learn` 就删除。该稳定源码包不配送学习启动入口；已经发布的学习预览由上方独立安装器提供。
 
-Historically named modules may remain shared dependencies. Their presence does not enable learning; the bundle excludes learning startup entrypoints and exposes execution tools only.
+Historically named modules remain shared execution dependencies in stable v0.1.1, whose source bundle excludes learning startup entrypoints. The published learning preview is provided by the separate installer above.
 
 ## 4. 模型与环境 / Models and environment
 
@@ -305,26 +325,19 @@ v0.1.1 源码与隔离候选各 2086 项（覆盖重叠，不相加）；294 个
 
 Published test.7 and test.8 results, failures and scope remain in their versioned acceptance records as historical evidence. See the [v0.1.1 acceptance record](docs/verification/V011_RELEASE_ACCEPTANCE.md) and [form contract](docs/verification/EXECUTION_FORM_FILL.md) for this patch's progress and limits; [v0.1.0 acceptance](docs/verification/V010_RELEASE_ACCEPTANCE.md) remains historical.
 
-## 9. 后续轻量学习模式 / Future lightweight learning
+## 9. 可选学习模式 / Optional learning mode
 
-**独立开发中，本次不发布，不要求额外学习模型，不承诺完成时间。 / Separate development, not shipped and no extra learning models required.**
+**学习工作台 0.1.0-preview.1 已发布为测试版，独立安装，不要求额外学习模型。 / Learning Workbench 0.1.0-preview.1 is a published preview, independently installed without an extra learning model requirement.**
 
-核心：**Agent 决策，框架提供可编辑、可复用的界面与流程记忆，继续使用同一个执行器。** 不再建一套点击引擎，也不每步重复读取完整历史。
+Agent 操作可形成可复用工作流草稿，用户在学习工作台审核、修改并保存确切版本。独立界面、流程图和任务步骤分别管理；流程图引用固定界面版本，加入成员不自动增加跳转。编辑后仍需审核，旧确切版本不被新修改静默改变。 / Agent teaching can synthesize reusable workflow drafts for human review, editing and pinned saves. Standalone interfaces, graphs and task steps remain distinct; graphs pin interface versions without implicit edges. Edits require review and do not silently change existing pinned versions.
 
-The agent remains the decision-maker. Learning adds editable interface/process memory above the same executor, with scoped retrieval rather than full-history replay.
+用户可以修改目标规则、参数、步骤关系及结果核验；有判别证据的跳转默认提议本地图像核验。图像明确匹配时可确认结果，不匹配或不确定时由 Agent 审核原请求；可人工修改稳定区域和阈值，也可关闭图像选项后保存重开。 / Users can edit target rules, parameters, step relationships and result checks. Distinguishable transitions propose local image verification; clear matches can verify results and inconclusive evidence retains the original request for Agent review. Regions/thresholds are editable and disablement persists.
 
-1. **学习段**：Agent 正常操作时记录前后界面、目标、动作和真实跳转。
-2. **界面与流程分开**：单页面学习产生独立界面；连续学习按实际跳转成图。输入值作为变量，不因换搜索词重复造页面。
-3. **人工修改**：在原图上修改控件框、标签、含义；已有界面可加入／移出流程，持续保存编辑，不强制定稿。
-4. **轻量复用**：按需读取节点、目标控件、下一跳与变量，使用明确版本引用；仍核对当前界面，不照搬旧坐标。
-5. **局部截图定位**：固定样式按钮保存局部模板，在当前图里比较定位。重复匹配、缺失、缩放／布局变化要明确返回，不伪装成命中。
-6. **反馈与版本**：可人工修正或交 Agent 重学，保留来源和修订，避免新修改静默污染旧流程。
+学习工作台可离线管理库；真实采集与试运行显式连接兼容执行组件，复用现有执行器。支持简体中文与 English，数据根保存在安装目录外。 / The workbench edits libraries offline and explicitly attaches to compatible execution for teaching/trials, using the existing executor. Simplified Chinese and English are supported; keep data outside installation roots.
 
-Planned experience: action-linked learning segments, standalone interfaces, real transition graphs, editable regions/semantics, parameterized reuse, local screenshot-template matching and explicit revisions/relearning. Templates assist localization; they do not prove old coordinates remain valid.
+[下载测试版 / Download preview](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1) · [使用说明 / Quickstart](https://github.com/Desolate-Jix/agent-gui-runtime/blob/3cd9b989c11592595ae5e63bd6dd183d33554068/docs/LEARNING_PREVIEW_QUICKSTART.md) · [验收及未验证范围 / Acceptance and limits](https://github.com/Desolate-Jix/agent-gui-runtime/blob/3cd9b989c11592595ae5e63bd6dd183d33554068/docs/verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)
 
-先把执行模式稳定性、操作覆盖和跨 Agent 使用打磨好，再把学习接到稳定执行链上。历史网页／工作台仅供参考，不把旧截图和旧流程当成新版验收数据。
-
-Execution stability and coverage come first. Learning requires separate acceptance with fresh content; the historical workbench is not the current product download.
+本次只证明验收报告中的受控新数据流程。旧便携候选未知退出仍为历史未解决项，不承诺任意应用稳定性或通用收益。后续继续扩大真实应用覆盖、变化与恢复测试及准确/速度收益评估。 / Evidence is limited to the controlled fresh-data journeys in the report. The excluded old portable exit remains unexplained; universal reliability and benefits are not established. Future work expands application coverage, change/recovery testing and accuracy/speed evaluation.
 
 ## License / 许可证
 
