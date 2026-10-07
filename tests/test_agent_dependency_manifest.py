@@ -17,6 +17,7 @@ IMPORT_DISTRIBUTIONS = {
     "pywinauto": "pywinauto", "win32api": "pywin32",
     "win32gui": "pywin32", "win32con": "pywin32",
     "win32clipboard": "pywin32", "win32process": "pywin32",
+    "cv2": "opencv-python", "numpy": "numpy",
 }
 RUNTIME_PATHS = (
     "scripts/start_instant_mcp.py", "scripts/run_local_step_session.py",
@@ -27,10 +28,11 @@ RUNTIME_PATHS = (
     "app/api/action.py", "app/core/screenshot.py",
     "app/core/window_manager.py", "app/core/input_controller.py",
     "app/core/process_sampler.py", "app/agent_link/host.py",
+    "app/learning_memory/image_verification.py",
 )
 OPTIONAL = {"rapidocr", "rapidocr-onnxruntime", "paddlepaddle", "torch",
             "torchvision", "transformers", "accelerate", "safetensors",
-            "opencv-python", "numpy", "omegaconf", "pyyaml", "pyside6"}
+            "omegaconf", "pyyaml", "pyside6"}
 
 
 def _requirements():
@@ -63,7 +65,7 @@ def test_agent_import_boundary_without_local_models_or_qt():
 import importlib.abc
 import sys
 blocked = {'PySide6', 'rapidocr', 'rapidocr_onnxruntime', 'paddle',
-           'torch', 'torchvision', 'transformers', 'cv2', 'numpy',
+           'torch', 'torchvision', 'transformers',
            'omegaconf', 'yaml'}
 class Deny(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):

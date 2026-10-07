@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import struct
 from typing import Any
-from uuid import uuid4
+from uuid import uuid4, uuid5, NAMESPACE_URL
 
 from .external_mapping import (
     ExternalMappingError,
@@ -71,6 +71,89 @@ class InterfaceContentService:
         registry["interface_ids"].append(interface_id)
         registry["interface_ids"].sort()
         self._write_registry(registry)
+        return self._view(value)
+
+    def import_execution_memory(self, source: dict, content: dict) -> dict:
+        """复用现有不可变修订；同一显式身份重学不得覆盖人工修改。"""
+        from app.learning_memory.content_source import valid_source, validate_binding
+        if not valid_source(source) or not _valid_content(content):
+            raise DesktopReviewError("execution_memory_content_invalid")
+        validate_binding(self.facade, source)
+        self._verified_evidence(source)
+        if any(not self._bbox(region["bbox"], source) for region in content["regions"]):
+            raise DesktopReviewError("execution_memory_region_outside_image")
+        key = "execution-memory:" + hashlib.sha256(canonical_json_bytes(
+            [source["task_id"], source["interface_key"], source["state_key"]])).hexdigest()
+        registry = self._registry()
+        existing = registry["sources"].get(key)
+        if existing is not None:
+            self._require_active(existing, registry)
+            value = self.load(existing, None)
+            return {**value, "import_status": "existing_identity_not_overwritten",
+                    "incoming_source_ref": source["source_ref"], "update_requires_explicit_source_adoption": True}
+        # 确定性 ID 使落盘中断后的重试不留下另一份内容身份。
+        interface_id = "interface-" + str(uuid5(NAMESPACE_URL, key))
+        value = self._base(interface_id, 1, source, content)
+        self._write_version(value)
+        self._commit_current(interface_id, value, {})
+        registry["sources"][key] = interface_id
+        registry["interface_ids"].append(interface_id)
+        registry["interface_ids"].sort()
+        self._write_registry(registry)
+        return {**self._view(value), "import_status": "created"}
+
+    def find_execution_identity(self, task_id: str, interface_key: str, state_key: str) -> dict | None:
+        key = "execution-memory:" + hashlib.sha256(canonical_json_bytes(
+            [task_id, interface_key, state_key])).hexdigest()
+        registry = self._registry()
+        identity = registry["sources"].get(key)
+        if identity is None:
+            return None
+        self._require_active(identity, registry)
+        return self.load(identity, None)
+
+    def adopt_execution_source(self, interface_id: str, source: dict, regions: list,
+                               recognition_text: str, expected_revision: int,
+                               expected_sha256: str, idempotency_key: str) -> dict:
+        """明确采用同身份新证据；旧框不继承，旧修订和流程引用保持不变。"""
+        from app.learning_memory.content_source import valid_source
+        interface, key = _interface_id(interface_id), _idempotency_key(idempotency_key)
+        self._require_active(interface)
+        if not valid_source(source):
+            raise DesktopReviewError("execution_memory_source_invalid")
+        manifest = self._current(interface)
+        self._versions(interface)
+        request = hashlib.sha256(canonical_json_bytes({
+            "operation": "adopt_execution_source", "interface_id": interface,
+            "source": source, "regions": regions, "recognition_text": recognition_text,
+            "expected_revision": expected_revision, "expected_sha256": expected_sha256,
+        })).hexdigest()
+        prior = manifest["requests"].get(key)
+        if prior is not None:
+            if prior["request_sha256"] != request:
+                raise DesktopReviewError("idempotency_conflict")
+            return self.load(interface, prior["version_id"])
+        current = self._load_version(interface, manifest["content_sha256"])
+        if (type(expected_revision) is not int or expected_revision != current["revision"]
+                or expected_sha256 != current["content_sha256"]):
+            raise DesktopReviewError("stale_revision")
+        if (current["source"].get("kind") != "execution_memory_v1"
+                or any(current["source"][field] != source[field] for field in
+                       ("task_id", "interface_key", "state_key", "external_interface_id"))):
+            raise DesktopReviewError("execution_memory_adoption_identity_mismatch")
+        content = deepcopy(current["content"])
+        content.update(regions=deepcopy(regions), recognition_text=recognition_text)
+        if not _valid_content(content):
+            raise DesktopReviewError("execution_memory_content_invalid")
+        self._validate_source_binding(source, content)
+        if any(not self._bbox(region["bbox"], source) for region in content["regions"]):
+            raise DesktopReviewError("execution_memory_region_outside_image")
+        value = self._base(interface, current["revision"] + 1, source, content,
+                           parent_content_sha256=current["content_sha256"], request_sha256=request)
+        self._write_version(value)
+        requests = deepcopy(manifest["requests"])
+        requests[key] = {"request_sha256": request, "version_id": value["version_id"]}
+        self._commit_current(interface, value, requests)
         return self._view(value)
 
     def list(self, reviewed_only: bool = False, task_id: str | None = None, *, include_deleted: bool = False) -> list[dict]:
@@ -272,6 +355,12 @@ class InterfaceContentService:
         return all(math.isfinite(float(item)) for item in value) and x >= 0 and y >= 0 and width > 0 and height > 0 and x + width <= image_width and y + height <= image_height
 
     def _image_bytes(self, source: dict) -> tuple[str, bytes]:
+        if source.get("kind") == "execution_memory_v1":
+            from app.learning_memory.content_source import read_image
+            try:
+                return read_image(self.facade, source)
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                raise DesktopReviewError("execution_memory_evidence_invalid") from error
         path = source_image_relative_path(
             source["source_ref"],
             {
@@ -449,6 +538,14 @@ class InterfaceContentService:
         return path
 
     def _validate_source_binding(self, source: dict, content: dict) -> None:
+        if source.get("kind") == "execution_memory_v1":
+            from app.learning_memory.content_source import validate_binding
+            try:
+                validate_binding(self.facade, source)
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                raise DesktopReviewError("execution_memory_source_invalid") from error
+            self._verified_evidence(source)
+            return
         reference = Path("desktop-review") / "sources" / source["source_ref"] / "original_batch.json"
         source_file = self.facade._artifact_file(reference.as_posix(), "独立界面原始来源")
         try:
@@ -467,7 +564,7 @@ class InterfaceContentService:
 
 
 def _memory_view(value: dict) -> dict:
-    result = {"contract_version": "agent_interface_memory_v1", "interface_id": value["interface_id"], "version_id": value["version_id"], "content_sha256": value["content_sha256"], "storage_status": value["storage_status"], "origin_status": value["origin_status"], "application_binding": deepcopy(value["application_binding"]), "source": {key: value["source"][key] for key in ("task_id", "batch_id", "source_ref", "external_interface_id", "screenshot_id", "screenshot_sha256")}, "content": deepcopy(value["content"]), "artifact_is_authorization": False, "execute_binding_enabled": False}
+    result = {"contract_version": "agent_interface_memory_v1", "interface_id": value["interface_id"], "version_id": value["version_id"], "content_sha256": value["content_sha256"], "storage_status": value["storage_status"], "origin_status": value["origin_status"], "application_binding": deepcopy(value["application_binding"]), "source": deepcopy(value["source"]), "content": deepcopy(value["content"]), "artifact_is_authorization": False, "execute_binding_enabled": False}
     result["learning_status"] = value.get("learning_status", "interface_content")
     if "learning_flow" in value:
         result["learning_flow"] = deepcopy(value["learning_flow"])
@@ -633,6 +730,9 @@ def _valid_version(value: Any, interface_id: str, digest: str) -> bool:
 
 
 def _valid_source(value: Any) -> bool:
+    if isinstance(value, dict) and value.get("kind") == "execution_memory_v1":
+        from app.learning_memory.content_source import valid_source
+        return valid_source(value)
     required = {
         "task_id", "batch_id", "source_ref", "external_interface_id",
         "screenshot_id", "screenshot_sha256",

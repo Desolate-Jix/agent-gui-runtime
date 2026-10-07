@@ -228,11 +228,27 @@ class InputController:
         )
 
         foreground_before = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
+        foreground_popup_handle = None
+        point_popup_handle = expected_owned_popup_handle
         if popup_guard is not None:
             popup_guard.verify_current()
             set_foreground_ok = None
         else:
-            set_foreground_ok = self._focus_window(bound.handle)
+            foreground_popup_handle = window_manager.get_owned_foreground_popup_handle(bound)
+            if foreground_popup_handle is not None:
+                if point_popup_handle is None:
+                    point_popup_handle = foreground_popup_handle
+                # 只为当前确切弹窗内的目标保留前台，不能借此点击后台父窗口。
+                popup_visibility = window_manager.validate_bound_point_visibility(
+                    bound=bound, x=point["window_x"], y=point["window_y"],
+                    expected_owned_popup_handle=point_popup_handle)
+                if (not popup_visibility.get("allowed")
+                        or popup_visibility.get("hit_window", {}).get("root_handle") != foreground_popup_handle):
+                    raise TargetPointOccludedError({**popup_visibility, "allowed": False,
+                        "reason": "target_point_not_owned_by_foreground_popup"})
+                set_foreground_ok = None
+            else:
+                set_foreground_ok = self._focus_window(bound.handle)
         cursor_before = win32api.GetCursorPos()  # type: ignore[union-attr]
 
         if move_before_click:
@@ -251,7 +267,7 @@ class InputController:
             bound=bound,
             x=point["window_x"],
             y=point["window_y"],
-            **({"expected_owned_popup_handle": expected_owned_popup_handle} if expected_owned_popup_handle is not None else {}),
+            **({"expected_owned_popup_handle": point_popup_handle} if point_popup_handle is not None else {}),
         )
         if not point_visibility.get("allowed"):
             raise TargetPointOccludedError(point_visibility)
@@ -275,7 +291,8 @@ class InputController:
         if popup_guard is not None:
             popup_guard.verify_current()
         expected_foreground_handle = (
-            popup_guard.expectation.parent_handle if popup_guard is not None else int(bound.handle)
+            popup_guard.expectation.parent_handle if popup_guard is not None
+            else (foreground_popup_handle or int(bound.handle))
         )
         if (
             current_bound is None
@@ -283,6 +300,8 @@ class InputController:
             or current_bound.process_id != bound.process_id
             or current_bound.rect != bound.rect
             or int(win32gui.GetForegroundWindow()) != expected_foreground_handle
+            or (foreground_popup_handle is not None
+                and window_manager.get_owned_foreground_popup_handle(current_bound) != foreground_popup_handle)
         ):
             raise RuntimeError("Bound window changed immediately before mouse down")
         current_cursor = tuple(win32api.GetCursorPos())
@@ -316,13 +335,15 @@ class InputController:
                         or current.process_id != bound.process_id
                         or current.rect != bound.rect
                         or int(win32gui.GetForegroundWindow()) != expected_foreground_handle
+                        or (foreground_popup_handle is not None
+                            and window_manager.get_owned_foreground_popup_handle(current) != foreground_popup_handle)
                     ):
                         raise RuntimeError("Bound window changed before second click")
                     if tuple(win32api.GetCursorPos()) != (point["screen_x"], point["screen_y"]):
                         raise RuntimeError("Mouse cursor position changed before second click")
                     second_visibility = window_manager.validate_bound_point_visibility(
                         bound=current, x=point["window_x"], y=point["window_y"],
-                        **({"expected_owned_popup_handle": expected_owned_popup_handle} if expected_owned_popup_handle is not None else {}))
+                        **({"expected_owned_popup_handle": point_popup_handle} if point_popup_handle is not None else {}))
                     if not second_visibility.get("allowed"):
                         raise TargetPointOccludedError(second_visibility)
 

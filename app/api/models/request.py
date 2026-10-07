@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ROIModel(BaseModel):
@@ -187,7 +187,9 @@ class ExecuteRecognitionPlanRequest(BaseModel):
     """Request model for executing a gated recognition plan against a bound window."""
 
     goal: str = Field(min_length=1)
+    target_memory: Optional[dict[str, str]] = None
     click_kind: Literal["single", "double", "right"] = "single"
+    selection_intent: Optional[Literal['ensure_selected']] = None
     approved_plan_id: Optional[str] = None
     learned_instruction_id: Optional[str] = None
     interface_memory_id: Optional[str] = None
@@ -212,8 +214,18 @@ class ExecuteRecognitionPlanRequest(BaseModel):
     dry_run: bool = False
     operation_context: OperationRuntimeContextModel = Field(default_factory=OperationRuntimeContextModel)
 
+    @field_validator("target_memory")
+    @classmethod
+    def validate_target_memory(cls, value):
+        if value is None:
+            return None
+        from app.learning_memory.target_recipe import validate_target_reference
+        return validate_target_reference(value)
+
     @model_validator(mode="after")
     def require_fresh_non_single_click(self) -> "ExecuteRecognitionPlanRequest":
+        if self.selection_intent is not None and (self.click_kind != 'single' or self.target_memory is None):
+            raise ValueError('selection_row_name_reference_required')
         # 学习资产尚无点击种类契约，不能把旧单击证据冒充双击/右键。
         if self.click_kind != "single":
             if (self.agent_mode != "execute" or self.learning_mode or self.approved_plan_id

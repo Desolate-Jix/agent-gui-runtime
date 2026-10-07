@@ -49,11 +49,12 @@ async def run(root, model, data, administrator=False, recognition_source="local"
         async with ClientSession(*streams) as client:
             initialized = await client.initialize()
             evidence["server_version"] = initialized.server_info.version
-            assert evidence["server_version"] == "0.1.1"
+            assert evidence["server_version"] == "0.1.0-test.8"
             tools = await client.list_tools()
             evidence["tools"] = [t.name for t in tools.tools]
             assert set(evidence["tools"]) == {"instant_start", "instant_status", "instant_submit",
-                "instant_result", "instant_image", "instant_stop", "instant_run"}
+                "instant_result", "instant_image", "instant_stop", "instant_run",
+                "instant_recovery_preview", "instant_recover_session"}
 
             async def call(name, args=None):
                 result = await client.call_tool(name, args or {})

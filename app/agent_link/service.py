@@ -290,13 +290,14 @@ class AgentLinkService:
     def bind_learning_runtime_provider(self, reviewer_token: str, provider: Any) -> None:
         """安装与当前收件箱和学习所有者一致的本地运行时提供者。"""
         self._reviewer(reviewer_token)
-        from app.desktop_review.learning_runtime import LearningRuntimeProvider
+        from app.core.learning_runtime_provider_contract import LearningRuntimeProviderContract
 
         with self._learning_owner_guard:
             owner = self._learning_owner
         if (
             owner is None
-            or not isinstance(provider, LearningRuntimeProvider)
+            or not isinstance(provider, LearningRuntimeProviderContract)
+            or LearningRuntimeProviderContract not in type(provider).__mro__
             or provider.owner is not owner
             or owner.store is not self._store
         ):

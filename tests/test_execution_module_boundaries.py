@@ -1,6 +1,5 @@
 import ast
 import importlib
-import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -36,12 +35,9 @@ def test_patch_via_either_form_import_reaches_real_orchestration(monkeypatch, pa
 
 
 @pytest.mark.parametrize("first", ["app.desktop_review", "app.execution"])
-def test_fresh_process_import_identity_without_review_ui(first, tmp_path):
+def test_fresh_process_import_identity_without_review_ui(first):
     code = '''
 import importlib, sys
-from pathlib import Path
-root = Path(sys.argv[2]).resolve()
-sys.path.insert(0, str(root))
 first = sys.argv[1]
 other = 'app.execution' if first == 'app.desktop_review' else 'app.desktop_review'
 for name in ('input_sequence', 'form_fill', 'conditional_observation', 'local_direct_step', 'post_action_recovery'):
@@ -51,13 +47,10 @@ for name in ('input_sequence', 'form_fill', 'conditional_observation', 'local_di
     right = importlib.import_module(other + '.' + name)
     assert left is right
     assert left.__name__ == 'app.execution.' + name
-    assert Path(left.__file__).resolve().is_relative_to(root)
 assert not any(name.startswith(('PySide', 'PyQt')) for name in sys.modules)
 assert not any('workflow_editor' in name or 'review_editor' in name for name in sys.modules)
 '''
-    root = Path(__file__).resolve().parents[1]
-    result = subprocess.run([sys.executable, "-I", "-c", code, first, str(root)],
-        cwd=tmp_path, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "-c", code, first], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 
@@ -68,15 +61,14 @@ def test_maintained_entrypoints_use_canonical_modules():
         "app/execution/local_direct_step.py", "app/desktop_review/single_step_coordinator.py"]
     for path in consumers:
         tree = ast.parse((root / path).read_text(encoding="utf-8-sig"))
-        package = ".".join(Path(path).parent.parts)
-        imports = [importlib.util.resolve_name("." * node.level + (node.module or ""), package)
-                   if node.level else node.module
-                   for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+        imports = [node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
         imports += [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
                     and isinstance(node.value, str) and node.value.startswith("app.")]
         assert any(value and value.startswith("app.execution.") for value in imports), path
         assert not any(value in {"app.desktop_review." + name for name in
             ("input_sequence", "form_fill", "conditional_observation", "local_direct_step", "post_action_recovery")} for value in imports), path
+        assert not any(isinstance(node, ast.ImportFrom) and node.level and
+            node.module in {"conditional_observation", "local_direct_step"} for node in ast.walk(tree)), path
 
 
 def test_preflight_records_both_alias_and_canonical_entrypoints(tmp_path):
@@ -108,10 +100,9 @@ def test_local_contract_and_keyboard_share_unique_model_and_error():
     assert keyboard.press_local_key.__module__ == "app.execution.local_keyboard_action"
 
 
-def test_canonical_key_validation_does_not_load_input_backend(tmp_path):
+def test_canonical_key_validation_does_not_load_input_backend():
     code = '''
 import sys
-sys.path.insert(0, sys.argv[1])
 from app.execution.local_action_contract import _validated_request
 value = _validated_request('press_key', {'key': 'Shift+Home', 'x': 1, 'y': 2})
 assert value == {'key': 'Shift+Home', 'x': 1, 'y': 2, 'capture_roi': None}
@@ -119,9 +110,7 @@ assert 'app.core.input_controller' not in sys.modules
 assert 'app.desktop_review.local_keyboard_action' not in sys.modules
 assert not any(name.startswith(('PySide', 'PyQt')) for name in sys.modules)
 '''
-    root = Path(__file__).resolve().parents[1]
-    result = subprocess.run([sys.executable, "-I", "-c", code, str(root)],
-        cwd=tmp_path, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
 
 

@@ -1,20 +1,46 @@
+## 独立组件安装说明 / Independent component setup
+
+执行模式可单独安装和使用，学习工作台是可选组件。学习 EXE 可离线打开、审核、修改、保存和重开库，无需执行宿主或模型；两组件普通安装、升级及独立卸载/重装已有限核验。测试版尚未公开发布。 / Execution works independently; learning is optional and supports offline library management without a host or model. Ordinary installation, upgrade and separate removal/reinstallation have bounded verification; the preview remains unpublished.
+
+采集教学和运行工作流时，在运行页明确选择兼容执行安装与既有会话；第一版要求同一数据根和确切库。数据目录放在安装根之外，重开选择原数据根而非 memory-library 子目录。连接不等于输入授权，关闭学习工作台不停止外部执行宿主。 / Teaching and execution require explicit attachment to a compatible installation and existing session with the same data root/library. Connection is not input authorization, and closing the workbench does not stop an external host.
+
+执行 Setup 交付维护运行时源码，Agent/API 路线仍需按现有 setup/configure 配置用户环境，安装器不替代环境配置。本地源码 setup 使用 execution + vista 依赖组，不要求学习 Qt；本地模型可选。工作台支持设置中的简体中文/English 切换并记忆选择，保留用户内容和未保存编辑。 / Execution Setup delivers maintained source; Agent/API routes require the existing setup/configure environment. Local setup uses execution + vista without learning Qt; local models are optional. Settings supports remembered Chinese/English selection while preserving user content and unsaved edits.
+
+本页描述该版本的安装、使用与限定验收；[发行入口](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1)。 / This page describes this version's installation, use and bounded acceptance; [release entry](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1). Main 与独立 Sol 已在同一冻结独立安装版完成限定新内容连续验收和正常清理，Main已复核原件。新安装版接替旧便携包；旧包不交付，其未知退出保留为历史未解决问题，不宣称修复。 / Main and independent Sol passed bounded fresh continuous acceptance and cleanup on the same installed pair, with Main reviewing originals. The installers replace the old portable package; its unexplained exit remains historical and unresolved.
+
+以下便携及同根 runtime 说明属于历史候选。 / Portable and same-root runtime notes below describe historical candidates.
+
+## 历史 Windows 便携学习工作台候选 / Historical portable learning workbench candidate
+
+本地便携EXE候选已构建，29项启动/打包/收集回归及树外中文路径两次离屏打开、重开和正常关闭通过；包内真实入口依赖检查通过。包内宿主连接、实际目录选择器与桌面操作仍未验收，未发布。目录为 `AgentLearningWorkbench/AgentLearningWorkbench.exe`，旁边 `runtime/` 保留维护源码与GUI依赖共根；不是新的安装器或正式版本。 / The local executable builds and passes 29 focused checks plus two isolated offscreen startup/reopen/close runs in a Chinese path; real source dependency entrypoints pass. Package-host connection, the interactive picker and desktop input remain unaccepted; unpublished; the executable sits beside a runtime root containing maintained source and GUI dependencies.
+
+启动适配首次无参数启动用QFileDialog选择已存在、可写的Agent数据根，之后从 `%LOCALAPPDATA%/AgentGUIRuntime/learning-workbench.json` 记忆；取消不新建目录或内容。坏记忆或目录丢失须明确报错，可用 `--data-dir "<数据根>"` 显式打开；显式参数优先且不改记忆。`--session-dir "<已有会话目录>"` 可选。GUI只编辑和附着已有会话，不自动启动宿主/模型，不修改MCP。当前维护源码入口仍是 `scripts/run_learning_memory_workbench.py --data-dir ...`，其数据参数必填；新增scripts/start_learning_workbench.py→app.learning_memory.workbench_launch提供无参数选择与记忆适配；EXE离屏隔离已通过，包内连接与桌面仍待验证。 / Proposed first launch selects an existing writable Agent data root and remembers it locally; cancelling creates nothing. Invalid/missing remembered roots report an error. Explicit --data-dir takes precedence without changing memory; --session-dir is optional. The GUI neither starts a host/model nor changes MCP. The current source entry still requires --data-dir; scripts/start_learning_workbench.py delegates selection/memory to workbench_launch; isolated executable startup passes; package-host and desktop validation remain pending.
+
+Agent宿主必须从同一包的 `runtime/` 安装/配置，并使用与GUI完全相同的数据根；不要接旧安装目录的宿主或其他库。保留WorkflowRunClient对确切root、身份及同库的验证。以当前Agent路线为例，在便携目录中运行：
+```powershell
+.\runtime\scripts\setup_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentLearningData"
+# 已有包内环境时，仅重新生成配置：
+.\runtime\scripts\configure_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentLearningData"
+```
+setup需要已有uv并联网安装依赖，Agent路线使用包内 `runtime/.venv-agent`；configure也可用 `-Python "<该包内解释器>"`。两脚本按既有语义生成管理员MCP、本地真实输入启用配置；由操作者审阅生成的单个连接项、合并到Agent并重连，UAC由用户确认。它们不是GUI自动配置步骤，也不代表新安全策略。 / Install/configure the host under this same runtime root and use the exact same data root. Setup requires uv/network and creates runtime/.venv-agent; configure can take an explicit package-local Python. Existing scripts generate supervised administrator MCP/local-input configuration, which the operator reviews and merges before reconnecting and confirming UAC. The GUI does not perform these steps.
+
+现有脚本有效 `-RecognitionSource` 值为 `agent_current|agent_delegate|external_api|local`。`agent_delegate` 另需 `-DelegateProfile`，`external_api` 另需 `-ApiProfile`；local另需 `-ModelDirectory`，setup按需才加 `-DownloadModel`，本地模型可选。已有API/委派/本地路由沿用，真实供应商连通与准确率未在本轮验收。 / Supported script routes are agent_current, agent_delegate, external_api and local, with their existing profile/model flags. Local models are optional;  No live-provider or accuracy validation is claimed.
+
+空库可打开“任务步骤”中的“运行”页签，选择“连接当前Agent会话”；会话仍由原Agent建立，未连接时执行按钮禁用。真实教学、审核、保存及复用见下方既有工作台说明；该候选仍需按批准范围进行桌面验收。 / In an empty library, open the Run tab within Task Steps and connect the current Agent session. The Agent establishes that session; disconnected execution stays disabled. Approved desktop acceptance remains required.
+
+> **2026-09-27 后续源码，未发布 / Unreleased source follow-up:** `external_api` 已接入现有执行链；配置完整 API 端点、视觉模型和密钥环境变量名后，可用原有单步与组合命令，API 自动定位，执行仍走公共检查。已发布 test.8 ZIP 仍仅预留 API 适配器，不能按本段当成已更新。 / External API grounding is now wired into the common execution path in source. The published test.8 ZIP remains adapter-only and has not been replaced.
+
 # 朋友试用：安装、模型下载与 Agent 连接 / Friend trial setup
 
-适用范围：Windows x64 v0.1.1 执行模式正式补丁源码包。它不是双击即用安装器；包内不含 Python 环境和模型。先完成下面的连接检查，再由人在场监督真实操作。本说明中的 `D:` 路径都只是示例，可换成你自己的磁盘；不要照搬别人电脑生成的 `mcp-config.local.json`。
+适用范围：Windows x64 即时模式源码预览包。它不是双击即用安装器；包内不含 Python 环境和模型。先完成下面的连接检查，再由人在场监督真实操作。本说明中的 `D:` 路径都只是示例，可换成你自己的磁盘；不要照搬别人电脑生成的 `mcp-config.local.json`。
 
-This guide is for the Windows x64 v0.1.1 execution-mode patch source package, not a standalone installer. Install dependencies for the chosen route (weights only for local vision), verify the connection, then supervise real input. All `D:` paths are examples. Generate your own configuration instead of copying another machine's local MCP paths.
+This guide is for the Windows x64 instant-mode source preview, not a standalone installer. Install dependencies for the chosen route (weights only for local vision), verify the connection, then supervise real input. All `D:` paths are examples. Generate your own configuration instead of copying another machine's local MCP paths.
 
-本补丁保留原七个 MCP 工具与全部视觉路线；API／Agent 无需本地模型，只有 `local` 需要权重。模块归属调整及可选判断／用量合同不要求你增加模型；判断供应商未生产接线，默认不调用判断模型。学习产品不发布。本方与独立 Agent 同冻结运行时连续使用及清理验收通过，证据与首次失败见 [v0.1.1 验收](docs/verification/V011_RELEASE_ACCEPTANCE.md)；下载页为 [instant-v0.1.1](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.1)。 / The patch retains seven tools and all vision routes. Only local vision requires weights; API/Agent routes do not. Module relocation and unwired optional judgment/usage require no extra model or default judgment-model call. Learning is excluded. Main-agent and independent same-runtime continuous journeys and cleanup passed; see acceptance for evidence and first failures, and the linked release page for downloads.
+## test.8：不装本地模型 / Model-free Agent setup
 
-## 无本地模型视觉路线 / Model-free vision routes
+**以下适用于 test.8 或更新；test.7 不含这些新路由。** `agent_current` 将视觉任务交给当前确实支持图像的 Agent；`agent_delegate` 仅由客户端按显式 profile 选择视觉子 Agent（例如 Astra 主 Agent 显式委派给 Luna）。委派名只是客户端配置标识，不会让宿主继承 API/key、自动创建子 Agent 或切换模型。unknown/unsupported 会停止所选视觉路径，不会偷偷回退到本地 VISTA/OCR 或外部 API。Agent 路线 `read_text` 回传当前原图供 Agent 阅读，不加载本地 OCR。独立 API 仅保留 adapter/config/mock 协议检查，宿主执行路由禁用，不读取或要求 key，也不要求 live-provider 验收；详见[预留接口](docs/development/EXTERNAL_VISION_API.md)。
 
-`agent_current` 将视觉任务交给当前确实支持图像的 Agent；`agent_delegate` 仅由客户端按显式 profile 选择视觉子 Agent（例如 Astra 主 Agent 显式委派给 Luna）。委派名只是客户端配置标识，不会让宿主继承 API/key、自动创建子 Agent 或切换模型。unknown/unsupported 会停止所选 Agent 视觉路径，不会偷偷回退到本地 VISTA/OCR 或另一服务。Agent 路线 `read_text` 回传当前原图供 Agent 阅读，不加载本地 OCR。`external_api` 会把当前截图发送给配置的服务，收到定位候选后沿用公共执行器；不需要本地模型权重。服务错误明确停止，不自动重试或回退。详见[API 接入说明](docs/development/EXTERNAL_VISION_API.md)。
-
-`agent_current` uses the current agent only when it actually supports images. `agent_delegate` asks the client to select a vision delegate by an explicit profile (for example, an Astra planner explicitly delegates to Luna). A profile is client configuration: it grants no host API/key access and creates or switches no model automatically. Unknown/unsupported capability stops the selected Agent route; there is no silent fallback to local VISTA/OCR or another service. Agent-route `read_text` returns the current original image without local OCR. `external_api` sends the current screenshot to the configured service, then uses the shared executor; it needs no local model weights. Provider errors stop without retries or fallback. See the [API guide](docs/development/EXTERNAL_VISION_API.md).
-
-API 示例配置需写入完整请求端点、视觉模型 ID 和密钥环境变量名；密钥只由运行 MCP 的进程环境提供，不放进 JSON。截图会发送给所配置服务，使用前请确认数据范围，勿发送含私人页面、凭证或账户信息的画面。连接形式不保证任意供应商兼容或识别准确率。
-
-The API profile requires a complete request endpoint, vision model ID and secret environment variable name. Keep the key in the MCP process environment, not in JSON. Screenshots are sent to the configured service; confirm the data scope and do not send private pages, credentials or account details. The protocol does not guarantee compatibility or accuracy for every provider.
+**Requires test.8 or later; test.7 does not include these routes.** `agent_current` uses the current agent only when it actually supports images. `agent_delegate` asks the client to select a vision delegate by an explicit profile (for example, an Astra planner explicitly delegates to Luna). A profile is just client configuration: it grants no host API/key access and creates or switches no model automatically. Unknown/unsupported capability stops the selected route; there is no silent fallback to local VISTA/OCR or external API. Agent-route `read_text` returns the current original image for the Agent and does not load local OCR. The external API is limited to reserved adapter/config/mock-protocol checks; host execution is disabled, no key is read or required, and no live-provider acceptance is required. See the [reserved adapter](docs/development/EXTERNAL_VISION_API.md).
 
 ```powershell
 # 当前 Agent 读图，不安装 VISTA 或本地 OCR。
@@ -22,9 +48,6 @@ The API profile requires a complete request endpoint, vision model ID and secret
 
 # 或：客户端已配置视觉委派时使用（vision-luna 是示例配置名）。
 .\scripts\setup_instant.ps1 -RecognitionSource agent_delegate -DelegateProfile "vision-luna" -DataDirectory "D:\AgentReviewInstantData"
-
-# 外部视觉 API：先按 API 接入说明创建 vision-api.json 并配置进程环境变量。
-.\scripts\setup_instant.ps1 -RecognitionSource external_api -ApiProfile "D:\AgentReviewConfig\vision-api.json" -DataDirectory "D:\AgentReviewInstantData"
 ```
 
 安装在独立 `.venv-agent`，不覆盖 `.venv` 本地模型环境；Python 和下载缓存保存在程序目录，不创建全局 Python 命令或注册 Python。直接依赖版本固定，传递依赖仍由安装时解析，并非完整锁定。第一次安装必须联网。Agent 路线不传 `-ModelDirectory` 或 `-DownloadModel`，不运行下文的 `uv sync`，不需要本地识别 GPU 或模型权重。Agent 自身的运行成本和图像权限由它的客户端负责。
@@ -43,15 +66,15 @@ Setup uses `.venv-agent` without modifying `.venv`, keeps Python/cache under the
 .\.venv-agent\Scripts\python.exe scripts\smoke_instant_mcp.py --recognition-source agent_current --data-dir "D:\AgentReviewInstantSmoke" --report "D:\AgentReviewInstant\smoke-report.json"
 ```
 
-组合命令在视觉定位等待时暂停；客户端回传后继续原命令，保留已完成字段且不自动重放。此前 test.8 的数字、失败和实机经历属于历史证据，不是 v0.1.1 验收结果；本版进展见 [v0.1.1 验收记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)。Agent 路线 `read_text` 返回原图供 Agent 阅读，不加载本地 OCR；桌面审核 UI 不在轻量依赖中。见 [接入协议](docs/development/AGENT_BATCH_PROTOCOL.md)。
+委派检查加 `--recognition-source agent_delegate --delegate-profile vision-luna`，它只检查宿主协议，不会实际调用委派模型。Agent 组合命令会在 grounding 等待时暂停；客户端回传后继续原命令，保留已完成字段且不自动重放。test.8 源码和冻结候选均 2010 项全套测试通过；Codex 已完成两轮真实 Luna 委派混合填写与清理。首个 `CaptureVisibilityError` 保留，并通过明确的新截图和重新选择恢复；两轮耗时 139.013s / 126.147s，含 Agent 等待，不是性能基准；24 张原图摘要已核验。AionUi 同一冻结候选独立验收已派发，任务 `test8-independent-20260927-01`，待返回结果，因此不把 test.8 称作发布版或独立验收通过。**Agent 路线 `read_text` 返回原图给 Agent 阅读，不加载本地 OCR；桌面审核 UI 不包含在轻量依赖中**。见 [接入协议](docs/development/AGENT_BATCH_PROTOCOL.md) 和 [test.8 验收记录](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。
 
-Grounding waits suspend and resume the original command while preserving completed work. Historical test.8 runs and counts do not stand in for v0.1.1 acceptance; see the [v0.1.1 acceptance record](docs/verification/V011_RELEASE_ACCEPTANCE.md). **Agent read_text returns the original image without local OCR; the desktop review UI is excluded**. See the [batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md).
+For delegate startup use its source/profile flags; this smoke does not invoke the delegate. Grounding waits suspend and resume the original Agent command, preserving completed fields without replay. Source and frozen candidate suites each pass 2010 checks; Codex completed two real Luna-delegated mixed-form runs and cleanup on the frozen candidate. The first `CaptureVisibilityError` is retained; recovery used explicit fresh capture and reselection. Per-run wall times (139.013s / 126.147s) include Agent waits and are not performance benchmarks; 24 original-image hashes were checked. AionUi acceptance of the same candidate has been dispatched (`test8-independent-20260927-01`), with result pending, so test.8 is not called released or independently accepted. **Agent read_text returns the original image without local OCR; the desktop review UI is excluded**. See the [batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md) and [test.8 acceptance record](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md).
 
-## local 路线快捷入口 / Quick setup for local vision
+## 本次测试版快捷入口 / Quick setup for this test edition
 
-本版快捷方式使用 **管理员 MCP + 自动安全拦截关闭**。脚本不提升整个 Agent 软件权限。真实操作必须有人监督；Windows 的 UAC 和窗口／坐标完整性检查仍保留。
+本次要求的运行方式是 **管理员 MCP + 自动安全拦截关闭**。下列脚本按这个方式生成配置，不给整个 Agent 软件提权。操作必须有人监督。Windows 的 UAC 和窗口／坐标完整性检查不会删除。
 
-The quick script configures **administrator MCP with automatic risk interception disabled**. It does not elevate the entire Agent application. Supervise real operations; UAC and window/coordinate integrity checks remain.
+This edition's quick script configures **administrator MCP with automatic safety interception disabled**. It does not elevate the entire Agent application. Supervise real operations; UAC and window/coordinate integrity checks remain.
 
 先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，进入解压后的程序目录。下面将安装较大依赖并下载约 9.1 GB 模型（全部磁盘空间规划见下一节）：
 
@@ -69,9 +92,9 @@ The quick script configures **administrator MCP with automatic risk interception
 
 The setup script installs locked dependencies and optionally downloads official weights. The configuration-only script reuses your environment/model. Setup keeps uv cache/managed Python on the extracted program's drive and stops on failure. Use `-WhatIf` to preview. If PowerShell policy blocks scripts, review the files and follow your organization's policy or use the manual commands below; no global policy change is required. Merge the resulting MCP entry and confirm UAC when connecting.
 
-下文保留逐步／普通权限配置作为排错参考；快捷脚本按上文配置。连接等待设置建议至少 180 秒，但连接器不能替你自动确认或取消 UAC。
+下文保留逐步／普通权限配置作为排错参考；**本次管理员测试版用上面的快捷脚本**。连接等待设置建议至少 180 秒，但连接器不能替你自动确认或取消 UAC。
 
-Manual/non-elevated configuration remains below for diagnostics. Allow at least 180 seconds in your MCP client, but the connector cannot approve or dismiss UAC for you.
+Manual/non-elevated configuration remains below for diagnostics; the quick scripts implement this administrator test edition. Allow at least 180 seconds in your MCP client, but the connector cannot approve or dismiss UAC for you.
 
 ## 1. 准备目录与设备 / Prepare folders and hardware
 
@@ -85,7 +108,7 @@ Manual/non-elevated configuration remains below for diagnostics. Allow at least 
 | 首次连接检查 / Initial smoke data | `D:\AgentReviewInstantSmoke` |
 
 - 使用 Windows x64；锁定环境是 **Python 3.11**，不是 3.12 或更高版本。
-- local 路线依赖 CUDA 13.0 版 PyTorch，需要匹配的 NVIDIA GPU／驱动。CPU、AMD GPU、不同显卡容量及驱动组合尚未作兼容性承诺；无模型视觉路线不下载本地权重。
+- 当前依赖使用 CUDA 13.0 版 PyTorch；需要匹配的 NVIDIA GPU／驱动。CPU、AMD GPU、不同显卡容量及驱动组合尚未作为本预览包的兼容性承诺。
 - 模型目录约 **9.1 GB**；其中官方 `model.safetensors` 页面标示 **9.08 GB**，约 **8.46 GiB**。这不是安装总空间：Python、PyTorch、下载缓存和截图记录还会占用额外空间。[官方模型文件](https://huggingface.co/inclusionAI/VISTA-4B/tree/main)
 - 容量规划可先按 **32 GB 内存、16 GB 显存、目标磁盘 35–45 GB 空余空间**预留；这是保守的试用规划估算，**不是已验证最低配置，也不保证该配置必定可运行**。显存还受图片大小、并行程序与推理参数影响。
 

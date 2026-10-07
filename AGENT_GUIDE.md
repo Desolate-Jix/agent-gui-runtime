@@ -1,15 +1,104 @@
-# Agent 接入与操作 / Agent usage — v0.1.1
+## 2026-10-03 明确恢复选择 / Explicit recovery choice
 
-本版包含 [Agent 视觉组合命令协议](docs/development/AGENT_BATCH_PROTOCOL.md)：显式声明能力，使用 status/continue/cancel 继续原批次，不重发已完成输入。Agent `read_text` 返回原图，不加载本地 OCR。 / This release includes explicit-capability Agent batches with status/continue/cancel and original-image reading, without replay or local OCR.
+## 行选择失败的读值事实 / Row-selection failure facts
 
-**使用新增视觉路由前，确认连接的是 v0.1.0 或更新的服务端。** 旧版 test.7 不支持这些字段。 / Confirm the server is v0.1.0 or later before using the added vision routes; test.7 does not support these fields.
-
-识图交接与状态命令本身不点击；`grounding_execute` 仅用于独立单步，暂停中的组合命令须用 `agent_command_continue`。所有路线沿用公共执行路由，不自动重放。外部 API 的截图会发往配置的服务，错误不自动重试或切换服务，详见 [API 接入](docs/development/EXTERNAL_VISION_API.md)。新窗口的 500ms 等待不等于页面就绪，仍需核对原图。 / Handoff/status do not click. Use grounding_execute only for standalone grounding and agent_command_continue for suspended batches. All routes use the shared executor without replay. External API screenshots go to the configured service; errors do not trigger retries or provider fallback. See the API guide. A 500 ms launch wait does not prove page readiness; inspect the image.
+row_selection_state_changed 表示两次原生UIA扫描字典不一致，不等同于selected改变，也不同于 local_control_target_row_selection_state_changed。若 control_target_check.failure_evidence 存在，可核对其 changed_fields 与两侧有界摘要；缺失时保留未知原因，不能重试输入或归因用户。当前证据不会修改旧回执或放宽拒绝。 / A double-scan mismatch is distinct from a selection-state guard. Inspect optional bounded evidence; absent differences remain unknown and never justify replay or attribution.
 
 
-v0.1.1 本轮单项、连续使用、429 恢复、最终清理及同冻结运行时独立验收通过；双方原始证据审计通过。首次拒绝与 fixture 修复／复测记录见 [验收记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)，不据此声称修复了未知的首次 identity 拒绝根因。[v0.1.0](docs/verification/V010_RELEASE_ACCEPTANCE.md) 与 test.8 结果保留为历史。 / v0.1.1 single/continuous/429-recovery/cleanup and independent same-runtime acceptance passed, with both original-evidence sets audited. See acceptance for first failures and fixture correction/retests; no fix of the unknown initial identity-rejection cause is claimed. v0.1.0 and test.8 remain historical.
+`learning_workflow.takeover_preview` 新增可选 `resolution`：省略或 `adopt_success` 保持原“当前效果成功后接管”；`resume_unexecuted` 仅用于原任务已取消且确认未派发输入、当前完整新观察确认效果未完成的步骤。不能把 failed、未知或部分输入当作取消零输入。 / Optional resolution preserves default successful-effect adoption; explicit continuation requires a cancelled, proven zero-input original and a complete fresh observation showing the effect unmet. Failed, unknown or partial input is not eligible.
 
-本补丁不改变七个 MCP 工具或外部 API／Agent／local 视觉选择，API／Agent 不需要本地权重。八个执行模块的 `app.execution` 归属与旧路径同对象别名属于维护调整。可选判断／`ModelUsage` 合同未生产接线，不提供新判断工具、不自动调用判断模型，也不接管你的结果核验或授权输入；未知用量保持 null，不是全量 Agent 用量。见 [模块边界](docs/EXECUTION_MODULE_BOUNDARIES.md) 与 [判断／用量合同](docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md)。 / The patch retains seven MCP tools and API/Agent/local vision choices, with no local weights required for API/Agent. Canonical execution paths and same-object aliases are maintenance changes. Unwired optional judgment/usage adds no judgment tool or automatic judgment-model call, replaces no Agent review and grants no input authority. Unknown usage stays null, not total Agent usage.
+```json
+{"action":"takeover_preview","admission_request_id":"<ready-admission>","source_run_id":"<original-run>","resolution":"resume_unexecuted"}
+```
+
+随后提交确切返回的 `preview_request_id` 与 `preview_sha256`；`takeover_commit` 不接受另一个 resolution。提交只导入并暂停在 `takeover_ready`，读取当前 wait_id 后明确 continue；原 execution ID 保留为取消，新步骤使用新 ID 与新截图，不能重发旧票据。同预览 ID 不可更改选择，ready 重复提交只读。 / Commit the exact preview identity/hash with no choice override. Commit imports a paused run; use its current wait ID for explicit continuation. The old execution stays cancelled and fresh execution/capture identities are required. Preview choices are immutable and ready retries are read-only.
+
+普通工作台尚未提供这项恢复选择，不声称 UI 已接线。原窗口/PID 已退出，旧连接已由原正常结束入口核验清理并 exit 0；尚未重新连接，完整原生恢复仍待。 / This source/API slice does not yet wire an ordinary workbench choice. The original window/PID is absent and the old connection exits zero through verified normal cleanup; reconnect and complete native recovery are pending.
+
+[合同与实证边界 / Contract and evidence limits](docs/verification/EXPLICIT_UNEXECUTED_TAKEOVER.md)
+
+## 2026-10-02 当前候选与下一出口 / Current candidate and next outcome
+
+历史保持：live-03仅准备，零尝试/输入且清理通过；v4/live-04 的 A 实际任务成功，但 Main 给 finish 多传 attempt_id 导致采集器退出，原0行/1unfinished，观察到清理318.975秒；v4/live-05 的 C 到step2，原异步回执被collector错误拒绝，原0行/1unfinished，观察到清理93.068秒。两现场原宿主/runner/窗口均退出，清理核验通过；未补造 finish、未重评分或拼接到v5。v5首C前 Main 只读核验误解 outputs 键的 KeyError 单列调用方错误，之后按真实键更正，耗时未扣除。 / Preparation, unfinished attempts, verified cleanup and caller errors remain separate; no original scores are rewritten or combined across candidates.
+
+现有 agent_current/workflow_metrics、调用方 record_model_call 和公开任务摘要只能提供局部或调用方上报计量，完整规划/定位/核验/补救总量仍未闭合；A普通路线也没有工作流计量范围。总调用/token继续未知，不把工具数、等待或局部0次当总调用。不为计量购置API或换模型，继续测正确率和耗时。 / Existing hooks provide partial coverage only; complete actual call coverage remains open without replacing missing totals with tool counts or buying providers.
+
+执行顺序调整为：立即结算已结束的原任务，不在计时窗口插入无关调查/文档；只修真实来源覆盖阻断并新冻结 → 首对原结果/replay/未决请求检查 → 余下五对与三项分别诊断 → 同窗口一次弹窗/一次宿主中断及收尾 → 按实测瓶颈优化，完成语义编辑后待审/复用、第三方应用迁移及完整计量缺口 → 再扩大正式三类对照和同候选独立验收。泛化重构、决策API接入、大型UI重做和重复打包后置；正式v0.1.1独立，当前不改版本、不推送或发布。 / Settle completed tasks promptly without inserting unrelated investigation into the attempt clock, repair the proven provenance blocker and freeze anew. Then validate the first pair, finish the pilot, bound recovery and complete measured optimization, edited reuse, transfer and telemetry before formal scale.
+
+[异步回执故障与验证](docs/verification/LEARNING_BENCHMARK_ASYNC_ENVELOPE.md)。
+
+## 2026-10-02 当前重心与实测进度 / Current focus and live progress
+
+学习主线保持“真实教学生成→可审核修改→保存重开→换数据复用→实测收益”。P0 已完成。本批 P1 普通闭环已核验：live-p1-02 六步教学、Agent 整理和可见编辑重开；live-p1-03 在同一原窗口/会话不复位完成 R-381、R-590 两轮六步复用，均填写当次读取详情。原图固定引用和旧程序保留。审核者是 Agent，human_review=false。 / This batch verifies teaching, visible editing/reopening and two continuous fresh-data reuses, with pinned graph/program versions and truthful Agent attribution.
+
+R-000 缺失目标在 step-3 停止，原 action_executed=false、dispatch_attempts=[]，未执行下游读取/填写；普通输入框改为 R-362 后完整六步完成。原宿主和窗口正常退出，cleanup_verified=true、pending_ids=[]。普通界面能看出失败步骤并重新输入，但具体 request_absent 原因目前仅在原回执，作为易用性限制保留。本批不是任意应用、完整 R1/R2 或独立验收。历史超时、遮挡拒绝、驱动错误、取消和多余 continue 拒绝均不改写为首次成功。 / Missing-target stopping, ordinary correction and cleanup pass within the declared scope; detailed failure wording and wider acceptance remain open.
+
+当前 P2：source-v5/cohort-05 的首 A/C 原任务和 finish 都成功，A328.390326秒、C564.687463秒；C本次 step-4.current_detail 绑定 step-5 填写且最终显示 Matches current detail。但C来源覆盖因重复引用为partial，首对继续采集检查点尚未通过；保留原两行结果，停止本候选采余下五对。此计时包含执行者、工具往返、汇报、Main 核验和结算；C最终completed返回后至finish为344.305728秒，主会话收尾明显拖慢，不能归因于模型推理。 / Both first tasks originally succeed, but duplicate provenance references block the collection checkpoint. Keep original rows and stop this candidate before repair; caller settlement accounts for substantial elapsed time and does not identify model inference latency.
+
+共同采集修复已核验：异步returned/running只读准入与真正终态分开；同session原路径规范化去重，原Windows规则引用沿只读索引读取；memory plan绑定原动作goal，附加视觉提示不替代动作语义。Main最终266 passed/10.67s，真实v5原件只读复查coverage=complete、errors=[]，58个唯一快照及原图SHA一致，旧journal/原分未改。部分步骤仍为Agent核验，全规则资格false、总调用/token未知；runtime/client/输入门控和终态评分不变。 / Bound asynchronous retrieval, canonical snapshots and original action semantics are verified by related regressions and actual retained files. Mixed Agent judgment, unknown usage and unchanged original scores remain explicit.
+
+source-v6/cohort-06（849文件、种子2026100206、每路线计划6例/600秒）现已完成4对/8次任务并正常清理；原首对检查点通过，C四例来源coverage=complete、errors=[]，全规则资格仍false。A首次成功4/4，C3/4；C04调用方读取格式化错误经原请求reread补救，最终任务8/8完成，原首次失败与全部耗时保留。稳定两对中位耗时A298.986秒/C246.596秒，描述性节省17.5226%，未达30%目标；模型总调用/token未知，准确率提升未证实。A04后只读审计误展开评分records，执行worker隔离失效；停止余下2对layout，不记失败、不补分、不续采旧清单。原8行、missing4、零unfinished和cleanup证明保留；正式配额不抵扣、真人/独立验收未完成，正式v0.1.1独立不变。 / The closed candidate retains four pairs, eight completed tasks and its original first-success/recovery scores; two layout pairs remain unstarted after post-task oracle exposure. Stable descriptive timing saves 17.5226%, below the target. Call coverage and correctness improvement remain unproven; no formal credit or release change follows.
+
+总模型调用/token 仍未知，省模型、正确率和速度收益均未证明。工具/交接数与等待不冒充模型调用或推理耗时；满分基线只报持平。正式 v0.1.1 独立保持；当前学习源码未发布、未改版本或打包。P1及P2 v2/v3/v4的候选证明分别保存，原失败不移入新候选，也不补改旧记录。 / Benefits and full usage remain unproven; the stable release is separate, and each candidate proof and original failure remains tied to its own frozen revision.
+
+[当前执行计划](docs/superpowers/plans/2026-10-01-learning-mainline-refocus.md)；Main 证据：`D:/AgentGUI-Projects/verification/AgentReviewAcceptance/20261002-learning-mainline-01/live-p1-03/p1-main-audit.json`。以下日期段均为历史，不覆盖当前顺序。 / The plan and raw evidence control current status; dated sections below are historical.
+
+## 2026-10-01 中断事实修复 / Durable interruption facts
+
+读取死宿主原非终态 Agent 回执时，worker_status 的 terminal_available 仅说明原 worker 文件可读，不是工作流已结算。persisted_worker_evidence 是路径/hash 绑定的诊断，不能当新执行回执；没有此前 True 的未决输入保持 null，禁止重派。/ A terminal_available worker diagnostic does not settle a workflow or authorize replay; preserve unknown input and original receipts.
+
+合同与证据界限见 [WORKFLOW_INTERRUPTION_CONTRACT.md](docs/WORKFLOW_INTERRUPTION_CONTRACT.md)。/ See the interruption contract and evidence limits.
+
+## 2026-10-01 原会话退出后的只读入口 / Reading an exited session
+
+`WorkflowRunClient` 现分离只读 attachment 核验与派发前 live gate。宿主实际退出后，新客户端及新开的普通 main 可读取本轮原结果、输出和回执，执行/继续/取消按钮禁用，账本与命令字节未变。活宿主仍完整验证 PID、创建时间及 runner；`control`、原回执绑定和动作门控保持原实现。 / Validated read-only attachment now works after the original host exits; dispatch still requires the original live identity and gate. Ordinary reopening preserves the ledger and disables action controls.
+
+这只证明退出后的只读重连，不是原宿主进程重启续跑。活动 workflow 切换独立顶层弹窗仍不支持：admit 只放行原 ticket 的确切 EID/command，不能放宽竞争 select 代替窗口迁移合同。死宿主的原 worker 仍不能从磁盘自动恢复，未知结果不能当作未输入而重放。 / Read-only reconnection does not restore a dead worker or permit competing window selection; active dialogs and process restart remain open.
+普通运行页仍用“连接会话”附着原目录，再“刷新状态”或回读原请求 ID。不要调用 start 启动新宿主，不要重发旧输入；`result_unknown` 继续未知，任何新 control 都必须经过存活身份检查。旧 pointer/library/source/profile/command/receipt 不一致时明确拒绝。 / Attach the original directory and read original IDs. Preserve unknown results and reject mismatched evidence; do not start a host or replay input.
+
+验证：目标编辑预检 31 passed；Main 合并检查 93 passed；只读恢复相关 worker 回归 250 passed。集合重叠，不相加。只读修复首次红阶段 5 failed / 41 passed 保留；实际输入首次完成两轮。审计先把 runner 投影误当原 trial、随后构造器参数写错，两个失败报告保留；改为原 public runner.status 全量核对后通过，未重放输入。 / Overlapping checks are reported separately. First failures remain retained; audit repairs required no input replay.
+
+证据 / Evidence：`D:/AgentGUI-Projects/verification/AgentReviewAcceptance/20261001-learning-target-rule-edit-01/main-live-audit-final.json`、`live-01/dead-host-reopened.json`、`D:/AgentGUI-Projects/verification/AgentReviewAcceptance/20261001-learning-recovery-boundary-01/main-integrated.xml`。未改版本、打包、发布或替换安装候选。 / No version, build, publication or installed-candidate replacement.
+
+## 2026-10-01 学习运行的识图声明 / Vision declaration in learning runs
+
+普通工作台连接 `agent_current` 会话后可勾选“此会话的 Agent 能接收并识别截图”；`agent_delegate` 显示客户端指定视觉子 Agent、转交截图并取得结果的声明。只在实际具备能力时声明，不根据模型名称推断。默认未勾选=未知；local/API 不显示此项也不发送能力字段。该选择不是动作授权。 / Declare actual client/Agent image capabilities explicitly. Default is unknown; local/API routes do not use this option. A capability declaration is not action authorization.
+
+声明在明确启动时固定到原 run，自动 start 接续也使用同一份；换会话/来源清空，运行和等待期间禁改。继续原运行或恢复原回执不把当前 UI 选择重新套到旧票据。MCP 调用方仍可通过原 `request.vision_capabilities` 显式声明，没有新增 API。 / Explicit starts pin the declaration; continuation and recovery preserve the original request. The existing MCP field remains unchanged.
+
+学习目标规则未命中后，已声明能力的原请求可进入当前截图识图等待。不存在目标回交 `grounding.v1` 的 absent；重复候选回交 ambiguous、至少两个当次图候选且不选择。没有选择时不得要求继续点击或新建替代输入。原 worker 以 request_absent/request_ambiguous 失败终止属于预期拒绝；仍核对原 run/EID、实际输入状态和清理。 / Non-target facts stop the original worker without selected input; inspect original identities and cleanup rather than replaying a replacement action.
+
+本批 Main 已按原图验证两个实机反例；首次普通入口缺少声明导致 capability_unknown 的记录保留。此结论不证明模型准确率或学习收益，也不关闭活动工作流弹窗与宿主重连验收。
+
+## 2026-10-01 独立弹窗与验收图像 / Standalone dialogs and acceptance images
+
+弹窗是独立原生窗口时，先等原动作终态，再 discover 核对进程、标题和可信的窗口归属，按确切 handle/process_id 执行 select；后续 grounding 必须绑定弹窗自己的新截图。不要在父窗口截图上定位独立弹窗，也不要为焦点颜色变化放宽像素新鲜度。多候选或无法核对归属时停止。 / Settle the original action, verify the independent dialog's identity/ownership, explicitly select it and ground against its fresh capture. Parent pixels and weakened freshness cannot replace correct binding; ambiguity stops input.
+
+关闭窗口后可能无法采集原目标：保留 action_executed=true 与 failed/post_action_observation_failed，核对 recovery 候选，再确切选择父窗口、采新图核验；不能因 failed 自动重发关闭动作。活动工作流禁止竞争 select，此路径不绕过 workflow admission；活动工作流跨窗口续接尚未验收。 / Preserve dispatch and unavailable post-close observation, verify and reselect the successor, then capture. Never replay a close solely because status is failed or bypass active-workflow admission.
+
+截图默认每目录保留最新 40 张，各 purpose 共用配额；普通回执 image_path 不自动保护 PNG。连续验收在下一批采集前复制引用图像到独立证据目录，记录原路径、归档路径、SHA256 与 run/step/EID，核对字节且不改写回执。已缺原图须如实记录。 / Default retention keeps 40 captures per directory across purposes. Promptly archive scoped bytes and hashes without rewriting receipts; ordinary receipt paths do not protect images. See [evidence boundary](docs/WORKFLOW_DEFINITION_AND_RUN_EVIDENCE.md).
+
+## 2026-09-30 可选逐调用计量 / Optional per-call telemetry
+
+仅在实际持有逐调用记录时，使用原 learning_workflow 的 record_model_call，绑定原运行步骤或草稿整理回复；没有记录就不报，不用工具/交接次数估计模型调用，不把等待当推理耗时。status/synthesis_status 独立返回 caller_reported_partial，不认证供应商记录，也不改变总量未知或输入结果。完整字段和例子见[接口说明](docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md)。 / Report only actual supplied per-call telemetry bound to original receipts; never estimate hidden calls or inference time. Partial caller summaries remain separate and do not prove total usage or input success.
+
+判断模型当前仅预留默认关闭的程序接口，没有可连接的供应商设置或新增 MCP 判断动作；继续现有规则和 Agent 核验。旧宿主未重载本次源码。 / The reserved judgment extension adds no provider settings or MCP judgment action; use existing checks. Running old hosts have not reloaded these changes.
+
+> **2026-09-27 后续源码，未发布 / Unreleased source follow-up:** `external_api` 已接入现有执行链；配置完整 API 端点、视觉模型和密钥环境变量名后，可用原有单步与组合命令，API 自动定位，执行仍走公共检查。已发布 test.8 ZIP 仍仅预留 API 适配器，不能按本段当成已更新。 / External API grounding is now wired into the common execution path in source. The published test.8 ZIP remains adapter-only and has not been replaced.
+
+# Agent 接入与操作 / Agent usage — v0.1.0-test.8
+
+test.8 新增 [Agent 视觉组合命令协议](docs/development/AGENT_BATCH_PROTOCOL.md)：显式声明能力，使用 status/continue/cancel 继续原批次，不重发已完成输入。Agent `read_text` 返回原图，不加载本地 OCR。 / Test.8 adds explicit-capability Agent batches with status/continue/cancel and original-image reading, without replay or local OCR.
+
+**使用新视觉来源前先核对服务端版本为 test.8 或更新。** 不要向 test.7 发送新增字段。 / Verify server version before using the new fields; test.7 does not support them.
+
+识图交接与状态命令本身不点击；`grounding_execute` 仅用于独立单步，暂停中的组合命令须用 `agent_command_continue`。沿用公共执行路由，不自动重放。独立 API [仅保留接口](docs/development/EXTERNAL_VISION_API.md)。新窗口的 500ms 等待不等于页面就绪，仍需核对原图。 / Handoff/status do not click. Use grounding_execute only for standalone grounding and agent_command_continue for suspended batches. API remains reserved; launch waiting is not page-readiness proof.
+
+
+> v0.1.0-test.8：源码与隔离候选各 2025 项通过，本方 local、当前 Agent、实际 Luna 委派的单项及连续操作与清理通过；同候选独立 local、visual 与 cleanup 均已完成。首次失败、恢复与具体覆盖见验收记录。独立 API 仍仅预留接口，宿主禁用。 / Source and isolated candidate each passed 2025 checks. Main-agent local/current/actual-Luna single and continuous journeys passed; same-candidate independent local, visual and cleanup gates are complete. Initial failures and scope remain documented. External API remains interface-only with its host route disabled.
+
+**后续学习源码，未发布 / Unreleased learning source:** `learning_workflow` 控制接口和原生任务步骤页已接入源码。`read/save` 管理固定项目快照上的步骤版本；`start/prepare/status/review/cancel` 管理一次会话内的局部试运行。`prepare` 只返回确切待执行命令与 `execution_request_id`；Agent 须将该 ID 作为新的 `instant_run.request_id`，通过原有执行路由提交建议命令，读取原回执后才能 `review`。未决、失败或不确定结果不能当作成功或自动重试。详见[工作流编辑说明](docs/WORKFLOW_EDITOR.md)。真实连续使用验收尚未完成，版本未变且未打包。 / The source adds step revisions and local-trial controls. Preparation does not dispatch input; the Agent submits the suggested command through the existing Instant route using the ticket's execution request ID, inspects that receipt, then reviews. Continuous live acceptance remains open; no new version or package has been released.
+
 ## test.6：通用应用启动 / Installed applications
 
 本节适用于 test.6；旧 test.5 包不包含新增接口，不需要为每个软件注册 MCP。 / Available in test.6, not older test.5 bundles. Apps do not need separate MCP registration.
@@ -53,9 +142,9 @@ test.6 的历史独立验收见 docs/verification/TEST6_CANDIDATE_ACCEPTANCE.md�
 
 Codex 使用 `agent_delegate` 时读取 [codex-vision-session 技能](skills/codex-vision-session/SKILL.md)：保留同一视觉子 Agent ID，后续以 `followup_task` 处理新截图，不逐图 `spawn_agent`。每次仍使用新请求与原图证据，原会话不可用则报告阻塞。这是 Codex 客户端技能，不改变通用 MCP 协议；其他客户端沿用自己的委派机制。 / The Codex skill reuses one visual worker with fresh evidence and request correlation; it does not change the generic MCP protocol or other clients.
 
-### 可恢复组合填写 / Resumable batch composition
+### test.8 组合填写 / Batch composition
 
-组合能力适用于 v0.1.0 或更新；test.8 验收记录是历史材料，本补丁进展和限制见 [v0.1.1 验收](docs/verification/V011_RELEASE_ACCEPTANCE.md)。Tab 分组仍要求调用方确认真实连续焦点顺序，不保证任意表单。 / These batch features require v0.1.0 or later. The test.8 record is historical; see the v0.1.1 acceptance report for current progress and limits. Tab groups require known contiguous focus order and are not a universal form guarantee.
+以下能力要求 test.8；早期 130 项契约检查已纳入完整回归，实际覆盖与限制见 [本版验收](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。Tab 分组仍要求调用方确认真实连续焦点顺序，不保证任意表单。 / These features require test.8. Earlier 130 contract checks are included in full regression; see release acceptance for live scope and limits. Tab groups require known contiguous focus order and are not a universal form guarantee.
 
 - 先收齐当前已知值，将同页独立字段放入一条 `form_fill`；缺失值另问另补，不阻塞已知字段。准备好请求后直接执行，不在批次间插入无关代码/日志调查。 / Prepare all currently known values in one form request; ask separately for missing facts and avoid unrelated investigation between batches.
 - 新增 `text_navigation:"tab_groups"`。只给已确认实际 Tab 顺序的连续文本字段相同 `tab_group`；不确定的字段省略该属性，新段使用另一个组名。非文本字段自动断组；不会因选择了下拉框就直接 Tab 到未确认的文本框。 / Explicit same-named groups apply only to consecutive text fields with known real Tab order; omit the group when uncertain. Non-text controls and group changes reset recognition.
@@ -82,15 +171,17 @@ Codex 使用 `agent_delegate` 时读取 [codex-vision-session 技能](skills/cod
 
 **test.5 窗口观察 / Window observation：** `close_launched_window` 等待时增加 `close_observation` 和 `next_action`；收到 `inspect_owned_window` 后保持会话，读取并选择确切弹窗，解决已授权选项后再核验原窗口消失。动作关闭目标时，派发成功与事后图缺失必须分开判断，不根据外层 `operation_succeeded=false` 重放；先检查退出诊断；目标仍存在时才明确选窗补图，已退出时不要重新选择不存在的窗口。`instant_stop.cleanup_verified` 只代表宿主收尾。 / Pending closure now carries owned-window diagnostics; inspect the exact dialog, resolve an authorized choice and verify disappearance before stopping. Dispatch may succeed with unavailable post-images; inspect rather than replay. [详细契约 / Details](docs/verification/EXECUTION_WINDOW_TRANSITIONS.md)。
 
-本包只提供执行操作，不是学习桥。按用户指定的低风险任务使用本包接口，不使用另一套鼠标工具冒充本包测试。快捷入口使用管理员宿主且自动风险拦截关闭；一次只允许一个 Agent 控制桌面。付款、发送、删除、最终提交等不可逆操作不在支持范围。
+本包只提供即时操作，不是学习桥。按用户指定的低风险任务使用本包接口，不使用另一套鼠标工具冒充本包测试。快捷入口使用管理员宿主且自动风险拦截关闭；一次只允许一个 Agent 控制桌面。付款、发送、删除、最终提交等不可逆操作不在本次测试范围。
 
-Execution operations only, not learning. Use this framework for the user's supervised low-risk task; do not substitute another input backend and claim package coverage. Quick setup uses an administrator host with automatic risk interception disabled. Only one Agent may operate the desktop. Payments, sending, deletion and final submissions are outside supported scope.
+Instant-mode operations only, not learning. Use this framework for the user's supervised low-risk task; do not substitute another input backend and claim package coverage. Quick setup uses an administrator host with automatic risk interception disabled. Only one Agent may operate the desktop. Payments, sending, deletion and final submissions are outside trial scope.
 
 ## 撤销的判定 / Undo interpretation
 
 `Ctrl+Z` 派发应用原生撤销键，不保证事务回滚或清空文档；按当前应用内容和选区核验效果。同样截图不代表同样撤销历史，不要把它当成测试环境重置，也不要因未清空自动重复按键。 / Ctrl+Z invokes native application undo, not guaranteed rollback or fixture reset. Inspect content and selection; identical screenshots do not imply identical undo history. Do not replay automatically.
 
 **源码恢复契约 / Source recovery contract:** `keyboard_target_not_foreground` 携带拒绝当刻两个 HWND，`phase=not_dispatched` 只证明没有派发该按键；先处理/取消已识别的弹窗，再选择目标并看图，用新请求继续。取消关闭后可明确再次调用 `close_launched_window`；同一模态等待不重复关闭，`instant_result` 查询不产生关闭动作。 / Inspect and resolve the actual focus/modal state before a new request; a new explicit close can follow observed modal dismissal, while receipt reads and pending-modal checks never resend. [边界 / Limits](docs/verification/EXECUTION_FOCUS_RECOVERY.md)。
+
+**源码候选的跨宿主启动窗口收尾 / Source-candidate recovered launch cleanup:** 正常任务仍先关闭本会话启动窗口，再 stop/断连。若原宿主已经正常停止，先用既有 epoch recovery 读取同一准入到 ready；仅对带完整 `launched_window_ownership.v1` 的原成功新 launch，显式提交 `command={"kind":"close_launched_window","handle":原launch的handle,"process_id":原launch的process_id,"request":{"admission_request_id":"原ready准入ID","launch_request_id":"原新launch请求ID"}}`。读取原实际 ID，不猜 HWND/PID、不用 select/focus 授予归属；ID 沿用 1–80 字符小写 ASCII 校验。服务核对原命令/响应 SHA、输入/资源证明和前后原生身份，未知关闭不重发；pending 时继续检查实际弹窗，不自动重复 close。旧无证明响应不补写。此为源码候选新增接口，不代表已安装正式 v0.1.1 更新；T15 只验收单层同窗口生命周期。 / After normal owner shutdown, finalize the same existing epoch admission to ready, then explicitly close a proven original new launch using the original admission/launch IDs. Source hashes, terminal/resource proof and native identity are revalidated; selection grants no ownership, pending requires actual modal inspection, and unknown closure is never replayed. This source-only extension has bounded single-layer lifecycle evidence and is not an installed stable-release update. [契约与证据 / Contract and evidence](docs/verification/RECOVERED_LAUNCH_CLEANUP.md)。
 
 **明确单词目标 / Explicit word targets（test.5）：** `Double-click the word "East" at the end of the line` 会保持词级目标并使用独立词框；不要把整行框或模型点当作目标命中证据。双击可能包含尾随空格，替换前读取实际选区或原图，效果不明时不自动重放。 / Preserve word identity, inspect actual selection and trailing whitespace before replacement, and never infer success from dispatch. [实测边界 / Limits](docs/verification/EXECUTION_WORD_CONTEXT_FIX.md)。
 
@@ -264,3 +355,36 @@ Plain named field goals tolerate one terminal label separator (`Address` / `Addr
 ### Closed file-picker target / 已关闭文件窗口
 
 `打开(O)` 或取消关闭对话框后，原绑定 HWND 已失效；先 `select` 原浏览器再 `capture`。直接截取旧对话框当前会返回 `ValueError: Window handle is not valid`，尚无结构化重新绑定指引；这不代表之前点击未执行，不要重放。/ After Open or Cancel closes a picker, explicitly select the original browser before capture. Capturing the old handle currently returns a raw invalid-window ValueError without a structured rebind hint. This is not evidence that the prior click failed; do not replay it.
+
+**学习源码目标提议 / Learning-source target proposals:** compile 只读返回 proposed_target_recipes；save.request.target_recipes 传 recipe 对象并与 definition/expected_sha256 一起核验。自动提议 v2 固定原动作，人工编辑用 v3 editorial/unverified 并保留原 v2 上下文。普通 UI 已支持固定控件/多条件可见行及1–8条已有策略的排序和增删；预览只针对学习证据，保存不代表动作验证。动作类型、控件类型和声明的文本依赖必须相容；未知/未来输出拒绝。旧 v1/v2、图 pin 和程序不改写。 / Editorial revisions preserve source context and remain unverified; original execution tickets are never replayed on source errors.
+
+**学习源码同会话整理 / Same-session synthesis:** workflow 学习停止后检查 `result.synthesis.status`。若为 `awaiting_agent`，直接使用 `result.synthesis.synthesis_request`；中断后可调用 `learning_workflow` 的 `synthesis_status`（synthesis_id）恢复，或 `synthesis_prepare`（learning_session_id）获取当前来源请求，两者返回顶层 `synthesis_request`。当前 Agent 查看请求引用的原图/事件以及可用 input_examples，一次回交 `synthesis_complete` 的原 synthesis_id/source_sha256、parameter_bindings、annotations。不调用视觉 continue、不新建会话、不重放动作；input_examples 缺失不能猜值。 / Consume the stop handoff directly or resume its exact identity, then return one structured reply from the current agent.
+
+`draft_ready` 只是待审草稿。按 conversation.state 处理：initial_reply 回交一次；correct_once 根据 last_correction/errors 自动修正一次；awaiting_user 停止回复并向用户说明具体字段。收到用户真实补充或明确继续后，调用 synthesis_resume，传原 synthesis_id/source_sha256、last_correction.reply_request_id 为 after_reply_request_id，以及真实 user_instruction（1–4000字符）；后续 complete 必须带返回的 conversation.resume_request_id。不得编造用户补充或通过重开/prepare 重置预算。pending/unknown 先回读原外层 request_id；来源/存储错误不猜修。历史顺序未知时不推定最后回复。 / Follow the persisted reply state, allow one automatic correction, and resume only on actual user input; preserve original request and round identity.
+
+**学习源码计量 / Learning-source metrics:** 原生结果、实际 API 尝试和已结束的 Agent 交接按本次原票据/历史幂等关联。recognition_handoffs 只记录从交出新截图到恢复/取消/过期/失败的 wait；包含调用方与人工空档，不能记成模型推理时长或一次模型调用。未结束的 grounding_wait 只有开始时钟，不补造终点；重复 status 不增记。主 Agent 全量调用和 usage 不可观测时仍为 null；metrics unavailable 不改变执行事实或授权重放。此变化未发布，见[开发证据](docs/verification/LEARNING_WORKFLOW_BENEFIT.md)。 / Handoff wall time is not model inference; missing telemetry never authorizes input replay.
+
+
+**学习工作台运行适配 / Learning workbench runtime attachment:** 工作台以非所有者客户端附着现有 Instant 会话，复用原 submit/result，不 start/stop MCP 或宿主，不修改识图配置。运行使用已保存 program_id；原 Agent 仍处理明确的定位/结果判断等待。编辑器控制标记只帮助找回原请求；恢复出 start ready 后须用户明确选择 run，不自动续跑。not_submitted 与 result_unknown 分开，后者不得重放；回执、程序、起点与参数的原始绑定不符即报错。源码/离屏证据不代替实机验收。 / The editor is a non-owning client and resumes only verified original state; agent waits and physical acceptance retain their existing contracts.
+
+
+**基准采集入口 / Benchmark collection:** 开发验收可使用 [LEARNING_BENCHMARK](docs/LEARNING_BENCHMARK.md) 的 freeze/baseline/compare。baseline 保持一个原 MCP 连接，调用方消费 JSON 行协议并复用识图会话；不把工具 returned/pending 或已派发当任务成功，不自动重放。未知全量调用不记零，生成报告仍为 empirical_acceptance=false。普通用户继续使用对话与工作台。 / This developer collector preserves original receipts and unknown totals; it does not replace normal controls or action confirmation.
+
+
+**Record Desk 基准 / Record Desk benchmark:** 开发采集可传 --fixture-root 连接本轮新夹具；next/begin 返回冻结案例顺序和本次输入，不给详情真值。控制器只重置自建窗口并观察，真正点击/填写仍从原 MCP/gated action API 派发。finish 和离线比较按同 case/epoch 的新状态及事件复算；不把仅 discover 的 returned 记为任务成功。 / Private outcome evidence stays in the local benchmark journal; task input still uses the existing gated executor.
+
+
+**学习源码执行策略 / Learning-source execution strategy:** learning_workflow start 可选 execution_strategy=learned|steps_only，省略为 learned；运行开始后不能切换，重用 start ID 搭配不同策略会冲突。steps_only 在原票据生成前禁用 target_memory，但保留本次动态目标描述与参数；preview 分开显示源程序审核状态和该变体待验证状态，不改源程序版本。verify 返回 steps_only_agent_review_required，当前 Agent 根据本轮证据走原 review，再按原 wait_id continue；不能写成 rule 判断。 / Pin strategy at start and retain the original program, receipt identity and Agent review provenance.
+
+基准采集的 A 禁止工作流与目标记忆，B/C start 在落盘实际调用前固定对应策略，并核对后续回执；直接启用策略不是实际收益证据。API/当前 Agent/同会话委派/本地来源保持原配置，API/Agent 不需本地权重；总模型调用与 token 缺测时保持未知。 / Route checks do not attest full model telemetry or empirical benefit.
+# 学习开发树的明确恢复入口 / Explicit recovery in the learning development tree
+
+**忙碌拒绝和继续 / Busy rejection and continuation:** 工作流 continue 返回的 ready 不是重新提交 run 的授权；运行时可继续调度原任务。等待 ID 漂移先读原 status，grounding_required 只处理原 worker/request，不新建命令。明确 input_admission_rejection.v1 仅证明被拒请求在派发前没有输入，原 worker 必须独立核验。修改源码不等于旧 MCP 已加载；没有热加载入口时正常结束旧连接后重连，保留首次失败，不能拼接为同连接通过。 / A ready continuation response does not authorize a competing run; original scheduling can advance. Read original status after wait drift and resolve only the original grounding request. Typed busy rejection proves no input for that rejected request alone. Source edits do not reload an existing MCP: normally reconnect after ending the old connection, retaining failures without stitched continuous acceptance.
+
+仅本开发源码新增两个实验性工具，正式 v0.1.1 下载包仍为原七工具。宿主异常退出后先调用 `instant_recovery_preview`，它只核对原资源与全部原输入终态/结算；未知或漂移时停止。明确准入使用 `instant_recover_session(request_id, preview_sha256)`，参数必须来自该预览，后续查询仍使用同一 ID/hash，不创建新请求来绕过未完成事务。/ Two experimental source-only tools verify original evidence and admit a successor with one durable ID/hash; they are not shipped in stable v0.1.1.
+
+普通 `instant_start(new_session=true)` 清理门控保持。启动后的错误可能已有宿主；`host_launch_attempted=null` 与 `launch_unknown` 不等于未启动，禁止自动再次创建或重放旧输入。new_epoch_ready 仅证明新宿主可用，workflow_takeover_completed 仍为 False；不要通过普通旧 workflow verify/continue 改写结算或推进旧步骤。见 [本轮证据和限制](docs/verification/LEARNING_EPOCH_ADMISSION.md)。/ Unknown launch state and readiness grant neither retry nor workflow-takeover authority.
+
+2026-10-02 live-07收尾 / Closed diagnostic update:
+
+执行/审计边界：执行子会话不读取原benchmark journal、fixture_prepared/observed、records或score；这些由不参与输入的Main/审计者保留。执行者仅消费白名单回执、自己的原worker终态及新鲜PNG。若误接触评分数据，记录实际已输出内容和发生时刻、停止后续受影响采样并另冻新数据，不改旧成绩。 / Input workers use receipt-only projections and never audit raw oracle-bearing records; disclose exposure and close affected future sampling.

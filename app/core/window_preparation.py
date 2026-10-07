@@ -28,10 +28,16 @@ def window_preparation_failure_details(error):
                 and isinstance(args[2], str)):
             winerror, function, message = args
         if type(winerror) is int:
-            return {"winerror": winerror, "win32_function": function if isinstance(function, str) else None,
+            reliable = function != "SetForegroundWindow"
+            details = {"winerror": winerror, "win32_function": function if isinstance(function, str) else None,
                     "win32_message": message[:512] if isinstance(message, str) else None,
-                    "access_denied": winerror == 5, "target_integrity": "not_measured",
-                    "privilege_mismatch_possible": winerror == 5}
+                    "access_denied": winerror == 5 and reliable, "target_integrity": "not_measured",
+                    "privilege_mismatch_possible": winerror == 5 and reliable,
+                    "winerror_reliable": reliable}
+            activation = getattr(current, "activation_diagnostics", None)
+            if isinstance(activation, dict):
+                details["activation"] = activation
+            return details
         current = current.__cause__ if current.__cause__ is not None else current.__context__
     return {}
 
@@ -41,6 +47,8 @@ def window_preparation_failure_message(details):
         return ""
     message = (f" Win32 error {details['winerror']}"
                f" ({details.get('win32_function') or 'unknown API'}): {details.get('win32_message') or 'unavailable' }.")
+    if details.get("winerror_reliable") is False:
+        return message + " This API does not guarantee extended error information; the code does not establish a permission mismatch. Foreground verification failed."
     if details["access_denied"]:
         message += (" Access denied; host/target privilege mismatch or Windows access restrictions are possible."
                     " Target integrity was not measured; elevation is not established."

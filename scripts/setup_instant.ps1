@@ -45,7 +45,7 @@ try {
                 & uv pip install --python $python -r (Join-Path $root 'requirements\agent-runtime-win311.txt')
                 if ($LASTEXITCODE -ne 0) { throw 'Agent dependency installation failed.' }
             } else {
-                & uv sync --frozen --group desktop --group vista
+                & uv sync --frozen --group execution --group vista
                 if ($LASTEXITCODE -ne 0) { throw 'Locked dependency installation failed.' }
             }
         } finally {

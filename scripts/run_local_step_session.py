@@ -1,4 +1,4 @@
-"""本地无学习单步会话：一条命令一份回执和后图，不自动规划或重放输入。"""
+"""本地单步会话：可选轻量记录，不启用旧学习执行器、不自动重放。"""
 from datetime import datetime, timezone
 import argparse
 import hashlib
@@ -21,6 +21,18 @@ def now():
 def write(path, data):
     from app.core.json_snapshot import write_json_snapshot
     write_json_snapshot(path, data)
+
+
+def record_workflow_snapshot(report, snapshot, *, clear_error):
+    report["workflow_run"] = snapshot
+    if clear_error:
+        report.pop("workflow_runtime_error", None)
+
+
+def record_workflow_control(report, runtime, request, request_id):
+    snapshot = runtime.control(request, request_id)
+    record_workflow_snapshot(report, snapshot, clear_error=request["action"] in {"run", "continue"})
+    return snapshot
 
 
 def configure_recognition_startup(coordinator, args, report):
@@ -50,7 +62,7 @@ def prepare_models_for_source(coordinator, recognition_source):
         {"status": "model_not_required", "recognition_source": recognition_source})
 
 
-def run_step_command(coordinator, target, command):
+def run_step_command(coordinator, target, command, *, workflow_bindings=None, learning_context=None):
     operation = command["operation"]
     request = command["request"]
     # 默认时机由公共运行时决定，脚本只转交显式覆盖。
@@ -58,13 +70,45 @@ def run_step_command(coordinator, target, command):
         target_window_handle=target["handle"], target_process_id=target["process_id"],
         operation=operation, request=request, include_observation=True,
         observation_wait_ms=command.get("observation_wait_ms"),
+        **({"memory_bindings": workflow_bindings} if workflow_bindings is not None else {}),
+        **({"learning_context": learning_context} if learning_context is not None else {}),
         **({"observation_condition": command["observation_condition"]}
            if command.get("observation_condition") is not None else {}))
 
 
-def run_read_text_command(capture_current, command, *, recognition_source="local"):
-    observation = {**capture_current(), 'capture_id': 'text-' + secrets.token_hex(16),
-                   'captured_at': now()}
+def run_read_text_command(capture_current, command, *, recognition_source="local", evidence_dir=None,
+                          coordinator=None, target=None):
+    if coordinator is not None:
+        if not isinstance(target, dict):
+            raise ValueError("select a target window before reading")
+        return coordinator._run_prepared_target_observation(target.get("handle"), target.get("process_id"),
+            lambda: run_read_text_command(capture_current, command,
+                recognition_source=recognition_source, evidence_dir=evidence_dir))
+    observation = dict(capture_current())
+    observation.setdefault('capture_id', 'text-' + secrets.token_hex(16))
+    observation.setdefault('captured_at', now())
+    if evidence_dir is not None:
+        from io import BytesIO
+        from PIL import Image
+        original = Path(observation['image_path']).read_bytes()
+        digest = hashlib.sha256(original).hexdigest()
+        if digest != observation.get('sha256') or not original.startswith(b'\x89PNG\r\n\x1a\n'):
+            raise ValueError('read_text original PNG digest does not match capture')
+        with Image.open(BytesIO(original)) as image:
+            image.verify()
+        directory = Path(evidence_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        if directory.is_symlink() or getattr(directory.lstat(), 'st_file_attributes', 0) & 0x400:
+            raise ValueError('read_text evidence directory must not be a reparse point')
+        retained = directory / ('read-' + secrets.token_hex(16) + '.png')
+        # 独立原件先完成并核验，再交付任何读取结果；不改变截图缓存保留策略。
+        with retained.open('xb') as stream:
+            stream.write(original)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if retained.read_bytes() != original:
+            raise ValueError('read_text persisted PNG differs from original capture')
+        observation['image_path'] = str(retained.resolve())
     if recognition_source != 'local':
         return {'status': 'agent_read_required', 'recognition_source': recognition_source,
             'text': None, 'next_action': 'read_returned_original_image',
@@ -74,14 +118,33 @@ def run_read_text_command(capture_current, command, *, recognition_source="local
     return result, observation
 
 
-def check_agent_command_admission(jobs, kind):
-    if jobs is not None and jobs.active and kind not in {
-            'close', 'agent_command_status', 'agent_command_continue', 'agent_command_cancel',
-            'grounding_resolve', 'grounding_status', 'grounding_cancel'}:
-        raise ValueError('agent_command_in_progress: continue, inspect or cancel the original command')
+class AgentCommandAdmissionError(ValueError):
+    """仅表示活动命令门控在输入派发前拒绝了新命令。"""
+
+    def __init__(self):
+        super().__init__('agent_command_in_progress: continue, inspect or cancel the original command')
+
+    def before_dispatch_result(self, command_id):
+        return {'contract_version': 'input_admission_rejection.v1', 'command_id': command_id,
+                'status': 'rejected_before_dispatch', 'reason': 'agent_command_in_progress',
+                'input_attempted': False, 'action_executed': False}
 
 
-def dispatch_agent_command(jobs, request_id, command, target):
+def preserve_input_admission_rejection(response, error, command_id):
+    # 只附加来自派发前专用异常的事实，不把普通错误改写为零输入。
+    from app.vision.agent_command_jobs import AgentCommandVisionAdmissionError
+    if isinstance(error, (AgentCommandAdmissionError, AgentCommandVisionAdmissionError)):
+        response['result'] = error.before_dispatch_result(command_id)
+
+
+def check_agent_command_admission(jobs, kind, command=None):
+    from app.execution.agent_command_admission import requires_idle_agent
+    if jobs is not None and jobs.active and requires_idle_agent(kind, command):
+        raise AgentCommandAdmissionError()
+
+
+def dispatch_agent_command(jobs, request_id, command, target, *, workflow_bindings=None,
+                           learning_context=None):
     from app.vision.agent_command_contract import AGENT_COMMANDS
     kind = command['kind']
     if kind in AGENT_COMMANDS:
@@ -93,7 +156,9 @@ def dispatch_agent_command(jobs, request_id, command, target):
         return (jobs.cancel if kind == 'agent_command_cancel' else jobs.get)(request.command_id)
     if jobs is not None and (kind in {'form_fill', 'input_sequence'} or
             kind == 'step' and command.get('operation') == 'execute_recognition_plan'):
-        return jobs.start(request_id, command, target, command.get('vision_capabilities') or {})
+        return jobs.start(request_id, command, target, command.get('vision_capabilities') or {},
+            **({'workflow_bindings': workflow_bindings} if workflow_bindings is not None else {}),
+            **({'learning_context': learning_context} if learning_context is not None else {}))
     return None
 
 
@@ -162,6 +227,84 @@ def run_grounding_execution(store, coordinator, selected, request_id, command):
     return result
 
 
+def flush_learning_receipts(learning, pending):
+    """只补记本宿主已有异步回执，失败留给明确恢复请求。"""
+    for request_id, ticket in list(pending.items()):
+        try:
+            result = learning.record(request_id, ticket)
+            if result["status"] == "awaiting_execution_result":
+                continue
+            learning.publish_recording_status(request_id, result)
+        except Exception as error:
+            result = {"status": "recording_failed", "phase": "async_terminal",
+                      "error_type": type(error).__name__, "message": str(error),
+                      "next": "Use learning_recover; never replay input."}
+            learning.publish_recording_status(request_id, result)
+        pending.pop(request_id)
+
+
+def initialize_session_resources(session_dir, recognition_source, *, parent_pid=None, timeout_seconds=5):
+    """在原拥有权绑定完成后登记本 runner；不为旧会话补造清单。"""
+    import math
+    import psutil
+    from app.core.json_snapshot import read_json_snapshot
+    from app.execution.session_resources import SessionResourceJournal
+
+    if (type(timeout_seconds) not in (int, float) or not math.isfinite(timeout_seconds)
+            or not 0 <= timeout_seconds <= 10):
+        raise ValueError("resource_owner_timeout_invalid")
+    session = Path(session_dir).resolve()
+    entry = Path(__file__).resolve()
+
+    def process(pid):
+        try:
+            value = psutil.Process(pid)
+            if not value.is_running() or value.status() == psutil.STATUS_ZOMBIE:
+                raise ValueError("resource_process_not_running")
+            created = value.create_time()
+            if type(created) not in (int, float) or not math.isfinite(created) or created <= 0:
+                raise ValueError("resource_process_identity_invalid")
+            command = value.cmdline()
+            outputs = [command[i+1] for i, part in enumerate(command[:-1]) if part == "--output"]
+            if (not any(Path(part).resolve() == entry for part in command[1:])
+                    or len(outputs) != 1 or Path(outputs[0]).resolve() != session):
+                raise ValueError("resource_process_entry_mismatch")
+            return value, created
+        except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied) as error:
+            raise ValueError("resource_process_unverifiable") from error
+
+    runner, created = process(os.getpid())
+    runner_identity = {"pid": runner.pid, "create_time_ns": int(round(created * 1_000_000_000))}
+    host_identity = {"pid": runner.pid, "created": created}
+    if parent_pid is not None:
+        if type(parent_pid) is not int or parent_pid <= 0:
+            raise ValueError("resource_parent_identity_invalid")
+        pointer_path = session.parent / "latest-session.json"
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            pointer = read_json_snapshot(pointer_path) if pointer_path.is_file() else None
+            if isinstance(pointer, dict) and pointer.get("name") == session.name:
+                break
+            if time.monotonic() >= deadline:
+                raise ValueError("resource_session_pointer_unavailable")
+            # 只等待原 launcher 的启动发布，不重新拉起进程或改写指针。
+            time.sleep(min(.025, max(0, deadline-time.monotonic())))
+        host_identity = pointer.get("host_identity")
+        if (pointer.get("recognition_source") != recognition_source
+                or not isinstance(host_identity, dict) or set(host_identity) != {"pid", "created"}
+                or type(host_identity["pid"]) is not int or host_identity["pid"] <= 0
+                or type(host_identity["created"]) not in (int, float)):
+            raise ValueError("resource_owner_binding_invalid")
+        launcher, launcher_created = process(host_identity["pid"])
+        if (launcher_created != host_identity["created"] or launcher.ppid() != parent_pid
+                or runner.pid != launcher.pid and runner.ppid() != launcher.pid):
+            raise ValueError("resource_owner_identity_changed")
+        if read_json_snapshot(pointer_path) != pointer:
+            raise ValueError("resource_session_pointer_changed")
+    return SessionResourceJournal(session, recognition_source=recognition_source,
+        host_identity=host_identity, runner_identity=runner_identity)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
@@ -170,7 +313,8 @@ def main():
                         default="local")
     parser.add_argument("--delegate-profile")
     parser.add_argument("--api-profile")
-    parser.add_argument("--local-no-learning", action="store_true", required=True)
+    parser.add_argument("--local-no-learning", action="store_true", required=True,
+                        help="Disable legacy learning executor; optional receipt-only recording stays off until requested")
     parser.add_argument("--observer", choices=["minimal", "original"], default="minimal")
     parser.add_argument("--parent-pid", type=int)
     args = parser.parse_args()
@@ -178,6 +322,7 @@ def main():
     from app.core.process_sampler import ProcessSampler
     from app.desktop_review.host import DesktopReviewHost
     from app.desktop_review.single_step_coordinator import NativeSingleStepCoordinator
+    from app.learning_memory.event_store import CONTROL_KINDS, LearningEventStore
     import psutil
     parent_created = psutil.Process(args.parent_pid).create_time() if args.parent_pid else None
 
@@ -185,16 +330,21 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     for name in ("commands", "responses"):
         (out / name).mkdir()
+    learning = LearningEventStore(out)
+    pending_learning = {}
     host = None
     co = None
     agent_jobs = None
+    workflow_runtime = None
     api_grounder = None
     target = None
     stop = threading.Event()
     sampler_thread = None
     errors = []
     report = {"started_at": now(), "phase": "starting", "runner_pid": os.getpid(),
-              "learning_enabled": False, "observer": args.observer, "completed_commands": []}
+              "learning_enabled": False, "legacy_learning_executor_enabled": False,
+              "learning_recording": {"status": "disabled", "recording_enabled": False},
+              "observer": args.observer, "completed_commands": []}
     import ctypes
     report["host_is_admin"] = bool(ctypes.windll.shell32.IsUserAnAdmin()) if os.name == "nt" else False
     sampler = ProcessSampler(os.getpid(), extra_root_getter=lambda: target, sample_interval=3)
@@ -254,13 +404,17 @@ def main():
                 "sha256": hashlib.sha256(Path(image["image_path"]).read_bytes()).hexdigest()}
 
     try:
+        resource_journal = initialize_session_resources(out, args.recognition_source, parent_pid=args.parent_pid)
         host = DesktopReviewHost(out / "inbox.json", out / "reviews", secrets.token_urlsafe(32))
         host.start()
         co = NativeSingleStepCoordinator(out / "reviews", host.facade, host, enable_agent_learning=False,
-            runtime_output_root=out / "runtime-output", vision_config_path=out / "configs/vision.json")
+            runtime_output_root=out / "runtime-output", vision_config_path=out / "configs/vision.json",
+            resource_journal=resource_journal)
+        co._memory_library_root = out.parent / "memory-library"
         co.set_automatic_safety_interception(False)
         co.set_keep_models_loaded(True)
         api_profile = configure_recognition_startup(co, args, report)
+        resource_journal.mark_ready()
         report["phase"] = "ready"
         write(out / "report.json", report)
         from app.vision.grounding_handoff import GroundingHandoffStore
@@ -276,11 +430,13 @@ def main():
                 api_grounder = ChatCompletionsGrounder(api_profile)
             agent_jobs = AgentCommandJobs(co, grounding_store, capture, session_configuration,
                 api_grounder=api_grounder)
+        from app.learning_memory.workflow_runtime import WorkflowRuntime
+        workflow_runtime = WorkflowRuntime(out, co, agent_jobs=agent_jobs)
         sampler_thread = threading.Thread(target=sample_loop, daemon=True, name="live-process-sampler")
         sampler_thread.start()
         done = set()
-        deadline = time.monotonic() + 3600
-        while time.monotonic() < deadline:
+        while True:
+            flush_learning_receipts(learning, pending_learning)
             if args.parent_pid:
                 try:
                     if psutil.Process(args.parent_pid).create_time() != parent_created:
@@ -288,6 +444,19 @@ def main():
                 except psutil.NoSuchProcess:
                     break
             paths = sorted(p for p in (out / "commands").glob("*.json") if p.name not in done)
+            if not paths:
+                try:
+                    workflow_snapshot = workflow_runtime.tick()
+                    if workflow_snapshot is not None:
+                        record_workflow_snapshot(report, workflow_snapshot, clear_error=True)
+                        write(out / "report.json", report)
+                except Exception as error:
+                    workflow_runtime.stop()
+                    report["workflow_runtime_error"] = {"error_type": type(error).__name__,
+                        "message": str(error), "automatic_retry_allowed": False,
+                        "next": "Inspect the original workflow and command before continuing; never replay input."}
+                    write(out / "report.json", report)
+                paths = sorted(p for p in (out / "commands").glob("*.json") if p.name not in done)
             if (out / "closing.json").is_file():
                 closing_id = json.loads((out / "closing.json").read_text(encoding="utf-8"))["request_id"]
                 paths.sort(key=lambda p: p.stem == closing_id)
@@ -302,13 +471,43 @@ def main():
             response["started_at"] = now()
             started = time.perf_counter()
             kind = None
+            learning_ticket = None
+            learning_context = None
+            learning_error = None
             try:
                 command = json.loads(path.read_text(encoding="utf-8"))
                 response["command"] = command
                 kind = command["kind"]
-                check_agent_command_admission(agent_jobs, kind)
-                agent_result = dispatch_agent_command(agent_jobs, path.stem, command, target)
-                if agent_result is not None:
+                workflow_runtime.admit(path.stem, command)
+                check_agent_command_admission(agent_jobs, kind, command)
+                workflow_bindings = None
+                if (command.get("request") or {}).get("target_memory") is not None:
+                    from app.learning_memory.workflow_target_bindings import load_workflow_target_bindings
+                    workflow_bindings = load_workflow_target_bindings(co._memory_library_root, out,
+                        execution_request_id=path.stem, command=command)
+                try:
+                    learning_ticket = learning.prepare(path.stem, command, target)
+                    if learning_ticket is not None:
+                        response["learning_binding"] = learning_ticket
+                        learning.reserve(learning_ticket)
+                        # 只有保留成功的原票据可触发同一命令的观察采集。
+                        learning_context = {"event_id": path.stem,
+                            "command_sha256": learning_ticket["command_sha256"]}
+                except Exception as error:
+                    # 记录故障与输入结果分开保存，不能因此重放输入。
+                    learning_error = {"status": "recording_failed", "phase": "prepare",
+                        "error_type": type(error).__name__, "message": str(error)}
+                    response["learning_recording_error"] = learning_error
+                agent_result = dispatch_agent_command(agent_jobs, path.stem, command, target,
+                    workflow_bindings=workflow_bindings, learning_context=learning_context)
+                if kind == "learning_workflow" and workflow_runtime.handles(command.get("request") or {}):
+                    response["learning_control"] = kind
+                    response["result"] = record_workflow_control(report, workflow_runtime,
+                        command["request"], path.stem)
+                elif kind in CONTROL_KINDS:
+                    response["learning_control"] = kind
+                    response["result"] = learning.control(kind, command.get("request") or {}, path.stem)
+                elif agent_result is not None:
                     response['result'] = agent_result
                     response['observation'] = (agent_result.get('observation') or {}).get('capture')
                 elif kind == "grounding_execute":
@@ -333,8 +532,10 @@ def main():
                         response["observation"] = co._owner.call(capture)
                     else:
                         step = {**command, 'kind': 'step', "operation": "execute_recognition_plan"}
-                        response["result"] = (dispatch_agent_command(agent_jobs, path.stem, step, target)
-                            if agent_jobs is not None else run_step_command(co, target, step))
+                        response["result"] = (dispatch_agent_command(agent_jobs, path.stem, step, target,
+                            learning_context=learning_context)
+                            if agent_jobs is not None else run_step_command(co, target, step,
+                            learning_context=learning_context))
                         response["observation"] = response["result"].get("observation", {}).get("capture")
                 elif kind == "select":
                     preview = co.preview_selected_window_preparation(
@@ -358,8 +559,15 @@ def main():
                     response["result"] = co.confirm_window_preparation(preview["preparation_id"])
                     response["observation"] = co._owner.call(capture)
                 elif kind == "close_launched_window":
+                    recovery_proof = None
+                    if "request" in command:
+                        from app.execution.launched_window_ownership import verify_recovered_launch_ownership
+                        recovery_proof = verify_recovered_launch_ownership(
+                            out, Path(__file__).resolve().parents[1], session_configuration, command["request"], co,
+                            model_directory=args.model_directory)
                     response["result"] = co.close_launched_window(
-                        target_window_handle=command["handle"], target_process_id=command["process_id"])
+                        target_window_handle=command["handle"], target_process_id=command["process_id"],
+                        recovery_proof=recovery_proof)
                     if (response["result"].get("status") == "window_closed" and target
                             and target["handle"] == command["handle"]
                             and target["process_id"] == command["process_id"]):
@@ -371,10 +579,12 @@ def main():
                 elif kind == "capture":
                     response["observation"] = co._owner.call(capture)
                 elif kind == "read_text":
-                    response["result"], response["observation"] = co._owner.call(
-                        lambda: run_read_text_command(capture, command, recognition_source=args.recognition_source))
+                    response["result"], response["observation"] = run_read_text_command(
+                        capture, command, recognition_source=args.recognition_source,
+                        evidence_dir=out / 'read-text-evidence', coordinator=co, target=target)
                 elif kind == "step":
-                    response["result"] = run_step_command(co, target, command)
+                    response["result"] = run_step_command(co, target, command,
+                        workflow_bindings=workflow_bindings, learning_context=learning_context)
                     observed = response["result"].get("observation", {})
                     response["observation"] = observed.get("capture")
                 elif kind == "form_fill":
@@ -389,6 +599,8 @@ def main():
                     progress = out / "sequence-progress"
                     progress.mkdir(exist_ok=True)
                     response["result"] = run_input_sequence(co, target, command["request"],
+                        **({"memory_bindings": workflow_bindings} if workflow_bindings is not None else {}),
+                        **({"learning_context": learning_context} if learning_context is not None else {}),
                         observation_wait_ms=command.get("observation_wait_ms"),
                         observation_condition=command.get("observation_condition"),
                         persist=lambda value: write(progress / path.name, value))
@@ -401,6 +613,7 @@ def main():
             except Exception as error:
                 response.update(status="failed", error_type=type(error).__name__, error=str(error),
                     automatic_retry_allowed=False)
+                preserve_input_admission_rejection(response, error, path.stem)
                 if isinstance(getattr(error, "diagnostics", None), dict):
                     response["diagnostics"] = error.diagnostics
             response["finished_at"] = now()
@@ -409,6 +622,31 @@ def main():
                 response["processes_after"] = sample_once()
             response["response_available_at"] = now()
             write(out / "responses" / path.name, response)
+            # 学习消费已持久回执；精简回执、轮询和取图都不能触发重复记录。
+            if learning_ticket is not None:
+                try:
+                    recorded = learning.record(path.stem, learning_ticket)
+                    learning.publish_recording_status(path.stem, recorded)
+                    if recorded["status"] == "awaiting_execution_result":
+                        pending_learning[path.stem] = learning_ticket
+                    learning_error = None
+                except Exception as error:
+                    learning_error = {"status": "recording_failed", "phase": "record",
+                        "learning_id": learning_ticket["learning_id"],
+                        "error_type": type(error).__name__, "message": str(error),
+                        "next": "Use learning_recover; never replay the original input."}
+            if learning_error is not None:
+                try:
+                    learning.publish_recording_status(path.stem, learning_error)
+                except OSError as error:
+                    learning_error["status_write_error"] = type(error).__name__
+            try:
+                report["learning_recording"] = learning.snapshot()
+                report["learning_enabled"] = report["learning_recording"]["recording_enabled"]
+            except Exception as error:
+                report["learning_recording"] = {"status": "unavailable", "error_type": type(error).__name__}
+                report["learning_enabled"] = None
+            report["learning_recording_error"] = learning_error
             done.add(path.name)
             report["completed_commands"].append({"name": path.name, "status": response["status"]})
             report["target"] = target
@@ -421,6 +659,8 @@ def main():
         raise
     finally:
         terminal_phase = report.get('phase')
+        if workflow_runtime is not None:
+            workflow_runtime.stop()
         if agent_jobs is not None:
             # 先停止组合命令再销毁协调器，未退出的输入线程不算清理完成。
             while not agent_jobs.close(timeout=5):
@@ -428,6 +668,15 @@ def main():
                     agent_command_cleanup={'status': 'waiting_for_worker', 'automatic_retry_allowed': False})
                 write(out / 'report.json', report)
             report['agent_command_cleanup'] = {'status': 'stopped'}
+        try:
+            flush_learning_receipts(learning, pending_learning)
+            learning.close()
+            report["learning_recording"] = learning.status()
+            report["learning_enabled"] = False
+        except Exception as error:
+            report["learning_recording_error"] = {"phase": "close", "error_type": type(error).__name__,
+                "message": str(error), "next": "Use learning_recover; never replay input."}
+            report["learning_enabled"] = None
         if api_grounder is not None:
             api_grounder.close()
         if co is not None:

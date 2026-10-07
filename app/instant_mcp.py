@@ -16,7 +16,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-INSTANT_VERSION = "0.1.1"
+from app.core.instant_attachment_transport import InstantAttachmentTransport, InstantAdmissionError, _validate_request_id
+
+INSTANT_VERSION = "0.1.2-preview.1"
 
 
 def _run_wait_budget(kind, requested):
@@ -28,13 +30,6 @@ def _run_wait_budget(kind, requested):
     return requested
 
 
-class InstantAdmissionError(ValueError):
-    """仅用于尚未写入命令队列的可预期状态拒绝。"""
-
-    def __init__(self, code, message, next_tool, next_arguments=None):
-        super().__init__(message)
-        self.code = code
-        self.next = {"tool": next_tool, "arguments": next_arguments or {}}
 
 
 class InstantImageError(ValueError):
@@ -55,14 +50,11 @@ class InstantStartError(ValueError):
         self.next = next_step
 
 
-def _validate_request_id(request_id):
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", request_id):
-        raise ValueError("request_id must be 1-80 lowercase ASCII letters/digits/dashes/underscores")
 
 
 class InstantCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "form_fill", "close_launched_window", "desktop_capture", "desktop_click", "grounding_prepare", "grounding_resolve", "grounding_status", "grounding_cancel", "grounding_execute", "agent_command_status", "agent_command_continue", "agent_command_cancel"]
+    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "form_fill", "close_launched_window", "desktop_capture", "desktop_click", "grounding_prepare", "grounding_resolve", "grounding_status", "grounding_cancel", "grounding_execute", "agent_command_status", "agent_command_continue", "agent_command_cancel", "learning_start", "learning_status", "learning_stop", "learning_recover", "learning_event", "learning_review", "learning_projection", "learning_import", "learning_library", "learning_memory", "learning_save_interface", "learning_commit", "learning_project", "learning_reuse", "learning_adopt_source", "learning_template", "learning_feedback", "learning_workflow"]
     app_id: str | None = None
     name: str | None = None
     path: str | None = None
@@ -84,7 +76,7 @@ class InstantCommand(BaseModel):
         fields = {
             "launch": (set(), {"app_id", "name", "path", "url", "prefer_existing"}),
             "select": ({"handle", "process_id"}, {"handle", "process_id"}),
-            "close_launched_window": ({"handle", "process_id"}, {"handle", "process_id"}),
+            "close_launched_window": ({"handle", "process_id"}, {"handle", "process_id", "request"}),
             "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
             "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
             "form_fill": ({"request"}, {"request", "vision_capabilities"}),
@@ -93,6 +85,9 @@ class InstantCommand(BaseModel):
         }
         required, allowed = (({"request"}, {"request"}) if self.kind in GROUNDING_COMMANDS or self.kind in AGENT_COMMANDS
                              else fields.get(self.kind, (set(), set())))
+        if self.kind.startswith("learning_"):
+            required = set() if self.kind in {"learning_status", "learning_stop", "learning_recover", "learning_projection", "learning_library", "learning_commit"} else {"request"}
+            allowed = {"request"}
         present = set(value) - {"kind"}
         if not required <= present or present - allowed:
             raise ValueError("command fields do not match kind")
@@ -103,6 +98,9 @@ class InstantCommand(BaseModel):
         if self.vision_capabilities is not None:
             from app.vision.recognition_source import ClientVisionCapabilities
             ClientVisionCapabilities.model_validate(self.vision_capabilities)
+        if self.kind == "close_launched_window" and "request" in self.model_fields_set:
+            from app.execution.launched_window_ownership import validate_close_ownership_request
+            validate_close_ownership_request(self.request)
         if self.kind == "launch":
             selectors = [value[key] for key in ("app_id", "name", "path") if key in value]
             if len(selectors) != 1 or not selectors[0].strip():
@@ -114,6 +112,9 @@ class InstantCommand(BaseModel):
         elif self.kind == "input_sequence":
             from app.execution.input_sequence import InputSequenceRequest
             InputSequenceRequest.model_validate(self.request)
+        elif self.kind.startswith("learning_"):
+            from app.learning_memory.event_store import validate_control
+            validate_control(self.kind, self.request or {})
         elif self.kind == "form_fill":
             from app.execution.form_fill import FormFillRequest
             FormFillRequest.model_validate(self.request)
@@ -138,7 +139,7 @@ def write_json(path, value):
     write_json_snapshot(path, value)
 
 
-class InstantSession:
+class InstantSession(InstantAttachmentTransport):
     def __init__(self, root, data_root, model_directory=None, *, allow_local_input=False,
                  recognition_source="local", delegate_profile=None, api_profile=None):
         self.root = Path(root).resolve()
@@ -173,33 +174,37 @@ class InstantSession:
             raise ValueError("another MCP owns this data directory; use that connection") from None
         self.lock_file = stream
 
+    def _startup_configuration(self):
+        if not self.allow_local_input:
+            raise InstantStartError("local_input_not_enabled",
+                "Local operator must explicitly launch with --allow-local-input; tools cannot change this",
+                "Ask the operator to check the MCP launch configuration; do not change input authorization automatically.")
+        from app.vision.recognition_source import RecognitionSourceConfig
+        from pydantic import ValidationError
+        try:
+            config = RecognitionSourceConfig.model_validate({"source": self.recognition_source,
+                "delegate_profile": self.delegate_profile, "api_profile": self.api_profile})
+        except ValidationError:
+            raise InstantStartError("invalid_recognition_configuration",
+                "invalid recognition source or profile",
+                "Check --recognition-source, --delegate-profile and --api-profile match the chosen route.") from None
+        if config.source == "external_api":
+            from app.vision.external_grounding_api import load_api_grounding_profile, ApiGroundingError
+            try:
+                profile = load_api_grounding_profile(config.api_profile)
+                if not os.environ.get(profile.api_key_env, "").strip():
+                    raise ApiGroundingError("api_key_missing")
+            except ApiGroundingError as error:
+                raise InstantStartError(error.code, error.code,
+                    "Check the API profile JSON and its named environment variable in the server process; then reconnect.") from None
+        if config.source == "local" and (self.model_directory is None or not self.model_directory.is_dir()):
+            raise InstantStartError("model_directory_unavailable", "configured model directory does not exist",
+                "Check --model-directory is an existing directory; use forward slashes or escaped backslashes in configuration, then reconnect.")
+        return config
+
     def start(self, new_session=False):
         with self.guard:
-            if not self.allow_local_input:
-                raise InstantStartError("local_input_not_enabled",
-                    "Local operator must explicitly launch with --allow-local-input; tools cannot change this",
-                    "Ask the operator to check the MCP launch configuration; do not change input authorization automatically.")
-            from app.vision.recognition_source import RecognitionSourceConfig
-            from pydantic import ValidationError
-            try:
-                config = RecognitionSourceConfig.model_validate({"source": self.recognition_source,
-                    "delegate_profile": self.delegate_profile, "api_profile": self.api_profile})
-            except ValidationError:
-                raise InstantStartError("invalid_recognition_configuration",
-                    "invalid recognition source or profile",
-                    "Check --recognition-source, --delegate-profile and --api-profile match the chosen route.") from None
-            if config.source == "external_api":
-                from app.vision.external_grounding_api import load_api_grounding_profile, ApiGroundingError
-                try:
-                    profile = load_api_grounding_profile(config.api_profile)
-                    if not os.environ.get(profile.api_key_env, "").strip():
-                        raise ApiGroundingError("api_key_missing")
-                except ApiGroundingError as error:
-                    raise InstantStartError(error.code, error.code,
-                        "Check the API profile JSON and its named environment variable in the server process; then reconnect.") from None
-            if config.source == "local" and (self.model_directory is None or not self.model_directory.is_dir()):
-                raise InstantStartError("model_directory_unavailable", "configured model directory does not exist",
-                    "Check --model-directory is an existing directory; use forward slashes or escaped backslashes in configuration, then reconnect.")
+            config = self._startup_configuration()
             self._lock()
             pointer = self.data_root / "latest-session.json"
             saved = read_json(pointer) if pointer.is_file() else {}
@@ -229,78 +234,65 @@ class InstantSession:
                 self.session = None
                 self.process = None
                 self.host_identity = None
-            # 新桥接进程不能覆盖仍在清理的旧宿主，也不续跑旧命令。
-            import psutil
-            for path in self.data_root.glob("session-*/report.json"):
-                old = read_json(path)
-                if not old.get("finished_at") and psutil.pid_exists(old.get("runner_pid", -1)):
-                    raise ValueError("previous host still active or cleaning up; inspect its report before restarting")
-            self.session = self.data_root / ("session-" + uuid4().hex)
-            self.log_file = (self.data_root / (self.session.name + ".log")).open("ab")
-            env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", HF_HUB_OFFLINE="1")
-            env.pop("PYTHONPATH", None)
-            command = [sys.executable, str(self.root / "scripts/run_local_step_session.py"),
-                "--output", str(self.session), "--recognition-source", config.source,
-                "--local-no-learning", "--parent-pid", str(os.getpid())]
-            if config.source == "local":
-                command.extend(["--model-directory", str(self.model_directory)])
-            if config.delegate_profile:
-                command.extend(["--delegate-profile", config.delegate_profile])
-            if config.api_profile:
-                command.extend(["--api-profile", config.api_profile])
-            self.process = subprocess.Popen(command, cwd=self.root,
-                stdin=subprocess.DEVNULL, stdout=self.log_file, stderr=self.log_file,
-                env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            self.host_identity = {"pid": self.process.pid, "created": psutil.Process(self.process.pid).create_time()}
-            write_json(pointer, {"name": self.session.name, "host_identity": self.host_identity,
-                "recognition_source": config.source, "delegate_profile": config.delegate_profile,
-                "api_profile": config.api_profile})
-            return self.status()
+            self._check_peer_hosts()
+            return self._launch_session(config)
 
-    def _host_alive(self):
-        if self.process is not None:
-            return self.process.poll() is None
-        if self.host_identity:
-            import psutil
-            try:
-                return psutil.Process(self.host_identity["pid"]).create_time() == self.host_identity["created"]
-            except psutil.NoSuchProcess:
-                return False
-        return False
+    def _check_peer_hosts(self, *, exclude_session=None):
+        # 已核验的原死会话仅由显式准入排除，普通 start 保持原清理门控。
+        import psutil
+        excluded = Path(exclude_session).resolve() if exclude_session is not None else None
+        for path in self.data_root.glob("session-*/report.json"):
+            if path.parent.resolve() == excluded:
+                continue
+            old = read_json(path)
+            if not old.get("finished_at") and psutil.pid_exists(old.get("runner_pid", -1)):
+                raise ValueError("previous host still active or cleaning up; inspect its report before restarting")
 
-    def status(self):
+    def _launch_session(self, config, *, session_name=None, on_created=None, before_publish=None):
+        import psutil
+        name = session_name or "session-" + uuid4().hex
+        target = (self.data_root / name).resolve()
+        if not re.fullmatch(r"session-[0-9a-f]{32}", name) or target.parent != self.data_root or target.exists():
+            raise ValueError("invalid or existing new session directory")
+        if self.log_file:
+            self.log_file.close()
+        self.session = target
+        self.log_file = (self.data_root / (name + ".log")).open("ab")
+        env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", HF_HUB_OFFLINE="1")
+        env.pop("PYTHONPATH", None)
+        command = [sys.executable, str(self.root / "scripts/run_local_step_session.py"),
+            "--output", str(self.session), "--recognition-source", config.source,
+            "--local-no-learning", "--parent-pid", str(os.getpid())]
+        if config.source == "local":
+            command.extend(["--model-directory", str(self.model_directory)])
+        if config.delegate_profile:
+            command.extend(["--delegate-profile", config.delegate_profile])
+        if config.api_profile:
+            command.extend(["--api-profile", config.api_profile])
+        self.process = subprocess.Popen(command, cwd=self.root,
+            stdin=subprocess.DEVNULL, stdout=self.log_file, stderr=self.log_file,
+            env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self.host_identity = {"pid": self.process.pid, "created": psutil.Process(self.process.pid).create_time()}
+        if on_created is not None:
+            on_created(self.host_identity)
+        if before_publish is not None:
+            before_publish()
+        write_json(self.data_root / "latest-session.json", {"name": self.session.name, "host_identity": self.host_identity,
+            "recognition_source": config.source, "delegate_profile": config.delegate_profile,
+            "api_profile": config.api_profile})
+        return self.status()
+
+    def preview_recovery(self):
+        from app.execution.session_epoch_admission import SessionEpochAdmission
         with self.guard:
-            report = {}
-            if self.session and (self.session / "report.json").is_file():
-                report = read_json(self.session / "report.json")
-            alive = self._host_alive()
-            phase = report.get("phase", "starting" if alive else "not_started")
-            if self.session is not None and not alive and not report.get("finished_at"):
-                phase = "host_exited_without_cleanup_proof"
-            pending = []
-            if self.session:
-                pending = [p.stem for p in (self.session / "commands").glob("*.json")
-                           if not (self.session / "responses" / p.name).exists()]
-            return {"mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
-                "recognition_source": self.recognition_source, "delegate_profile": self.delegate_profile,
-                "api_profile": self.api_profile,
-                "learning_enabled": False, "automatic_safety_interception": False if alive else None,
-                "local_input_enabled_by_operator": self.allow_local_input,
-                "host_is_admin": report.get("host_is_admin"),
-                "session_directory": str(self.session) if self.session else None,
-                "target": report.get("target"), "pending_ids": pending,
-                "cleanup_verified": bool(report.get("finished_at") and report.get("phase") == "stopped"
-                    and report.get("host_phase") == "stopped" and report.get("cleanup_errors") == []
-                    and report.get("sampler_stopped") is True and not alive),
-                "cleanup_errors": report.get("cleanup_errors"), "error_type": report.get("error_type"),
-                **({'next': report['cleanup_next']} if report.get('cleanup_next') else {}),
-                "automatic_retry_allowed": False}
+            return SessionEpochAdmission(self).preview()
 
-    def _path(self, request_id, folder):
-        _validate_request_id(request_id)
-        if self.session is None:
-            raise ValueError("start a session first")
-        return self.session / folder / (request_id + ".json")
+    def recover_session(self, request_id, preview_sha256):
+        from app.execution.session_epoch_admission import SessionEpochAdmission
+        return SessionEpochAdmission(self).recover(request_id, preview_sha256)
+
+
+
 
     def submit(self, request_id, command):
         with self.guard:
@@ -310,114 +302,25 @@ class InstantSession:
                     raise ValueError("request_id already belongs to a different command")
                 return self.result(request_id)
             status = self.status()
-            if status["phase"] != "ready" or not status["host_alive"]:
-                raise InstantAdmissionError("host_not_ready", "host is not ready; poll instant_status", "instant_status")
-            if status["pending_ids"]:
-                raise InstantAdmissionError("command_pending",
-                    "one command is still pending; query its original ID, do not queue input",
-                    "instant_result", {"request_id": status["pending_ids"][0]})
-            if (self.session / "closing.json").exists():
-                raise InstantAdmissionError("session_closing", "session is closing", "instant_status")
-            write_json(path, command)
-            return {"request_id": request_id, "status": "pending", "automatic_retry_allowed": False,
-                    "next": "Poll instant_result with this exact request_id"}
+            from app.learning_memory.event_store import OFFLINE_CONTROL_KINDS
+            if not status["host_alive"] and command.get("kind") in OFFLINE_CONTROL_KINDS:
+                # 宿主已退出后仍可查询/补记旧会话；绝不拉起宿主或重放待定输入。
+                self._lock()
+                from app.learning_memory.event_store import LearningEventStore, validate_control
+                validate_control(command["kind"], command.get("request") or {})
+                write_json(path, command)
+                response = {"command": command, "learning_control": command["kind"],
+                            "offline_recording_only": True, "automatic_retry_allowed": False}
+                try:
+                    response.update(status="returned", result=LearningEventStore(self.session).control(
+                        command["kind"], command.get("request") or {}, request_id))
+                except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+                    response.update(status="failed", error_type=type(error).__name__, error=str(error))
+                write_json(self._path(request_id, "responses"), response)
+                return self.result(request_id)
+            return self._live_submit(request_id, command, status)
 
-    def result(self, request_id):
-        with self.guard:
-            path = self._path(request_id, "responses")
-            if not path.exists():
-                if not self._path(request_id, "commands").exists():
-                    return {"request_id": request_id, "status": "not_found"}
-                pending = {"request_id": request_id, "status": "pending" if self.status()["host_alive"] else "result_unknown",
-                           "automatic_retry_allowed": False}
-                progress_path = self._path(request_id, "sequence-progress")
-                if progress_path.is_file():
-                    progress = read_json(progress_path)
-                    pending["partial_execution"] = {"completed_steps": progress.get("completed_steps", []),
-                        "completed_fields": progress.get("completed_fields", []),
-                        "phase": progress.get("phase"), "action_executed": progress.get("action_executed"),
-                        "progress_path": str(progress_path), "task_effect_verified": None}
-                return pending
-            response = read_json(path)
-            # 输入可能含个人文本，桥接回执不重复回显原始命令。
-            response.pop("command", None)
-            result = response.get("result") or {}
-            result.pop("request", None)
-            ok = response.get("status") == "returned"
-            api = result.get("response") or {}
-            outcome = result.get("status", "")
-            if (result.get("phase") in {"result_unknown", "failed", "rejected"}
-                    or result.get("result_unknown") is True or result.get("success") is False
-                    or api.get("success") is False
-                    or outcome in {"failed", "rejected", "result_unknown"}
-                    or str(outcome).endswith("_unavailable")):
-                ok = False
-            if outcome in {"launched_window_ready", "focused", "maximized"}:
-                # 返回成功必须包含有效窗口身份，不能把命令返回当作选中成功。
-                window = result.get("window")
-                ok = ok and isinstance(window, dict) and all(
-                    type(window.get(key)) is int and window[key] > 0
-                    for key in ("handle", "process_id"))
-            receipt = {"request_id": request_id, **response, "operation_succeeded": ok,
-                       "task_effect_verified": False, "automatic_retry_allowed": False}
-            if result.get("contract_version") == "agent_command.v1":
-                waiting = outcome in {"running", "awaiting_grounding"}
-                receipt.update(operation_succeeded=None if waiting else ok and outcome == "completed",
-                    operation_success_scope="agent_command_progress", task_effect_verified=None,
-                    action_executed=result.get("action_executed"))
-                if waiting:
-                    receipt['next_action'] = ('read_pending_image_then_grounding_resolve_and_agent_command_continue'
-                        if outcome == 'awaiting_grounding' else 'poll_agent_command_status_with_new_request_id')
-                    receipt["next"] = {"tool": "instant_run", "arguments": {
-                        "request_id": "agent-status-" + uuid4().hex,
-                        "command": {"kind": "agent_command_status", "request": {
-                            "command_id": result["command_id"]}}, "images": "after"}}
-            if outcome == "agent_read_required":
-                receipt.update(operation_succeeded=None, operation_success_scope="image_for_agent_reading",
-                               task_effect_verified=None, action_executed=False)
-            if result.get("contract_version") == "grounding_handoff.v1":
-                receipt.update(operation_success_scope="grounding_only", task_effect_verified=None,
-                               action_executed=False if result.get("input_dispatched") is False else None)
-                if result.get("execution_id"):
-                    receipt.update(input_attempted=result.get("input_attempted"),
-                                   execution_request_id=result["execution_id"])
-            sequence = result.get("contract_version") in {"input_sequence_v1", "form_fill_v1"}
-            if result.get("contract_version") == "local_direct_step_v1" or sequence:
-                receipt["operation_succeeded"] = (ok and result.get("status") == "completed" if sequence
-                                                   else ok and api.get("success") is True)
-                before = result.get("capture") or {}
-                after = (result.get("observation") or {}).get("capture") or {}
-                receipt.update(operation_success_scope="input_route_only",
-                               input_route_succeeded=api.get("success") if type(api.get("success")) is bool else None,
-                               observation_status=(result.get("observation") or {}).get("status", "not_requested"))
-                if sequence:
-                    receipt.update(operation_success_scope="declared_sequence_only",
-                        input_route_succeeded=None, task_effect_verified=None,
-                        action_executed=result.get("action_executed"))
-                receipt["agent_review"] = {
-                    "status": "awaiting_agent_review" if before and after else "evidence_incomplete",
-                    "verified": None, "judged_by": "agent",
-                    "before": {"tool": "instant_image", "arguments": {"request_id": request_id, "view": "before"},
-                               "frame_id": "before_input", "image_path": before.get("image_path"),
-                               "available": bool(before), "sha256": before.get("sha256")},
-                    "after": {"tool": "instant_image", "arguments": {"request_id": request_id, "view": "after"},
-                              "frame_id": "after_settled", "image_path": after.get("image_path"),
-                              "observation_stage": after.get("observation_stage", "after_render_wait"), "render_completion_verified": False,
-                              "render_grace_ms": (result.get("observation") or {}).get("render_grace_ms"),
-                              "available": bool(after), "sha256": after.get("sha256")},
-                    "comparison": {"frame_pair": ["before_input", "after_settled"],
-                        "diff_available": False, "reason": "immediate_diagnostic_diff_is_for_a_different_frame_pair"},
-                    "automatic_retry_allowed": False,
-                    "next": "Read before/after images, judge success/failure/uncertain against the goal. The internal immediate diagnostic diff uses a different frame pair. No change is not necessarily failure. Never replay automatically.",
-                }
-                if not after:
-                    receipt["agent_review"]["recovery"] = (result.get("observation") or {}).get("recovery")
-                    receipt["agent_review"]["next"] = (
-                        "After image is unavailable; input route outcome is separate from task effect. "
-                        "Inspect recovery candidates (same process, not proven successors), then explicitly select "
-                        "the intended current window and capture it under a new request_id. If no candidates are "
-                        "available, discover current windows. Do not replay the original input; retain this receipt.")
-            return receipt
+
 
     def image(self, request_id, view="after"):
         if view not in {"before", "after"}:
@@ -441,6 +344,17 @@ class InstantSession:
         if status == "result_unknown":
             raise InstantImageError("image_result_unknown", "the request has no completed receipt and its host is not alive",
                                     "Inspect instant_status and the original request receipt; input may have occurred. Do not replay automatically.")
+        if response.get("learning_control") == "learning_feedback":
+            result = response.get("result") or {}
+            if view != "before" or result.get("image_role") != "feedback_baseline_not_live_observation":
+                raise InstantImageError("image_frame_unavailable", "feedback only provides its pinned baseline image",
+                                        "Read feedback with action=read, then use view=before. No live after frame exists.")
+            try:
+                from app.learning_memory.feedback import read_baseline_image
+                return read_baseline_image(self.session.parent / "memory-library", result)
+            except (OSError, ValueError, KeyError, RuntimeError) as error:
+                raise InstantImageError("feedback_image_unavailable", str(error),
+                                        "Inspect the original feedback receipt and library storage; do not substitute a new screenshot.") from error
         if view == "before":
             result = response.get('result') or {}
             if result.get('contract_version') == 'agent_command.v1':
@@ -502,7 +416,7 @@ class InstantSession:
 def build_server(session):
     from mcp.server import MCPServer
     from mcp.types import CallToolResult, ImageContent, TextContent
-    server = MCPServer(name="agent-review-instant", version=INSTANT_VERSION, description="Windows instant-mode preview. Local operator input; no learning. Start explicitly, submit ONE command, poll its ID, inspect image before next action. No automatic retries.")
+    server = MCPServer(name="agent-review-instant", version=INSTANT_VERSION, description="Windows instant-mode preview. Local operator input; optional experimental receipt recording, disabled by default. No legacy learning executor or automatic graph/replay. Start explicitly, submit ONE command, inspect image before next action. No automatic retries.")
 
     def instant_start(new_session: bool = False) -> CallToolResult:
         try:
@@ -526,6 +440,30 @@ def build_server(session):
 
     def instant_status() -> dict:
         return session.status()
+
+    def instant_recovery_preview() -> CallToolResult:
+        try:
+            value = session.preview_recovery()
+        except (ValueError, OSError) as error:
+            value = {"status": "recovery_preview_rejected", "read_only": True,
+                "automatic_retry_allowed": False, "error": {"type": type(error).__name__, "message": str(error)}}
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+                structuredContent=value)
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+            structuredContent=value)
+
+    def instant_recover_session(request_id: str, preview_sha256: str) -> CallToolResult:
+        try:
+            value = session.recover_session(request_id, preview_sha256)
+        except (ValueError, OSError) as error:
+            # 此错误可能发生在创建之后，不能推断未启动或原输入未执行。
+            value = {"request_id": request_id, "status": "recovery_unresolved", "host_launch_attempted": None,
+                "automatic_retry_allowed": False, "error": {"type": type(error).__name__, "message": str(error)},
+                "next": "Inspect the original admission record and host status; keep the same request_id and preview hash. Do not create another admission or replay input."}
+            return CallToolResult(isError=True, content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+                structuredContent=value)
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(value, ensure_ascii=False))],
+            structuredContent=value)
 
     def instant_submit(request_id: str, command: InstantCommand) -> CallToolResult:
         validation_code = "invalid_request_id"
@@ -575,9 +513,12 @@ def build_server(session):
         value = (compact_receipt(receipt, full_receipt_path=session._path(request_id, "responses"))
                  if detail == "compact" else receipt)
         image_blocks = []
-        if images != "none" and receipt.get("status") not in {"pending", "not_found", "result_unknown"}:
+        feedback_image = (receipt.get("learning_control") == "learning_feedback"
+                          and (receipt.get("result") or {}).get("image_role") == "feedback_baseline_not_live_observation")
+        if images != "none" and (not receipt.get("learning_control") or feedback_image) and receipt.get("status") not in {"pending", "not_found", "result_unknown"}:
             delivery = []
-            for view in (("before", "after") if images == "both" else ("after",)):
+            views = ("before",) if feedback_image else (("before", "after") if images == "both" else ("after",))
+            for view in views:
                 try:
                     data = session.image(request_id, view=view)
                 except InstantImageError as error:
@@ -642,6 +583,8 @@ def build_server(session):
         "instant_run": "Preferred one-call execution: submit one durable command, wait up to wait_ms (0..120000; omitted/null uses 45000 for form_fill, 25000 otherwise), return compact receipt plus exact original after PNG together. This is a maximum receipt wait, NOT an added action delay: ready results return immediately. Configure client timeout above this budget. images=both adds before; detail=full preserves diagnostics. Same commands as instant_submit, including input_sequence request={field_goal,text,clear_existing:true,submit_search:true|false}. A sequence focuses the field through recognition, types, checks the actual focused UIA value, optionally presses Enter for search, then observes. No arbitrary batch, next-result click or task-success claim. Unsupported/unreadable fields interrupt with partial receipts; do not blindly replay. A wait timeout is NOT cancellation: use next to read the same ID, keeping this MCP connection alive.",
         "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option. Known preflight configuration failures and unresolved previous-session rejection return isError=true, status=start_rejected, error.code and next guidance; host_launch_attempted=false refers only to this call, not existing sessions.",
         "instant_status": "Read host, target, pending IDs and cleanup status; no screenshot or input.",
+        "instant_recovery_preview": "Experimental read-only recovery preview after the original host exits: verify original resource cleanup and all input terminal/settlement facts, returning preview_sha256. Does not modify the old session, start a host, grant input, replay commands or take over a workflow. Unknown dispatch or unverifiable resources reject. Ordinary instant_start cleanup requirements remain unchanged.",
+        "instant_recover_session": "Experimental explicit new-epoch admission: use the exact preview_sha256 from instant_recovery_preview and a unique durable request_id. Reuses the original launcher only after resource and input proofs; requires the existing operator --allow-local-input and route configuration. Re-read this SAME request_id/hash to inspect a starting host or recover interrupted pointer publication; NEVER create another request ID for an unresolved admission. launch_unknown cannot be replayed. Exceptions after launch may mean a host exists: inspect the durable admission, not zero-input or restart assumptions. Before submitting ANY new command, this SAME recovery request must return recovery_admission.phase=ready and new_epoch_ready=true; instant_status.phase=ready alone is insufficient. Premature commands return state_rejected/recovery_admission_not_ready with this original request/hash in next; original receipt reads remain available. Readiness does not complete workflow takeover, and old commands are never consumed.",
         "instant_submit": "Submit exactly one command with a unique durable ID. desktop_capture and desktop_click require NO prior select or caller handle: auto-resolve the current desktop icon host. desktop_click request={goal,click_kind:'double'} uses a FRESH desktop capture and the existing recognition route; no raw/stale coordinates. Desktop occlusion may remain; inspect images. After an icon opens an app, discover/select its new window; input dispatch is NOT app-launch verification. discover lists configured plus installed desktop apps/windows (Start Menu/Desktop shortcuts and App Paths); launch requires exactly one of app_id, name or absolute local .exe/.lnk path, optional url for configured browsers. Names resolve exactly then by substring; ambiguity returns diagnostics.candidates, choose app_id. prefer_existing defaults true for argument-free launches: reuse a unique identity-matched window, never silently choose among multiple windows. URL/shortcut arguments still dispatch their intended launch. UWP-only links and launcher-to-different-executable window binding are not guaranteed; unavailable is not launch failure proof. select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y, Shift+Left, Shift+Right, Shift+Up, Shift+Down, Shift+Home, Shift+End, Ctrl+Home, Ctrl+End. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
         "instant_result": "Read original response without executing again. pending means wait; result_unknown means inspect, never retry blindly. For local steps operation_success_scope=input_route_only; check observation_status and agent_review.recovery separately. operation_succeeded is not proof of task outcome.",
         "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Missing/pending/corrupt evidence returns isError=true with status=image_unavailable, error.code and next guidance; it says nothing about whether the original input happened. Do not replay automatically. Compare both frames against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
@@ -649,12 +592,26 @@ def build_server(session):
     }
     descriptions["instant_submit"] += " Also supports kind=input_sequence, request={field_goal,text,clear_existing:true,submit_search:true|false}; observation_wait_ms applies to the final Enter observation. Use instant_run for bounded waiting and inline final image without separate polling/image calls."
     for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Experimental source-only receipt recording: learning_start request={scope:'interface',title:'...'} records standalone observations; scope:'workflow' also requires project_id (1-80 lowercase ASCII letters/digits/dashes/underscores). learning_status, learning_stop and learning_recover accept optional request={learning_id:'...'}, otherwise use current/last segment. These controls issue no GUI input. Recording is OFF initially; learning_stop stops recording, not the execution host. learning_event request={event_id:...} returns the exact event and its digest. learning_review request={review:...} stores Agent verdict and explicit before/after interface identities against event/frame hashes. learning_projection accepts optional event_ids (max 128) and returns an on-demand semantic projection, not a persisted graph. These three also accept learning_id. learning_import request={event_id,view,regions?,recognition_text?,application_binding?} imports an explicitly identified observation into the existing versioned interface library. learning_library supports query/offset/limit; learning_memory requires interface_id and optional exact version_id and returns semantic hints without historical coordinates. learning_save_interface uses interface_id/expected_revision/expected_sha256/changes, with no mandatory approval. learning_stop persists a workflow-scope graph when receipt recording is complete; standalone scope never creates a graph. learning_commit optionally names expected_sha256 to persist amended reviews or explicitly replace existing project sources. learning_project action=list|read|save|memory|adopt_interface accesses native projects; memory returns a pinned snapshot_id, optionally bounded by node_id. learning_reuse requires workflow_id/snapshot_id/edge_id and explicit variables; it returns advice or a suggested EXISTING instant command, never executes or automatically follows edges. New source-only native editor is separate from the executor. learning_recover only imports already persisted receipts and never replays input. Keep original session evidence; recording_complete is bookkeeping completeness, not learned task success."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " learning_adopt_source request={learning_id?,event_id,event_sha256,review_sha256,view,interface_id,expected_revision,expected_sha256,regions,recognition_text} explicitly adopts a reviewed NEW screenshot for the SAME interface/state. Copy event/review digests from learning_event. Supply fresh regions/OCR (explicit [] and '' clear them); historical boxes are NOT inherited. Existing meaning/application binding are preserved. Creates a content revision only, not GUI input, and does NOT update pinned workflow versions; use learning_project action=adopt_interface separately. Ordinary save never changes screenshot provenance."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " learning_workflow uses request.action=compile|read|save|start|prepare|run|continue|review|verify|status|cancel. compile requires learning_session_id, optional parameter_bindings/annotations; it returns a read-only draft with evidence and unresolved_items, never saves or overwrites an edited version. read requires workflow_id (optional program_id); save requires workflow_id,expected_sha256,definition, optional target_recipes from compile.proposed_target_recipes to persist proposed recipes with the new program; inferred rules remain pending review; start pins workflow_id,program_id,start_step_id,inputs; prepare requires run_id, optional observations and explicit vision_capabilities for input actions. prepare only returns an execution_request_id and suggested_command: inspect preview, then call the existing instant_run with that exact command and ID. run requires run_id, mode=single|until_wait, optional explicit vision_capabilities; the live host advances through the original action queue. continue requires run_id,wait_id and resumes that exact wait after its original evidence is resolved, without replacement commands or outputs. review requires run_id,execution_request_id,verdict (success/failure/uncertain),observations,outputs; it verifies the original terminal receipt. verify requires run_id,execution_request_id and a live host: it reads current native UIA evidence against the saved verification/read_spec and records the rule result without input. Unsupported/agent checks return verification_required; missing evidence cannot prove success. status/cancel require run_id. Missing upstream outputs block preparation; only outputs from this run are usable. Pending execution must be resolved before another run; cancel does not undo input. Edited definitions create immutable versions and never overwrite original observations. Cyclic branches and keyboard actions without live targets are unsupported."
+        descriptions[name] += " Learning synthesis is a separate handoff in the same Agent session: after learning_stop returns synthesis.status=awaiting_agent and synthesis.synthesis_request, consume that request directly; synthesis_prepare with learning_session_id recovers it if missing. Return parameter_bindings and annotations with the original synthesis_id and source_sha256 via synthesis_complete. synthesis_status receipts also expose synthesis_request with the draft, conversation and partial handoff measurement; this is not total model usage. Follow conversation.state: initial_reply means produce one reply; correct_once permits at most one automatic correction using last_correction/errors; awaiting_user means STOP automatic replies and explain the specific fields in the original conversation. Only after the user explicitly supplies a correction or asks to continue, call synthesis_resume with the same synthesis_id/source_sha256, after_reply_request_id from last_correction and the actual user_instruction (1..4000 characters); pass its conversation.resume_request_id on subsequent synthesis_complete replies. Never invent user input, create another session, or call prepare to reset the budget. Polling does not spend or renew replies. Pending/unknown tool results must be read with their original request ID before generating or submitting anything else. Reconnect via synthesis_status, preserve the exact source and resume_request_id, and do not reinterpret source/storage errors as correctable annotations. synthesis_complete validates and creates a pending-review draft only: it does not save a formal program or execute input. These synthesis actions do not use visual agent_command_continue or replay GUI actions."
+        descriptions[name] += " Experimental effect takeover: learning_workflow action=takeover_preview requires admission_request_id,source_run_id after explicit new-epoch admission and target selection. The original host captures fresh native evidence; never supply client observation/envelope or infer success from a launch. Inspect returned effect, next_step_id and immutable preview_sha256. action=takeover_commit requires preview_request_id,preview_sha256,mode=single|until_wait and optional explicit vision_capabilities. It reobserves the same semantic scope and imports proven source history into a paused new run without replaying old input. Continue only explicitly with the returned run_id and wait_id. For partial commit recovery, use the SAME logical preview ID/hash and mode/configuration; the original outer queue request remains immutable, so an outer failed response can require a new outer request ID. Ready readback retains original downstream scheduling and does not reobserve or dispatch. Different logical previews cannot consume the same original source. Unsupported, uncertain, drifted or missing evidence refuses takeover. These actions extend the existing command tool, not the tool inventory."
+        descriptions[name] += " Optional learning_workflow action=record_model_call accepts scope and model_call AFTER the original execution or synthesis reply receipt exists. Workflow scope={kind:workflow,run_id,step_id,execution_request_id}; synthesis scope={kind:synthesis,synthesis_id,source_sha256,reply_request_id}. model_call requires provider,model,call_id (the actual provider call identity),source (agent_current|agent_delegate|external_api|local),phase (planning|grounding|verification; synthesis planning only),status (success|failure|timeout|cancelled),usage (null or input_tokens/output_tokens with optional total_tokens), optional elapsed_ms. Submit only real supplied per-call telemetry; NEVER estimate hidden agent usage or count tool calls, handoffs or human wait as model calls. Repeated identical provider/call_id is idempotent; conflicting content or scope is rejected. Status metrics expose this separately as caller_reported_partial, independently_verified=false; global total calls/usage remain unknown. No input or judgment is performed."
+        descriptions[name] += " Experimental target_memory={recipe_id,interface_key,state_key} is accepted on recognition clicks and input_sequence field focus. Only the configured host library resolves it against current window/context evidence before visual model work. A valid current match reuses the original action API; expected misses retain their reason and use the selected source. Corrupt assets or conflicting identities fail explicitly. Standalone HTTP target_memory use requires the host. No stored coordinate replay or silent provider switching. Dynamic row recipes still require trusted run-binding integration; internal scheduling is not yet a public run/continue action."
+        descriptions[name] += " For interface scope, learning_stop/learning_commit import explicitly reviewed states as standalone content and return interface_references without generating a graph. Unreviewed observations remain unresolved; review them and commit again. Automatic minimal imports do not invent controls or overwrite existing content; use learning_import before stopping to supply regions."
+        descriptions[name] += " learning_feedback request={action:list} lists human correction issues; action=read requires issue_id and returns pinned baseline content, candidates and PNG metadata (no base64 in JSON); instant_image view=before retrieves the original baseline, and instant_run/result images other than none attach that baseline with view=before, not a live after frame; action=submit requires issue_id, expected_baseline_sha256 and changes (meaning/recognition_text/regions). Regions are a complete ordered list; omitted regions are removed, partial fields within a listed existing region inherit the pinned baseline. Submit stores a candidate only: compare/adopt in the native interface editor. New screenshots use learning_adopt_source; graph pins never advance silently. Use instant_result detail=full to read learning payloads. No GUI input or model loading. Draft, untested."
+        descriptions[name] += " Experimental learning_template: action=save requires interface_id/version_id/region_id, optional padding=6/radius=80 (window pixels); stores an immutable button crop. action=list requires interface_id/version_id. action=locate requires template_id/event_id/view/frame_sha256/interface_key/state_key plus optional learning_id; matches against that exact RECORDED frame near the original window-relative position, without a model or input. Returns matched/ambiguous/not_found or a changed-viewport/detail reason, and a capture-bound candidate. Interface identity is supplied by Agent, not visually verified by this matcher. Matching a saved frame is NOT live freshness or click authorization; current executor must recheck before any input. No automatic model fallback or old-coordinate replay."
+    for name in ("instant_submit", "instant_run"):
         descriptions[name] += " With an agent_current/agent_delegate session, step recognition, desktop_click, input_sequence and form_fill require top-level vision_capabilities (same fields as grounding capabilities). They return agent_command.v1 rather than blocking for vision. Poll agent_command_status request={command_id} using a NEW outer request_id. At awaiting_grounding read the returned original image and pending_grounding.output_schema; submit grounding_resolve for pending_grounding.request_id, then agent_command_continue request={command_id,grounding_request_id} with another new outer request_id. Never resubmit the original batch or use grounding_execute for a suspended batch. It resumes the original worker and may request further grounding. agent_command_cancel request={command_id} requests cooperative cancellation; wait for terminal status, since input may already have occurred. Active jobs reject competing input or target changes. Read_text on Agent sources returns agent_read_required plus original PNG, text=null, with no local OCR; the agent must read it. Agent routes do not automatically invoke another model or assume image capability."
         descriptions[name] += " Experimental grounding handoff: grounding_prepare request={goal,configuration:{source:'agent_current'|'agent_delegate',delegate_profile?:name},capabilities:{image_transport:'supported'|'unsupported'|'unknown',current_vision?:state,delegation?:state,model_selection?:state,delegate_vision?:state}} captures selected window and returns awaiting_grounding plus immutable image. grounding_resolve request={grounding_request_id:original_prepare_id,result:grounding.v1_object}; grounding_status/grounding_cancel request={grounding_request_id}. These four commands never click. Explicit grounding_execute request={grounding_request_id} dispatches one click through the existing action route only when the candidate is ready and live identity, viewport and target-region consistency checks pass. It does not load a local vision model or prove semantic hit. Execution is claimed durably before input and cannot be replayed: poll the original execution request ID and inspect its before/after images. Never turn coordinates into unchecked input."
         descriptions[name] += " form_fill accepts request={fields:[...],text_navigation:'recognize_each'|'tab_sequence'|'tab_groups'}, 1..32 declared fields: text {kind,field_goal,text,clear_existing,label?,tab_group?}, date {kind,field_goal,value,format}, dropdown {kind,label,option}, checkbox {kind,label,checked}, radio {kind,label}. Prefer one grouped call for all currently known fields, not one tool call per field; missing facts need not block independent known fields. Optional tab_sequence requires ONLY consecutive text fields with distinct exact accessible labels. tab_groups accepts mixed fields: assign identical tab_group strings only to adjacent text fields whose actual Tab order is known; labels must be exact and distinct within each run. New group, non-text or omitted tab_group always starts fresh recognition; tab_group is invalid outside tab_groups mode. Recognize each group head, then Tab, verify focused field label/identity, fill and read back locally; return one batch receipt and final image. Wrong focus interrupts BEFORE typing; never guesses/skips fields or auto-replays. Default recognize_each preserves mixed control handling. Compact fields include aggregate timings; full diagnostics remain available by ID. Date value must be a real ISO YYYY-MM-DD date; format is explicitly YYYY-MM-DD, DD/MM/YYYY or MM/DD/YYYY. Date fills an editable text field and checks exact displayed text; it does NOT navigate calendars, guess locale or verify server acceptance. Exact current accessible labels are required for choices; read current screenshots first. It never submits a form; already-satisfied choices are not toggled. Unknown/ambiguous/unreadable states interrupt with partial receipts. Dropdown options must belong to the opened control. Inspect original images; completion is not task success."
     descriptions["instant_result"] += " Optional detail=compact omits verbose traces; full (default) keeps the old receipt fields. images=after|both includes original PNGs in this same call; default none preserves JSON-only delivery."
     for name in ("instant_submit", "instant_run"):
         descriptions[name] += " Optional command.observation_condition={text:exact_accessible_name,control_type:Text|Hyperlink|Button|Document} enables read-only early observation for step or submit_search sequences. Requires a positive observation_wait_ms budget (navigation defaults to 2000). Only a newly appearing unique visible match, repeated and rechecked after capture, ends early. Accessible names can differ from screenshot captions. Missing/ambiguous/old matches time out and still return an image; inspect observation.condition, not operation_succeeded, for this outcome. This is not full-page readiness or task verification. Synchronous UIA and capture I/O are outside a hard timeout; no input replay. Omit the condition when no reliable marker is known."
-    for fn in (instant_start, instant_status, instant_submit, instant_result, instant_image, instant_stop, instant_run):
+    for fn in (instant_start, instant_status, instant_submit, instant_result, instant_image, instant_stop, instant_run,
+               instant_recovery_preview, instant_recover_session):
         server.add_tool(fn, name=fn.__name__, description=descriptions[fn.__name__])
     return server

@@ -1,6 +1,9 @@
+from copy import deepcopy
 from pydantic import BaseModel, Field
+
 from app.api.models.request import ROIModel
 from app.core.editing_keys import EditingKey
+
 
 class LocalKeyRequest(BaseModel):
     key: EditingKey
@@ -9,7 +12,6 @@ class LocalKeyRequest(BaseModel):
     capture_roi: ROIModel | None = None
 
 
-from copy import deepcopy
 
 
 class LocalActionFieldsError(ValueError):

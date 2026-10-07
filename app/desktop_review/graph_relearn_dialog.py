@@ -1,6 +1,7 @@
 """图修订范围内的问题记录、候选比较与显式人工采用。"""
 
 from __future__ import annotations
+from app.learning_memory.workbench_i18n import ui, tr, bind_text, initialize_i18n, language_manager
 
 from copy import deepcopy
 import json
@@ -54,7 +55,7 @@ class GraphRelearnDialog(QDialog):
         self._issue_retry: tuple[tuple[Any, ...], str] | None = None
         self._adopt_retry: tuple[tuple[Any, ...], str] | None = None
         self.setObjectName("graphRelearnDialog")
-        self.setWindowTitle("图内标记问题与比较候选")
+        ui(self.setWindowTitle, tr('图内标记问题与比较候选'))
         self.resize(920, 700)
         self._build_ui()
         self._set_controls()
@@ -66,29 +67,23 @@ class GraphRelearnDialog(QDialog):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        kind_text = "节点" if self.selection[0] == "node" else "边"
-        self.identity_label = QLabel(
-            f"{self.snapshot['logical_workflow_id']} · 图修订 {self.snapshot['revision']}\n"
-            f"当前范围：{kind_text} {self.selection[1]}"
-        )
+        kind_text = tr("节点") if self.selection[0] == "node" else tr("边")
+        self.identity_label = ui(QLabel, tr('{v0} · 图修订 {v1}\n当前范围：{v2} {v3}', v0=self.snapshot['logical_workflow_id'], v1=self.snapshot['revision'], v2=kind_text, v3=self.selection[1]))
         self.identity_label.setObjectName("graphRelearnIdentity")
         self.identity_label.setWordWrap(True)
         layout.addWidget(self.identity_label)
-        explanation = QLabel(
-            "范围只包含当前所选稳定 ID。提交问题不会调用模型；选择候选只做只读比较，"
-            "只有单独点击“采用候选为新草稿”才写入新的图修订。"
-        )
+        explanation = ui(QLabel, tr('范围只包含当前所选稳定 ID。提交问题不会调用模型；选择候选只做只读比较，只有单独点击“采用候选为新草稿”才写入新的图修订。'))
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
 
         issue_row = QHBoxLayout()
         self.issue_message = QPlainTextEdit()
         self.issue_message.setObjectName("graphRelearnIssueMessage")
-        self.issue_message.setPlaceholderText("说明这个节点或边哪里需要重新核对（不能为空）")
+        ui(self.issue_message.setPlaceholderText, tr('说明这个节点或边哪里需要重新核对（不能为空）'))
         self.issue_message.setMaximumHeight(90)
-        self.submit_issue_button = QPushButton("提交范围问题")
+        self.submit_issue_button = ui(QPushButton, tr('提交范围问题'))
         self.submit_issue_button.setObjectName("submitGraphRelearnIssueButton")
-        self.refresh_button = QPushButton("刷新反馈")
+        self.refresh_button = ui(QPushButton, tr('刷新反馈'))
         self.refresh_button.setObjectName("refreshGraphRelearnButton")
         issue_buttons = QVBoxLayout()
         issue_buttons.addWidget(self.submit_issue_button)
@@ -102,7 +97,7 @@ class GraphRelearnDialog(QDialog):
         issues_panel = QWidget()
         issues_layout = QVBoxLayout(issues_panel)
         issues_layout.setContentsMargins(0, 0, 0, 0)
-        issues_layout.addWidget(QLabel("当前范围的问题"))
+        issues_layout.addWidget(ui(QLabel, tr('当前范围的问题')))
         self.issue_list = QListWidget()
         self.issue_list.setObjectName("graphRelearnIssueList")
         issues_layout.addWidget(self.issue_list)
@@ -111,27 +106,27 @@ class GraphRelearnDialog(QDialog):
         candidate_panel = QWidget()
         candidate_layout = QVBoxLayout(candidate_panel)
         candidate_layout.setContentsMargins(0, 0, 0, 0)
-        candidate_layout.addWidget(QLabel("Agent 候选（选择不会采用）"))
+        candidate_layout.addWidget(ui(QLabel, tr('Agent 候选（选择不会采用）')))
         self.candidate_combo = QComboBox()
         self.candidate_combo.setObjectName("graphRelearnCandidateCombo")
         candidate_layout.addWidget(self.candidate_combo)
-        self.comparison_status = QLabel("尚未选择候选")
+        self.comparison_status = ui(QLabel, tr('尚未选择候选'))
         self.comparison_status.setObjectName("graphRelearnComparisonStatus")
         self.comparison_status.setWordWrap(True)
         candidate_layout.addWidget(self.comparison_status)
         self.comparison_view = QPlainTextEdit()
         self.comparison_view.setObjectName("graphRelearnComparisonView")
         self.comparison_view.setReadOnly(True)
-        self.comparison_view.setPlaceholderText("选择候选后显示每项操作的修改前 / 修改后值。")
+        ui(self.comparison_view.setPlaceholderText, tr('选择候选后显示每项操作的修改前 / 修改后值。'))
         candidate_layout.addWidget(self.comparison_view, 1)
-        self.adopt_button = QPushButton("采用候选为新草稿")
+        self.adopt_button = ui(QPushButton, tr('采用候选为新草稿'))
         self.adopt_button.setObjectName("adoptGraphRelearnCandidateButton")
         candidate_layout.addWidget(self.adopt_button)
         splitter.addWidget(candidate_panel)
         splitter.setSizes([340, 560])
         layout.addWidget(splitter, 1)
 
-        self.status_label = QLabel("正在读取当前图的反馈…")
+        self.status_label = ui(QLabel, tr('正在读取当前图的反馈…'))
         self.status_label.setObjectName("graphRelearnStatus")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -162,10 +157,10 @@ class GraphRelearnDialog(QDialog):
             return
         message = self.issue_message.toPlainText().strip()
         if not message:
-            self._error("问题说明不能为空。")
+            self._error(tr('问题说明不能为空。'))
             return
         if self.feedback is None:
-            self._error("尚未取得当前图的反馈修订，不能提交。")
+            self._error(tr('尚未取得当前图的反馈修订，不能提交。'))
             return
         scope = self._scope()
         signature = (
@@ -237,7 +232,7 @@ class GraphRelearnDialog(QDialog):
         self._adopt_retry = None
         self.comparison_view.clear()
         if not isinstance(candidate_id, str):
-            self.comparison_status.setText("当前范围没有可比较候选")
+            ui(self.comparison_status.setText, tr('当前范围没有可比较候选'))
             self._set_controls()
             return
         logical_id, revision, digest = self._graph_identity()
@@ -267,20 +262,17 @@ class GraphRelearnDialog(QDialog):
         try:
             self.issue_list.clear()
             for issue in issues:
-                item = QListWidgetItem(
-                    f"[{self._status_text(issue.get('graph_status'))}] "
-                    f"{issue.get('message', '')} · {issue['issue_id']}"
-                )
+                item = ui(QListWidgetItem, tr('[{status}] {message} · {identity}',
+                    status=self._status_text(issue.get('graph_status')),
+                    message=issue.get('message', ''), identity=issue['issue_id']))
                 item.setData(Qt.ItemDataRole.UserRole, deepcopy(issue))
                 self.issue_list.addItem(item)
             self.candidate_combo.clear()
-            self.candidate_combo.addItem("请选择候选", None)
+            ui(self.candidate_combo.addItem, tr('请选择候选'), None)
             for candidate in candidates:
-                self.candidate_combo.addItem(
-                    f"[{self._status_text(candidate.get('graph_status'))}] "
-                    f"{candidate['candidate_id']}",
-                    candidate["candidate_id"],
-                )
+                ui(self.candidate_combo.addItem, tr('[{status}] {identity}',
+                    status=self._status_text(candidate.get('graph_status')),
+                    identity=candidate['candidate_id']), candidate['candidate_id'])
             index = self.candidate_combo.findData(previous_candidate)
             self.candidate_combo.setCurrentIndex(index if index >= 0 else 0)
         finally:
@@ -288,11 +280,8 @@ class GraphRelearnDialog(QDialog):
         self.comparison = None
         self._adopt_retry = None
         self.comparison_view.clear()
-        self.comparison_status.setText("请选择一个候选查看修改前后。")
-        self.status_label.setText(
-            f"已读取反馈修订 {feedback['feedback_revision']}；"
-            f"当前范围有 {len(issues)} 个问题、{len(candidates)} 个候选。"
-        )
+        ui(self.comparison_status.setText, tr('请选择一个候选查看修改前后。'))
+        ui(self.status_label.setText, tr('已读取反馈修订 {v0}；当前范围有 {v1} 个问题、{v2} 个候选。', v0=feedback['feedback_revision'], v1=len(issues), v2=len(candidates)))
         self._set_controls()
 
     def _issue_completed(
@@ -314,7 +303,7 @@ class GraphRelearnDialog(QDialog):
             raise ValueError("persisted graph issue is missing")
         self._issue_retry = None
         self.issue_message.clear()
-        self.status_label.setText(f"问题已持久化：{persisted['issue_id']}；正在刷新列表。")
+        ui(self.status_label.setText, tr('问题已持久化：{v0}；正在刷新列表。', v0=persisted['issue_id']))
         self.refresh_feedback()
 
     def _comparison_completed(self, result: dict[str, Any], candidate_id: str) -> None:
@@ -328,14 +317,9 @@ class GraphRelearnDialog(QDialog):
         )
         self.comparison = comparison
         if within_selection:
-            self.comparison_status.setText(
-                f"候选状态：{self._status_text(comparison['status'])} · "
-                f"{'包含实际变化' if comparison['changed'] else '没有实际变化'}"
-            )
+            ui(self.comparison_status.setText, tr('候选状态：{v0} · {v1}', v0=self._status_text(comparison['status']), v1=tr('包含实际变化') if comparison['changed'] else tr('没有实际变化')))
         else:
-            self.comparison_status.setText(
-                "候选超出当前单一选择范围；可以查看差异，但不能在此对话框采用。"
-            )
+            ui(self.comparison_status.setText, tr('候选超出当前单一选择范围；可以查看差异，但不能在此对话框采用。'))
         self.comparison_view.setPlainText(
             json.dumps(
                 comparison["operation_previews"],
@@ -344,7 +328,7 @@ class GraphRelearnDialog(QDialog):
                 indent=2,
             )
         )
-        self.status_label.setText("候选仅已比较，尚未采用；当前图没有改变。")
+        ui(self.status_label.setText, tr('候选仅已比较，尚未采用；当前图没有改变。'))
         self._set_controls()
 
     def _adoption_completed(self, result: dict[str, Any]) -> None:
@@ -499,7 +483,7 @@ class GraphRelearnDialog(QDialog):
         request_id = self._request_id
         self._busy = True
         self._job_outcome = None
-        self.status_label.setText(status)
+        bind_text(self.status_label, 'setText', status)
         self._set_controls()
         job = make_job(request_id, operation, self)
         self._jobs.add(job)
@@ -536,16 +520,16 @@ class GraphRelearnDialog(QDialog):
         self._job_outcome = None
         self._busy = False
         if outcome is None:
-            self._error("图重学后台任务未返回结果；当前状态已保留。")
+            self._error(tr('图重学后台任务未返回结果；当前状态已保留。'))
             self._set_controls()
             return
         kind, result, completed = outcome
         if kind == "failure":
-            self._error(f"图重学操作失败；没有采用或覆盖任何内容：{result}")
+            self._error(tr('图重学操作失败；没有采用或覆盖任何内容：{v0}', v0=result))
             self._set_controls()
             return
         if not isinstance(result, dict):
-            self._error("图重学操作返回格式无效；当前状态已保留。")
+            self._error(tr('图重学操作返回格式无效；当前状态已保留。'))
             self._set_controls()
             return
         try:
@@ -553,7 +537,7 @@ class GraphRelearnDialog(QDialog):
                 raise ValueError("graph relearn completion callback is invalid")
             completed(result)
         except (KeyError, TypeError, ValueError) as error:
-            self._error(f"图重学响应无效；当前状态已保留：{error}")
+            self._error(tr('图重学响应无效；当前状态已保留：{v0}', v0=error))
         self._set_controls()
 
     def _set_controls(self) -> None:
@@ -577,30 +561,30 @@ class GraphRelearnDialog(QDialog):
             close_button.setEnabled(not self._busy)
 
     def _error(self, message: str) -> None:
-        self.status_label.setText(message)
+        bind_text(self.status_label, 'setText', message)
         self.errorRaised.emit(message)
 
     @staticmethod
     def _status_text(value: Any) -> str:
-        return {
+        return tr({
             "open": "待处理",
             "pending": "待人工比较",
             "current": "当前可采用",
             "stale": "已过期",
             "withdrawn": "已撤回",
             "blocked": "已阻止",
-        }.get(value, str(value or "未知"))
+        }.get(value, str(value or "未知")))
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._busy:
-            self._error("操作仍在进行，完成前不能关闭此窗口。")
+            self._error(tr('操作仍在进行，完成前不能关闭此窗口。'))
             event.ignore()
             return
         super().closeEvent(event)
 
     def reject(self) -> None:
         if self._busy:
-            self._error("操作仍在进行，完成前不能关闭此窗口。")
+            self._error(tr('操作仍在进行，完成前不能关闭此窗口。'))
             return
         super().reject()
 

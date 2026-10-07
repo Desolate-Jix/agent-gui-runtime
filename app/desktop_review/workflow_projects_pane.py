@@ -1,5 +1,6 @@
 """可持续编辑的流程项目；保存记忆不等于执行授权。"""
 from __future__ import annotations
+from app.learning_memory.workbench_i18n import ui, translated_dialog, tr, bind_text, join_text
 
 from copy import deepcopy
 from uuid import uuid4
@@ -52,7 +53,7 @@ class WorkflowProjectsPane(QWidget):
 
     @property
     def is_busy(self):
-        return bool(self._read_jobs) or self.is_edit_busy
+        return bool(self._read_jobs) or self.is_edit_busy or self.interface_pane.is_busy
 
     @property
     def is_edit_busy(self):
@@ -60,16 +61,20 @@ class WorkflowProjectsPane(QWidget):
                 or self.action_evidence_editor._busy or bool(self.action_evidence_editor._jobs))
 
     def closeEvent(self, event):
+        if self.interface_pane.is_busy:
+            self.interface_pane.cancel_loading()
+            event.ignore()
+            return
         if self.interface_picker is not None and self.interface_picker.busy:
             self.interface_picker.reject()
             event.ignore()
             return
         if self.action_evidence_editor._busy or self.action_evidence_editor._jobs:
-            self.status.setText("操作证据仍在读取或保存，请完成后再关闭项目。")
+            ui(self.status.setText, tr('操作证据仍在读取或保存，请完成后再关闭项目。'))
             event.ignore()
             return
         if self.dirty:
-            self.status.setText("项目或操作证据有未保存修改；请先保存或放弃修改。")
+            ui(self.status.setText, tr('项目或操作证据有未保存修改；请先保存或放弃修改。'))
             event.ignore()
             return
         self.cancel_loading()
@@ -88,40 +93,40 @@ class WorkflowProjectsPane(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        self.status = QLabel("打开项目，选择界面或连线直接修改。保存后可继续修改，无需定稿。")
+        self.status = ui(QLabel, tr('打开项目，选择界面或连线直接修改。保存后可继续修改，无需定稿。'))
         self.status.setWordWrap(True)
         root.addWidget(self.status)
         split = QSplitter(Qt.Orientation.Horizontal)
         left = QWidget(); sidebar = QVBoxLayout(left)
         self.project_list = QListWidget()
         self.project_list.setMinimumWidth(180)
-        sidebar.addWidget(QLabel("流程项目")); sidebar.addWidget(self.project_list, 1)
-        self.create_button = QPushButton("新建流程项目")
-        self.refresh_button = QPushButton("刷新项目")
+        sidebar.addWidget(ui(QLabel, tr('流程项目'))); sidebar.addWidget(self.project_list, 1)
+        self.create_button = ui(QPushButton, tr('新建流程项目'))
+        self.refresh_button = ui(QPushButton, tr('刷新项目'))
         sidebar.addWidget(self.create_button); sidebar.addWidget(self.refresh_button)
         split.addWidget(left)
         center = QWidget(); layout = QVBoxLayout(center)
-        self.title_edit = QLineEdit(); self.title_edit.setPlaceholderText("流程项目名称")
+        self.title_edit = QLineEdit(); ui(self.title_edit.setPlaceholderText, tr('流程项目名称'))
         layout.addWidget(self.title_edit)
         self.graph_view = NativeWorkflowGraphView()
         self.graph_view.setMinimumHeight(210)
         layout.addWidget(self.graph_view, 2)
         graph_actions = QHBoxLayout()
-        self.fit_button = QPushButton("查看全图")
-        self.link_button = QPushButton("新增跳转关系")
-        self.remove_node_button = QPushButton("移除选中界面")
+        self.fit_button = ui(QPushButton, tr('查看全图'))
+        self.link_button = ui(QPushButton, tr('新增跳转关系'))
+        self.remove_node_button = ui(QPushButton, tr('移除选中界面'))
         for button in (self.fit_button, self.link_button, self.remove_node_button):
             graph_actions.addWidget(button)
         layout.addLayout(graph_actions)
         membership = QHBoxLayout()
-        self.attach_button = QPushButton("＋ 添加已有界面")
+        self.attach_button = ui(QPushButton, tr('＋ 添加已有界面'))
         membership.addWidget(self.attach_button)
-        membership_note = QLabel("从界面库挑选，可搜索、多选；加入后再连接跳转关系。")
+        membership_note = ui(QLabel, tr('从界面库挑选，可搜索、多选；加入后再连接跳转关系。'))
         membership_note.setWordWrap(True)
         membership.addWidget(membership_note, 1)
         layout.addLayout(membership)
         self.details = QStackedWidget()
-        self.empty_detail = QLabel("点击图中的界面查看截图和识别框；点击连线修改跳转。")
+        self.empty_detail = ui(QLabel, tr('点击图中的界面查看截图和识别框；点击连线修改跳转。'))
         self.empty_detail.setWordWrap(True)
         self.details.addWidget(self.empty_detail)
         self.interface_pane = InterfaceReviewPane(self.facade)
@@ -133,8 +138,7 @@ class WorkflowProjectsPane(QWidget):
         self.action_evidence_editor.graph_box.hide()
         self.action_evidence_editor.review_graph_button.hide()
         self.action_evidence_editor.graph_relearn_button.hide()
-        self.action_evidence_editor.status_label.setText(
-            "这是流程中的权威动作证据节点，不是独立学习界面；保存只修改当前图草稿，不授予执行权限。")
+        ui(self.action_evidence_editor.status_label.setText, tr('这是流程中的权威动作证据节点，不是独立学习界面；保存只修改当前图草稿，不授予执行权限。'))
         self.action_evidence_editor.dirtyChanged.connect(lambda _value: self.dirtyChanged.emit(self.dirty))
         self.action_evidence_editor.busyChanged.connect(self._action_busy_changed)
         self.action_evidence_editor.errorRaised.connect(self.status.setText)
@@ -145,16 +149,16 @@ class WorkflowProjectsPane(QWidget):
         self.edge_region = QComboBox(); self.edge_action = QComboBox()
         for label, value in (("点击", "click"), ("填写文本", "fill_field"), ("观察", "observe"),
                              ("打开详情", "open_detail"), ("继续下一步", "continue_next_step")):
-            self.edge_action.addItem(label, value)
+            ui(self.edge_action.addItem, tr(label), value)
         self.edge_action.setEditable(True)
         self.edge_result = QLineEdit(); self.edge_condition = QLineEdit()
         for label, control in (("从哪个界面", self.edge_source), ("操作哪个框", self.edge_region),
                                ("操作", self.edge_action), ("到哪个界面", self.edge_target),
                                ("预期变化", self.edge_result), ("跳转条件", self.edge_condition)):
-            form.addRow(label, control)
-        self.edge_note = QLabel("人工修改的是流程记忆；尚未验证的关系不会被当作执行证据。")
+            ui(form.addRow, tr(label), control)
+        self.edge_note = ui(QLabel, tr('人工修改的是流程记忆；尚未验证的关系不会被当作执行证据。'))
         self.edge_note.setWordWrap(True); form.addRow(self.edge_note)
-        self.remove_edge_button = QPushButton("删除这条关系")
+        self.remove_edge_button = ui(QPushButton, tr('删除这条关系'))
         form.addRow(self.remove_edge_button)
         self.details.addWidget(self.edge_editor)
         detail_scroll = QScrollArea()
@@ -163,8 +167,8 @@ class WorkflowProjectsPane(QWidget):
         detail_scroll.setWidget(self.details)
         layout.addWidget(detail_scroll, 3)
         save_row = QHBoxLayout()
-        self.save_button = QPushButton("保存项目修改")
-        self.discard_button = QPushButton("放弃项目修改")
+        self.save_button = ui(QPushButton, tr('保存项目修改'))
+        self.discard_button = ui(QPushButton, tr('放弃项目修改'))
         save_row.addWidget(self.save_button); save_row.addWidget(self.discard_button); save_row.addStretch()
         layout.addLayout(save_row)
         split.addWidget(center); split.setSizes([210, 1030])
@@ -191,10 +195,10 @@ class WorkflowProjectsPane(QWidget):
 
     def _allow_replace(self):
         if self.is_edit_busy:
-            self.status.setText("界面选择器仍在读取或保存，请完成后再修改项目。")
+            ui(self.status.setText, tr('界面选择器仍在读取或保存，请完成后再修改项目。'))
             return False
         if self.dirty:
-            self.status.setText("请先保存或放弃修改，再切换、刷新或改变项目成员。")
+            ui(self.status.setText, tr('请先保存或放弃修改，再切换、刷新或改变项目成员。'))
             return False
         return True
 
@@ -216,7 +220,7 @@ class WorkflowProjectsPane(QWidget):
             self._wanted_project = self.snapshot['logical_workflow_id']
         self._read_sequence += 1
         self._list_request = self._read_sequence
-        self.status.setText("正在读取流程项目列表…可继续切换页面或关闭窗口。")
+        ui(self.status.setText, tr('正在读取流程项目列表…可继续切换页面或关闭窗口。'))
         operation = getattr(self.facade, 'list_workflow_project_summaries', None)
         self._start_read('list', self._list_request,
                          operation if callable(operation) else self.facade.list_workflow_projects)
@@ -253,11 +257,10 @@ class WorkflowProjectsPane(QWidget):
                 self._project_request = None
             if self.dirty:
                 self._restore_project_selection()
-                self.status.setText("读取期间出现未保存修改，已保留编辑；请保存或放弃后再刷新。")
+                ui(self.status.setText, tr('读取期间出现未保存修改，已保留编辑；请保存或放弃后再刷新。'))
             elif not outcome[0]:
                 self._restore_project_selection()
-                self.status.setText(("读取项目失败：" if kind == 'list' else "打开项目失败：")
-                                    + str(outcome[1]).splitlines()[0])
+                ui(self.status.setText, (tr('读取项目失败：') if kind == 'list' else tr('打开项目失败：')) + str(outcome[1]).splitlines()[0])
                 self.status.setToolTip(str(outcome[1]))
             else:
                 try:
@@ -267,7 +270,7 @@ class WorkflowProjectsPane(QWidget):
                         self._install(outcome[1])
                 except Exception as error:
                     self._restore_project_selection()
-                    self.status.setText(f"项目内容无效，未替换当前编辑：{error}")
+                    ui(self.status.setText, tr('项目内容无效，未替换当前编辑：{v0}', v0=error))
         if self._project_job is None and self._pending_project is not None:
             pending_id, workflow_id = self._pending_project
             self._pending_project = None
@@ -302,12 +305,12 @@ class WorkflowProjectsPane(QWidget):
         if target is not None:
             self._request_project(target.data(Qt.ItemDataRole.UserRole))
         elif self._wanted_project is not None:
-            self.status.setText("所属学习流程暂不可用，请刷新；未创建替代流程。")
+            ui(self.status.setText, tr('所属学习流程暂不可用，请刷新；未创建替代流程。'))
         else:
             self.snapshot = None
             self.graph_view.clear_graph()
             self.details.setCurrentWidget(self.empty_detail)
-            self.status.setText("还没有流程项目。可以新建项目，然后加入已学界面并连接关系。")
+            ui(self.status.setText, tr('还没有流程项目。可以新建项目，然后加入已学界面并连接关系。'))
 
     def _request_project(self, workflow_id):
         if self._project_request is not None and self._wanted_project == workflow_id:
@@ -315,7 +318,7 @@ class WorkflowProjectsPane(QWidget):
         self._wanted_project = workflow_id
         self._read_sequence += 1
         self._project_request = self._read_sequence
-        self.status.setText("正在打开流程项目…可选择其他项目或切换页面。")
+        ui(self.status.setText, tr('正在打开流程项目…可选择其他项目或切换页面。'))
         if self._project_job is not None:
             self._pending_project = (self._project_request, workflow_id)
             return
@@ -343,6 +346,7 @@ class WorkflowProjectsPane(QWidget):
     def cancel_loading(self):
         """停止装入结果；在途只读任务自然结束前仍由页面持有。"""
         self._closing_reads = True
+        self.interface_pane.cancel_loading()
         self._list_request = None
         self._project_request = None
         self._pending_project = None
@@ -376,7 +380,7 @@ class WorkflowProjectsPane(QWidget):
                         or self.snapshot["logical_workflow_id"] != workflow_id):
                     self._request_project(workflow_id)
                 return
-        self.status.setText("所属学习流程暂不可用，请刷新；未创建替代流程。")
+        ui(self.status.setText, tr('所属学习流程暂不可用，请刷新；未创建替代流程。'))
 
     def _install(self, snapshot):
         self.graph_view.set_project(snapshot)
@@ -395,16 +399,16 @@ class WorkflowProjectsPane(QWidget):
         warnings = snapshot.get('warnings') or []
         from .learning_catalog import learning_project_notice
         notice = learning_project_notice(snapshot)
-        self.status.setText("；".join([notice, *map(str, warnings)]) if notice or warnings else "项目可持续修改。界面按最新保存内容显示；点击节点查看内容，点击连线修改关系。")
+        ui(self.status.setText, join_text('; ', [tr(notice), *map(str, warnings)]) if notice or warnings else tr('项目可持续修改。界面按最新保存内容显示；点击节点查看内容，点击连线修改关系。'))
         self.dirtyChanged.emit(False)
         self._update_loading_controls()
 
     def node_selected(self, node_id):
         if self._dirty:
-            self.status.setText("项目关系有未保存修改。请先保存项目，再编辑界面内容。")
+            ui(self.status.setText, tr('项目关系有未保存修改。请先保存项目，再编辑界面内容。'))
             return
         if self.interface_pane.dirty:
-            self.status.setText("请先保存或放弃当前界面修改。")
+            ui(self.status.setText, tr('请先保存或放弃当前界面修改。'))
             if self._node_id: self.graph_view.select_node(self._node_id)
             return
         node = next((n for n in self.snapshot['graph']['nodes'] if n['node_id'] == node_id), None)
@@ -415,7 +419,7 @@ class WorkflowProjectsPane(QWidget):
             source = self.facade.load_graph_revision(
                 self.snapshot['logical_workflow_id'], self.snapshot['source_revision'])
             if source.get('source_refs', {}).get('kind') != 'recorded_actions':
-                self.empty_detail.setText("这是原学习图中的证据节点；当前项目不能直接修改。独立界面可通过“加入已有界面”添加。")
+                ui(self.empty_detail.setText, tr('这是原学习图中的证据节点；当前项目不能直接修改。独立界面可通过“加入已有界面”添加。'))
                 self.details.setCurrentWidget(self.empty_detail); return
             try:
                 self._loading_action_editor = True
@@ -431,28 +435,35 @@ class WorkflowProjectsPane(QWidget):
             value = self.facade.load_interface_content(reference['interface_id'], reference['version_id'])
             latest = self.facade.load_interface_content(reference['interface_id'])
             if latest['version_id'] != reference['version_id']:
+                if (self.snapshot['graph'].get('source', {}).get('kind') == 'execution_memory'
+                        or getattr(self.facade, 'pinned_interface_references', False)):
+                    self.interface_pane.set_snapshot(value)
+                    self.interface_pane.set_read_only(True)
+                    self.details.setCurrentWidget(self.interface_pane)
+                    ui(self.status.setText, tr('当前节点固定旧版本；请在界面库修改后，明确采用最新版本。'))
+                    return
                 self._install(self.facade.load_workflow_project(self.snapshot['logical_workflow_id']))
                 return self.node_selected(node_id)
             self.interface_pane.set_read_only(False)
             self.interface_pane.set_snapshot(value)
             self.details.setCurrentWidget(self.interface_pane)
             self.graph_view.select_node(node_id)
-        except Exception as error: self.status.setText(f"打开界面失败：{error}")
+        except Exception as error: ui(self.status.setText, tr('打开界面失败：{v0}', v0=error))
 
     def _fill_regions(self, preferred=None):
-        self.edge_region.clear(); self.edge_region.addItem("无特定框", None)
+        self.edge_region.clear(); ui(self.edge_region.addItem, tr('无特定框'), None)
         node = next((n for n in self.snapshot['graph']['nodes'] if n['node_id'] == self.edge_source.currentData()), {})
         for region in node.get('regions', []):
             self.edge_region.addItem(str(region.get('name') or region['region_id']), region['region_id'])
         index = self.edge_region.findData(preferred)
         if preferred and index < 0:
-            self.edge_region.addItem("原目标框已不存在（请选择）", preferred)
+            ui(self.edge_region.addItem, tr('原目标框已不存在（请选择）'), preferred)
             index = self.edge_region.count()-1
         self.edge_region.setCurrentIndex(max(0, index))
 
     def edge_selected(self, edge_id):
         if self.interface_pane.dirty:
-            self.status.setText("请先保存或放弃当前界面修改。"); return
+            ui(self.status.setText, tr('请先保存或放弃当前界面修改。')); return
         edge = next((e for e in self._edges if e['edge_id'] == edge_id), None)
         if edge is None: return
         self._loading = True; self._edge_id = edge_id; self._node_id = None
@@ -492,13 +503,13 @@ class WorkflowProjectsPane(QWidget):
     def _mark_dirty(self):
         if self._loading or self.snapshot is None: return
         self._dirty = True; self.dirtyChanged.emit(True)
-        self.status.setText("项目有未保存修改。保存即可继续使用，不需要审核或发布。")
+        ui(self.status.setText, tr('项目有未保存修改。保存即可继续使用，不需要审核或发布。'))
 
     def add_edge(self):
         if not self.snapshot or self.interface_pane.dirty: return
         nodes = self.snapshot['graph']['nodes']
         if not nodes:
-            self.status.setText("请先加入界面，再新增跳转关系。"); return
+            ui(self.status.setText, tr('请先加入界面，再新增跳转关系。')); return
         edge = {'edge_id': 'edge-user-'+uuid4().hex, 'source_node_id': nodes[0]['node_id'],
             'target_node_id': nodes[min(1, len(nodes)-1)]['node_id'], 'action_type': 'click',
             'target_region_id': None, 'expected_result': '', 'condition': ''}
@@ -522,7 +533,7 @@ class WorkflowProjectsPane(QWidget):
             self.graph_view.set_project(preview)
             if self._edge_id: self.graph_view.select_edge(self._edge_id)
         except ValueError:
-            self.status.setText("关系信息尚不完整；补充后再保存，当前编辑不会丢失。")
+            ui(self.status.setText, tr('关系信息尚不完整；补充后再保存，当前编辑不会丢失。'))
 
     def save_current(self):
         if self.interface_pane.dirty:
@@ -542,8 +553,8 @@ class WorkflowProjectsPane(QWidget):
             self._install(result)
             current = self.project_list.currentItem()
             if current: current.setText(result['graph']['workflow']['goal'])
-            self.status.setText("项目修改已保存；后续仍可随时修改。")
-        except Exception as error: self.status.setText(f"保存失败，修改已保留：{error}")
+            ui(self.status.setText, tr('项目修改已保存；后续仍可随时修改。'))
+        except Exception as error: ui(self.status.setText, tr('保存失败，修改已保留：{v0}', v0=error))
 
     def discard_changes(self):
         self.interface_pane.discard_changes()
@@ -552,17 +563,21 @@ class WorkflowProjectsPane(QWidget):
         self._dirty = False
         if self.snapshot:
             try: self._install(self.facade.load_workflow_project(self.snapshot['logical_workflow_id']))
-            except Exception as error: self.status.setText(f"重新读取失败：{error}")
+            except Exception as error: ui(self.status.setText, tr('重新读取失败：{v0}', v0=error))
 
     def _interface_saved(self, value):
         if self.snapshot is None: return
         if self._dirty:
-            self.status.setText("界面已保存。项目另有未保存关系，请保留编辑并核对引用后保存。")
+            ui(self.status.setText, tr('界面已保存。项目另有未保存关系，请保留编辑并核对引用后保存。'))
             return
         node = self._node_id
         self._install(self.facade.load_workflow_project(self.snapshot['logical_workflow_id']))
         if node: self.node_selected(node)
-        self.status.setText("界面已保存；所有引用它的项目在下次打开/刷新时读取最新内容。")
+        if (self.snapshot['graph'].get('source', {}).get('kind') == 'execution_memory'
+                or getattr(self.facade, 'pinned_interface_references', False)):
+            ui(self.status.setText, tr('界面新版本已保存；流程仍固定原版本，请明确采用最新版本后再复用。'))
+        else:
+            ui(self.status.setText, tr('界面已保存；所有引用它的项目在下次打开/刷新时读取最新内容。'))
 
     def _action_revision_changed(self, value):
         if self._loading_action_editor or self.snapshot is None:
@@ -582,38 +597,38 @@ class WorkflowProjectsPane(QWidget):
         if self._delete_after_picker or value is None or self.snapshot is None or self.action_evidence_editor._busy:
             return
         if self._dirty or self.interface_pane.dirty or self.action_evidence_editor._dirty:
-            self.status.setText("动作证据图已变化，但项目仍有未保存修改；请先保存或放弃项目修改，再刷新来源。")
+            ui(self.status.setText, tr('动作证据图已变化，但项目仍有未保存修改；请先保存或放弃项目修改，再刷新来源。'))
             return
         node = self._node_id
         try:
             current = self.facade.load_graph_revision(self.snapshot['logical_workflow_id'])
             if (current.get('revision') != value.get('revision')
                     or current.get('content_sha256') != value.get('content_sha256')):
-                self.status.setText("操作证据来源已有更新；当前编辑未被覆盖，请刷新后再继续。")
+                ui(self.status.setText, tr('操作证据来源已有更新；当前编辑未被覆盖，请刷新后再继续。'))
                 return
             self._pending_action_revision = None
             self._install(self.facade.load_workflow_project(self.snapshot['logical_workflow_id']))
             if node: self.node_selected(node)
-            self.status.setText("动作证据节点修改已保存；项目已读取新的确切图修订。")
+            ui(self.status.setText, tr('动作证据节点修改已保存；项目已读取新的确切图修订。'))
         except Exception as error:
-            self.status.setText(f"动作证据已保存，但项目刷新失败：{error}")
+            ui(self.status.setText, tr('动作证据已保存，但项目刷新失败：{v0}', v0=error))
 
     def create_project(self):
         if not self._allow_replace(): return
         values = self.facade.list_interface_contents(False)
         if not values:
-            self.status.setText("请先接收一个界面，项目将沿用该学习连接。无需批准界面。"); return
-        title, ok = QInputDialog.getText(self, "新建流程项目", "项目名称")
+            ui(self.status.setText, tr('请先接收一个界面，项目将沿用该学习连接。无需批准界面。')); return
+        title, ok = translated_dialog(QInputDialog.getText, self, tr('新建流程项目'), tr('项目名称'))
         if not ok or not title.strip(): return
         tasks = sorted({v['source']['task_id'] for v in values})
         task = tasks[0]
         if len(tasks) > 1:
-            task, ok = QInputDialog.getItem(self, "选择学习连接", "项目所属连接", tasks, 0, False)
+            task, ok = translated_dialog(QInputDialog.getItem, self, tr('选择学习连接'), tr('项目所属连接'), tasks, 0, False)
             if not ok: return
         try:
             graph = self.facade.create_workflow_graph(title.strip(), task)
             self.snapshot = self.facade.load_workflow_project(graph['logical_workflow_id']); self.refresh()
-        except Exception as error: self.status.setText(f"创建失败：{error}")
+        except Exception as error: ui(self.status.setText, tr('创建失败：{v0}', v0=error))
 
     def attach_interface(self):
         if not self._allow_replace() or not self.snapshot: return
@@ -649,14 +664,14 @@ class WorkflowProjectsPane(QWidget):
             self.graph_view.fit_graph()
             if nodes:
                 self.node_selected(nodes[0]['node_id'])
-            self.status.setText(f"已加入 {len(references)} 个界面，已打开其中一个。可继续添加，或点击“新增跳转关系”连接它们。")
+            ui(self.status.setText, tr('已加入 {v0} 个界面，已打开其中一个。可继续添加，或点击“新增跳转关系”连接它们。', v0=len(references)))
         except Exception as error:
-            self.status.setText(f"界面已加入，但项目显示刷新失败；请刷新项目，不要重复添加：{error}")
+            ui(self.status.setText, tr('界面已加入，但项目显示刷新失败；请刷新项目，不要重复添加：{v0}', v0=error))
 
     def detach_interface(self):
         if not self._allow_replace() or not self.snapshot or not self._node_id: return
         if any(self._node_id in (e['source_node_id'], e['target_node_id']) for e in self._edges):
-            self.status.setText("这个界面仍有跳转关系。请先删除相关连线并保存，再移除界面；界面原件不会删除。"); return
+            ui(self.status.setText, tr('这个界面仍有跳转关系。请先删除相关连线并保存，再移除界面；界面原件不会删除。')); return
         try:
             source = self.facade.load_graph_revision(self.snapshot['logical_workflow_id'], self.snapshot['source_revision'])
             node = next(n for n in source['graph']['nodes'] if n['node_id'] == self._node_id)
@@ -664,5 +679,5 @@ class WorkflowProjectsPane(QWidget):
             self.facade.detach_interface_from_workflow(source['logical_workflow_id'], ref['interface_id'], ref['version_id'],
                 source['revision'], source['content_sha256'], uuid4().hex)
             self._install(self.facade.load_workflow_project(source['logical_workflow_id']))
-            self.status.setText("已移除项目引用；独立界面仍在界面库中。")
-        except Exception as error: self.status.setText(f"移除失败：{error}")
+            ui(self.status.setText, tr('已移除项目引用；独立界面仍在界面库中。'))
+        except Exception as error: ui(self.status.setText, tr('移除失败：{v0}', v0=error))

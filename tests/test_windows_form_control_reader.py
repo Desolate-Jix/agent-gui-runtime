@@ -50,6 +50,8 @@ def test_complete_form_tree_above_512_still_checks_later_duplicate(setup):
 @pytest.fixture(autouse=True)
 def compare_elements_boundary(monkeypatch):
     monkeypatch.setattr(reader, "_same_element", lambda left, right: left is right, raising=False)
+    from app.agent import windows_text_field_reader as text_reader
+    monkeypatch.setattr(text_reader, '_native_root_handle', lambda hwnd: {10: 10, 99: 99}.get(hwnd))
 
 
 def rect(x=100, y=200, w=600, h=500):
@@ -61,6 +63,7 @@ class Node:
                  pid=20, handle=10, visible=True, enabled=True, password=False):
         self.element_info = NS(name=name, control_type=kind, runtime_id=list(rid),
                                process_id=pid, rectangle=rect(120, 230, 100, 25))
+        self.element_info.handle = handle
         self.element_info.element = self
         self.CurrentIsPassword = password
         self.CurrentProcessId = pid
@@ -74,6 +77,17 @@ class Node:
 
     def top_level_parent(self):
         return NS(element_info=NS(handle=self.top_handle))
+
+    @property
+    def top_handle(self):
+        return self.element_info.handle
+
+    @top_handle.setter
+    def top_handle(self, value):
+        self.element_info.handle = value
+
+    def parent(self):
+        return self.parent_node
 
     def is_visible(self):
         return self.visible
@@ -107,6 +121,8 @@ class Array:
 @pytest.fixture
 def setup(monkeypatch):
     def build(*controls, identities=None, bounds=None):
+        from app.agent import windows_text_field_reader as text_reader
+        monkeypatch.setattr(text_reader, '_native_root_handle', lambda hwnd: {10: 10, 99: 99}.get(hwnd))
         monkeypatch.setattr(reader, "_native_owned_popups", lambda handle, pid: [])
         root = Node("root", "Window", (0, 1), children=controls)
         snapshots = list(identities or [IDENTITY, IDENTITY])

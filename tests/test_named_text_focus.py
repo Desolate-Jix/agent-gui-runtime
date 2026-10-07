@@ -13,6 +13,13 @@ from tests.test_windows_form_control_reader import Node, Walker, rect, IDENTITY
 def desktop(monkeypatch):
     def build(*nodes):
         root = Node('root', 'Window', (0, 1), children=nodes)
+        root.element_info.handle = 10
+        pending = [root]
+        while pending:
+            node = pending.pop()
+            node.parent = lambda node=node: node.parent_node
+            pending.extend(node.nodes)
+        monkeypatch.setattr(text_reader, '_native_root_handle', lambda hwnd: {10: 10}.get(hwnd))
         monkeypatch.setattr(form_reader, '_finite_children', lambda node: node.nodes)
         monkeypatch.setattr(form_reader, '_same_element', lambda a, b: a is b)
         monkeypatch.setattr(form_reader, '_uia_factory', lambda: (
@@ -85,7 +92,8 @@ def test_real_probe_enforces_label_before_returning_binding(monkeypatch):
     wrapper.element_info.rectangle = rect(20, 30, 100, 40)
     wrapper.is_visible = lambda: True
     wrapper.is_enabled = lambda: True
-    wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+    wrapper.parent = lambda: NS(element_info=NS(handle=10, process_id=20))
+    monkeypatch.setattr(text_reader, '_native_root_handle', lambda hwnd: {10: 10}.get(hwnd))
     wrapper.iface_text.DocumentRange.GetAttributeValue = lambda _: False
     del wrapper.iface_value
     manager = NS(get_bound_window=lambda: NS(handle=10, process_id=20, rect=rect(0, 0)))

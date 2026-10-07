@@ -14,12 +14,56 @@ from app.core.local_input_policy import _local_operator_input_scope, _local_oper
 from app.core.runtime_artifacts import RuntimeTimer
 from app.core.screenshot import ScreenshotService, CaptureVisibilityError
 from app.core.observation_policy import local_action_observation_kind, resolve_render_grace_ms
-from .conditional_observation import UIATextConditionProbe, observe_until_condition, validate_condition
-from .local_action_contract import LocalActionFieldsError, _validated_request
+from app.execution.conditional_observation import UIATextConditionProbe, observe_until_condition, validate_condition
+from app.execution.local_action_contract import LocalActionFieldsError, _validated_request
 from .post_action_recovery import observe_recovery_windows
 
 
 class LocalDirectStepMixin:
+    def _prepare_execution_window_on_owner(self, handle, pid):
+        from app.core.window_preparation import _mint_window_preparation_permit
+        if type(handle) is not int or handle <= 0 or type(pid) is not int or pid <= 0:
+            raise ValueError("execution_observation_target_invalid")
+        manager = self._windows()
+        bound = manager.bind_window_by_handle(handle)
+        reader = WindowsNativeIdentityReader(window_manager=manager)
+        identity = validate_native_identity_fact(reader.read_identity(handle),
+            target_window_handle=handle, expected_process_id=pid)
+        if identity is None or bound is None or bound.handle != handle or bound.process_id != pid:
+            raise ValueError("memory_execution_target_identity_changed")
+        geometry = _window_rect(bound)
+        permit = _mint_window_preparation_permit(manager, identity, reader)
+        manager.prepare_bound_window(permit)
+        current = manager.get_bound_window()
+        checked = validate_native_identity_fact(reader.read_identity(handle),
+            target_window_handle=handle, expected_process_id=pid)
+        if (current is None or current.handle != handle or current.process_id != pid
+                or checked != identity or _window_rect(current) != geometry):
+            raise ValueError("memory_execution_target_identity_or_geometry_changed")
+        if current.is_active is not True:
+            raise PermissionError("memory_execution_target_focus_unverified")
+
+    def prepare_memory_grounding(self, *, target_window_handle, target_process_id, request, action=None,
+                                 memory_bindings=None):
+        from app.learning_memory.runtime_target import prepare_memory_grounding
+        def prepare():
+            with _local_operator_step_scope():
+                self._prepare_execution_window_on_owner(target_window_handle, target_process_id)
+                return prepare_memory_grounding(self, request=request,
+                    handle=target_window_handle, pid=target_process_id, action=action,
+                    memory_bindings=memory_bindings)
+        return self._owner.call(prepare)
+
+    def _run_prepared_target_observation(self, handle, pid, observe):
+        # 只为明确执行读取准备目标，普通观察与验证不调用此入口。
+        if not callable(observe):
+            raise TypeError("execution observation callback required")
+        def run():
+            with _local_operator_step_scope():
+                self._prepare_execution_window_on_owner(handle, pid)
+                return observe()
+        return self._owner.call(run)
+
     def prepare_local_step_models(self, *, prepare_ocr: bool = True) -> dict:
         """显式只读准备并复用既有驻留池，不附加运行时或赋予输入权限。"""
         if type(prepare_ocr) is not bool:
@@ -67,15 +111,45 @@ class LocalDirectStepMixin:
     def execute_local_step(self, *, target_window_handle: int, target_process_id: int,
                            operation: str, request: dict, include_observation: bool = False,
                            observation_wait_ms: int | None = None, observation_condition: dict | None = None,
-                           control_target=None, keyboard_target=None, focus_target=None, grounding_target=None) -> dict:
+                           control_target=None, keyboard_target=None, focus_target=None, grounding_target=None,
+                           memory_target=None, memory_action=None, memory_resolution=None,
+                           memory_bindings=None, learning_context=None, selection_dispatch_boundary=None) -> dict:
         """仅本地协调器入口；不经 Agent JSON 关闭策略，也不要求一次性执行凭据。"""
         timer = RuntimeTimer(contract_version="local_step_invocation_timing_v1")
         timing_context = {"invocation_id": "local-invocation-" + uuid4().hex,
                           "include_observation": include_observation, "observation_wait_ms": observation_wait_ms}
+        if selection_dispatch_boundary is not None:
+            if not callable(selection_dispatch_boundary) or request.get('selection_intent') != 'ensure_selected':
+                raise ValueError('selection_dispatch_boundary_invalid')
+            timing_context['selection_dispatch_boundary'] = selection_dispatch_boundary
+        learning_context = deepcopy(learning_context) if learning_context is not None else None
         failure = None
         try:
             with timer.step("request_validation"):
+                if request.get('selection_intent') is not None:
+                    from app.learning_memory.selection_satisfaction import validate_selection_intent
+                    validate_selection_intent({'kind': 'click', **request})
+                    if learning_context is not None:
+                        raise ValueError('selection_intent_learning_capture_unsupported')
+                    if operation != 'execute_recognition_plan' or request.get('target_memory') is None:
+                        raise ValueError('selection_row_name_reference_required')
                 from app.core.agent_grounding_target import AgentGroundingTarget
+                from app.core.memory_grounding_target import MemoryGroundingTarget
+                if memory_target is not None and (operation != "execute_recognition_plan"
+                        or type(memory_target) is not MemoryGroundingTarget
+                        or memory_target.goal != request.get("goal")
+                        or grounding_target is not None or keyboard_target is not None):
+                    raise ValueError("internal memory grounding target mismatch")
+                if (memory_target is not None and request.get("target_memory") is not None
+                        and memory_target.reference != request["target_memory"]):
+                    raise ValueError("internal memory grounding reference mismatch")
+                if memory_action is not None and (operation != "execute_recognition_plan"
+                        or request.get("target_memory") is None or not isinstance(memory_action, dict)
+                        or memory_action.get("field_goal", memory_action.get("goal")) != request.get("goal")):
+                    raise ValueError("internal memory action mismatch")
+                if memory_bindings is not None and (operation != "execute_recognition_plan"
+                        or request.get("target_memory") is None or not isinstance(memory_bindings, dict)):
+                    raise ValueError("internal memory bindings mismatch")
                 if grounding_target is not None and (operation != "execute_recognition_plan"
                         or type(grounding_target) is not AgentGroundingTarget
                         or grounding_target.goal != request.get("goal")
@@ -114,7 +188,6 @@ class LocalDirectStepMixin:
             with timer.step("coordinator_begin"):
                 self._begin("idle")
             configuration = None
-            prepare_model = operation == "execute_recognition_plan" and self._uses_production_factory and grounding_target is None
             model_preparation_owned = False
             try:
                 with timer.step("host_preparation"):
@@ -127,6 +200,22 @@ class LocalDirectStepMixin:
                         if self._model_service is not None:
                             raise self._error("model_service_cleanup_pending", "release the previous model owner before a local step")
                     self._require_host_ready(require_unattached=True)
+                if (operation == "execute_recognition_plan" and request.get("target_memory") is not None
+                        and grounding_target is None and memory_target is None):
+                    with timer.step("memory_resolution"):
+                        memory_target, memory_resolution = self.prepare_memory_grounding(
+                            target_window_handle=target_window_handle, target_process_id=target_process_id,
+                            request=request, action=memory_action, memory_bindings=memory_bindings)
+                if memory_resolution is not None:
+                    timing_context["memory_resolution"] = deepcopy(memory_resolution)
+                    if memory_target is None and memory_resolution.get("status") in {"miss", "ambiguous", "unsupported"}:
+                        if request.get('selection_intent') is not None:
+                            raise ValueError('selection_unique_current_row_required')
+                        request = deepcopy(request)
+                        request["goal"] = memory_resolution.get("grounding_goal", request["goal"])
+                        request.pop("target_memory", None)
+                prepare_model = (operation == "execute_recognition_plan" and self._uses_production_factory
+                                 and grounding_target is None and memory_target is None)
                 if prepare_model:
                     with timer.step("configuration_load"):
                         from app.vision.configuration import load_formal_vision_configuration
@@ -147,7 +236,8 @@ class LocalDirectStepMixin:
                     lambda stage: self._execute_local_step_on_owner(target_window_handle,
                         target_process_id, operation, request, configuration, timing_context=timing_context,
                         control_target=control_target, keyboard_target=keyboard_target,
-                        focus_target=focus_target, grounding_target=grounding_target),
+                        focus_target=focus_target, grounding_target=grounding_target, memory_target=memory_target,
+                        learning_context=learning_context),
                     includes="local_step_timings")
             finally:
                 try:
@@ -170,7 +260,8 @@ class LocalDirectStepMixin:
                 failure.add_note("local step timing persistence failed: " + type(timing_error).__name__)
 
     def _execute_local_step_on_owner(self, handle, pid, operation, request, configuration=None,
-                                     *, timing_context, control_target=None, keyboard_target=None, focus_target=None, grounding_target=None):
+                                     *, timing_context, control_target=None, keyboard_target=None, focus_target=None,
+                                     grounding_target=None, memory_target=None, learning_context=None):
         timer = RuntimeTimer(contract_version="local_step_owner_timing_v1")
         try:
             from app.vision.configuration import pinned_vision_configuration
@@ -178,7 +269,19 @@ class LocalDirectStepMixin:
             from app.core.local_keyboard_target import local_keyboard_target_scope
             from app.core.local_text_focus import local_text_focus_scope
             from app.core.agent_grounding_target import agent_grounding_scope
-            with _local_operator_step_scope(), local_control_target_scope(control_target), local_keyboard_target_scope(keyboard_target), local_text_focus_scope(focus_target), agent_grounding_scope(grounding_target), (pinned_vision_configuration(configuration) if configuration else nullcontext()):
+            from app.core.memory_grounding_target import memory_grounding_scope
+            if request.get('selection_intent') is not None:
+                if memory_target is None or not memory_target.selection_enabled or control_target is not None:
+                    raise ValueError('selection_context_required')
+                state = memory_target.selection_preflight()
+                timing_context['selection_preflight'] = state
+                if state['selected'] is False:
+                    control_target = memory_target.selection_control()
+            capture_scope = nullcontext()
+            if learning_context is not None:
+                from app.learning_memory.learning_observation_capture import learning_capture_scope
+                capture_scope = learning_capture_scope(self, learning_context)
+            with _local_operator_step_scope(), local_control_target_scope(control_target), local_keyboard_target_scope(keyboard_target), local_text_focus_scope(focus_target), agent_grounding_scope(grounding_target), memory_grounding_scope(memory_target), (pinned_vision_configuration(configuration) if configuration else nullcontext()), capture_scope:
                 return self._perform_local_step_on_owner(handle, pid, operation, request, timer, timing_context)
         finally:
             timing_context["local_step_timings"] = {**timer.to_dict(), "scope": "owner_execution",
@@ -204,6 +307,8 @@ class LocalDirectStepMixin:
                   "automatic_safety_interception": False, "one_time_authority_required": False,
                   "learning_enabled": False, "phase": "preparing", "request": _audit_request(request),
                   "effect_verified": False, "automatic_retry_allowed": False}
+        if "memory_resolution" in timing_context:
+            report["memory_resolution"] = deepcopy(timing_context["memory_resolution"])
         timing_context.update(report=report, output=output)
         failure = None
         try:
@@ -217,6 +322,16 @@ class LocalDirectStepMixin:
                 report["capture"] = {**capture, "sha256": sha256(image_path.read_bytes()).hexdigest(),
                     "frame_id": "before_input", "observation_stage": "before_input"}
             condition = timing_context.get("observation_condition")
+            if request.get('selection_intent') is not None and timing_context['selection_preflight']['selected'] is True:
+                from app.core.memory_grounding_target import current_memory_grounding
+                proof = current_memory_grounding().selection_effect(action_executed=False)
+                report.update(phase='returned', status='completed', action_executed=False,
+                    row_selection_proof=proof, capture=deepcopy(proof['before']['frame']),
+                    observation={'status': 'captured', 'capture': deepcopy(proof['after']['frame']),
+                                 'source': 'row_selection', 'authorizes_action': False},
+                    response={'success': True, 'data': {'result': {'row_selection_proof': deepcopy(proof),
+                              'execution_path': {'action_executed': False}}}})
+                return report
             if condition is not None:
                 with timer.step("observation_condition_baseline"):
                     probe = UIATextConditionProbe(condition, manager, reader, identity)
@@ -227,16 +342,44 @@ class LocalDirectStepMixin:
                     enabled=lambda: not self._automatic_safety_interception and not self._shutdown
                                     and not self._cancel_wait.is_set()):
                 report["phase"] = "dispatching"
+                if 'selection_dispatch_boundary' in timing_context:
+                    timing_context['selection_dispatch_boundary']()
                 with timer.step("report_persist", phase="dispatching"):
                     _write_report(output, report)
                 with timer.step("route_call", inclusive=True):
                     report["response"] = _post_action(operation, request, manager)
             # 进入原路由后可能已产生部分输入，失败返回不能证明没有副作用。
             report["phase"] = "returned" if report["response"].get("success") is True else "result_unknown"
+            if request.get('selection_intent') is not None:
+                from app.core.memory_grounding_target import current_memory_grounding
+                data = report['response'].get('data') or {}
+                actual = data.get('result', data)
+                report['action_executed'] = actual.get('execution_path', {}).get('action_executed', actual.get('action_executed'))
+                if report['action_executed'] is True and report['phase'] == 'returned':
+                    try:
+                        proof = current_memory_grounding().selection_effect(action_executed=True)
+                        report['row_selection_proof'] = proof
+                        actual['row_selection_proof'] = deepcopy(proof)
+                    except Exception as error:
+                        # 已发生输入保持真实事实；效果未知不能重放。
+                        report['status'] = 'failed'
+                        report['selection_error'] = getattr(error, 'reason_code', str(error))
+                else:
+                    report['status'] = 'failed'
             response_data = report["response"].get("data") or {}
             if (operation == "press_key" and report["response"].get("success") is False
                     and response_data.get("dispatch_status") == "not_dispatched"
                     and response_data.get("pressed") is False):
+                report["phase"] = "not_dispatched"
+            elif (operation == "scroll" and report["response"].get("success") is False
+                    and isinstance(response_data, dict)
+                    and isinstance(report["response"].get("error"), dict)
+                    and report["response"]["error"].get("code") == "scroll_precondition_rejected"
+                    and response_data.get("dispatch_status") == "not_dispatched"
+                    and response_data.get("scrolled") is False
+                    and response_data.get("input_started") is False
+                    and isinstance(response_data.get("precondition_decision"), dict)
+                    and response_data["precondition_decision"].get("decision") == "REJECT"):
                 report["phase"] = "not_dispatched"
             if timing_context.get("include_observation"):
                 # 结果和后图同次回传；观察失败不能重放已经可能派发的动作。
@@ -364,7 +507,8 @@ def _post_action(operation, request, manager):
     import httpx
     from app.api import action
     from app.api.models.request import ExecuteRecognitionPlanRequest, ScrollRequest, TypeTextRequest
-    from .local_keyboard_action import LocalKeyRequest, press_local_key
+    from app.execution.local_action_contract import LocalKeyRequest
+    from app.execution.local_keyboard_action import press_local_key
     if action.window_manager is not manager:
         raise ValueError("local route and coordinator must share the bound window manager")
     model, handler = {"type_text": (TypeTextRequest, action.type_text),

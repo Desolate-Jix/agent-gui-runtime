@@ -621,8 +621,11 @@ class GraphRevisionService:
             elif "interface_batch" in child["change"]:
                 from .workflow_membership import validate_membership_batch_change
                 validate_membership_batch_change(self._facade, parent, child)
-            elif parent["source_refs"] != child["source_refs"]:
-                if "action_append" in child["change"]:
+            elif parent["source_refs"] != child["source_refs"] or "memory_update" in child["change"]:
+                if "memory_update" in child["change"]:
+                    from app.learning_memory.graph_source import validate_source_update
+                    validate_source_update(parent, child)
+                elif "action_append" in child["change"]:
                     self._validate_action_append(parent, child)
                 else:
                     self._validate_source_append(parent, child)
@@ -652,6 +655,7 @@ class GraphRevisionService:
             {"idempotency_key", "request_sha256", "action_append", "action_invalid_sources_version", "action_sequence_version"},
             {"idempotency_key", "request_sha256", "interface_append"},
             {"idempotency_key", "request_sha256", "interface_batch"},
+            {"idempotency_key", "request_sha256", "memory_update"},
         )
         if not isinstance(change, dict) or set(change) not in permitted_changes:
             raise DesktopReviewError("图草稿变更元数据无效")
@@ -661,6 +665,10 @@ class GraphRevisionService:
         else:
             _key(change.get("idempotency_key"), "图草稿幂等键")
             _sha(change.get("request_sha256"), "图草稿请求摘要")
+            if "memory_update" in change:
+                _sha(change["memory_update"], "记忆图父来源摘要")
+                if value["source_refs"].get("kind") != "execution_memory":
+                    raise DesktopReviewError("memory_update_requires_memory_graph")
             if "adoption" in change:
                 self._validate_adoption(value, change["adoption"])
             if "source_append" in change:
@@ -764,6 +772,10 @@ class GraphRevisionService:
             raise DesktopReviewError("图草稿采用操作无效") from error
 
     def _validate_source_refs(self, refs: Any) -> None:
+        if isinstance(refs, dict) and refs.get("kind") == "execution_memory":
+            from app.learning_memory.graph_source import read_source
+            read_source(self._facade, refs)
+            return
         if isinstance(refs, dict) and refs.get("kind") == "recorded_actions":
             fields = {"kind", "connection_id", "task_id", "segment_id", "anchor_event_id",
                       "anchor_source_sha256", "action_sources"}
@@ -1141,6 +1153,11 @@ class GraphRevisionService:
             raise DesktopReviewError("图草稿 action_append 请求摘要无效")
 
     def _validate_graph(self, graph: Any, refs: dict[str, Any]) -> None:
+        if refs.get("kind") == "execution_memory":
+            from app.learning_memory.graph_source import build_graph
+            if graph != build_graph(self._facade, refs):
+                raise DesktopReviewError("memory_graph_projection_mismatch")
+            return
         if not isinstance(graph, dict) or graph.get("display_only") is not True or graph.get("artifact_is_authorization") is not False or graph.get("execute_binding_enabled") is not False:
             raise DesktopReviewError("图草稿不得获得执行或批准权限")
         source = graph.get("source")

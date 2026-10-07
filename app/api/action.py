@@ -49,6 +49,7 @@ from app.api.models.request import (
 )
 from app.api.models.response import APIResponse, ActionResultData, ErrorModel
 from app.trace.transition import TransitionRecord
+from app.learning_memory.learning_observation_capture import learning_capture_active, observe_learning_target
 from app.application_profiles.seek.scroll_containers import (
     discover_seek_scroll_containers,
     get_scroll_container,
@@ -113,8 +114,20 @@ def _record_operational_memory_feedback(
 
 def _run_recognition_plan_for_execution(request: VisionRecognitionPlanRequestModel) -> APIResponse:
     from app.core.agent_grounding_target import current_agent_grounding
+    from app.core.memory_grounding_target import current_memory_grounding
     from app.core.local_input_policy import current_local_operator_identity
 
+    memory = current_memory_grounding()
+    if memory is not None:
+        if current_agent_grounding() is not None:
+            raise ValueError("conflicting internal grounding scopes")
+        try:
+            plan = memory.plan(image_path=request.image_path, goal=request.goal,
+                               identity=current_local_operator_identity(window_manager))
+        except (ValueError, PermissionError) as error:
+            return APIResponse(success=False, message="Current memory grounding is unavailable",
+                error=ErrorModel(code="memory_grounding_invalid", details=str(error)))
+        return APIResponse(success=True, message="Current memory candidate adapted", data={"result": plan})
     target = current_agent_grounding()
     if target is not None:
         try:
@@ -168,6 +181,34 @@ def _extract_action_point(plan: dict[str, Any]) -> Optional[dict[str, int]]:
     if not point:
         return None
     return {"x": int(point["x"]), "y": int(point["y"])}
+
+
+def _selected_learning_candidate(plan: dict[str, Any], pre_click: dict[str, Any]) -> dict[str, Any] | None:
+    selected_id = pre_click.get("selected_candidate_id")
+    candidates = (plan.get("candidate_result") or {}).get("candidates")
+    if not isinstance(selected_id, str) or not isinstance(candidates, list):
+        return None
+    matches = [candidate for candidate in candidates
+        if isinstance(candidate, dict) and candidate.get("candidate_id") == selected_id]
+    if len(matches) != 1:
+        return None
+    candidate = dict(matches[0])
+    if not isinstance(candidate.get("source"), str) or not candidate["source"]:
+        narrow = plan.get("narrow_search_result") or {}
+        rows = narrow.get("results") if isinstance(narrow, dict) else None
+        rows = rows if isinstance(rows, list) else []
+        source_rows = [row for row in rows if isinstance(row, dict)
+            and row.get("candidate_id") == selected_id
+            and isinstance(row.get("coordinate_source"), str) and row["coordinate_source"]]
+        decisions = pre_click.get("candidate_decisions") if isinstance(pre_click, dict) else None
+        decisions = decisions if isinstance(decisions, list) else []
+        decision_sources = [row for row in decisions if isinstance(row, dict)
+            and row.get("candidate_id") == selected_id
+            and isinstance(row.get("coordinate_source"), str) and row["coordinate_source"]]
+        provenance = source_rows if len(source_rows) == 1 else decision_sources
+        if len(provenance) == 1:
+            candidate["source"] = provenance[0]["coordinate_source"]
+    return candidate
 
 
 def _low_risk_visual_fast_lane_profile(
@@ -1654,8 +1695,25 @@ def _capture_pre_action_state_with_foreground_retry(
 @router.post("/execute_recognition_plan", response_model=APIResponse)
 def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIResponse:
     timer = RuntimeTimer()
+    if request.selection_intent is not None:
+        from app.core.memory_grounding_target import current_memory_grounding
+        selection_target = current_memory_grounding()
+        from app.learning_memory.selection_satisfaction import request_digest
+        if (selection_target is None or not getattr(selection_target, 'selection_enabled', False)
+                or request_digest(request.model_dump()) != request_digest(selection_target.selection_request)):
+            return APIResponse(success=False, message='selection_context_required',
+                data={'action_executed': False},
+                error=ErrorModel(code='selection_context_required', details='Current bound row selection context required'))
     from app.core.local_input_policy import require_local_operator_input
     local_policy_off = require_local_operator_input(window_manager)
+    if request.target_memory is not None and not local_policy_off:
+        return APIResponse(
+            success=False,
+            message="Target memory requires the configured local runtime host",
+            data={"action_executed": False, "timings": timer.to_dict()},
+            error=ErrorModel(code="target_memory_host_required",
+                details="Resolve target_memory through the Instant host and its configured memory library"),
+        )
     bound = window_manager.get_bound_window()
     live_capture: Optional[dict[str, Any]] = None
     auto_observe_trace: dict[str, Any] | None = None
@@ -2715,7 +2773,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                                 visibility_options["expected_owned_popup_handle"] = popup_handle
                     except LocalControlTargetError as error:
                         base_result["control_target_check"] = {"status": "rejected",
-                            "error_code": error.reason_code, "action_executed": False}
+                            "error_code": error.reason_code, "action_executed": False,
+                            **({"failure_evidence": error.failure_evidence} if error.failure_evidence is not None else {})}
                         raise
                     if control_check is not None:
                         base_result["control_target_check"] = control_check
@@ -2723,8 +2782,25 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     focus_check = check_local_text_focus(selected_point, window_manager)
                     if focus_check is not None:
                         base_result["local_text_focus_check"] = focus_check
+                    from app.core.memory_grounding_target import current_memory_grounding
                     from app.core.agent_grounding_target import current_agent_grounding
                     from app.core.local_input_policy import current_local_operator_identity
+                    learning_image_path = image_path
+                    learning_plan = plan
+                    learning_pre_click = pre_click
+                    memory_target = current_memory_grounding()
+                    if memory_target is not None:
+                        with timer.step("memory_grounding_dispatch_scene_check"):
+                            memory_capture = screenshot_service.capture_window(
+                                focus_window=False, purpose="memory-grounding-dispatch-check")
+                            memory_plan = memory_target.plan(image_path=memory_capture["image_path"],
+                                goal=request.goal, identity=current_local_operator_identity(window_manager))
+                            base_result["memory_grounding_dispatch_scene"] = memory_plan["memory_evidence"]
+                            learning_image_path = memory_capture["image_path"]
+                            learning_plan = memory_plan
+                            learning_pre_click = memory_plan["pre_click_decision"]
+                        memory_target.before_dispatch(selected_point,
+                            identity=current_local_operator_identity(window_manager))
                     grounding_target = current_agent_grounding()
                     if grounding_target is not None:
                         # 在真正派发前再复核区域，不能沿用计划阶段的旧画面。
@@ -2734,12 +2810,22 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                             dispatch_plan = grounding_target.plan(
                                 image_path=dispatch_capture["image_path"], goal=request.goal,
                                 identity=current_local_operator_identity(window_manager))
+                            learning_image_path = dispatch_capture["image_path"]
+                            learning_plan = dispatch_plan
+                            learning_pre_click = dispatch_plan["pre_click_decision"]
                             base_result["agent_grounding_dispatch_scene"] = {
                                 "image_path": dispatch_capture["image_path"],
                                 "validation_scope": "target_region_consistency_not_atomic_hit_proof",
                                 "region_changed_fraction": dispatch_plan["grounding_evidence"]["region_changed_fraction"]}
                         grounding_target.before_dispatch(selected_point,
                             current_local_operator_identity(window_manager))
+                    if learning_capture_active() and "learning_observation" not in base_result:
+                        with timer.step("learning_target_observation"):
+                            learning_observation = observe_learning_target(image_path=learning_image_path,
+                                candidate=_selected_learning_candidate(learning_plan, learning_pre_click),
+                                click_point=selected_point)
+                        if learning_observation is not None:
+                            base_result["learning_observation"] = learning_observation
                     click_result = input_controller.click_point(
                         selected_point["x"],
                         selected_point["y"],
@@ -3534,6 +3620,10 @@ def scroll(request: ScrollRequest) -> APIResponse:
                     "scroll_containers": scroll_containers,
                     "target_container": target_container,
                     "precondition_decision": precondition,
+                    "dispatch_status": "not_dispatched",
+                    "scrolled": False,
+                    "input_started": False,
+                    "automatic_retry_allowed": False,
                     "operation_context": operation_context,
                     "operation_trace_link": operation_trace_link(operation_context, result_status="blocked"),
                     "timings": timings,
