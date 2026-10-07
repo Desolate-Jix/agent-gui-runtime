@@ -7,6 +7,8 @@ pydantic==2.12.5
 uvicorn==0.52.4
 httpx==0.28.1
 Pillow==12.3.0
+numpy==2.4.4
+opencv-python==4.13.0.92
 psutil==7.2.2
 loguru==0.7.3
 mss==10.1.0

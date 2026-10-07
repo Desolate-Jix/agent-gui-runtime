@@ -1,6 +1,6 @@
 [project]
 name = "agent-gui-runtime"
-version = "0.1.1"
+version = "0.3.0"
 license = { file = "LICENSE" }
 description = "Local Windows GUI automation runtime for AI agents"
 readme = "README.md"
@@ -43,6 +43,10 @@ pythonpath = ["."]
 [dependency-groups]
 desktop = [
   "PySide6==6.11.2",
+  "mcp==2.1.1",
+  "httpx==0.28.1",
+]
+execution = [
   "mcp==2.1.1",
   "httpx==0.28.1",
 ]

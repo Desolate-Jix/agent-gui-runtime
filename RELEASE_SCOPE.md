@@ -1,3 +1,30 @@
+# 2026-10-07 当前release-ready状态 / Current release-ready status
+
+第三批source14/GUI12已完成匹配冻结与实装限定验收，状态为release-ready。Main与独立Sol各记录2个教学事件、6个预期连续场景（5个正例完成，负例一次点击后判失败，无重复输入）；GUI Save原job为completed并返回captured状态的动作后截图，关闭重开后图像关闭选项保持，最终cleanup完成。第一批终态JSON读取失败及第二批空标题清除绑定失败原记录保留；旧便携candidate02未知退出未宣称修复，stablev0.1.1保持原发布。网络发布与下载核对单独记录在对应发行页。 / The matched third source14/GUI12 pair is release-ready after bounded installed acceptance. Main and independent Sol each recorded two teaching events and six expected continuous cases: five positive completions and one negative failure after a single click without replay. The original GUI Save job completed with captured post-action evidence; image disablement persisted across close/reopen and cleanup completed. Both earlier failures and the unexplained excluded portable exit remain historical. Stablev0.1.1 is unchanged; publication and download verification are recorded separately on the release page.
+
+当前安装包含默认图像规则提议、人工区域编辑及可关闭图像核验；不确定保留原请求交Agent审核，不重放输入。流程图引用图钉固定的界面版本，附加成员不自动创建跳转。GUI页签为“结果与读取”。本地模型权重可选；本轮没有新增真实API供应商测试，不宣称通用准确率、速度或模型用量收益。 / Current installers include default image proposals, editable regions and persistent disablement. Uncertain evidence retains the original request for Agent review without replay. Graphs pin interface versions and membership does not create transitions. The GUI tab is Results and readback. Local weights are optional; no new real API-provider tests or general accuracy, speed or usage claims.
+
+| 组件 / Component | 版本 / Version | 冻结批次 / Frozen pair | Setup SHA256 |
+|---|---|---|---|
+| 执行 / Execution | `0.1.2-preview.1` | source14 / installers-execution-13 | `fc8e343549d84d3deceb3d116451bc739729402fdefc2b5a1ba5a097e96ea5e7` |
+| 可选学习 / Optional learning | `0.1.0-preview.1` | GUI12 / installers-learning-12 | `d67443fdb9c77d60db4063a66b501e1be1ae45baf9c2af2b2a8cbecad86728b9` |
+
+[最终限定验收 / Final bounded acceptance](docs/verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)。下方原段落为原冻结时点历史记录；版本与限制以本节及最终验收为准，不覆盖首次失败。 / Original sections below describe historical freezes; use this section and final acceptance for current scope while preserving first failures.
+
+---
+
+# 可选学习候选范围 / Optional learning candidate scope
+
+学习0.1.0-preview.1与兼容执行0.1.2-preview.1分别安装、升级和卸载；学习是可选组件。离线编辑库不需宿主或模型，采集及试运行按需连接已有兼容执行会话。API/当前Agent/明确视觉委派不强制本地模型。 / Components have separate lifecycles; learning is optional and its offline library needs no host or model. Explicit attachment enables teaching/trials, with local weights optional for API/Agent routes.
+
+已有source11/Setup10与GUI09/Setup09的新内容限定实装验收作为旧冻结基线保留；当前图像规则、编辑及等待修复尚未进入这两个安装器，最终候选需重新冻结并验收。本次只交付新的独立安装器，旧candidate02不交付，未知退出记录保留，不宣称根因修复。 / Retain the installed source11/Setup10 and GUI09/Setup09 acceptance as a prior baseline. Current image and wait changes require a new frozen pair and installed acceptance. Deliver independent installers only; exclude candidate02 and preserve its unexplained exit without claiming a fix.
+
+最终文档可与冻结包不同；非文档生产实现和资源必须匹配验收冻结清单。公开源码/资产排除用户库、截图、模型、凭据及本地构建证据。 / Final documentation may differ from the freeze, but production code/resources must match. Exclude user data, models, secrets and local evidence from public assets.
+
+见[使用说明](docs/LEARNING_PREVIEW_QUICKSTART.md)与[实装验收](docs/verification/LEARNING_PREVIEW_NATIVE_ACCEPTANCE.md)。以下正式v0.1.1范围保留，不代表学习候选已发布。 / The stable v0.1.1 scope below remains separate.
+
+---
+
 # v0.1.1 执行模式正式补丁范围 / Execution-mode patch release scope
 
 源码及隔离包各 2086 项、STDIO 七工具检查通过；294 个包内项目模块、739 项冻结清单核验通过。本方及独立 Agent 在同一冻结运行时完成全新原生单项、连续使用、429 恢复和最终清理，原始回执／PNG／trace 审计通过。首次 identity 拒绝原因未定；Note fixture 修复经 19 项离线检查、长中英前缀本方回归与独立复测通过，未修改冻结运行时。见 [v0.1.1 验收](docs/verification/V011_RELEASE_ACCEPTANCE.md)；[v0.1.0 验收](docs/verification/V010_RELEASE_ACCEPTANCE.md) 保留为历史证据。 / Source and isolated bundle each passed 2086 checks, plus seven-tool STDIO, 294 bundle-local module and 739 manifest checks. Main-agent and independent fresh native single/continuous/429-recovery/cleanup journeys and original-evidence audit passed on the same frozen runtime. The initial identity-rejection cause remains unresolved; Note fixture correction passed 19 offline checks, long Chinese/English-prefix main regression and independent retesting without changing the frozen runtime. v0.1.0 evidence remains historical.

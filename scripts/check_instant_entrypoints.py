@@ -13,24 +13,39 @@ def check(root):
     action = importlib.import_module("app.api.action")
     execute = importlib.import_module("app.api.execute")
     local = importlib.import_module("app.execution.local_direct_step")
-    for name in ('input_sequence', 'form_fill', 'conditional_observation', 'local_action_contract', 'local_keyboard_action', 'single_step_runtime_owner', 'local_direct_step', 'post_action_recovery'):
-        canonical = importlib.import_module("app.execution." + name)
+    recovery = importlib.import_module("app.execution.post_action_recovery")
+    for name, canonical in (("local_direct_step", local), ("post_action_recovery", recovery)):
         if importlib.import_module("app.desktop_review." + name) is not canonical:
             raise ValueError("execution compatibility module identity diverged: " + name)
-    recovery = importlib.import_module("app.execution.post_action_recovery")
-    owner = importlib.import_module("app.execution.single_step_runtime_owner")
     if not (callable(local.LocalDirectStepMixin.execute_local_step)
+            and callable(local.LocalDirectStepMixin.prepare_memory_grounding)
             and callable(local.LocalDirectStepMixin._execute_local_step_on_owner)
-            and callable(recovery.observe_recovery_windows)
-            and callable(owner.SerialRuntimeOwner) and callable(owner.RuntimeOwnerProxy)):
-        raise ValueError("local step dependencies are unavailable")
-    # 判断接口只校验依赖；不创建证据、不调用供应商或授权输入。
+            and callable(recovery.observe_recovery_windows)):
+        raise ValueError("local step and recovery dependencies are unavailable")
+    # 判断合同是预留维护依赖；预检不创建证据、不求值或连接供应商。
     judgment = importlib.import_module("app.core.outcome_judgment")
     if not (all(callable(getattr(judgment, name)) for name in
                 ("JudgmentEvidence", "JudgmentRequest", "JudgmentAnswer", "JudgmentProvider", "OptionalJudgment"))
-            and callable(judgment.JudgmentProvider.judge) and callable(judgment.OptionalJudgment.evaluate)):
+            and callable(judgment.JudgmentProvider.judge)
+            and callable(judgment.OptionalJudgment.evaluate)):
         raise ValueError("optional judgment contract is unavailable")
     keyboard = importlib.import_module("app.execution.local_keyboard_action")
+    legacy_keyboard = importlib.import_module("app.desktop_review.local_keyboard_action")
+    if legacy_keyboard is not keyboard:
+        raise ValueError("local keyboard module identity diverged")
+    contract = importlib.import_module("app.execution.local_action_contract")
+    legacy_contract = importlib.import_module("app.desktop_review.local_action_contract")
+    if legacy_contract is not contract or keyboard.LocalKeyRequest is not contract.LocalKeyRequest:
+        raise ValueError("local action contract identity diverged")
+    owner = importlib.import_module("app.execution.single_step_runtime_owner")
+    legacy_owner = importlib.import_module("app.desktop_review.single_step_runtime_owner")
+    owner_symbols = ("RuntimeOwnerError", "RuntimeOwnerProxy", "SerialRuntimeOwner",
+                     "_STOP", "_initialize_com", "_finalize_com")
+    if legacy_owner is not owner or any(getattr(legacy_owner, name) is not getattr(owner, name)
+                                        for name in owner_symbols):
+        raise ValueError("single step runtime owner identity diverged")
+    if not all(callable(getattr(owner, name)) for name in owner_symbols if name != "_STOP"):
+        raise ValueError("single step runtime owner dependencies are unavailable")
     from fastapi import FastAPI
     application = FastAPI()
     application.include_router(action.router)
@@ -118,6 +133,11 @@ def check(root):
     instant.InstantCommand.model_validate({"kind": "input_sequence", "request": {
         "field_goal": "Search input", "text": "dependency preflight only", "submit_search": True}}).command()
     condition = importlib.import_module("app.execution.conditional_observation")
+    for name, canonical in (("input_sequence", sequence), ("form_fill", form),
+                            ("conditional_observation", condition)):
+        compatibility = importlib.import_module("app.desktop_review." + name)
+        if compatibility is not canonical:
+            raise ValueError("execution compatibility module identity diverged: " + name)
     if not callable(condition.observe_until_condition) or not callable(condition.UIATextConditionProbe):
         raise ValueError("conditional observation dependencies are unavailable")
     instant.InstantCommand.model_validate({"kind": "input_sequence", "request": {

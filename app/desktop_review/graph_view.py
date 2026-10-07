@@ -1,6 +1,7 @@
 """原生只读流程图视图。"""
 
 from __future__ import annotations
+from app.learning_memory.workbench_i18n import ui, tr, bind_text, initialize_i18n, language_manager
 
 from copy import deepcopy
 import hashlib
@@ -25,7 +26,9 @@ _LOGICAL_ID = re.compile(r"workflow-[0-9a-f]{64}\Z")
 # 卡片留出更宽的中文标题和更大的点选面，仍只改变视图几何。
 _NODE_WIDTH = 204.0
 _NODE_HEIGHT = 82.0
-_COLUMN_GAP = 72.0
+_EDGE_LABEL_WIDTH = 176.0
+# 列间距容纳完整的省略标签及背景，防止连线名称被节点遮住。
+_COLUMN_GAP = _EDGE_LABEL_WIDTH + 24.0
 _ROW_GAP = 72.0
 _SURFACE = "#ffffff"
 _BACKGROUND = "#f4f7fb"
@@ -47,7 +50,7 @@ _KNOWN_ACTION_LABELS = {
 
 
 def friendly_action_label(action: str) -> str:
-    return _KNOWN_ACTION_LABELS.get(action, "动作待核对")
+    return tr(_KNOWN_ACTION_LABELS.get(action, "动作待核对"))
 
 
 def _elide(text: str, font: QFont, width: float) -> str:
@@ -64,7 +67,7 @@ class _NodeItem(QGraphicsRectItem):
         self.setZValue(2)
         self.setToolTip(label)
         self._set_pen(False)
-        self._type_text = QGraphicsSimpleTextItem("界面", self)
+        self._type_text = ui(QGraphicsSimpleTextItem, tr("界面"), self)
         type_font = QFont(self._type_text.font())
         type_font.setPointSizeF(9.0)
         self._type_text.setFont(type_font)
@@ -121,7 +124,9 @@ class _EdgeItem(QGraphicsPathItem):
         label_font.setPointSizeF(10.0)
         self._label_text.setFont(label_font)
         self.display_label = display_label or label
-        self._label_text.setText(_elide(self.display_label, label_font, 176.0))
+        self._label_text.setText(_elide(self.display_label, label_font, _EDGE_LABEL_WIDTH))
+        if hasattr(self.display_label, "render"):
+            bind_text(self._label_text, "setText", self.display_label)
         self._label_text.setToolTip(label)
         self._label_text.setBrush(QColor(_MUTED))
         self._label_text.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
@@ -166,7 +171,7 @@ class _SequenceLinkItem(QGraphicsPathItem):
         self.setPen(pen)
         self.setZValue(-1)
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-        text = QGraphicsSimpleTextItem(label, self)
+        text = ui(QGraphicsSimpleTextItem, label, self)
         text.setBrush(QColor("#7b8794"))
         text.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         bounds = text.boundingRect()
@@ -374,7 +379,7 @@ class NativeWorkflowGraphView(QGraphicsView):
                     end = target_node.sceneBoundingRect().center()
                     mid_x = (path.currentPosition().x() + end.x()) / 2
                     path.cubicTo(mid_x, path.currentPosition().y(), mid_x, end.y(), end.x(), end.y())
-                    scene.addItem(_SequenceLinkItem(path, "下一次操作 · 衔接未核验", path.pointAtPercent(0.5)))
+                    ui(scene.addItem, _SequenceLinkItem(path, tr('下一次操作 · 衔接未核验'), path.pointAtPercent(0.5)))
                 previous_pair = (item.get("event_id"), pair[1])
 
         edges: dict[str, _EdgeItem] = {}

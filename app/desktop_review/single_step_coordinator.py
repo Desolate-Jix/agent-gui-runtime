@@ -61,6 +61,7 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
         vision_config_path: str | Path | None = None,
         runtime_output_root: str | Path | None = None,
         enable_agent_learning: bool | None = None,
+        resource_journal=None,
     ) -> None:
         timeout = _positive_timeout(foreground_timeout)
         if not callable(getattr(facade, "list_reviewed_assets", None)):
@@ -68,6 +69,7 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
         if not callable(getattr(host, "status", None)):
             raise TypeError("host must expose status")
         self._project_root = Path(project_root).resolve()
+        self._resource_journal = resource_journal
         self._runtime_output_root = (self._project_root / "runtime-output" if runtime_output_root is None
                                      else Path(runtime_output_root).expanduser().resolve())
         self._vision_config_path = resolve_vision_config_path(vision_config_path, project_root=self._project_root)
@@ -194,7 +196,7 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
                 "assets": _assets(assets),
                 "windows": _windows(windows),
             }
-            self._unverified_window_launch = None
+            inventory["launch_recovery"] = self._acknowledge_launch_inventory(windows)
             return inventory
         except NativeSingleStepCoordinatorError:
             raise
@@ -1124,7 +1126,9 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
             self._model_reuse_failed = False
             self._model_service = resident or FormalModelService(
                 configuration, output_root=self._runtime_output_root,
-                **({"allow_resource_coexistence": True} if self._keep_models_loaded else {}))
+                **({"allow_resource_coexistence": True} if self._keep_models_loaded else {}),
+                **({"resource_journal": self._resource_journal}
+                   if getattr(self, "_resource_journal", None) is not None else {}))
         if resident is None:
             self._model_service.prepare(self._cancel_wait)
         else:

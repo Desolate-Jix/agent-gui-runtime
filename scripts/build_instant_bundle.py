@@ -35,15 +35,23 @@ def verify_entrypoints(output):
 
 
 ROOT_FILES = ("LICENSE", ".gitignore", ".gitattributes", "pyproject.toml", "uv.lock",
-              "skills/codex-vision-session/SKILL.md",
-              "docs/EXECUTION_MODULE_BOUNDARIES.md", "docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md",
+              "skills/codex-vision-session/SKILL.md", "docs/WORKFLOW_EDITOR.md",
+              "docs/EXECUTION_MODULE_BOUNDARIES.md", "docs/WORKFLOW_DEFINITION_AND_RUN_EVIDENCE.md",
+              "docs/LEARNING_BENCHMARK.md", "docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md",
+              "docs/LEARNING_WORKFLOW_SUCCESS_SPEC.md",
+              "docs/superpowers/plans/2026-09-29-learning-workflow-benefit.md",
+              "docs/superpowers/plans/2026-10-03-learning-trial-closeout.md",
+              "docs/superpowers/plans/2026-10-05-learning-test-delivery.md",
+              "docs/superpowers/plans/2026-10-01-learning-mainline-refocus.md",
+              "docs/WORKFLOW_INTERRUPTION_CONTRACT.md",
               "README.md", "AGENT_GUIDE.md", "FRIEND_SETUP.md", "CHANGELOG.md", "RELEASE_SCOPE.md",
-              "configs/model_profiles/vista_4b_transformers.json")
+              "configs/model_profiles/vista_4b_transformers.json", "packaging/learning_workbench.spec")
 SCRIPTS = tuple("scripts/" + name for name in (
     "start_instant_mcp.py", "run_local_step_session.py", "start_instant_mcp_admin.py",
     "instant_admin_worker.py", "setup_instant.ps1", "configure_instant.ps1",
     "configure_instant_mcp.py", "smoke_instant_mcp.py", "check_instant_entrypoints.py",
-    "build_instant_bundle.py"))
+    "build_instant_bundle.py", "run_learning_memory_workbench.py",
+    "start_learning_workbench.py", "build_learning_workbench.py"))
 
 
 def collect_sources(root):

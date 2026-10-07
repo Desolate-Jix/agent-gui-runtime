@@ -1,29 +1,47 @@
-# v0.1.1 · 执行模式正式补丁 / Execution-mode patch release
+# 2026-10-07 当前release-ready状态 / Current release-ready status
 
-- 八个既有执行模块收拢到 `app.execution`，旧路径保留同一模块对象别名；沿用原 owner、公共执行 API 与键盘／校验语义，不新增执行器。 / Consolidate eight existing execution modules under `app.execution`; legacy paths alias the same objects, preserving the original owner, public execution API and keyboard/validation semantics.
-- 增加可选判断及 `ModelUsage` 共享合同，未接入生产调用；默认不调用判断模型，不生成坐标、不授权输入、不自动重试，未知用量保持 null。 / Add unwired optional judgment and usage contracts, with no default judgment-model call, coordinates, input authority or automatic retry; unknown usage remains null.
-- 原七个 MCP 工具、外部 API、当前／委派 Agent 视觉及 local 路线保留；API／Agent 使用不需要本地权重。学习产品不在本补丁。 / Retain seven MCP tools and external API, current/delegated Agent and local vision routes. API/Agent routes need no local weights; learning is excluded.
-- 源码与隔离包各 2086 项、STDIO 七工具检查通过；294 个包内项目模块、739 项冻结清单核验通过。本方与独立 Agent 同冻结运行时完成全新原生单项／连续／429 恢复／清理，原始回执／PNG／trace 审计通过。首次 identity 拒绝原因未定；Note fixture 修复经 19 项离线检查、长中英前缀本方回归及独立复测通过，未修改冻结运行时。详见 [v0.1.1 验收](docs/verification/V011_RELEASE_ACCEPTANCE.md)、[模块边界](docs/EXECUTION_MODULE_BOUNDARIES.md) 与 [判断／用量合同](docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md)。 / Source and isolated bundle each passed 2086 checks, plus seven-tool STDIO, 294 bundle-local module and 739 manifest checks. Main-agent and independent fresh native single/continuous/429-recovery/cleanup journeys and original-evidence audit passed on the same frozen runtime. The initial identity-rejection cause remains unresolved; the Note fixture correction passed 19 offline checks, long Chinese/English-prefix main regression and independent retesting without changing the frozen runtime.
+第三批source14/GUI12已完成匹配冻结与实装限定验收，状态为release-ready。Main与独立Sol各记录2个教学事件、6个预期连续场景（5个正例完成，负例一次点击后判失败，无重复输入）；GUI Save原job为completed并返回captured状态的动作后截图，关闭重开后图像关闭选项保持，最终cleanup完成。第一批终态JSON读取失败及第二批空标题清除绑定失败原记录保留；旧便携candidate02未知退出未宣称修复，stablev0.1.1保持原发布。网络发布与下载核对单独记录在对应发行页。 / The matched third source14/GUI12 pair is release-ready after bounded installed acceptance. Main and independent Sol each recorded two teaching events and six expected continuous cases: five positive completions and one negative failure after a single click without replay. The original GUI Save job completed with captured post-action evidence; image disablement persisted across close/reopen and cleanup completed. Both earlier failures and the unexplained excluded portable exit remain historical. Stablev0.1.1 is unchanged; publication and download verification are recorded separately on the release page.
 
-# v0.1.0 · 执行模式正式版 / Execution-mode release
+当前安装包含默认图像规则提议、人工区域编辑及可关闭图像核验；不确定保留原请求交Agent审核，不重放输入。流程图引用图钉固定的界面版本，附加成员不自动创建跳转。GUI页签为“结果与读取”。本地模型权重可选；本轮没有新增真实API供应商测试，不宣称通用准确率、速度或模型用量收益。 / Current installers include default image proposals, editable regions and persistent disablement. Uncertain evidence retains the original request for Agent review without replay. Graphs pin interface versions and membership does not create transitions. The GUI tab is Results and readback. Local weights are optional; no new real API-provider tests or general accuracy, speed or usage claims.
 
-- 新增 Codex 专用视觉会话技能，连续任务复用同一子 Agent ID；通用 MCP 接口不绑定 Codex 调度工具。 / Add a Codex-only skill that reuses one visual worker per continuous task, without changing generic MCP APIs.
+| 组件 / Component | 版本 / Version | 冻结批次 / Frozen pair | Setup SHA256 |
+|---|---|---|---|
+| 执行 / Execution | `0.1.2-preview.1` | source14 / installers-execution-13 | `fc8e343549d84d3deceb3d116451bc739729402fdefc2b5a1ba5a097e96ea5e7` |
+| 可选学习 / Optional learning | `0.1.0-preview.1` | GUI12 / installers-learning-12 | `d67443fdb9c77d60db4063a66b501e1be1ae45baf9c2af2b2a8cbecad86728b9` |
+
+[最终限定验收 / Final bounded acceptance](docs/verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)。下方原段落为原冻结时点历史记录；版本与限制以本节及最终验收为准，不覆盖首次失败。 / Original sections below describe historical freezes; use this section and final acceptance for current scope while preserving first failures.
+
+---
+
+# 可选学习测试候选 / Optional learning preview candidate
+
+学习 `0.1.0-preview.1` 与兼容执行 `0.1.2-preview.1` 独立安装，尚未公开发布。旧安装冻结的限定验收保留；本轮默认图像核验、人工区域编辑和有界成功早退已在源码验证，最终安装候选仍需集中构建与验收。旧便携candidate02不交付，其未知退出保留。 / The independent preview pair is unpublished. Current source adds default image checks, region editing and bounded early completion; final installers still require a new freeze and acceptance. Candidate02 is excluded while its unexplained exit remains documented.
+
+- 自动教学生成工作流草稿、人工修改审核、不可变版本保存与参数复用。 / Teaching synthesis, human editing/review, immutable saves and per-run inputs.
+- 学习可选，离线库编辑不需要宿主或模型；中英文切换并持久化，显式连接独立执行安装。 / Optional offline library editing, persisted bilingual UI and explicit independent execution attachment.
+- 修复匹配已审核票据取消后runner残留；未知或未审核输入保留门禁。 / Settle matching reviewed cancellation without relaxing unresolved-input gates.
+- 本轮源回归、独立包合同与实装证据分别报告；不宣称模型收益、任意应用或真实服务商准确率。详[使用说明](docs/LEARNING_PREVIEW_QUICKSTART.md)与[验收边界](docs/verification/LEARNING_PREVIEW_NATIVE_ACCEPTANCE.md)。 / Keep verification scopes and untested benefits explicit.
+
+正式执行 `instant-v0.1.1` 保持独立，原验收见[稳定版记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)。以下旧源码与版本记录保留为历史。 / Stable execution remains separate; older entries below are historical.
+
+# 历史源码记录 / Historical source notes
+
+- 新增 Codex 专用视觉会话技能，连续任务复用同一子 Agent ID；通用 MCP 接口不绑定 Codex 调度工具，版本号与已发布 ZIP 不变。 / Add a Codex-only skill that reuses one visual worker per continuous task, without changing generic MCP APIs, version numbers or published ZIP assets.
 - 接通显式 `external_api` 配置、启动、原图 HTTP 请求、候选校验、公共执行及结果回传；支持现有单步与组合调度，不新增执行器。 / Wire external API configuration, startup, original-image HTTP grounding, validation, shared execution and receipts.
 - API 请求可查询状态、合作取消；无自动重试或静默回退；精简回执保留调用模型、用量和耗时。 / Poll/cancel active requests; no retry or fallback, with provider metadata retained in compact receipts.
-- 截图按配置发送至视觉服务；缺少密钥、鉴权、限流、超时、网络或响应格式错误均停止，不自动重试或回退。`read_text` 仍回传原图。 / Screenshots go to the configured visual service; credential, auth, rate, timeout, network and response errors stop without retry or fallback. `read_text` still returns the original image.
-- 不保证任意供应商兼容或准确率。源码及隔离包各 2040 项通过；本方及同候选独立实机验收与首次失败详见 [验收记录](docs/verification/V010_RELEASE_ACCEPTANCE.md)。 / No universal provider-compatibility or accuracy claim. 2040 checks passed in each source/bundle suite; see acceptance for main-agent and independent live results and first failures.
+- 验证限于接口及运行时契约，不评估服务商识别准确率。详见 [API 接入](docs/development/EXTERNAL_VISION_API.md)。 / Verification covers interface/runtime contracts rather than provider accuracy.
 
-# 历史版本：v0.1.0-test.8 · 可切换 Agent 视觉 / Historical version: switchable Agent vision
+# v0.1.0-test.8 · 可切换 Agent 视觉 / Switchable Agent vision
 
 验收与保留的首次失败见 [test.8 验收](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)。 / See acceptance for verified scope and retained first failures.
 
 - 当前 Agent 或客户端显式委派视觉模型提供定位，沿用公共执行器；能力未知不自动启用视觉或加载本地模型。 / Current or client-delegated visual grounding reuses the shared executor without silent local-model fallback.
 - 单步、组合输入和表单支持持久化定位交接、状态/继续/取消；不重放已完成输入。Agent 文字读取返回原图。 / Durable grounding handoff and status/continue/cancel for steps and batches; image-based reading and no input replay.
-- 轻量 .venv-agent 安装、按来源配置和连接检查。 / Lightweight source-aware setup and smoke.
+- 轻量 .venv-agent 安装、按来源配置和连接检查；独立 API 仅预留接口，不要求额外密钥。 / Lightweight source-aware setup and smoke; external API remains reserved only.
 - 修复浏览器初始 UIA 文档准备依赖目标句式、派发中旧图误标和取消竞态；自定义组合框支持显式 ARIA 展开状态，冲突拒绝并标注来源。 / Repair browser preparation, inflight evidence and cancellation; read explicit ARIA expansion with honest provenance.
 - 中断表单的精简回执保留底层步骤错误与失败原因，不放宽模型/UIA 冲突拒绝。已知精确字段名时同时提供 `label`。 / Compact interrupted-form receipts retain step errors and failure reasons without weakening model/UIA conflict rejection. Supply `label` when the exact field name is known.
 - 修复明确文本标签可能误填另一字段的问题：公共点击前校验唯一标签身份、控件命中与别名歧义，操作员模式不能跳过。 / Verify explicit text-label identity and hit-control equality before input, including mixed-name/alias ambiguity; operator mode cannot bypass this check.
-- 历史 test.8 源码与隔离候选各 2025 项通过；这些计数及同候选操作经历仅属于 test.8，不作为 v0.1.0 验收证据。首次失败和调用方错误仍保留在对应记录。 / Historical test.8 source and isolated candidate each passed 2025 checks. These counts and journeys apply only to test.8, not v0.1.0 acceptance; retain first failures in the versioned record.
+- 源码与隔离候选各 2025 项通过；同一候选的 local、当前 Agent、实际 Luna 委派单项及连续混合填写、弹窗取消恢复与清理通过。首次失败和调用方错误保留；独立验收另行记录。 / Source and isolated candidate each passed 2025 checks. Same-candidate local/current/delegated single and continuous operations, popup cancellation/recovery and cleanup passed. Initial failures and caller errors remain recorded; independent acceptance is tracked separately.
 
 # v0.1.0-test.7 · 组合表单测试版 / Batch-form test release
 

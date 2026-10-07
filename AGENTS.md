@@ -1,3 +1,7 @@
+## 2026-10-05 原生 Computer Use 禁用 / Native Computer Use disabled
+
+- 禁止调用 Codex 原生 Computer Use、computer-use@openai-bundled 或 @oai/sky；不得为项目验收继续排查、复测或绕行使用该组件。项目桌面观察、截图及真实动作优先使用项目正式维护的截图/动作接口，并保留既有输入授权和门禁。浏览器 unified-computer-use 等无关能力不受此禁用影响。 / Do not invoke Codex native Computer Use, computer-use@openai-bundled or @oai/sky, or investigate/retest/work around that component for project acceptance. Use the project's maintained screenshot and action interfaces for project desktop observation and real input, preserving existing authorization and gates. Unrelated browser/unified-computer-use capabilities remain unchanged.
+
 # Execution caller scheduling / 执行调用方调度
 
 These instructions supplement, rather than replace, the user's project instructions. / 本文件补充用户项目规则，不替代其权限、测试顺序和数据完整性要求。

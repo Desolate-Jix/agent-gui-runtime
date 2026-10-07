@@ -102,7 +102,7 @@ class WorkflowProjectService:
         if current["content_sha256"] != expected:
             raise DesktopReviewError("stale_workflow_project")
         source = self.facade.load_graph_revision(workflow)
-        action_only = source.get("source_refs", {}).get("kind") == "recorded_actions"
+        action_only = source.get("source_refs", {}).get("kind") in {"recorded_actions", "execution_memory"}
         if (not action_only
                 and not any(isinstance(node, dict) and isinstance(node.get("interface_reference"), dict)
                             for node in current["graph"]["nodes"])):
@@ -202,6 +202,10 @@ class WorkflowProjectService:
             pin = pinned_interfaces.get(node["node_id"]) if isinstance(pinned_interfaces, dict) else None
             interface_id = pin["interface_id"] if isinstance(pin, dict) else reference["interface_id"]
             version_id = pin.get("version_id") if isinstance(pin, dict) else None
+            if version_id is None and (source_refs.get("kind") == "execution_memory"
+                                       or getattr(self.facade, "pinned_interface_references", False)):
+                # 新记忆项目只能通过明确采用修订更新引用，不能随界面库最新版本漂移。
+                version_id = reference["version_id"]
             content = self.facade.load_interface_content(interface_id, version_id)
             if isinstance(pin, dict) and (
                 content.get("interface_id") != pin.get("interface_id")
@@ -225,6 +229,11 @@ class WorkflowProjectService:
                 if edge_id not in source_edges:
                     warnings.append("removed_source_edge_missing:" + edge_id)
         node_map = {node["node_id"]: node for node in graph["nodes"]}
+        if source_refs.get("kind") == "execution_memory":
+            missing = [edge for edge in graph["edges"] if edge["source_node_id"] not in node_map
+                       or edge["target_node_id"] not in node_map]
+            warnings.extend("editorial_edge_endpoint_missing:" + edge["edge_id"] for edge in missing)
+            graph["edges"] = [edge for edge in graph["edges"] if edge not in missing]
         for edge in graph["edges"]:
             if edge.get("editorial") is not True:
                 continue

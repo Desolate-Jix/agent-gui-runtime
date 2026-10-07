@@ -80,7 +80,8 @@ def test_real_focus_probe_requires_named_writable_new_field(monkeypatch, fault, 
     wrapper.element_info.rectangle = SimpleNamespace(left=20, top=30, right=120, bottom=55)
     wrapper.is_visible = lambda: True
     wrapper.is_enabled = lambda: True
-    wrapper.top_level_parent = lambda: SimpleNamespace(element_info=SimpleNamespace(handle=10))
+    wrapper.parent = lambda: SimpleNamespace(element_info=SimpleNamespace(handle=10, process_id=20))
+    monkeypatch.setattr(reader, '_native_root_handle', lambda hwnd: {10: 10}.get(hwnd))
     if fault == "button": wrapper.element_info.control_type = "Button"
     if fault == "readonly": wrapper.iface_value.CurrentIsReadOnly = True
     manager = SimpleNamespace(get_bound_window=lambda: SimpleNamespace(handle=10, process_id=20,

@@ -27,13 +27,41 @@ class WindowPreparationMixin:
         self._begin("idle", preserve_window_preparation=True)
         try:
             self._require_host_ready(require_unattached=True)
-            return self._owner.call(lambda: {
-                "contract_version": "native_application_discovery_v1",
-                "apps": application_catalog_view(),
-                "running_windows": self._windows().list_visible_windows(),
-            })
+            def discover():
+                apps = application_catalog_view()
+                windows = self._windows().list_visible_windows()
+                recovery = self._acknowledge_launch_inventory(windows)
+                return {
+                    "contract_version": "native_application_discovery_v1",
+                    "apps": apps,
+                    "running_windows": windows,
+                    "launch_recovery": recovery,
+                }
+            return self._owner.call(discover)
         finally:
             self._end()
+
+    def _acknowledge_launch_inventory(self, windows):
+        if not isinstance(windows, list):
+            raise ValueError("native window inventory must be a complete list")
+        handles = set()
+        for item in windows:
+            if (not isinstance(item, dict)
+                    or not {"handle", "process_id", "title", "process_name"}.issubset(item)
+                    or type(item["handle"]) is not int or item["handle"] <= 0
+                    or type(item["process_id"]) is not int or item["process_id"] <= 0
+                    or any(item[key] is not None and not isinstance(item[key], str)
+                           for key in ("title", "process_name"))
+                    or item["handle"] in handles):
+                raise ValueError("native window inventory contains an invalid identity")
+            handles.add(item["handle"])
+        original = deepcopy(getattr(self, "_unverified_window_launch", None))
+        # 盘点仅解除后续明确启动的预览门禁，不声称原副作用撤销。
+        recovery = {"inventory_refreshed": True, "effect_undone": False,
+                    "original_launch_result": original, "automatic_retry_allowed": False}
+        self._unverified_window_launch = None
+        self._launch_inventory_recovery = deepcopy(recovery)
+        return recovery
 
     def preview_application_launch(self, *, app_id: str | None = None, url: str | None = None,
                                    name: str | None = None, path: str | None = None,
@@ -246,26 +274,33 @@ class WindowPreparationMixin:
         self._window_preparations[intent['preparation_id']] = intent
         return self._confirm_window_preparation_on_owner(intent['preparation_id'])
 
-    def close_launched_window(self, *, target_window_handle: int, target_process_id: int) -> dict[str, Any]:
+    def close_launched_window(self, *, target_window_handle: int, target_process_id: int, recovery_proof=None) -> dict[str, Any]:
         """仅关闭本协调器通过 launch 新增且身份仍一致的窗口。"""
         self._begin("idle", preserve_window_preparation=True)
         try:
             self._require_host_ready()
-            return self._owner.call(lambda: self._close_launched_window_on_owner(
-                target_window_handle=target_window_handle, target_process_id=target_process_id))
+            result = self._owner.call(lambda: self._close_launched_window_on_owner(
+                target_window_handle=target_window_handle, target_process_id=target_process_id,
+                recovery_proof=recovery_proof))
+            if recovery_proof is not None:
+                recovery_proof.finish(result)
+            return result
         finally:
             self._end()
 
-    def _close_launched_window_on_owner(self, *, target_window_handle: int, target_process_id: int) -> dict[str, Any]:
+    def _close_launched_window_on_owner(self, *, target_window_handle: int, target_process_id: int, recovery_proof=None) -> dict[str, Any]:
         if type(target_window_handle) is not int or target_window_handle <= 0 or type(target_process_id) is not int or target_process_id <= 0:
             raise self._error("window_close_identity_invalid", "window close requires a valid handle and process id")
         identity = getattr(self, "_launched_window_identities", {}).get((target_window_handle, target_process_id))
+        if recovery_proof is not None:
+            from app.execution.launched_window_ownership import proof_identity
+            identity = proof_identity(recovery_proof, self, target_window_handle, target_process_id)
         if identity is None:
             raise self._error("window_close_not_launched", "window was not launched by this coordinator")
         close_state = getattr(self, "_launched_window_close_state", {})
         # 同一关闭等待只补确认；已观察到弹窗退出后，新调用可重新请求关闭。
         if close_state.get((target_window_handle, target_process_id)) and not window_handle_exists(target_window_handle):
-            self._launched_window_identities.pop((target_window_handle, target_process_id), None)
+            getattr(self, "_launched_window_identities", {}).pop((target_window_handle, target_process_id), None)
             close_state.pop((target_window_handle, target_process_id), None)
             return {"status": "window_closed", "success": True, "close_requested": True,
                     "automatic_retry_allowed": False}
@@ -286,6 +321,14 @@ class WindowPreparationMixin:
             modal_dismissed = (observed.get("status") == "window_still_present"
                 and observed.get("parent_enabled") is True and not observed.get("owned_windows"))
         if not previous or modal_dismissed:
+            if recovery_proof is not None:
+                recovery_proof.claim(self, resend=modal_dismissed)
+                # 来源证明可能耗时，关闭前再次核对本机身份，未知 claim 仍保留。
+                fresh = validate_native_identity_fact(
+                    WindowsNativeIdentityReader(window_manager=self._windows()).read_identity(target_window_handle),
+                    target_window_handle=target_window_handle, expected_process_id=target_process_id)
+                if fresh != identity:
+                    raise self._error("window_close_identity_changed", "launched window identity changed")
             post_window_close(target_window_handle)
             close_state[(target_window_handle, target_process_id)] = True
             self._launched_window_close_state = close_state
@@ -402,22 +445,35 @@ class WindowPreparationMixin:
         process_id = process.pid if type(process.pid) is int and process.pid > 0 else None
         expected_path = intent["executable_path"]
         deadline = time.monotonic() + self._WINDOW_PREPARATION_TTL_SECONDS
+        unresolved = []
         while time.monotonic() < deadline:
             if self._cancel_wait.is_set():
                 return _launch_unavailable(process_id, "launch_effect_not_undone_after_cancel")
             handles = self._visible_window_handles() - before
             matches = []
+            unresolved = []
             for handle in sorted(handles):
-                self._windows().bind_window_by_handle(handle)
-                identity = WindowsNativeIdentityReader(window_manager=self._windows()).read_identity(handle)
-                observed = validate_native_identity_fact(identity, target_window_handle=handle)
+                stage = "binding_read"
+                try:
+                    self._windows().bind_window_by_handle(handle)
+                    stage = "native_identity_read"
+                    identity = WindowsNativeIdentityReader(window_manager=self._windows()).read_identity(handle)
+                    observed = validate_native_identity_fact(identity, target_window_handle=handle)
+                except (OSError, RuntimeError, ValueError) as error:
+                    unresolved.append({"handle": handle, "stage": stage, "error_type": type(error).__name__})
+                    continue
                 if observed is None:
-                    return _launch_unavailable(process_id, "launched_window_identity_unavailable")
+                    diagnostic = {"handle": handle, "stage": stage}
+                    if isinstance(identity, dict):
+                        diagnostic.update({key: identity[key] for key in ("stage", "reason", "error_type")
+                                           if isinstance(identity.get(key), str)})
+                    unresolved.append(diagnostic)
+                    continue
                 if observed["executable_path"] == expected_path:
                     matches.append(observed)
             if len(matches) > 1:
                 return _launch_unavailable(process_id, "launched_window_ambiguous")
-            if len(matches) == 1:
+            if len(matches) == 1 and not unresolved:
                 matched = matches[0]
                 handle = matched["target_window_handle"]
                 bound = self._windows().bind_window_by_handle(handle)
@@ -441,10 +497,15 @@ class WindowPreparationMixin:
                     return _launch_unavailable(process_id, "launch_effect_not_undone_after_cancel")
                 self._cache_prepared_identity(intent, matched)
                 return {"status": "launched_window_ready", "process_id": process_id, "window": _bound(bound),
+                        "launch_ownership": {"contract_version": "launched_window_ownership.v1",
+                            "newly_launched": True, "identity": deepcopy(matched)},
                         "presentation_wait_ms": round(self._LAUNCH_PRESENTATION_WAIT_SECONDS * 1000),
                         "content_ready": None, "next_action": "capture_and_inspect_current_content"}
             self._cancel_wait.wait(min(0.05, max(0, deadline - time.monotonic())))
-        return _launch_unavailable(process_id, "launched_window_timeout")
+        result = _launch_unavailable(process_id, "launched_window_identity_unavailable"
+                                     if unresolved else "launched_window_timeout")
+        result["diagnostics"] = {"unresolved_windows": unresolved, "observation_timed_out": True}
+        return result
 
 
 def _launch_unavailable(process_id, reason):

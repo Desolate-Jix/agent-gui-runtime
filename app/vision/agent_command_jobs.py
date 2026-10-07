@@ -1,10 +1,14 @@
 """会话内 Agent 命令暂停器；交接识别时不重放已完成输入。"""
 
+from app.core.vision_admission_contract import AgentCommandError, AgentCommandVisionAdmissionError
+from app.core.receipt_action import _receipt_action
 from copy import deepcopy
+from hashlib import sha256
+from app.desktop_review.external_mapping import canonical_json_bytes
 from pathlib import Path
 import re
 from threading import Condition, Thread
-from time import monotonic
+from time import monotonic, perf_counter_ns
 from uuid import uuid4
 
 from app.core.agent_grounding_target import AgentGroundingTarget
@@ -15,8 +19,8 @@ from app.vision.grounding_contract import GroundingResult
 from app.vision.recognition_source import ClientVisionCapabilities, resolve_recognition_route
 
 
-class AgentCommandError(ValueError):
-    pass
+
+
 
 
 class _Cancelled(AgentCommandError):
@@ -31,12 +35,6 @@ def _merge_action(previous, current):
     return False
 
 
-def _receipt_action(receipt, operation):
-    data = (receipt.get("response") or {}).get("data") or {}
-    data = data.get("result", data)
-    value = (data.get("pressed") if operation == "press_key" else
-        (data.get("execution_path") or {}).get("action_executed", data.get("action_executed")))
-    return value if type(value) is bool else None
 
 
 class _CoordinatorProxy:
@@ -49,29 +47,52 @@ class _CoordinatorProxy:
     def execute_local_step(self, **kwargs):
         job = self._job
         manager = job.manager
+        kwargs.pop("learning_context", None)
+        if job.learning_context is not None:
+            kwargs["learning_context"] = deepcopy(job.learning_context)
         with manager._condition:
             if job.cancelled:
                 raise _Cancelled("agent_command_cancelled")
-            manager._update(job, observation={"status": "unavailable", "reason": "action_in_progress"},
-                dispatch_in_progress=kwargs.get("operation") != "execute_recognition_plan")
+            if kwargs.get("operation") != "execute_recognition_plan":
+                attempt_index = manager._begin_dispatch(job, kwargs["operation"])
+            else:
+                manager._update(job, observation={"status": "unavailable", "reason": "action_in_progress"})
         if kwargs.get("operation") != "execute_recognition_plan":
             try:
                 receipt = manager.coordinator.execute_local_step(**kwargs)
             except Exception:
-                with manager._condition:
-                    previous = manager._snapshots[job.command_id]["action_executed"]
-                    manager._update(job, action_executed=_merge_action(previous, None),
-                        observation={"status": "unavailable", "reason": "execution_result_unknown"})
+                manager._record_unknown(job, kwargs["operation"], attempt_index)
                 raise
-            finally:
-                with manager._condition:
-                    manager._update(job, dispatch_in_progress=False)
-            manager._record_receipt(job, receipt, kwargs["operation"])
+            manager._record_receipt(job, receipt, kwargs["operation"], attempt_index)
             return receipt
         request = kwargs.get("request") or {}
         goal = request.get("goal")
         if not isinstance(goal, str) or not goal.strip():
             raise AgentCommandError("recognition_goal_invalid")
+        if request.get("target_memory") is not None:
+            if job.workflow_bindings is not None:
+                kwargs["memory_bindings"] = deepcopy(job.workflow_bindings)
+            memory_target, resolution = manager.coordinator.prepare_memory_grounding(
+                target_window_handle=kwargs["target_window_handle"],
+                target_process_id=kwargs["target_process_id"], request=request,
+                action=kwargs.get("memory_action"),
+                **({"memory_bindings": kwargs["memory_bindings"]} if "memory_bindings" in kwargs else {}))
+            kwargs["memory_resolution"] = resolution
+            if memory_target is not None:
+                return self._execute_memory(kwargs, memory_target)
+            if resolution["status"] in {"miss", "ambiguous", "unsupported"}:
+                if request.get('selection_intent') is not None:
+                    raise AgentCommandError('selection_unique_bound_row_required')
+                goal = resolution.get("grounding_goal", goal)
+                request = deepcopy(request)
+                request["goal"] = goal
+                request.pop("target_memory", None)
+                kwargs["request"] = request
+                kwargs.pop("memory_action", None)
+                kwargs.pop("memory_bindings", None)
+        route = resolve_recognition_route(manager.configuration, job.capabilities)
+        if route.status != "eligible":
+            raise AgentCommandError(route.code)
         capture = manager.coordinator._owner.call(manager.capture_current)
         if not isinstance(capture, dict):
             raise AgentCommandError("capture_invalid")
@@ -97,17 +118,22 @@ class _CoordinatorProxy:
                 job.execution_id = None
                 manager._update(job, status="awaiting_grounding", pending_grounding={
                     **pending, "output_schema": GroundingResult.model_json_schema()},
+                    grounding_wait={"request_id": request_id,
+                        "capture_id": pending["capture"]["capture_id"],
+                        "source": manager.configuration.source, "started_ns": perf_counter_ns()},
                     observation={"status": "captured", "capture": pending["capture"]})
             manager._condition.notify_all()
-            while job.resume_state is None and not job.cancelled:
-                manager._condition.wait(timeout=.1)
-                if job.resume_state is None and not job.cancelled:
-                    phase = manager.store.get(request_id)["phase"]
-                    if phase in {"expired", "cancelled", "absent", "ambiguous", "unsupported", "error"}:
-                        job.failure_code = "request_" + phase
-                        job.cancelled = True
-                        manager._update(job, status="failed", pending_grounding=None,
-                            error={"code": job.failure_code})
+            try:
+                while job.resume_state is None and not job.cancelled:
+                    manager._condition.wait(timeout=.1)
+                    if job.resume_state is None and not job.cancelled:
+                        phase = manager.store.get(request_id)["phase"]
+                        if phase in {"expired", "cancelled", "absent", "ambiguous", "unsupported", "error"}:
+                            job.failure_code = "request_" + phase
+                            job.cancelled = True
+            finally:
+                if manager.api_grounder is None:
+                    manager._finish_grounding_wait(job)
             if job.cancelled:
                 if job.resume_state is not None:
                     manager.store.finish_execution(request_id, job.execution_id,
@@ -137,44 +163,86 @@ class _CoordinatorProxy:
                     manager.store.finish_execution(request_id, execution_id,
                         {"phase": "cancelled_before_dispatch"}, input_attempted=False)
                     raise _Cancelled("agent_command_cancelled")
+                attempt_index = manager._begin_dispatch(job, "execute_recognition_plan")
                 dispatch_started = True
-                manager._update(job, dispatch_in_progress=True)
-            try:
-                receipt = manager.coordinator.execute_local_step(**kwargs, grounding_target=grounding_target)
-            finally:
-                with manager._condition:
-                    manager._update(job, dispatch_in_progress=False)
+            receipt = manager.coordinator.execute_local_step(**kwargs, grounding_target=grounding_target)
         except Exception as error:
             if not isinstance(error, _Cancelled):
                 manager.store.finish_execution(request_id, execution_id,
                     {"phase": "result_unknown" if dispatch_started else "failed_before_dispatch",
                         "error": {"code": type(error).__name__}},
                     input_attempted=dispatch_started)
-                with manager._condition:
-                    previous = manager._snapshots[job.command_id]["action_executed"]
-                    manager._update(job, action_executed=(True if previous is True else
-                        None if dispatch_started else previous),
-                        observation={"status": "unavailable", "reason":
-                            "execution_result_unknown" if dispatch_started else "failed_before_dispatch"})
+                if dispatch_started:
+                    manager._record_unknown(job, "execute_recognition_plan", attempt_index)
+                else:
+                    with manager._condition:
+                        manager._update(job, observation={"status": "unavailable", "reason": "failed_before_dispatch"})
             raise
+        manager._record_receipt(job, receipt, "execute_recognition_plan", attempt_index)
         manager.store.finish_execution(request_id, execution_id, receipt,
             input_attempted=grounding_target.input_claimed)
-        manager._record_receipt(job, receipt, "execute_recognition_plan")
+        return receipt
+
+    def _execute_memory(self, kwargs, target):
+        job = self._job
+        manager = job.manager
+        if kwargs['request'].get('selection_intent') is not None:
+            attempted = []
+            def boundary():
+                with manager._condition:
+                    if job.cancelled:
+                        raise _Cancelled('agent_command_cancelled')
+                    attempted.append(manager._begin_dispatch(job, 'execute_recognition_plan'))
+            try:
+                receipt = manager.coordinator.execute_local_step(**kwargs, memory_target=target,
+                                                               selection_dispatch_boundary=boundary)
+            except Exception:
+                if attempted:
+                    manager._record_unknown(job, 'execute_recognition_plan', attempted[0])
+                raise
+            if attempted:
+                manager._record_receipt(job, receipt, 'execute_recognition_plan', attempted[0])
+            else:
+                from app.learning_memory.selection_satisfaction import validate_selection_receipt
+                if not validate_selection_receipt(receipt, kwargs['request'], command=job.command, action_executed=False,
+                        session_dir=manager.store.session_root, expected_context=job.workflow_bindings):
+                    raise AgentCommandError('selection_no_input_proof_invalid')
+                with manager._condition:
+                    if job.cancelled:
+                        raise _Cancelled('agent_command_cancelled')
+                    manager._update(job, last_execution={'attempt_index': None, 'operation': 'execute_recognition_plan',
+                                    'receipt': deepcopy(receipt)}, observation=deepcopy(receipt['observation']))
+            return receipt
+        # 与原识图路线共用派发线性化点，取消不得重放可能已经发生的输入。
+        with manager._condition:
+            if job.cancelled:
+                raise _Cancelled("agent_command_cancelled")
+            attempt_index = manager._begin_dispatch(job, "execute_recognition_plan")
+        try:
+            receipt = manager.coordinator.execute_local_step(**kwargs, memory_target=target)
+        except Exception:
+            manager._record_unknown(job, "execute_recognition_plan", attempt_index)
+            raise
+        manager._record_receipt(job, receipt, "execute_recognition_plan", attempt_index)
         return receipt
 
 
 class _Job:
-    def __init__(self, manager, command_id, command, target, capabilities):
+    def __init__(self, manager, command_id, command, target, capabilities, workflow_bindings=None,
+                 learning_context=None):
         self.manager = manager
         self.command_id = command_id
         self.command = deepcopy(command)
         self.target = deepcopy(target)
         self.capabilities = capabilities
+        self.workflow_bindings = deepcopy(workflow_bindings)
+        self.learning_context = deepcopy(learning_context)
         self.pending_id = None
         self.resume_state = None
         self.execution_id = None
         self.cancelled = False
         self.failure_code = None
+        self.measurement_changes = {}
         self.thread = None
 
 
@@ -209,23 +277,30 @@ class AgentCommandJobs:
                 observation={"status": "captured", "capture": pending["capture"]},
                 api_request={"request_id": request_id, "phase": "requesting"})
         # 网络等待不持有命令锁，取消和状态查询仍可处理；只发送此步冻结原图。
+        response_received = False
         try:
             response = self.api_grounder.ground(request_id=request_id,
                 capture=pending["capture"], goal=pending["goal"])
+            response_received = True
+            provider = response.get("provider")
+            self._record_recognition_call(job, request_id, pending["capture"]["capture_id"],
+                provider=provider, attempt=provider.get("attempt") if isinstance(provider, dict) else None)
             with self._condition:
                 if job.cancelled:
                     raise _Cancelled("agent_command_cancelled")
                 state = self.store.resolve(request_id, response["result"])
-                calls = self._snapshots[job.command_id].get("recognition_calls", [])
-                self._update(job, recognition_calls=[*calls, {"request_id": request_id,
-                    "capture_id": pending["capture"]["capture_id"], "provider": response["provider"]}],
-                    api_request={"request_id": request_id, "phase": state["phase"]})
+                self._update(job, api_request={"request_id": request_id, "phase": state["phase"]})
                 if state["phase"] != "grounding_ready":
                     raise AgentCommandError("request_" + state["phase"])
                 job.execution_id = "api-" + uuid4().hex
                 job.resume_state = self.store.claim_execution(request_id, job.execution_id)
         except Exception as error:
             with self._condition:
+                if not response_received:
+                    attempt = getattr(error, "attempt", None)
+                    if attempt is not None:
+                        self._record_recognition_call(job, request_id,
+                            pending["capture"]["capture_id"], attempt=attempt)
                 self.store.cancel(request_id)
                 self._update(job, api_request={"request_id": request_id,
                     "phase": "cancelled" if job.cancelled else "failed"})
@@ -234,6 +309,37 @@ class AgentCommandJobs:
                 job.failure_code = getattr(error, "code", None) or str(error)
             raise
 
+    def _record_recognition_call(self, job, request_id, capture_id, *, provider=None, attempt=None):
+        call = {"request_id": request_id, "capture_id": capture_id}
+        call["source"] = "external_api"
+        if provider is not None:
+            call["provider"] = deepcopy(provider)
+        if attempt is not None:
+            call["attempt"] = deepcopy(attempt)
+        with self._condition:
+            calls = self._snapshots[job.command_id].get("recognition_calls", [])
+            existing = next((item for item in calls if item.get("request_id") == request_id), None)
+            if existing is not None:
+                if existing != call:
+                    raise AgentCommandError("recognition_attempt_conflict")
+                return
+            self._update(job, recognition_calls=[*calls, call])
+
+    def _finish_grounding_wait(self, job):
+        # 这里只观测交接等待，包含调用方空档；不能推定模型调用数或推理耗时。
+        state = self._snapshots[job.command_id]
+        wait = state.get("grounding_wait")
+        if wait is None:
+            return
+        status = ("timeout" if job.failure_code == "request_expired" else
+                  "cancelled" if job.failure_code == "request_cancelled" or job.cancelled and not job.failure_code else
+                  "failure" if job.failure_code or job.resume_state is None else "success")
+        handoff = {key: wait[key] for key in ("request_id", "capture_id", "source")}
+        handoff["wait"] = {"started_ns": wait["started_ns"], "ended_ns": perf_counter_ns(), "status": status}
+        # 合入原有命令状态提交，不为辅助计量新增派发前的独立写盘。
+        job.measurement_changes = {"grounding_wait": None,
+            "recognition_handoffs": [*state.get("recognition_handoffs", []), handoff]}
+
     def _path(self, command_id):
         if not isinstance(command_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", command_id):
             raise AgentCommandError("command_id_invalid")
@@ -241,16 +347,52 @@ class AgentCommandJobs:
 
     def _update(self, job, **changes):
         state = deepcopy(self._snapshots[job.command_id])
+        state.update(deepcopy(job.measurement_changes))
         state.update(deepcopy(changes))
         write_json_snapshot(self._path(job.command_id), state)
         self._snapshots[job.command_id] = state
+        job.measurement_changes = {}
         return deepcopy(state)
 
-    def _record_receipt(self, job, receipt, operation):
+    def _begin_dispatch(self, job, operation):
         with self._condition:
-            previous = self._snapshots[job.command_id]["action_executed"]
-            self._update(job, action_executed=_merge_action(
-                previous, _receipt_action(receipt, operation)),
+            state = self._snapshots[job.command_id]
+            attempts = deepcopy(state["dispatch_attempts"])
+            if attempts and attempts[-1]["status"] == "started":
+                raise AgentCommandError("dispatch_attempt_unresolved")
+            index = len(attempts) + 1
+            attempts.append({"index": index, "operation": operation, "status": "started",
+                             "previous_action_executed": state["action_executed"], "action_executed": None})
+            # 输入前先保存未结算边界；后续明确返回 False 可恢复此前的已知事实。
+            self._update(job, dispatch_attempts=attempts, dispatch_in_progress=True,
+                action_executed=_merge_action(state["action_executed"], None),
+                observation={"status": "unavailable", "reason": "action_in_progress"})
+            return index
+
+    def _dispatch_attempt(self, job, operation, attempt_index):
+        attempts = deepcopy(self._snapshots[job.command_id]["dispatch_attempts"])
+        if (not attempts or attempts[-1]["index"] != attempt_index
+                or attempts[-1]["operation"] != operation or attempts[-1]["status"] != "started"):
+            raise AgentCommandError("dispatch_attempt_identity_mismatch")
+        return attempts
+
+    def _record_unknown(self, job, operation, attempt_index):
+        with self._condition:
+            attempts = self._dispatch_attempt(job, operation, attempt_index)
+            attempts[-1].update(status="unknown", action_executed=None)
+            self._update(job, dispatch_attempts=attempts, dispatch_in_progress=False,
+                action_executed=_merge_action(attempts[-1]["previous_action_executed"], None),
+                observation={"status": "unavailable", "reason": "execution_result_unknown"})
+
+    def _record_receipt(self, job, receipt, operation, attempt_index):
+        with self._condition:
+            attempts = self._dispatch_attempt(job, operation, attempt_index)
+            executed = _receipt_action(receipt, operation)
+            attempts[-1].update(status="returned", action_executed=executed)
+            # 原回执、动作事实和关闭边界必须在同一原子快照中发布。
+            self._update(job, dispatch_attempts=attempts, dispatch_in_progress=False,
+                last_execution={"attempt_index": attempt_index, "operation": operation, "receipt": deepcopy(receipt)},
+                action_executed=_merge_action(attempts[-1]["previous_action_executed"], executed),
                 observation=deepcopy(receipt.get("observation") or
                     {"status": "unavailable", "reason": "post_action_observation_unavailable"}))
 
@@ -259,12 +401,25 @@ class AgentCommandJobs:
         with self._condition:
             return self._active_id is not None
 
-    def start(self, command_id, command, target, capabilities):
+    def start(self, command_id, command, target, capabilities, *, workflow_bindings=None,
+              learning_context=None):
         path = self._path(command_id)
         capabilities = ClientVisionCapabilities.model_validate(capabilities)
         route = resolve_recognition_route(self.configuration, capabilities)
         if route.status != "eligible":
-            raise AgentCommandError(route.code)
+            request = command.get("request") if isinstance(command, dict) else None
+            memory_reference = request.get("target_memory") if isinstance(request, dict) else None
+            memory_command = isinstance(command, dict) and (
+                command.get("kind") == "input_sequence" or
+                (command.get("kind") == "step" and
+                 command.get("operation") == "execute_recognition_plan"))
+            if route.code != "capability_unknown" or not memory_command:
+                raise AgentCommandVisionAdmissionError(command_id, command, self.configuration, capabilities, route.code)
+            from app.learning_memory.target_recipe import validate_target_reference
+            try:
+                validate_target_reference(memory_reference)
+            except ValueError:
+                raise AgentCommandVisionAdmissionError(command_id, command, self.configuration, capabilities, route.code) from None
         if route.dispatch_owner != "agent_client" and self.configuration.source != "external_api":
             raise AgentCommandError("handoff_requires_agent_source")
         if not isinstance(target, dict) or any(type(target.get(k)) is not int or target[k] <= 0
@@ -295,12 +450,14 @@ class AgentCommandJobs:
             if self._active_id is not None:
                 raise AgentCommandError("command_active")
             self._root.mkdir(parents=True, exist_ok=True)
-            job = _Job(self, command_id, frozen, target, capabilities)
+            job = _Job(self, command_id, frozen, target, capabilities, workflow_bindings,
+                       learning_context)
             state = {"contract_version": "agent_command.v1", "command_id": command_id,
                 "status": "running", "pending_grounding": None, "progress": None,
                 "result": None, "observation": {"status": "not_requested", "capture": None},
                 "action_executed": False, "cancel_requested": False,
                 "dispatch_in_progress": False,
+                "dispatch_attempts": [], "last_execution": None,
                 "automatic_retry_allowed": False}
             write_json_snapshot(path, state)
             self._snapshots[command_id] = state
@@ -322,7 +479,9 @@ class AgentCommandJobs:
                 result = run_input_sequence(proxy, job.target, command["request"],
                     observation_wait_ms=command.get("observation_wait_ms"),
                     observation_condition=command.get("observation_condition"),
-                    persist=lambda progress: self._progress(job, progress))
+                    persist=lambda progress: self._progress(job, progress),
+                    **({"memory_bindings": job.workflow_bindings}
+                       if job.workflow_bindings is not None and command["request"].get("target_memory") is not None else {}))
             else:
                 result = proxy.execute_local_step(target_window_handle=job.target["handle"],
                     target_process_id=job.target["process_id"], operation="execute_recognition_plan",
@@ -334,9 +493,16 @@ class AgentCommandJobs:
                 action_executed = _receipt_action(result, "execute_recognition_plan")
             if type(action_executed) is not bool:
                 action_executed = None
+            selection_completed = False
+            if command.get('request', {}).get('selection_intent') is not None:
+                from app.learning_memory.selection_satisfaction import validate_selection_receipt
+                selection_completed = validate_selection_receipt(result, command['request'], command=command,
+                    action_executed=action_executed, session_dir=self.store.session_root,
+                    expected_context=job.workflow_bindings)
             status = ("completed" if result.get("status", "completed") == "completed"
                 and (command["kind"] != "step" or (result.get("response") or {}).get("success") is True
-                    and result.get("phase") == "returned" and action_executed is True)
+                    and result.get("phase") == "returned" and
+                    (selection_completed if command.get('request', {}).get('selection_intent') is not None else action_executed is True))
                 else "failed")
             with self._condition:
                 current_observation = self._snapshots[job.command_id]["observation"]

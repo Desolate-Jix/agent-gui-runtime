@@ -1,9 +1,7 @@
 """本地无学习编辑键适配，复用现有键盘后端。"""
-from .local_action_contract import LocalKeyRequest
+from app.execution.local_action_contract import LocalKeyRequest
 
 from app.api.models.response import APIResponse, ErrorModel
-
-
 
 
 def press_local_key(request: LocalKeyRequest) -> APIResponse:

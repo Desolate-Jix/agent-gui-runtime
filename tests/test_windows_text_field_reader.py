@@ -10,9 +10,66 @@ class NoPattern(Exception):
     pass
 
 
+def virtual_modal_chain(monkeypatch, *, modal=11012174, parent_pid=37552):
+    owner = NS(element_info=NS(handle=1837246, process_id=37552,
+        runtime_id=[42, 1837246], control_type='Window'), parent=lambda: None)
+    current = NS(element_info=NS(handle=modal, process_id=parent_pid,
+        runtime_id=[42, modal], control_type='Window'), parent=lambda: owner)
+    for index, kind in enumerate(['Group', 'Group', 'Group', 'Edit']):
+        parent = current
+        current = NS(element_info=NS(handle=None, process_id=37552,
+            runtime_id=[42, 11012174, 4, index], control_type=kind),
+            parent=lambda parent=parent: parent)
+    current.top_level_parent = lambda: owner
+    monkeypatch.setattr(module, '_native_root_handle',
+        lambda hwnd: {11012174: 11012174, 1837246: 1837246, 11012175: 11012175}.get(hwnd))
+    return current
+
+
+def test_virtual_edit_root_stops_at_actual_modal_not_uia_owner(monkeypatch):
+    hit = virtual_modal_chain(monkeypatch)
+    assert module._top_window_handle(hit) == 11012174
+
+
+def test_same_pid_other_modal_never_resolves_to_bound_owner(monkeypatch):
+    hit = virtual_modal_chain(monkeypatch, modal=11012175)
+    assert module._top_window_handle(hit) == 11012175
+    with pytest.raises(module.TextFieldReadError, match='window_or_process_changed'):
+        module.WindowsTextFieldReader._resolve_field(hit, 11012174)
+
+
+def test_virtual_root_rejects_foreign_pid_ancestor(monkeypatch):
+    hit = virtual_modal_chain(monkeypatch, parent_pid=999)
+    assert module._top_window_handle(hit) is None
+
+
+@pytest.mark.parametrize('fault', ['unknown', 'cycle', 'parent_error', 'invalid_native', 'depth'])
+def test_virtual_root_unknown_or_broken_chain_never_uses_owner(monkeypatch, fault):
+    hit = virtual_modal_chain(monkeypatch)
+    if fault == 'unknown':
+        hit.parent = lambda: None
+    elif fault == 'cycle':
+        hit.parent = lambda: hit
+    elif fault == 'parent_error':
+        def broken():
+            raise RuntimeError('provider failed')
+        hit.parent = broken
+    elif fault == 'invalid_native':
+        hit.element_info.handle = 777
+    else:
+        current = hit.parent()
+        for index in range(20):
+            parent = current
+            current = NS(element_info=NS(handle=None, process_id=37552,
+                runtime_id=[42, 999, index]), parent=lambda parent=parent: parent)
+        hit.parent = lambda: current
+    assert module._top_window_handle(hit) is None
+
+
 @pytest.fixture(autouse=True)
 def fake_com_boundary(monkeypatch):
     monkeypatch.setattr(module, "_no_pattern_exception", lambda: NoPattern)
+    monkeypatch.setattr(module, "_native_root_handle", lambda hwnd: {10: 10, 11: 11, 99: 99}.get(hwnd))
 
 
 def field(*, kind="Edit", role="textbox", value="", text="\ufffc", fault=None):
@@ -119,7 +176,7 @@ def test_full_field_read_rechecks_value_and_identity_for_object_marker(changed):
     wrapper.element_info.rectangle = NS(left=20, top=30, right=120, bottom=55)
     wrapper.is_visible = lambda: True
     wrapper.is_enabled = lambda: True
-    wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+    wrapper.parent = lambda: NS(element_info=NS(process_id=20, handle=10))
     values = iter(["", "changed" if changed else ""])
 
     class ValuePattern:
@@ -170,7 +227,7 @@ def test_read_failure_records_exact_stage_without_private_text(monkeypatch, read
         wrapper.element_info.rectangle = NS(left=20, top=30, right=120, bottom=55)
         wrapper.is_visible = lambda: True
         wrapper.is_enabled = lambda: True
-        wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+        wrapper.parent = lambda: NS(element_info=NS(process_id=20, handle=10))
         if index == read_index:
             if fault == "visible": wrapper.is_visible = lambda: False
             elif fault == "enabled": wrapper.is_enabled = lambda: False
@@ -179,6 +236,7 @@ def test_read_failure_records_exact_stage_without_private_text(monkeypatch, read
             elif fault == "text_readonly": wrapper.iface_text.DocumentRange.GetAttributeValue = lambda _: True
             elif fault == "resolve":
                 wrapper.element_info.control_type = "Button"
+                wrapper.element_info.handle = 10
                 wrapper.parent = lambda: None
         wrappers.append(wrapper)
     hits = iter(wrappers)
@@ -257,9 +315,10 @@ def test_hit_timeout_identifies_existing_deadline_without_more_sampling(monkeypa
     wrapper = field(kind=kind, role="combobox")
     wrapper.element_info.process_id = 20
     wrapper.element_info.rectangle = NS(left=20, top=30, right=120, bottom=55)
-    wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+    wrapper.parent = lambda: NS(element_info=NS(process_id=20, handle=10))
     wrapper.is_visible = lambda: True
     wrapper.is_enabled = lambda: True
+    wrapper.element_info.handle = 10
     wrapper.parent = lambda: None
     times = iter(clock_values)
     clocks, hits, waits = [], [], []
@@ -291,7 +350,7 @@ def test_completed_valid_first_hit_is_not_discarded_by_elapsed_budget(monkeypatc
     wrapper = field(kind="ComboBox", role="combobox")
     wrapper.element_info.process_id = 20
     wrapper.element_info.rectangle = NS(left=20, top=30, right=120, bottom=55)
-    wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+    wrapper.parent = lambda: NS(element_info=NS(process_id=20, handle=10))
     clock = iter(times)
     hits, verifies, waits = [], [], []
     reader = module.WindowsTextFieldReader(window_manager=None, native_identity_reader=None,
@@ -308,7 +367,7 @@ def test_late_wrong_hit_is_never_accepted(monkeypatch, fault):
     wrapper = field(kind="ComboBox", role="combobox")
     wrapper.element_info.process_id = 20
     wrapper.element_info.rectangle = NS(left=20, top=30, right=120, bottom=55)
-    wrapper.top_level_parent = lambda: NS(element_info=NS(handle=11 if fault == "window" else 10))
+    wrapper.parent = lambda: NS(element_info=NS(process_id=20, handle=11 if fault == "window" else 10))
     if fault == "identity": wrapper.element_info.runtime_id = [42, 99]
     if fault == "geometry": wrapper.element_info.rectangle.right = 121
     if fault == "process": wrapper.element_info.process_id = 21
@@ -341,7 +400,7 @@ def post_input_case(monkeypatch, *, new_box=(985,457,533,50), fault=None):
         wrapper.element_info.element.CurrentHasKeyboardFocus = not (fault == "unfocused" or fault == "focus_second" and index == 2)
         wrapper.is_visible = lambda: True
         wrapper.is_enabled = lambda: True
-        wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+        wrapper.parent = lambda: NS(element_info=NS(process_id=20, handle=10))
         if fault == "runtime" or fault == "runtime_second" and index == 2: wrapper.element_info.runtime_id = [42,99]
         if fault == "type": wrapper.element_info.control_type = "Edit"
         if fault == "readonly": wrapper.iface_value.CurrentIsReadOnly = True
@@ -406,12 +465,12 @@ def focused_overlay_case(monkeypatch, *, fault=None, fault_read=1):
         info.element.CurrentHasKeyboardFocus = True
         wrapper.is_visible = lambda: True
         wrapper.is_enabled = lambda: True
-        wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+        wrapper.parent = lambda: NS(element_info=NS(process_id=20, handle=10))
         if index == fault_read:
             if fault == "runtime": info.runtime_id = [42,99]
             elif fault == "type": info.control_type = "ComboBox"
             elif fault == "process": info.process_id = 21
-            elif fault == "window": wrapper.top_level_parent = lambda: NS(element_info=NS(handle=99))
+            elif fault == "window": wrapper.parent = lambda: NS(element_info=NS(process_id=20, handle=99))
             elif fault == "geometry": info.rectangle.right += 10
             elif fault == "unfocused": info.element.CurrentHasKeyboardFocus = False
             elif fault == "unknown_focus": info.element.CurrentHasKeyboardFocus = None

@@ -102,12 +102,25 @@ class WindowManager:
                 return None
 
             wrapper = HwndWrapper(self._bound_window.handle)  # type: ignore[operator]
-            if not self._is_candidate_window(wrapper):
+            previous_pid = self._bound_window.process_id
+            current_pid = self._get_process_id(self._bound_window.handle)
+            if (type(previous_pid) is not int or previous_pid <= 0
+                    or type(current_pid) is not int or current_pid <= 0 or current_pid != previous_pid):
+                logger.warning("Bound window process identity is unavailable or changed: {}", self._bound_window.handle)
+                self._bound_window = None
+                return None
+            if not self._is_candidate_window(wrapper, require_title=False):
                 logger.warning("Bound window is no longer a supported visible top-level window: {}", self._bound_window.handle)
                 self._bound_window = None
                 return None
 
-            self._bound_window = self._build_bound_window(wrapper)
+            refreshed = self._build_bound_window(wrapper)
+            # 刷新前后均保持原 PID；标题只保存本次实际值，不复用旧标题。
+            if type(refreshed.process_id) is not int or refreshed.process_id != previous_pid:
+                logger.warning("Bound window process identity changed during refresh: {}", self._bound_window.handle)
+                self._bound_window = None
+                return None
+            self._bound_window = refreshed
         except Exception as exc:  # pragma: no cover - defensive refresh path
             logger.warning("Failed to refresh bound window state; clearing stale binding: {}", exc)
             self._bound_window = None
@@ -122,6 +135,9 @@ class WindowManager:
         if bound is None:
             raise ValueError("No bound window available to focus")
 
+        # 保留同进程且确切归属当前父窗口的前台弹窗，避免准备阶段自己改变截图。
+        if self.get_owned_foreground_popup_handle(bound) is not None:
+            return bound
         logger.info("Focusing bound window: handle={}, title={}", bound.handle, bound.title)
         activation_error = self._activate_window(bound.handle)
 
@@ -139,13 +155,36 @@ class WindowManager:
                     active_root = int(win32gui.GetAncestor(active_handle, win32con.GA_ROOT) or active_handle)  # type: ignore[union-attr]
                 except Exception:
                     active_root = active_handle
-            if active_handle == refreshed.handle or active_root == refreshed.handle:
+            if (active_handle == refreshed.handle or active_root == refreshed.handle
+                    or self.get_owned_foreground_popup_handle(refreshed) is not None):
                 return refreshed
 
         raise RuntimeError(
             "Bound window foreground verification failed: "
             f"expected_handle={bound.handle}, actual_foreground_handle={active_handle}"
         ) from activation_error
+
+    def get_owned_foreground_popup_handle(self, bound: BoundWindow) -> int | None:
+        """只读核对前台弹窗的可见性、进程和确切父窗口归属。"""
+        self._ensure_windows_backend()
+        process_id = getattr(bound, "process_id", None)
+        if not process_id:
+            return None
+        try:
+            active = int(win32gui.GetForegroundWindow() or 0)
+            if not active or active == bound.handle:
+                return None
+            if (not win32gui.IsWindow(bound.handle) or not win32gui.IsWindow(active)
+                    or not win32gui.IsWindowVisible(active) or win32gui.IsIconic(active)
+                    or self._get_process_id(bound.handle) != process_id
+                    or self._get_process_id(active) != process_id):
+                return None
+            if (int(win32gui.GetAncestor(active, win32con.GA_ROOT) or active) != active
+                    or int(win32gui.GetAncestor(active, win32con.GA_ROOTOWNER) or active) != bound.handle):
+                return None
+            return active
+        except Exception as exc:
+            raise RuntimeError("foreground_popup_ownership_unavailable") from exc
 
     def prepare_bound_window(self, permit: object) -> BoundWindow:
         """消费本地人工确认许可，只恢复和聚焦同一进程窗口。"""
@@ -269,7 +308,7 @@ class WindowManager:
                 return False
             state = self._read_gui_menu_state(thread)
             owner = state["menu_owner"]
-            return bool(state["flags"] & 0x10 and state["active"] == bound_handle
+            return bool(state["flags"] & (0x04 | 0x10) and state["active"] == bound_handle
                         and win32gui.GetForegroundWindow() == bound_handle and owner
                         and tuple(win32process.GetWindowThreadProcessId(owner)) == (thread, process)
                         and int(get_ancestor(owner, win32con.GA_ROOT) or owner) == bound_handle)
@@ -599,7 +638,7 @@ class WindowManager:
         icons = win32gui.FindWindowEx(view, 0, "SysListView32", None) if view else 0
         return "icon_host" if icons else "shell_background"
 
-    def _is_candidate_window(self, wrapper: HwndWrapper) -> bool:
+    def _is_candidate_window(self, wrapper: HwndWrapper, *, require_title: bool = True) -> bool:
         """Return whether a window is a usable top-level candidate."""
         if not WINDOWS_BACKEND_AVAILABLE:
             return False
@@ -621,7 +660,7 @@ class WindowManager:
             desktop_role = self._desktop_window_role(handle)
             if desktop_role in {"shell_background", "unverified_shell"}:
                 return rejected("desktop_icon_host_unavailable")
-            if not wrapper.window_text().strip() and desktop_role != "icon_host":
+            if require_title and not wrapper.window_text().strip() and desktop_role != "icon_host":
                 return rejected("empty_title")
             return True
         except Exception as error:
@@ -649,7 +688,7 @@ class WindowManager:
         return "".join(char for char in value.strip().lower() if unicodedata.category(char) != "Cf")
 
     def _build_bound_window(self, wrapper: HwndWrapper) -> BoundWindow:
-        """截图、UIA 投影和输入共用客户区原点；标题继续作为窗口元数据。"""
+        """截图、UIA 投影和输入共用客户区及已验证原生菜单原点。"""
         self._ensure_windows_backend()
         left, top, right, bottom = self._capture_surface_rect(wrapper.handle)
         process_id = self._get_process_id(wrapper.handle)
@@ -667,7 +706,7 @@ class WindowManager:
 
     @staticmethod
     def _capture_surface_rect(handle: int, *, gui=None) -> tuple[int, int, int, int]:
-        """排除非客户区透明边框；不可把其他窗口像素归属于当前应用。"""
+        """仅纳入客户区与确切归属当前窗口的菜单，排除透明边框。"""
         gui = win32gui if gui is None else gui
         left, top, right, bottom = gui.GetClientRect(handle)
         if right <= left or bottom <= top:
@@ -676,7 +715,40 @@ class WindowManager:
         screen_right, screen_bottom = gui.ClientToScreen(handle, (right, bottom))
         if screen_right <= screen_left or screen_bottom <= screen_top:
             raise ValueError("native_capture_client_area_invalid")
-        return screen_left, screen_top, screen_right, screen_bottom
+        client = (screen_left, screen_top, screen_right, screen_bottom)
+        menu = gui.GetMenu(handle)
+        if not menu:
+            return client
+        count = gui.GetMenuItemCount(menu)
+        if type(count) is not int or count < 0:
+            raise ValueError("native_capture_menu_query_failed")
+        if not count:
+            return client
+        window = gui.GetWindowRect(handle)
+
+        def menu_items():
+            items = []
+            for index in range(count):
+                value = gui.GetMenuItemRect(handle, menu, index)
+                if (not isinstance(value, (tuple, list)) or len(value) != 2
+                        or type(value[0]) not in (bool, int) or not value[0]):
+                    raise ValueError("native_capture_menu_query_failed")
+                rect = value[1]
+                if (not isinstance(rect, (tuple, list)) or len(rect) != 4
+                        or any(type(part) is not int for part in rect)):
+                    raise ValueError("native_capture_menu_area_invalid")
+                left, top, right, bottom = rect
+                if not (screen_left <= left < right <= screen_right
+                        and window[1] <= top < bottom <= screen_top):
+                    raise ValueError("native_capture_menu_area_invalid")
+                items.append(tuple(rect))
+            return items
+
+        # 只扩展当前 HWND 的已显示菜单；不纳入标题栏、透明边框或系统菜单。
+        items = menu_items()
+        if gui.GetMenu(handle) != menu or gui.GetMenuItemCount(menu) != count or menu_items() != items:
+            raise ValueError("native_capture_menu_changed")
+        return screen_left, min(item[1] for item in items), screen_right, screen_bottom
 
     def _activate_window(self, handle: int) -> Optional[Exception]:
         """Best-effort lightweight foreground activation for screen-coordinate capture."""
@@ -690,6 +762,9 @@ class WindowManager:
             activation_error = exc
 
         attached_threads: list[int] = []
+        attachment_errors: list[Exception] = []
+        diagnostics = {"current_thread": 0, "foreground_thread": 0, "target_thread": 0,
+                       "attachment_failures": [], "failure_stage": None}
         current_thread = 0
         thread_ids: tuple[int, int] = (0, 0)
         try:
@@ -702,6 +777,8 @@ class WindowManager:
             )
             target_thread = int(win32process.GetWindowThreadProcessId(handle)[0])  # type: ignore[union-attr]
             thread_ids = (foreground_thread, target_thread)
+            diagnostics.update(current_thread=current_thread, foreground_thread=foreground_thread,
+                               target_thread=target_thread)
         except Exception as exc:
             logger.warning("Input-thread discovery failed for handle {}: {}", handle, exc)
 
@@ -711,6 +788,11 @@ class WindowManager:
             try:
                 win32process.AttachThreadInput(current_thread, thread_id, True)  # type: ignore[union-attr]
             except Exception as exc:
+                from app.core.window_preparation import window_preparation_failure_details
+
+                attachment_errors.append(exc)
+                diagnostics["attachment_failures"].append({"from_thread": current_thread,
+                    "to_thread": thread_id, **window_preparation_failure_details(exc)})
                 logger.warning(
                     "Input-thread attachment failed for handle {}, target_thread={}: {}",
                     handle,
@@ -721,7 +803,9 @@ class WindowManager:
             attached_threads.append(thread_id)
 
         try:
+            diagnostics["failure_stage"] = "BringWindowToTop"
             win32gui.BringWindowToTop(handle)  # type: ignore[union-attr]
+            diagnostics["failure_stage"] = "SetWindowPos_topmost"
             win32gui.SetWindowPos(  # type: ignore[union-attr]
                 handle,
                 win32con.HWND_TOPMOST,  # type: ignore[union-attr]
@@ -731,6 +815,7 @@ class WindowManager:
                 0,
                 win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW,  # type: ignore[union-attr]
             )
+            diagnostics["failure_stage"] = "SetWindowPos_notopmost"
             win32gui.SetWindowPos(  # type: ignore[union-attr]
                 handle,
                 win32con.HWND_NOTOPMOST,  # type: ignore[union-attr]
@@ -740,8 +825,14 @@ class WindowManager:
                 0,
                 win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW,  # type: ignore[union-attr]
             )
+            # 清除更早附件错误；此 API 未保证扩展错误码可靠。
+            diagnostics["failure_stage"] = "SetLastError"
+            win32api.SetLastError(0)  # type: ignore[union-attr]
+            diagnostics["failure_stage"] = "SetForegroundWindow"
             win32gui.SetForegroundWindow(handle)  # type: ignore[union-attr]
         except Exception as exc:
+            exc.activation_diagnostics = diagnostics
+            exc.activation_attachment_errors = tuple(attachment_errors)
             logger.warning("Foreground activation failed for handle {}: {}", handle, exc)
             activation_error = exc
             from app.core.window_preparation import _window_preparation_is_active

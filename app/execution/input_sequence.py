@@ -1,9 +1,10 @@
 """通用输入组合：复用单步执行与字段读取，检查失败即返回已完成部分。"""
+from copy import deepcopy
 from hashlib import sha256
 from time import perf_counter, sleep
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class InputSequenceRequest(BaseModel):
@@ -12,6 +13,15 @@ class InputSequenceRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
     clear_existing: bool = True
     submit_search: bool
+    target_memory: dict[str, str] | None = None
+
+    @field_validator("target_memory")
+    @classmethod
+    def validate_target_memory(cls, value):
+        if value is None:
+            return None
+        from app.learning_memory.target_recipe import validate_target_reference
+        return validate_target_reference(value)
 
 
 class InputSequenceInterrupted(ValueError):
@@ -204,9 +214,25 @@ def _read_local_focus(coordinator, target, capture, field_id, binding, expected_
 
 def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None, observation_condition=None, persist=None,
                        _tab_from=None, _expected_label=None, _on_field_complete=None, _prefer_current_uia=False,
-                       _declared_label=None):
+                       _declared_label=None, memory_bindings=None, learning_context=None):
     """同一宿主串行命令内完成组合；不循环点击、不自动改写目标或重试输入。"""
+    learning_context = deepcopy(learning_context) if learning_context is not None else None
     spec = InputSequenceRequest.model_validate(request)
+    if memory_bindings is not None:
+        if not isinstance(memory_bindings, dict) or spec.target_memory is None:
+            raise ValueError("workflow_target_bindings_invalid")
+        bound = memory_bindings.get("action")
+        if (not isinstance(bound, dict) or bound.get("kind") != "input_sequence"
+                or bound.get("target_memory") != spec.target_memory
+                or bound.get("field_goal") != spec.field_goal
+                or bound.get("submit_search") is not spec.submit_search
+                or bound.get("clear_existing") is not spec.clear_existing):
+            raise ValueError("workflow_target_action_mismatch")
+        from app.learning_memory.target_selectors import _value
+        expected_text = _value(bound.get("text"), {key: memory_bindings[key]
+            for key in ("run_id", "inputs", "outputs")})
+        if expected_text != spec.text:
+            raise ValueError("workflow_target_input_mismatch")
     if _tab_from is not None and (spec.submit_search or not _expected_label):
         raise ValueError("internal tab continuation requires a named fill-only field")
     if target is None:
@@ -237,7 +263,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         if persist is not None:
             persist(result)
 
-    def action(name, operation, payload, wait_ms, *, keyboard_target=None, focus_target=None):
+    def action(name, operation, payload, wait_ms, *, keyboard_target=None, focus_target=None, memory_action=None):
         result["phase"] = name
         # 后图必须属于最后一次尝试，不能把上一步的图冒充本次输入后的图。
         result["observation"] = {"status": "unavailable", "reason": "action_in_progress"}
@@ -251,8 +277,12 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 include_observation=True, observation_wait_ms=wait_ms,
                 **({"keyboard_target": keyboard_target} if keyboard_target is not None else {}),
                 **({"focus_target": focus_target} if focus_target is not None else {}),
+                **({"memory_action": memory_action, "memory_bindings": memory_bindings}
+                   if memory_action is not None and memory_bindings is not None else
+                   {"memory_action": memory_action} if memory_action is not None else {}),
                 **({"observation_condition": observation_condition}
-                   if name == "search" and observation_condition is not None else {}))
+                   if name == "search" and observation_condition is not None else {}),
+                **({"learning_context": learning_context} if learning_context is not None else {}))
         except Exception:
             row["status"] = "result_unknown"
             result["action_executed"] = True if result["action_executed"] is True else None
@@ -309,8 +339,11 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         if _tab_from is None:
             located = action("focus", "execute_recognition_plan", {
                 "goal": spec.field_goal, "click_kind": "single",
+                **({"target_memory": spec.target_memory} if spec.target_memory is not None else {}),
                 **({"metadata": {"text_focus_route": "current_uia_primary"}} if _prefer_current_uia else {})},
-                0, focus_target=focus_target)
+                0, focus_target=focus_target,
+                memory_action=({"kind": "input_sequence", "field_goal": spec.field_goal,
+                                "submit_search": spec.submit_search} if spec.target_memory is not None else None))
         else:
             from app.core.local_keyboard_target import LocalKeyboardTarget
             previous, previous_kind = _tab_from
@@ -417,7 +450,9 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             next_action="inspect_returned_image_and_judge_task_effect")
     except Exception as error:
         # 组合可能已有输入，必须保留子步回执，不把整个命令伪装成零副作用。
+        from app.core.screenshot import CaptureVisibilityError
         reason = (str(error) if isinstance(error, InputSequenceInterrupted)
+                  else error.reason if isinstance(error, CaptureVisibilityError)
                   else getattr(error, "reason_code", "input_sequence_failed"))
         result.update(status="interrupted", interrupted_at=result["phase"],
             error={"code": reason, "type": type(error).__name__},

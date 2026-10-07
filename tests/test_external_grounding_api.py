@@ -60,6 +60,11 @@ def test_exact_png_utf8_and_model_provenance(capture, monkeypatch):
     assert value["provider"]["returned_model"] == "provider-model"
     assert value["provider"]["usage"]["total_tokens"] == 50
     assert value["provider"]["elapsed_ms"] >= 0
+    attempt = value["provider"]["attempt"]
+    assert attempt["status"] == "success"
+    assert attempt["started_ns"] <= attempt["ended_ns"]
+    assert attempt["usage"] == {"input_tokens": 30, "output_tokens": 20, "total_tokens": 50}
+    assert set(attempt) == {"started_ns", "ended_ns", "status", "usage"}
     assert value["action_executed"] is False
     assert "secret-value" not in json.dumps(value)
 
@@ -77,6 +82,9 @@ def test_http_errors_are_distinct_redacted_and_not_retried(capture, monkeypatch,
             provider.ground(request_id="request-1", capture=capture, goal="Search")
     assert failure.value.code == code
     assert "secret-value" not in str(failure.value)
+    assert failure.value.attempt["status"] == "failure"
+    assert failure.value.attempt["usage"] is None
+    assert set(failure.value.attempt) == {"started_ns", "ended_ns", "status", "usage"}
     assert len(calls) == 1
 
 
@@ -89,19 +97,25 @@ def test_bad_candidates_cannot_become_ready(capture, monkeypatch, mutation, code
     payload = result()
     mutation(payload)
     with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(lambda _: httpx.Response(200,json=reply(payload)))) as provider:
-        with pytest.raises(ApiGroundingError, match=code):
+        with pytest.raises(ApiGroundingError, match=code) as failure:
             provider.ground(request_id="request-1",capture=capture,goal="Search")
+    assert failure.value.attempt["status"] == "failure"
+    assert failure.value.attempt["usage"] == {"input_tokens": 30, "output_tokens": 20, "total_tokens": 50}
 
 
 def test_missing_key_and_changed_frame_fail_before_network(capture, monkeypatch):
     monkeypatch.delenv("TEST_VISION_KEY", raising=False)
-    with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(lambda _: pytest.fail("network"))) as provider:
-        with pytest.raises(ApiGroundingError, match="api_key_missing"):
+    calls = []
+    with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(lambda request: calls.append(request) or pytest.fail("network"))) as provider:
+        with pytest.raises(ApiGroundingError, match="api_key_missing") as missing_key:
             provider.ground(request_id="request-1",capture=capture,goal="Search")
+        assert missing_key.value.attempt is None
         monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
         capture["sha256"] = "wrong"
-        with pytest.raises(ApiGroundingError, match="api_capture_changed"):
+        with pytest.raises(ApiGroundingError, match="api_capture_changed") as changed_capture:
             provider.ground(request_id="request-1",capture=capture,goal="Search")
+        assert changed_capture.value.attempt is None
+    assert calls == []
 
 
 @pytest.mark.parametrize("value,code", [
@@ -112,8 +126,9 @@ def test_missing_key_and_changed_frame_fail_before_network(capture, monkeypatch)
 def test_protocol_failures_are_not_vision_unsupported(capture, monkeypatch, value, code):
     monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
     with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(lambda _: httpx.Response(200,json=value))) as provider:
-        with pytest.raises(ApiGroundingError, match=code):
+        with pytest.raises(ApiGroundingError, match=code) as failure:
             provider.ground(request_id="request-1",capture=capture,goal="Search")
+    assert failure.value.attempt["status"] == "failure"
 
 
 def test_timeout_and_response_bound(capture, monkeypatch):
@@ -121,12 +136,23 @@ def test_timeout_and_response_bound(capture, monkeypatch):
     def timeout(request):
         raise httpx.ReadTimeout("secret-value", request=request)
     with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(timeout)) as provider:
-        with pytest.raises(ApiGroundingError, match="api_timeout"):
+        with pytest.raises(ApiGroundingError, match="api_timeout") as timed_out:
             provider.ground(request_id="request-1",capture=capture,goal="Search")
+        assert timed_out.value.attempt["status"] == "timeout"
+        assert timed_out.value.attempt["usage"] is None
     with ChatCompletionsGrounder(profile(max_response_bytes=1024), transport=httpx.MockTransport(
             lambda _: httpx.Response(200, content=b"x"*1025))) as provider:
-        with pytest.raises(ApiGroundingError, match="api_response_too_large"):
+        with pytest.raises(ApiGroundingError, match="api_response_too_large") as too_large:
             provider.ground(request_id="request-1",capture=capture,goal="Search")
+    assert too_large.value.attempt["status"] == "failure"
+
+
+def test_unknown_provider_usage_stays_unknown(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=reply(usage=None)))) as provider:
+        value = provider.ground(request_id="request-1", capture=capture, goal="Search")
+    assert value["provider"]["attempt"]["usage"] is None
 
 
 @pytest.mark.parametrize("endpoint", ["http://remote.example/v1/chat/completions", "https://user:secret@host/api", "https://host/api?key=secret", "https://host:bad/api", "https://host:99999/api"])
@@ -158,7 +184,8 @@ def test_slot_released_after_error_and_explicit_busy(capture, monkeypatch):
     monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
     with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(lambda _: httpx.Response(200,json=reply()))) as provider:
         assert provider._slots.acquire(blocking=False)
-        with pytest.raises(ApiGroundingError, match="api_busy"):
+        with pytest.raises(ApiGroundingError, match="api_busy") as busy:
             provider.ground(request_id="request-1",capture=capture,goal="Search")
+        assert busy.value.attempt is None
         provider._slots.release()
         assert provider.ground(request_id="request-1",capture=capture,goal="Search")["result"]["status"] == "found"
