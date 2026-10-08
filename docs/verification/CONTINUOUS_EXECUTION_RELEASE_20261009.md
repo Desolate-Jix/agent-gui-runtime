@@ -1,6 +1,6 @@
 # Continuous execution preview.3 delivery / 连续执行 preview.3 交付
 
-Status: **Main and independent installed acceptance passed; publication and public-download verification pending.** / **本方及独立实装验收通过，网络发布与公开下载核验待完成。** Latest publication receipts will be recorded in the [online release record](https://github.com/Desolate-Jix/agent-gui-runtime/blob/main/docs/verification/CONTINUOUS_EXECUTION_RELEASE_20261009.md). / 后续发布证明维护在该在线记录。
+Status: **Published; Main and independent installed acceptance and all public-download hashes passed.** / **已发布；本方、独立实装验收与全部公开下载哈希核对通过。**
 
 Execution `0.1.2-preview.3` and optional learning `0.1.0-preview.3` use independent installers. This release carries short task plans, original-ticket cancellation/review continuation, native control validation and browser-field fixes. Local models remain optional for users; the release tests use local grounding with Decision off. / 执行与可选学习组件独立安装；本次交付短计划、原票据取消审核续接、原生目标校验和浏览器字段修复。用户不强制使用本地模型，本轮验收采用本地识别并关闭 Decision。
 
@@ -49,7 +49,13 @@ Initial failed E SHA `da13f3478e38cd0e8811cbc9c3377c1fc5e32ef902bddd8401ef11eb04
 
 Evidence is retained under this batch's dedicated Main/independent installed roots and private `2026-10-09-continuous-release` records, including both audit corrections and the original `gui01` refusal. Public summaries exclude raw desktop images, user configuration and credentials. / 本方、独立原回执、PNG、清理和清单本地保留，审计前两版与 GUI 首拒绝不覆盖；公开摘要不包含原始桌面图、用户配置或凭据。
 
-Final supported test-uninstall completed for both owned installations: exit 0, `worker_cleanup_complete=true`, user defaults unchanged. G has `remaining_paths=[]`; E retains only its ownership receipt, `Uninstall.exe`, runtime logs, the one-byte lease lock and empty directories. Initial failed E uninstall is also recorded. Additional residual deletion was blocked by automatic approval policy and was not bypassed; this is not a claim that every temporary test file was removed. Network publication, public-download verification and shutdown remain unfinished. / 两个最终测试安装均受支持卸载完成，用户默认未变；G 无残留，E 保留明确的归属/卸载器/日志/单字节锁及空目录。额外残留删除被审批策略阻止且未绕过，不宣称测试文件全删；网络发布、下载核验与关机仍待。
+Final supported test-uninstall completed for both owned installations: exit 0, `worker_cleanup_complete=true`, user defaults unchanged. G has `remaining_paths=[]`; E retains only its ownership receipt, `Uninstall.exe`, runtime logs, the one-byte lease lock and empty directories. Initial failed E uninstall is also recorded. Additional residual deletion was blocked by automatic approval policy and was not bypassed; this is not a claim that every temporary test file was removed. Publication and public-download verification completed; normal shutdown is the final local handoff. / 两个最终测试安装均受支持卸载完成，用户默认未变；G 无残留，E 保留明确的归属/卸载器/日志/单字节锁及空目录。额外残留删除被审批策略阻止且未绕过，不宣称测试文件全删；网络发布与下载核验完成，正常关机为最后本地收尾。
+
+## Publication / 发布完成
+
+Published on 2026-10-09 (Pacific/Auckland): [learning-v0.1.0-preview.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3), GitHub release ID `406894230`. The immutable tag resolves to `69d759a45b96821b13f3c0aa69c78b5ee94daf49`. Development and `main` were fast-forwarded without rewriting history; `main` subsequently carries this documentation-only closeout. Installer bytes are unchanged. / 两个独立预览安装器已发布，标签固定已验收代码；开发与主分支快进同步，随后仅补本页及首页发布证明，不重写标签或改安装器。
+
+All three assets in the table above passed authenticated draft-download verification and then **unauthenticated public-download** size/SHA256 verification. The public check saved no duplicate installer files. Private publication and download receipts are retained; no credential is included in public evidence. / 上表三项资产先核对草稿下载，再通过无凭据公开下载逐字节哈希验证；不保留重复下载副本，凭据不进入公开记录。
 
 ## Scope / 范围
 
