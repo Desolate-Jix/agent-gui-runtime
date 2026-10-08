@@ -17,6 +17,43 @@ def restore_language():
         manager.set_language('zh-CN', persist=False)
 
 
+def test_first_start_defaults_to_english_on_chinese_system(tmp_path, monkeypatch):
+    from PySide6.QtCore import QLocale
+    from app.learning_memory.workbench_i18n import initialize_i18n, ui
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QLocale, 'system', lambda: QLocale('zh_CN'))
+    assert QLocale.system().name() == 'zh_CN'
+    preferences = tmp_path / 'workbench-preferences.json'
+    manager = initialize_i18n(app, preferences)
+    assert manager.language == 'en-US'
+    assert ui(QLabel, '任务步骤').text() == 'Task steps'
+    assert not preferences.exists()
+
+
+@pytest.mark.parametrize('language', ['zh-CN', 'zh_CN'])
+def test_explicit_chinese_language_remains_supported(tmp_path, language):
+    from app.learning_memory.workbench_i18n import initialize_i18n, ui
+    app = QApplication.instance() or QApplication([])
+    manager = initialize_i18n(app, tmp_path / 'workbench-preferences.json', language)
+    assert manager.language == 'zh-CN'
+    assert ui(QLabel, '任务步骤').text() == '任务步骤'
+
+
+@pytest.mark.parametrize('initial_language', [None, 'en_US'])
+def test_saved_chinese_survives_fresh_initialization(tmp_path, initial_language):
+    from app.learning_memory.workbench_i18n import initialize_i18n, ui
+    app = QApplication.instance() or QApplication([])
+    preferences = tmp_path / 'workbench-preferences.json'
+    first = initialize_i18n(app, preferences, 'en_US')
+    first.set_language('zh-CN')
+    initialize_i18n(app, tmp_path / 'separate-preferences.json', 'en_US')
+    reopened = initialize_i18n(app, preferences, initial_language)
+    assert reopened is not first
+    assert reopened.language == 'zh-CN'
+    assert ui(QLabel, '任务步骤').text() == '任务步骤'
+    assert json.loads(preferences.read_text(encoding='utf-8')) == {'language': 'zh-CN'}
+
+
 def test_language_switch_preserves_input_and_semantics(tmp_path):
     assert importlib.util.find_spec("app.learning_memory.workbench_i18n"), "language switching is missing"
     from app.learning_memory.workbench_i18n import initialize_i18n, ui

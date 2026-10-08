@@ -139,9 +139,15 @@ def _step_rules(step, inputs, available, declarations):
         required = {"kind"} if kind == "agent_judgment" else {"kind", "target"}
         if kind in {"field_equals", "text_equals", "text_contains"}:
             required.add("expected")
-        optional = {"output_name", "image_check"} if kind == "agent_judgment" else {"output_name"}
+        optional = {"output_name", "image_check", "decision_condition"} if kind == "agent_judgment" else {"output_name"}
         if not required <= set(verification) or set(verification) - required - optional:
             raise ValueError("task_program_verification_fields_invalid")
+        if "decision_condition" in verification:
+            condition = verification["decision_condition"]
+            if not isinstance(condition, str) or not 1 <= len(condition.strip()) <= 4000 or len(condition) > 4000:
+                raise ValueError("task_program_decision_condition_invalid")
+            if step.get("outputs") or "read_spec" in step or step["action"]["kind"] == "read_text":
+                raise ValueError("task_program_decision_dynamic_read_forbidden")
         if "image_check" in verification:
             from .image_verification import validate_image_check
             validate_image_check(verification["image_check"])

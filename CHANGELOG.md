@@ -1,4 +1,15 @@
-# 2026-10-07 当前release-ready状态 / Current release-ready status
+# 2026-10-08 preview.2 可选判断测试版 / Optional Decisions preview.2
+
+学习 `0.1.0-preview.2` 与兼容执行 `0.1.2-preview.2` 分别安装：[preview.2 下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.2)。稳定 `instant-v0.1.1` 保留；上一版 [preview.1 下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1)及下方记录属于历史。本轮测量与安装验证范围以[本轮报告](docs/verification/DECISION_API_RELEASE_ACCEPTANCE_20261008.md)为准。 / The preview.2 learning/execution components install independently. Stable execution remains available; preview.1 and the notes below are historical. Use the current report for measurements and installed validation scope.
+
+- 新增执行与学习共用的可选 Decision API 结果判断；未配置仍正常使用，本地图像匹配成功零 Decision 请求。本地模型可选，判断不替代定位或动态读取。 / Add optional shared outcome decisions; unconfigured use remains normal and successful local image checks send zero Decision requests. Local models are optional; decisions do not replace grounding or dynamic reading.
+- 默认 `shadow` 保留审核；自动采用须显式 `auto`、明确条件列入 `auto_conditions`，并复核原证据、执行绑定和回执。学习 `decision_condition` 须审核，不重放未知输入。 / Default shadow preserves review; auto requires explicit allowlisted conditions and original evidence/execution/receipt checks. Learned conditions require review and unknown input is not replayed.
+- 学习工作台首次无语言偏好时默认 English，不跟随系统语言；设置中可切换中文并保存，已保存的语言偏好优先。 / First launch defaults to English regardless of system locale; Settings can switch to Chinese and save the choice. Saved language preferences take priority.
+- 独立执行包纳入配置样例与使用文档，并增加真实 DPAPI 离线持久化/只读认证依赖预检；源码验证不等于新安装版、真实服务商准确率或速度收益。 / Include configuration/usage resources and real offline DPAPI persistence/read-only dependency checks; source verification is not installed acceptance or a live accuracy/speed result.
+
+见[使用说明](docs/LEARNING_PREVIEW_QUICKSTART.md)、[判断配置](docs/development/DECISION_API.md)与[样例](configs/decision-profile.example.json)。 / See the quickstart, decision configuration and example.
+
+# 2026-10-07 preview.1 历史冻结与验收 / Historical preview.1 freeze and acceptance
 
 第三批source14/GUI12已完成匹配冻结与实装限定验收，状态为release-ready。Main与独立Sol各记录2个教学事件、6个预期连续场景（5个正例完成，负例一次点击后判失败，无重复输入）；GUI Save原job为completed并返回captured状态的动作后截图，关闭重开后图像关闭选项保持，最终cleanup完成。第一批终态JSON读取失败及第二批空标题清除绑定失败原记录保留；旧便携candidate02未知退出未宣称修复，stablev0.1.1保持原发布。网络发布与下载核对单独记录在对应发行页。 / The matched third source14/GUI12 pair is release-ready after bounded installed acceptance. Main and independent Sol each recorded two teaching events and six expected continuous cases: five positive completions and one negative failure after a single click without replay. The original GUI Save job completed with captured post-action evidence; image disablement persisted across close/reopen and cleanup completed. Both earlier failures and the unexplained excluded portable exit remain historical. Stablev0.1.1 is unchanged; publication and download verification are recorded separately on the release page.
 
@@ -13,9 +24,9 @@
 
 ---
 
-# 可选学习测试候选 / Optional learning preview candidate
+# 2026-10-07 发布前候选历史 / Historical pre-release candidate
 
-学习 `0.1.0-preview.1` 与兼容执行 `0.1.2-preview.1` 独立安装，尚未公开发布。旧安装冻结的限定验收保留；本轮默认图像核验、人工区域编辑和有界成功早退已在源码验证，最终安装候选仍需集中构建与验收。旧便携candidate02不交付，其未知退出保留。 / The independent preview pair is unpublished. Current source adds default image checks, region editing and bounded early completion; final installers still require a new freeze and acceptance. Candidate02 is excluded while its unexplained exit remains documented.
+以下为 preview.1 发布前的候选记录：当时默认图像核验、人工区域编辑和有界成功早退已在源码验证，仍需最终冻结与安装验收；后续 source14/GUI12 验收及发布见上方历史记录。旧便携 candidate02 不交付，其未知退出保留。 / These are preview.1 pre-release notes: image checks, region editing and bounded early completion had source verification while final freeze/installed acceptance remained pending. The later source14/GUI12 acceptance and publication are recorded above; candidate02 remains excluded with its unexplained exit preserved.
 
 - 自动教学生成工作流草稿、人工修改审核、不可变版本保存与参数复用。 / Teaching synthesis, human editing/review, immutable saves and per-run inputs.
 - 学习可选，离线库编辑不需要宿主或模型；中英文切换并持久化，显式连接独立执行安装。 / Optional offline library editing, persisted bilingual UI and explicit independent execution attachment.

@@ -28,6 +28,8 @@ class InstantAttachmentTransport:
         self.recognition_source = recognition_source
         self.delegate_profile = delegate_profile
         self.api_profile = api_profile
+        self.decision_profile = None
+        self.decision_profile_sha256 = None
         self.guard = RLock()
         self.process = None
         self.session = None
@@ -112,6 +114,7 @@ class InstantAttachmentTransport:
             return {"mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
                 "recognition_source": self.recognition_source, "delegate_profile": self.delegate_profile,
                 "api_profile": self.api_profile,
+                "decision_service": report.get("decision_service", {"mode": "off"}),
                 "learning_enabled": learning_state.get("recording_enabled") if alive else False,
                 "legacy_learning_executor_enabled": False,
                 "learning_recording": learning_state,
@@ -302,5 +305,6 @@ class InstantAttachmentTransport:
                         "Inspect recovery candidates (same process, not proven successors), then explicitly select "
                         "the intended current window and capture it under a new request_id. If no candidates are "
                         "available, discover current windows. Do not replay the original input; retain this receipt.")
-            return receipt
-
+            from .decision_receipt import project_decision_receipt
+            return project_decision_receipt(receipt, session_dir=self.session,
+                                           profile_path=getattr(self, "decision_profile", None))

@@ -16,6 +16,8 @@ from app.core.screenshot import ScreenshotService, CaptureVisibilityError
 from app.core.observation_policy import local_action_observation_kind, resolve_render_grace_ms
 from app.execution.conditional_observation import UIATextConditionProbe, observe_until_condition, validate_condition
 from app.execution.local_action_contract import LocalActionFieldsError, _validated_request
+from app.execution.decision_check import (execution_decision_scope, evaluate_post_action,
+    validate_decision_check, validate_execution_request_id)
 from .post_action_recovery import observe_recovery_windows
 
 
@@ -113,7 +115,8 @@ class LocalDirectStepMixin:
                            observation_wait_ms: int | None = None, observation_condition: dict | None = None,
                            control_target=None, keyboard_target=None, focus_target=None, grounding_target=None,
                            memory_target=None, memory_action=None, memory_resolution=None,
-                           memory_bindings=None, learning_context=None, selection_dispatch_boundary=None) -> dict:
+                           memory_bindings=None, learning_context=None, selection_dispatch_boundary=None,
+                           decision_check=None, execution_request_id=None) -> dict:
         """仅本地协调器入口；不经 Agent JSON 关闭策略，也不要求一次性执行凭据。"""
         timer = RuntimeTimer(contract_version="local_step_invocation_timing_v1")
         timing_context = {"invocation_id": "local-invocation-" + uuid4().hex,
@@ -126,6 +129,17 @@ class LocalDirectStepMixin:
         failure = None
         try:
             with timer.step("request_validation"):
+                declared = (request.get("metadata") or {}).get("decision_check") if isinstance(request.get("metadata", {}), dict) else None
+                checked = validate_decision_check(decision_check)
+                embedded = validate_decision_check(declared)
+                if checked is not None and embedded is not None and checked != embedded:
+                    raise ValueError("decision_check conflicts with request metadata")
+                checked = checked if checked is not None else embedded
+                if checked is not None:
+                    validate_execution_request_id(execution_request_id)
+                    if checked["phase"] == "before_action" and operation != "execute_recognition_plan":
+                        raise ValueError("decision_check before_action only supports execute_recognition_plan")
+                    timing_context.update(decision_check=checked, execution_request_id=execution_request_id)
                 if request.get('selection_intent') is not None:
                     from app.learning_memory.selection_satisfaction import validate_selection_intent
                     validate_selection_intent({'kind': 'click', **request})
@@ -347,7 +361,15 @@ class LocalDirectStepMixin:
                 with timer.step("report_persist", phase="dispatching"):
                     _write_report(output, report)
                 with timer.step("route_call", inclusive=True):
-                    report["response"] = _post_action(operation, request, manager)
+                    checked = timing_context.get("decision_check")
+                    execution_id = timing_context.get("execution_request_id")
+                    with execution_decision_scope(getattr(self, "_decision_service", None),
+                            decision_check=checked, execution_request_id=execution_id,
+                            request_id="decision-before-" + execution_id if execution_id else None,
+                            step_id=step_id, evidence_root=output / "decision-evidence") as decision_scope:
+                        report["response"] = _post_action(operation, request, manager)
+                        if decision_scope is not None and decision_scope["result"] is not None:
+                            report["decision_judgment"] = deepcopy(decision_scope["result"])
             # 进入原路由后可能已产生部分输入，失败返回不能证明没有副作用。
             report["phase"] = "returned" if report["response"].get("success") is True else "result_unknown"
             if request.get('selection_intent') is not None:
@@ -367,7 +389,12 @@ class LocalDirectStepMixin:
                 else:
                     report['status'] = 'failed'
             response_data = report["response"].get("data") or {}
-            if (operation == "press_key" and report["response"].get("success") is False
+            if (report["response"].get("success") is False and isinstance(response_data, dict)
+                    and response_data.get("dispatch_status") == "not_dispatched"
+                    and response_data.get("decision_judgment") is not None
+                    and (response_data.get("execution_path") or {}).get("action_executed") is False):
+                report["phase"] = "not_dispatched"
+            elif (operation == "press_key" and report["response"].get("success") is False
                     and response_data.get("dispatch_status") == "not_dispatched"
                     and response_data.get("pressed") is False):
                 report["phase"] = "not_dispatched"
@@ -423,6 +450,14 @@ class LocalDirectStepMixin:
                             # 进程消失可解释缺图，但不证明正常退出或任务成功，也不能重放输入。
                             report["observation"]["error_code"] = "target_process_not_running"
                             report["observation"]["next_action"] = "review_task_effect_without_replaying_input"
+            checked = timing_context.get("decision_check")
+            if checked is not None and checked["phase"] == "after_action":
+                with timer.step("post_action_decision_judgment"):
+                    execution_id = timing_context["execution_request_id"]
+                    report["decision_judgment"] = evaluate_post_action(getattr(self, "_decision_service", None),
+                        request_id="decision-after-" + execution_id, execution_request_id=execution_id,
+                        decision_check=checked, receipt=report)
+                    report["effect_verified"] = report["decision_judgment"].get("effect_verified") is True
             return report
         except Exception as error:
             failure = error

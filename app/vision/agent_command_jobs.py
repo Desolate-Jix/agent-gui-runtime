@@ -483,8 +483,13 @@ class AgentCommandJobs:
                     **({"memory_bindings": job.workflow_bindings}
                        if job.workflow_bindings is not None and command["request"].get("target_memory") is not None else {}))
             else:
+                decision_check = command.get("decision_check")
+                if decision_check is None and isinstance(command["request"].get("metadata"), dict):
+                    decision_check = command["request"]["metadata"].get("decision_check")
                 result = proxy.execute_local_step(target_window_handle=job.target["handle"],
                     target_process_id=job.target["process_id"], operation="execute_recognition_plan",
+                    **({"decision_check": decision_check, "execution_request_id": job.command_id}
+                       if decision_check is not None else {}),
                     request=command["request"], include_observation=True,
                     observation_wait_ms=command.get("observation_wait_ms"),
                     observation_condition=command.get("observation_condition"))

@@ -1,4 +1,14 @@
-# 2026-10-07 当前release-ready状态 / Current release-ready status
+# 2026-10-08 preview.2 测试版范围 / preview.2 scope
+
+学习 `0.1.0-preview.2`、兼容执行 `0.1.2-preview.2` 使用两个独立测试版安装器：[preview.2 下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.2)。本轮实测与安装验证范围详见[本轮验收报告](docs/verification/DECISION_API_RELEASE_ACCEPTANCE_20261008.md)。学习可选，执行可单独使用；学习离线编辑无需宿主或模型，教学/运行明确连接兼容执行安装与已有同数据根会话。 / The preview.2 pair uses separate installers. See the current report for measured and installed validation scope. Execution works alone; optional learning edits libraries offline and explicitly attaches to compatible execution for teaching/trials.
+
+新增共用的可选 Decision API：未配置正常使用，本地图像匹配成功零 Decision 请求，本地模型可选；判断不替代定位模型或生成动态读取值。配置默认 `shadow`，仅显式 `auto`、明确条件完全列入 `auto_conditions` 且原证据、执行绑定和回执有效时采用；学习步骤的 `decision_condition` 必须审核。缺失、损坏、过期或错窗证据不借判断绕过门禁，不重放未知输入。 / Optional shared Decisions leave ordinary unconfigured use intact and local image success sends zero Decision requests. Auto requires an exact allowlisted condition and valid original evidence/bindings/receipt; learned conditions require review. Decisions neither replace grounding/dynamic reading nor bypass invalid evidence or replay input.
+
+独立执行包包含 [配置样例](configs/decision-profile.example.json) 与 [使用说明](docs/development/DECISION_API.md)；通过 Python 配置命令的 `--decision-profile <绝对 JSON 路径>` 显式启用，Key 仅通过宿主可见的命名环境变量提供。两个安装器分别安装、升级和卸载，用户库、模型权重、Key 与本机配置不作为载荷。 / Execution includes the example and guide. Enable it explicitly through the Python configurator's absolute profile path and host-visible key environment variable. Components have separate lifecycles and omit user libraries, model weights, keys and machine configuration.
+
+[上一版 preview.1 下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1)与下方哈希、验收属于历史，不是 preview.2 的安装器或验收。稳定 `instant-v0.1.1` 保持原发布。 / The previous download, hashes and results below are historical, not preview.2 artifacts or acceptance. Stable execution remains unchanged.
+
+# 2026-10-07 preview.1 历史冻结与验收 / Historical preview.1 freeze and acceptance
 
 第三批source14/GUI12已完成匹配冻结与实装限定验收，状态为release-ready。Main与独立Sol各记录2个教学事件、6个预期连续场景（5个正例完成，负例一次点击后判失败，无重复输入）；GUI Save原job为completed并返回captured状态的动作后截图，关闭重开后图像关闭选项保持，最终cleanup完成。第一批终态JSON读取失败及第二批空标题清除绑定失败原记录保留；旧便携candidate02未知退出未宣称修复，stablev0.1.1保持原发布。网络发布与下载核对单独记录在对应发行页。 / The matched third source14/GUI12 pair is release-ready after bounded installed acceptance. Main and independent Sol each recorded two teaching events and six expected continuous cases: five positive completions and one negative failure after a single click without replay. The original GUI Save job completed with captured post-action evidence; image disablement persisted across close/reopen and cleanup completed. Both earlier failures and the unexplained excluded portable exit remain historical. Stablev0.1.1 is unchanged; publication and download verification are recorded separately on the release page.
 
@@ -13,7 +23,7 @@
 
 ---
 
-# 可选学习候选范围 / Optional learning candidate scope
+# preview.1 发布前候选范围 / Historical preview.1 pre-release scope
 
 学习0.1.0-preview.1与兼容执行0.1.2-preview.1分别安装、升级和卸载；学习是可选组件。离线编辑库不需宿主或模型，采集及试运行按需连接已有兼容执行会话。API/当前Agent/明确视觉委派不强制本地模型。 / Components have separate lifecycles; learning is optional and its offline library needs no host or model. Explicit attachment enables teaching/trials, with local weights optional for API/Agent routes.
 

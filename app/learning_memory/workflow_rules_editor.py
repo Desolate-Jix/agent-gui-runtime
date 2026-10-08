@@ -255,6 +255,10 @@ class WorkflowRulesEditor(QWidget):
                 self.validation_error = tr('图像核验必须使用 Agent 判断结果规则。')
             else:
                 verification = {'kind': 'agent_judgment', 'image_check': image_check}
+        if (verification is not None and verification.get("kind") == "agent_judgment"
+                and "decision_condition" in (self._original_verification or {})):
+            # 修改图像规则不应静默丢弃已声明的语义核验条件。
+            verification["decision_condition"] = self._original_verification["decision_condition"]
         return verification, read_spec
 
 

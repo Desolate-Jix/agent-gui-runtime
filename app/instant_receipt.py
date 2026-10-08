@@ -26,7 +26,7 @@ def compact_receipt(receipt, *, full_receipt_path=None):
     keys = ("request_id", "status", "operation_succeeded", "operation_success_scope",
         "input_route_succeeded", "task_effect_verified", "automatic_retry_allowed",
         "observation_status", "started_at", "finished_at", "command_wall_ms", "error", "error_type",
-        "diagnostics", "desktop_context", "agent_review", "next", "accepted", "action_executed",
+        "diagnostics", "desktop_context", "agent_review", "decision_judgment", "decision_validation", "next", "accepted", "action_executed",
         "wait_expired", "command_cancelled", "partial_execution", "next_action", "learning_recording", "learning_recording_error", "learning_binding", "learning_control")
     value = {key: deepcopy(receipt[key]) for key in keys if key in receipt}
     value["receipt_detail"] = "compact"
@@ -42,7 +42,7 @@ def compact_receipt(receipt, *, full_receipt_path=None):
             if isinstance(result.get(key), dict):
                 projected = compact_receipt({'request_id': receipt.get('request_id'), 'result': result[key]})
                 value['agent_command'][key] = {name: projected[name] for name in (
-                    'form', 'sequence', 'action', 'error', 'message', 'observation', 'image') if name in projected}
+                    'form', 'sequence', 'action', 'error', 'message', 'observation', 'image', 'decision_judgment') if name in projected}
     elif result.get("contract_version") == "form_fill_v1":
         value["form"] = {key: deepcopy(result[key]) for key in (
             "status", "phase", "completed_fields", "interrupted_at", "action_executed",

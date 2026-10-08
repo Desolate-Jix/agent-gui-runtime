@@ -1,4 +1,12 @@
-## 2026-10-01 维护接入位置 / Maintained integration positions
+## 2026-10-08 当前接入 / Current integration
+
+开发源码已接通 `app/judgment/DecisionService`：OpenAI Decisions 适配器、非秘密配置、证据绑定、持久防重派、执行前后检查及学习 Trial 结算共用同一服务。`app/core/outcome_judgment.py` 的旧可选接口继续保留兼容测试；下方“尚未接入”的段落属于历史记录，不再描述当前源码。已发布安装包尚未更新。 / Development source now shares DecisionService across execution checks and learning settlement, with the OpenAI adapter, evidence binding and durable dispatch protection. The old OptionalJudgment interface remains for compatibility; the unconnected-state descriptions below are historical. Released installers are unchanged.
+
+本地图像成功不调用 API；没有配置时沿原路线。配置默认 shadow；auto 只用于完全匹配允许清单的审核条件，错误和不确定保留 Agent。原回执与任务效果分开，重复读取不重复网络请求。API usage/timing 保存在服务结果；现有 caller_reported 计量保持独立，不据此宣称全量 Agent 节省。 / Local image success is zero API, absent configuration preserves existing behavior, shadow remains the configured default, and auto adoption is explicit. Service usage/timings are factual; caller-reported totals remain separate.
+
+配置、请求示例与边界见 [Decision API](development/DECISION_API.md)，本轮证据见 [验证记录](verification/DECISION_API_INTEGRATION.md)。 / See the current integration guide and verification report.
+
+## 2026-10-01 历史维护接入位置 / Historical integration positions
 
 本轮执行代码归层保留以下真实合同，不新增重复判断协议或执行器。`OptionalJudgment` 目前仅有离线合同测试，没有生产自动调用、供应商适配器、设置 UI 或公共判断 HTTP 端点。/ Execution cleanup preserves these existing contracts, without duplicate judgment protocols or executors. Optional judgment still has no production invocation, provider adapter, settings UI or public judgment endpoint.
 

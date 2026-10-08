@@ -1,0 +1,10 @@
+{
+  "contract_version": "decision_profile.v1",
+  "mode": "shadow",
+  "api_key_env": "OPENAI_API_KEY",
+  "timeout_seconds": 8,
+  "pass_threshold": 0.9,
+  "fail_threshold": 0.1,
+  "request_cap": 20,
+  "auto_conditions": []
+}

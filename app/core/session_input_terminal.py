@@ -6,7 +6,7 @@ from pathlib import Path
 from app.core.receipt_action import _receipt_action
 
 
-_FOLDERS = ("commands", "responses", "agent-commands", "grounding", "sequence-progress", "workflow-trials", "workflow-runners", "workflow-observations")
+_FOLDERS = ("commands", "responses", "agent-commands", "grounding", "sequence-progress", "workflow-trials", "workflow-runners", "workflow-observations", "workflow-decisions")
 _CONTROLS = {"agent_command_status", "agent_command_continue", "agent_command_cancel"}
 _READ_ONLY = {"discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "close_launched_window", "desktop_capture", "grounding_prepare", "grounding_resolve", "grounding_status", "grounding_cancel", "close", "learning_start", "learning_status", "learning_stop", "learning_recover", "learning_event", "learning_review", "learning_projection", "learning_import", "learning_library", "learning_memory", "learning_save_interface", "learning_commit", "learning_project", "learning_reuse", "learning_adopt_source", "learning_template", "learning_feedback", "learning_workflow"}
 
@@ -31,10 +31,14 @@ def _catalog(root):
             total += len(raw)
             _require(len(raw) <= 64 * 1024 * 1024 and total <= 64 * 1024 * 1024, "catalog_limit")
             result[path.relative_to(root).as_posix()] = raw
-    for name in ("session-resources.json", "report.json"):
+    from .decision_configuration import PROFILE_SNAPSHOT
+    # 原判断策略和认证账本属于恢复准入证据；不读取用户密钥或扫描其他缓存。
+    for name in ("session-resources.json", "report.json", PROFILE_SNAPSHOT, "judgments/decisions.sqlite3",
+                 "judgments/decisions.sqlite3-journal", "judgments/decisions.sqlite3-wal", "judgments/decisions.sqlite3-shm"):
         path = root / name
         if path.exists():
             _require(path.is_file() and path.resolve().is_relative_to(root), "path_invalid")
+            _require(total + path.stat().st_size <= 64 * 1024 * 1024, "catalog_limit")
             raw = path.read_bytes()
             total += len(raw)
             _require(len(result) < 4096 and total <= 64 * 1024 * 1024, "catalog_limit")
@@ -70,6 +74,8 @@ def _catalog(root):
                 native_frames(child)
     # 只闭合原业务引用，不扫描截图缓存或学习资产。
     for relative, raw in list(result.items()):
+        if not relative.endswith(".json"):
+            continue
         value = _json(raw)
         if relative.startswith(("responses/", "agent-commands/")):
             # 原选择证明的两张图闭合到同一目录清单，不扫描截图缓存。

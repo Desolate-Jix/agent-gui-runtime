@@ -44,6 +44,15 @@ class SessionEpochReadContract:
     def _config_matches(self, pointer):
         _require(all(pointer.get(key) == getattr(self.instant, key) for key in
                      ("recognition_source", "delegate_profile", "api_profile")), "configuration_changed")
+        profile = getattr(self.instant, "decision_profile", None)
+        _require(pointer.get("decision_profile") == profile, "configuration_changed")
+        if profile is not None:
+            digest = getattr(self.instant, "decision_profile_sha256", None)
+            if digest is None:
+                from app.judgment.profile import load_decision_profile
+                load_decision_profile(profile)
+                digest = _sha(Path(profile).read_bytes())
+            _require(pointer.get("decision_profile_sha256") == digest, "configuration_changed")
 
 
     def pending_request(self):
@@ -119,6 +128,7 @@ class SessionEpochReadContract:
     def _new_pointer(self, record):
         return {"name": record["new_session_name"], "host_identity": record["new_host_identity"],
                 **{key: getattr(self.instant, key) for key in
-                   ("recognition_source", "delegate_profile", "api_profile")}}
-
+                   ("recognition_source", "delegate_profile", "api_profile")},
+                **({key: getattr(self.instant, key) for key in ("decision_profile", "decision_profile_sha256")}
+                   if getattr(self.instant, "decision_profile", None) is not None else {})}
 

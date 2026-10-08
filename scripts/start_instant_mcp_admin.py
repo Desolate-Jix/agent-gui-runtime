@@ -94,6 +94,7 @@ def make_ticket(args, sid, session):
                "model": str(args.model_directory.resolve()) if args.model_directory is not None else None,
                "source": args.recognition_source, "delegate_profile": args.delegate_profile,
                "api_profile": str(args.api_profile.resolve()) if getattr(args, "api_profile", None) else None,
+               "decision_profile": str(args.decision_profile.resolve()) if getattr(args, "decision_profile", None) else None,
                "allow_input": args.allow_local_input}
     try:
         with path.open("x", encoding="utf-8") as stream:
@@ -164,12 +165,22 @@ def main():
                         default="local")
     parser.add_argument("--delegate-profile")
     parser.add_argument("--api-profile", type=Path)
+    parser.add_argument("--decision-profile", type=Path, default=os.environ.get("AGENT_GUI_DECISION_PROFILE"))
     parser.add_argument("--allow-local-input", action="store_true")
     parser.add_argument("--connect-timeout", "--uac-timeout", type=int, default=90,
                         help="Pipe connection timeout AFTER UAC confirmation; --uac-timeout is a legacy alias. "
                              "The synchronous Windows UAC dialog is not automatically timed out or cancelled.")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
+    if args.decision_profile is not None:
+        if not args.decision_profile.is_absolute() or not args.decision_profile.is_file():
+            parser.error("--decision-profile must be an existing absolute JSON path")
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from app.judgment.profile import load_decision_profile
+        try:
+            load_decision_profile(args.decision_profile)
+        except (OSError, ValueError):
+            parser.error("--decision-profile has an invalid schema")
     if os.name != "nt":
         parser.error("Windows administrator relay only")
     if not 5 <= args.connect_timeout <= 300:

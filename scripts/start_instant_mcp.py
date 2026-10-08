@@ -16,6 +16,7 @@ def main():
                         default="local")
     parser.add_argument("--delegate-profile")
     parser.add_argument("--api-profile", type=Path)
+    parser.add_argument("--decision-profile", type=Path)
     parser.add_argument("--allow-local-input", action="store_true",
                         help="Operator explicitly enables existing non-learning direct input, automatic risk interception OFF")
     args = parser.parse_args()
@@ -36,7 +37,7 @@ def main():
     from app.instant_mcp import InstantSession, build_server
     session = InstantSession(ROOT, args.data_dir, args.model_directory, allow_local_input=args.allow_local_input,
                              recognition_source=args.recognition_source, delegate_profile=args.delegate_profile,
-                             api_profile=getattr(args, "api_profile", None))
+                             api_profile=getattr(args, "api_profile", None), decision_profile=args.decision_profile)
     try:
         import anyio
         from mcp.server.stdio import stdio_server

@@ -483,12 +483,12 @@ class TrialService:
         return self._review(run_id, request_id, execution_request_id, "uncertain", {}, {},
                             verification_result=runtime_result)
 
-    def record_verified_result(self, run_id, request_id, execution_request_id, result):
+    def record_verified_result(self, run_id, request_id, execution_request_id, result, *, decision_service=None):
         from .workflow_verification import verify_step
         _id(request_id, "request_id")
         _id(execution_request_id, "execution_request_id")
         if (not isinstance(result, dict) or set(result) != {"verdict", "source", "observations", "outputs", "evidence_refs", "reason"}
-                or result.get("source") != "rule" or not isinstance(result.get("observations"), dict)
+                or result.get("source") not in {"rule", "decision"} or not isinstance(result.get("observations"), dict)
                 or not isinstance(result.get("outputs"), dict)):
             raise ValueError("workflow_verification_result_invalid")
         observations = result["observations"]
@@ -496,6 +496,8 @@ class TrialService:
         request_hash = hashlib.sha256(canonical_json_bytes(
             [execution_request_id, result["verdict"], values, result["outputs"], result])).hexdigest()
         state = self._load(run_id)
+        if state.get("recovery_settlement"):
+            raise ValueError("workflow_trial_recovery_paused")
         if execution_strategy(state) == "steps_only":
             raise ValueError("workflow_trial_steps_only_requires_agent_review")
         if request_id in state["requests"]:
@@ -505,6 +507,8 @@ class TrialService:
         pending = state["pending"]
         if not isinstance(pending, dict) or pending["execution_request_id"] != execution_request_id:
             raise ValueError("workflow_trial_pending_ticket_mismatch")
+        if result["source"] == "decision" and state["status"] == "cancel_requested":
+            return self.record_cancelled_execution(run_id, request_id, execution_request_id)
         evidence_ref = observations.get("evidence_ref")
         if not isinstance(evidence_ref, str):
             raise ValueError("workflow_verification_evidence_missing")
@@ -554,9 +558,16 @@ class TrialService:
                 proof = match_image_check(image_check, reference_raw, frame)
             except (OSError, ValueError) as error:
                 raise ValueError("workflow_verification_image_evidence_unavailable") from error
-            if proof.get("matched") is not True or proof != observations.get("values", {}).get("image_check"):
+            semantic_miss = result["source"] == "decision" and proof.get("reason") == "image_not_matched" and proof.get("matched") is False
+            if (proof.get("matched") is not True and not semantic_miss) or proof != observations.get("values", {}).get("image_check"):
                 raise ValueError("workflow_verification_image_proof_mismatch")
-        computed = verify_step(step, inputs=state["inputs"], outputs=outputs, receipt=normalized, observation=observations)
+        if result["source"] == "decision":
+            from .decision_verification import adopted_verification, decision_result_path
+            saved = _read(decision_result_path(self.session, request_id))
+            computed = adopted_verification(step, inputs=state["inputs"], outputs=outputs,
+                envelope=evidence, decision=saved.get("result"), service=decision_service)
+        else:
+            computed = verify_step(step, inputs=state["inputs"], outputs=outputs, receipt=normalized, observation=observations)
         if computed != result:
             raise ValueError("workflow_verification_result_mismatch")
         return self._review(run_id, request_id, execution_request_id, computed["verdict"], values,
@@ -635,7 +646,8 @@ class TrialService:
                 if verification_result.get("error") is not None:
                     entry["error"] = verification_result["error"]
             else:
-                entry.update(rule_verdict=verdict, judged_by="rule", verification=deepcopy(verification_result))
+                entry.update(judged_by="decision" if source == "decision" else "rule", verification=deepcopy(verification_result))
+                entry["decision_verdict" if source == "decision" else "rule_verdict"] = verdict
         state["history"].append(entry)
         state["pending"] = None
         state["requests"][request_id] = request_hash

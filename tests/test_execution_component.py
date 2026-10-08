@@ -8,7 +8,7 @@ import pytest
 def test_actual_mcp_initialization_reports_release_version():
     from app.instant_mcp import build_server
     server = build_server(None)
-    assert server._lowlevel_server.create_initialization_options().server_version == "0.1.2-preview.1"
+    assert server._lowlevel_server.create_initialization_options().server_version == "0.1.2-preview.2"
 
 
 def test_checker_rejects_descriptor_version_different_from_actual_mcp(monkeypatch):
@@ -34,7 +34,7 @@ def test_real_payload_has_execution_identity_installer_manifest_and_isolated_inp
     from scripts.build_component_installer import validate
     from app.learning_memory.execution_installation import load_execution_installation
     root = Path(__file__).resolve().parents[1]
-    result = build(root, tmp_path / "execution", version="0.1.2-preview.1")
+    result = build(root, tmp_path / "execution", version="0.1.2-preview.2")
     payload = Path(result["directory"])
     installer_rows = validate(payload, result["installer_manifest"])
     assert all(set(row) == {"path", "size", "sha256"} for row in installer_rows)
@@ -45,10 +45,10 @@ def test_real_payload_has_execution_identity_installer_manifest_and_isolated_inp
         "requirements/agent-runtime-win311.txt", "execution-installation.json"} <= paths
     assert "app/application_profiles/seek/application.py" in paths
     assert not any("workbench" in name or name.endswith(".qm") for name in paths)
-    assert load_execution_installation(payload).version == "0.1.2-preview.1"
+    assert load_execution_installation(payload).version == "0.1.2-preview.2"
     evidence = json.loads(Path(result["verification_report"]).read_text(encoding="utf-8"))
     assert evidence["passed"] is True
-    assert evidence["mcp_server_version"] == evidence["version"] == "0.1.2-preview.1"
+    assert evidence["mcp_server_version"] == evidence["version"] == "0.1.2-preview.2"
     assert evidence["input_executed"] is False
     assert evidence["qt_imported"] is False
     assert evidence["image_feature_closure"]["passed"] is True

@@ -55,11 +55,14 @@ def test_default_disabled_requires_explicit_stable_boxes_and_can_turn_off(app, o
     editor.close()
 
 
-def test_roundtrip_missing_source_preserves_config_and_disable_only_removes_image_check(app, option):
+@pytest.mark.parametrize("decision", [False, True])
+def test_roundtrip_missing_source_preserves_config_and_disable_only_removes_image_check(app, option, decision):
     config = {"contract_version": "workflow_image_check.v1", "reference_sha256": option["reference_sha256"],
               "reference_size": [200, 100], "template_bbox": [10, 10, 30, 20],
               "search_roi": [0, 0, 100, 60], "threshold": 0.95}
     value = step(verification={"kind": "agent_judgment", "image_check": config})
+    if decision:
+        value["verification"]["decision_condition"] = "The reviewed detail is open."
     original = deepcopy(value)
     editor = WorkflowRulesEditor()
     load(editor, value, [])
@@ -67,9 +70,10 @@ def test_roundtrip_missing_source_preserves_config_and_disable_only_removes_imag
     assert "不可用" in editor.image_check_editor.status.text()
     editor.image_check_editor.threshold.setValue(0.9)
     assert editor.rules("click")[0]["image_check"]["reference_sha256"] == config["reference_sha256"]
+    assert editor.rules("click")[0].get("decision_condition") == value["verification"].get("decision_condition")
     assert value == original
     editor.image_check_editor.enabled.setChecked(False)
-    assert editor.rules("click")[0] == {"kind": "agent_judgment"}
+    assert editor.rules("click")[0] == {key: item for key, item in value["verification"].items() if key != "image_check"}
     load(editor, original, [option])
     assert editor.rules("click")[0] == original["verification"]
     editor.close()

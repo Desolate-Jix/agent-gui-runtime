@@ -125,7 +125,7 @@ def load_ticket(path):
     ticket = json.loads(path.read_text(encoding="utf-8"))
     required = {"pipe", "auth", "sid", "session", "expires", "data", "model", "source",
                 "delegate_profile", "allow_input"}
-    if not required.issubset(ticket) or set(ticket) - required - {"api_profile"}:
+    if not required.issubset(ticket) or set(ticket) - required - {"api_profile", "decision_profile"}:
         raise ValueError("invalid_ticket_fields")
     if ticket["sid"] != sid or ticket["session"] != session_id:
         raise RuntimeError("same_user_and_session_required")
@@ -157,6 +157,14 @@ def load_ticket(path):
             raise ValueError("invalid_api_profile") from None
     elif ticket.get("api_profile") is not None:
         raise ValueError("api_profile_only_for_external_api")
+    if ticket.get("decision_profile") is not None:
+        if not isinstance(ticket["decision_profile"], str) or not Path(ticket["decision_profile"]).is_absolute():
+            raise ValueError("absolute_decision_profile_required")
+        from app.judgment.profile import load_decision_profile
+        try:
+            load_decision_profile(ticket["decision_profile"])
+        except (OSError, ValueError):
+            raise ValueError("invalid_decision_profile") from None
     if config.source == "local" and (not isinstance(ticket["model"], str)
                                      or not Path(ticket["model"]).is_absolute()):
         raise ValueError("absolute_model_directory_required")
@@ -175,6 +183,8 @@ def server_command(ticket):
         command.extend(["--delegate-profile", ticket["delegate_profile"]])
     if ticket.get("api_profile") is not None:
         command.extend(["--api-profile", ticket["api_profile"]])
+    if ticket.get("decision_profile") is not None:
+        command.extend(["--decision-profile", ticket["decision_profile"]])
     if ticket["allow_input"]:
         command.append("--allow-local-input")
     return command

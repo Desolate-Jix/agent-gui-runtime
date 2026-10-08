@@ -208,11 +208,15 @@ def test_invalid_recognition_pointer_does_not_attach(tmp_path):
     assert not list((session / "commands").glob("*.json"))
 
 
-def test_changed_attached_configuration_rejects_new_control_but_keeps_original_result(tmp_path):
+@pytest.mark.parametrize("changed", ["recognition", "decision"])
+def test_changed_attached_configuration_rejects_new_control_but_keeps_original_result(tmp_path, changed):
     session, library, pointer, _ = _live(tmp_path)
     client = WorkflowRunClient(session, library)
     client.connect()
-    pointer.update(recognition_source="local", delegate_profile=None)
+    if changed == "recognition":
+        pointer.update(recognition_source="local", delegate_profile=None)
+    else:
+        pointer.update(decision_profile="C:/changed.json", decision_profile_sha256="a" * 64)
     _write(tmp_path / "latest-session.json", pointer)
     with pytest.raises(ValueError, match="workflow_run_attachment_changed"):
         client.control(_start_request(), "start-one")

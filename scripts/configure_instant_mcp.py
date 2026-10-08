@@ -13,6 +13,7 @@ def main():
                         default="local")
     parser.add_argument("--delegate-profile")
     parser.add_argument("--api-profile", type=Path)
+    parser.add_argument("--decision-profile", type=Path)
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--enable-local-input", action="store_true",
                         help="Explicitly include --allow-local-input in generated config")
@@ -22,6 +23,15 @@ def main():
     root = Path(__file__).resolve().parents[1]
     if not args.python.is_file():
         parser.error("Python executable must exist")
+    if args.decision_profile is not None:
+        if not args.decision_profile.is_absolute() or not args.decision_profile.is_file():
+            parser.error("--decision-profile must be an existing absolute JSON path")
+        sys.path.insert(0, str(root))
+        from app.judgment.profile import load_decision_profile
+        try:
+            load_decision_profile(args.decision_profile)
+        except (OSError, ValueError):
+            parser.error("--decision-profile has an invalid schema")
     if args.recognition_source == "external_api":
         if args.api_profile is None:
             parser.error("external_api requires --api-profile")
@@ -57,6 +67,8 @@ def main():
         arguments.extend(["--delegate-profile", args.delegate_profile])
     if args.api_profile is not None:
         arguments.extend(["--api-profile", str(args.api_profile.resolve())])
+    if args.decision_profile is not None:
+        arguments.extend(["--decision-profile", str(args.decision_profile.resolve())])
     if args.enable_local_input:
         arguments.append("--allow-local-input")
     server = {"command": str(args.python.resolve()), "args": arguments,

@@ -32,6 +32,8 @@ RESOURCES = (
     "requirements/agent-runtime-win311.txt", "requirements/desktop-runtime-constraints.txt",
     "requirements/pylock.desktop-runtime-win311.toml", "pyproject.toml", "uv.lock",
     "LICENSE", "README.md", "FRIEND_SETUP.md", "AGENT_GUIDE.md", "RELEASE_SCOPE.md",
+    "configs/decision-profile.example.json", "docs/development/DECISION_API.md",
+    "docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md",
     "configs/model_profiles/vista_4b_transformers.json", "skills/codex-vision-session/SKILL.md",
 )
 

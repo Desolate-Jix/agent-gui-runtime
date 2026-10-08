@@ -99,7 +99,7 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
     for entry in history[prefix_length:]:
         _require(isinstance(entry, dict), "entry_invalid")
         origin = entry.get("judged_by")
-        _require(origin in {"agent", "rule", "runtime"}, "origin_not_supported")
+        _require(origin in {"agent", "rule", "runtime", "decision"}, "origin_not_supported")
         if origin == "runtime":
             _require(entry.get("runtime_reason") == "original_execution_failed", "origin_not_supported")
         step_id = entry.get("step_id")
@@ -209,7 +209,7 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
             verdict, observations, submitted = "failure", {}, {}
         else:
             result = entry.get("verification")
-            _require(isinstance(result, dict) and result.get("source") == "rule", "verification_invalid")
+            _require(isinstance(result, dict) and result.get("source") == origin, "verification_invalid")
             observation = result.get("observations")
             _require(isinstance(observation, dict), "verification_invalid")
             reference = observation.get("evidence_ref")
@@ -237,12 +237,28 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
             else:
                 _require("row_selection_proof" not in normalized, "normalized_selection_proof_mismatch")
             result_outputs = {key: {"run_id": run_id, "value": value} for key, value in earlier.items()}
-            computed = verify_step(step, inputs=state["inputs"], outputs=result_outputs,
-                                   receipt=normalized, observation=observation)
+            if origin == "decision":
+                computed = _verify_decision(library, session, state, step, envelope, effective,
+                    result_outputs, read=read, snapshot=snapshot)
+                fields = {"step_id", "execution_request_id", "review_request", "execution_strategy", "receipt_sha256",
+                    "terminal_receipt", "input_route_succeeded", "verdict", "condition_result", "judged_by",
+                    "observations", "outputs", "verification", "decision_verdict"}
+                if context is not None:
+                    fields.update({"command_succeeded", "action_executed"})
+                    if dispatched:
+                        fields.add("selection_proof_sha256")
+                _require(set(entry) == fields, "decision_entry_mismatch")
+            else:
+                computed = verify_step(step, inputs=state["inputs"], outputs=result_outputs,
+                                       receipt=normalized, observation=observation)
             _require(computed == result, "verification_mismatch")
             verdict, observations, submitted = result["verdict"], observation.get("values", {}), result["outputs"]
-            _require(entry.get("rule_verdict") == verdict and entry.get("observations") == observations, "verification_mismatch")
+            _require(entry.get("decision_verdict" if origin == "decision" else "rule_verdict") == verdict
+                     and entry.get("observations") == observations, "verification_mismatch")
             _require(requests.get(request_id) == _digest([eid, verdict, observations, submitted, result]), "request_hash_mismatch")
+            if origin == "decision":
+                _require(entry.get("review_request") == {"request_id": request_id, "submitted_outputs": submitted},
+                         "decision_review_request_mismatch")
             if entry.get("review_request") is not None:
                 _require(entry["review_request"] == {"request_id": request_id, "submitted_outputs": submitted}, "review_request_invalid")
         _require(verdict in {"success", "failure", "uncertain"} and isinstance(observations, dict)
@@ -271,6 +287,43 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
     if ancestry is not None:
         result["ancestry"] = ancestry
     return {**result, "content_sha256": _digest(result)}
+
+
+def _verify_decision(library, session, state, step, envelope, effective, outputs, *, read, snapshot):
+    from app.core.decision_configuration import PROFILE_SNAPSHOT
+    from app.judgment import DecisionService
+    from .decision_verification import adopted_verification, decision_binding, decision_result_path
+    normalized = envelope["receipt"]
+    request_id = normalized["request_id"]
+    before = (effective.get("result") or {}).get("capture") or {}
+    _require(not before.get("capture_id") or normalized.get("pre_capture_id") == before["capture_id"],
+             "decision_pre_capture_mismatch")
+    binding = decision_binding(step, envelope)
+    pointer = read("workflow-decisions/" + normalized["execution_request_id"] + ".request.json")
+    _require(pointer == {"run_id": state["run_id"], "step_id": step["step_id"],
+        "execution_request_id": normalized["execution_request_id"], "request_id": request_id}, "decision_request_mismatch")
+    saved = read(decision_result_path(session, request_id))
+    _require(set(saved) == {"binding", "result"} and saved["binding"] == binding, "decision_binding_mismatch")
+    snapshot(PROFILE_SNAPSHOT)
+    snapshot("judgments/decisions.sqlite3")
+    for suffix in ("-journal", "-wal", "-shm"):
+        if (session / ("judgments/decisions.sqlite3" + suffix)).exists():
+            snapshot("judgments/decisions.sqlite3" + suffix)
+    check = step.get("verification", {}).get("image_check")
+    if check is not None:
+        from .image_verification import load_reference_image, match_image_check
+        reference = load_reference_image(library, check)
+        computed = match_image_check(check, reference, envelope["frame"])
+        _require(computed.get("reason") == "image_not_matched" and computed.get("matched") is False
+                 and computed == envelope["observation"].get("values", {}).get("image_check"), "decision_image_proof_mismatch")
+    # 显式读取原会话冻结策略，账本只读认证；绝不从结果重建策略或调用 evaluate。
+    service = DecisionService.from_environment(session, profile_path=session / PROFILE_SNAPSHOT)
+    try:
+        result = adopted_verification(step, inputs=state["inputs"], outputs=outputs,
+            envelope=envelope, decision=saved["result"], service=service)
+    finally:
+        service.close()
+    return result
 
 
 def _verify_import(library, session, state, program, *, visited, depth, external_snapshots, admission_chain):

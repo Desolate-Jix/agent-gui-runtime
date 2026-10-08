@@ -103,6 +103,42 @@ def test_explicit_recovery_uses_original_launcher_once_and_empty_new_queue(epoch
     assert len(scene.launches) == 1 and old_bytes(scene) == raw
 
 
+def test_decision_profile_survives_original_epoch_admission_without_second_host(epoch_scene):
+    import hashlib
+    scene = epoch_scene
+    profile = scene.old.parent / "decision.json"
+    profile.write_text('{"contract_version":"decision_profile.v1","mode":"shadow"}', encoding="utf-8")
+    scene.manager.decision_profile = str(profile.resolve())
+    pointer_path = scene.old.parent / "latest-session.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    pointer.update(decision_profile=str(profile.resolve()), decision_profile_sha256=hashlib.sha256(profile.read_bytes()).hexdigest())
+    write_json_snapshot(pointer_path, pointer)
+    preview = scene.manager.preview_recovery()
+    result = scene.manager.recover_session("decision-recover", preview["preview_sha256"])
+    assert result["recovery_admission"]["new_epoch_ready"] is True
+    command = scene.launches[0].command
+    assert command[command.index("--decision-profile") + 1] == str(profile.resolve())
+    again = scene.manager.recover_session("decision-recover", preview["preview_sha256"])
+    assert again["session_directory"] == result["session_directory"] and len(scene.launches) == 1
+
+
+def test_changed_decision_profile_cannot_cross_epoch_admission(epoch_scene):
+    import hashlib
+    scene = epoch_scene
+    profile = scene.old.parent / "decision.json"
+    profile.write_text('{"contract_version":"decision_profile.v1","mode":"shadow"}', encoding="utf-8")
+    scene.manager.decision_profile = str(profile.resolve())
+    pointer_path = scene.old.parent / "latest-session.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    pointer.update(decision_profile=str(profile.resolve()), decision_profile_sha256=hashlib.sha256(profile.read_bytes()).hexdigest())
+    write_json_snapshot(pointer_path, pointer)
+    preview = scene.manager.preview_recovery()
+    profile.write_text('{"contract_version":"decision_profile.v1","mode":"auto"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="configuration_changed"):
+        scene.manager.recover_session("decision-changed", preview["preview_sha256"])
+    assert not scene.launches
+
+
 def test_wrong_preview_and_operator_disabled_never_launch(epoch_scene):
     scene = epoch_scene
     preview = scene.manager.preview_recovery()

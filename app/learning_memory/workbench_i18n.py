@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import weakref
 
-from PySide6.QtCore import QEvent, QObject, QLocale, QStandardPaths, QTranslator, Signal
+from PySide6.QtCore import QEvent, QObject, QStandardPaths, QTranslator, Signal
 from PySide6.QtWidgets import QApplication, QLabel
 from shiboken6 import isValid
 
@@ -196,7 +196,8 @@ class LanguageManager(QObject):
         self.preferences_path = Path(preferences_path)
         self.translator = QTranslator(self)
         self.language = ""
-        locale = (system_locale or QLocale.system().name()).replace("_", "-")
+        # 保留检查入口的显式语言选择；未指定时固定英语，不跟随系统语言。
+        locale = (system_locale or "en-US").replace("_", "-")
         language = "zh-CN" if locale in {"zh-CN", "zh-Hans", "zh-Hans-CN"} else "en-US"
         if self.preferences_path.exists():
             try:

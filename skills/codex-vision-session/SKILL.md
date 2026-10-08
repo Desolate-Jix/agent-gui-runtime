@@ -1,6 +1,6 @@
 ---
 name: codex-vision-session
-description: Codex adapter for agent-gui-runtime agent_delegate visual grounding. Reuse one Luna or explicitly selected visual subagent across a continuous GUI task, correlate fresh screenshots and resume the original MCP command. Use only for this runtime's delegated vision route.
+description: Codex adapter for agent-gui-runtime agent_delegate visual grounding. Reuse one visual subagent with the user's selected model and effort across a continuous GUI task, correlate fresh screenshots and resume the original MCP command. Use only for this runtime's delegated vision route.
 ---
 
 # Codex 视觉会话适配 / Codex visual-session adapter
@@ -10,12 +10,13 @@ description: Codex adapter for agent-gui-runtime agent_delegate visual grounding
 ## 会话复用 / Session reuse
 
 - 同一连续任务与指定模型复用一个子 Agent。先从当前任务的已知委派记录或 `collaboration.list_agents` 找到已有视觉子 Agent，保留其 ID/规范任务名。已经完成一轮并不代表会话被销毁。
-- 没有已有会话时才允许 `collaboration.spawn_agent` 创建一次；Luna 使用当前工具明确支持的 `model="gpt-6-luna"`、`fork_turns="none"`，只提供当前定位任务。用户指定其他模型时遵从其选择；模型不可用则报告阻塞，不静默换模型。
+- 用户于 2026-10-08 要求所有工作子 Agent 使用 `ultra`。新建视觉会话使用 `model="gpt-6.1-sol"`、`reasoning_effort="ultra"`、`fork_turns="none"`；其他用户指定模型也须明确支持 `ultra`。当前 Luna 最高支持 `max`，未经用户另行选择并接受该限制，不降档使用 Luna。
+- 仅在没有符合指定模型与强度的已有会话时创建一次。此次明确强度调整允许把低强度或强度未知的旧会话替换一次，移交必要的当前任务状态；此后恢复连续复用。修改技能不会热切换旧会话。
 - 后续始终 `collaboration.followup_task(target=保留的ID, message=本次定位请求)`，包括上一轮已完成的子 Agent。`send_message` 不会唤醒闲置子 Agent，不能代替续接。
 - 一个子 Agent 同时仅一个识图请求；等待它完成再发送下一张图。保留主任务记录中的 `{delegate_profile, model, worker_id, pending_request_id, capture_id}`，跨上下文压缩时一并保留，不把 ID 当作可跨新任务或重启恢复的凭证。
 - 原子 Agent 不可用、达到上下文限制或无法续接时明确报告原因，不自动新建、不自动换模型。用户另行要求重建时再处理。
 
-Reuse one known worker ID for the same continuous task and chosen model. Create only when no worker exists, and use `followup_task` for every later request, including after a completed turn. Keep one outstanding request and preserve its correlation record. An unavailable session is a blocker, not permission to spawn a replacement. No main-agent model change or host-managed model service is implied.
+Reuse one known worker ID for the same continuous task, chosen model and effort. The user's 2026-10-08 preference is explicit `ultra`: new visual workers use `gpt-6.1-sol`, `reasoning_effort="ultra"`, `fork_turns="none"`. Luna currently supports only `max`; use it only if the user explicitly chooses and accepts that limit. This preference change permits a one-time replacement of a lower/unknown-effort worker, then use `followup_task` for every later request, including after a completed turn. Keep one outstanding request and preserve its correlation record. Other unavailable sessions remain a blocker, not automatic replacement permission. No main-agent model change or host-managed model service is implied.
 
 ## 每次识图与回传 / Per-request grounding
 

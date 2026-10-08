@@ -62,13 +62,19 @@ def prepare_models_for_source(coordinator, recognition_source):
         {"status": "model_not_required", "recognition_source": recognition_source})
 
 
-def run_step_command(coordinator, target, command, *, workflow_bindings=None, learning_context=None):
+def run_step_command(coordinator, target, command, *, workflow_bindings=None, learning_context=None,
+                     execution_request_id=None):
     operation = command["operation"]
     request = command["request"]
+    decision_check = command.get("decision_check")
+    if decision_check is None and isinstance(request.get("metadata"), dict):
+        decision_check = request["metadata"].get("decision_check")
     # 默认时机由公共运行时决定，脚本只转交显式覆盖。
     return coordinator.execute_local_step(
         target_window_handle=target["handle"], target_process_id=target["process_id"],
         operation=operation, request=request, include_observation=True,
+        **({"decision_check": decision_check, "execution_request_id": execution_request_id}
+           if decision_check is not None else {}),
         observation_wait_ms=command.get("observation_wait_ms"),
         **({"memory_bindings": workflow_bindings} if workflow_bindings is not None else {}),
         **({"learning_context": learning_context} if learning_context is not None else {}),
@@ -313,6 +319,7 @@ def main():
                         default="local")
     parser.add_argument("--delegate-profile")
     parser.add_argument("--api-profile")
+    parser.add_argument("--decision-profile", type=Path)
     parser.add_argument("--local-no-learning", action="store_true", required=True,
                         help="Disable legacy learning executor; optional receipt-only recording stays off until requested")
     parser.add_argument("--observer", choices=["minimal", "original"], default="minimal")
@@ -337,6 +344,7 @@ def main():
     agent_jobs = None
     workflow_runtime = None
     api_grounder = None
+    decision_service = None
     target = None
     stop = threading.Event()
     sampler_thread = None
@@ -404,6 +412,9 @@ def main():
                 "sha256": hashlib.sha256(Path(image["image_path"]).read_bytes()).hexdigest()}
 
     try:
+        from app.core.decision_configuration import create_session_decision_service
+        decision_service = create_session_decision_service(out, profile_path=args.decision_profile)
+        report["decision_service"] = decision_service.status()
         resource_journal = initialize_session_resources(out, args.recognition_source, parent_pid=args.parent_pid)
         host = DesktopReviewHost(out / "inbox.json", out / "reviews", secrets.token_urlsafe(32))
         host.start()
@@ -411,6 +422,7 @@ def main():
             runtime_output_root=out / "runtime-output", vision_config_path=out / "configs/vision.json",
             resource_journal=resource_journal)
         co._memory_library_root = out.parent / "memory-library"
+        co._decision_service = decision_service
         co.set_automatic_safety_interception(False)
         co.set_keep_models_loaded(True)
         api_profile = configure_recognition_startup(co, args, report)
@@ -535,7 +547,7 @@ def main():
                         response["result"] = (dispatch_agent_command(agent_jobs, path.stem, step, target,
                             learning_context=learning_context)
                             if agent_jobs is not None else run_step_command(co, target, step,
-                            learning_context=learning_context))
+                            learning_context=learning_context, execution_request_id=path.stem))
                         response["observation"] = response["result"].get("observation", {}).get("capture")
                 elif kind == "select":
                     preview = co.preview_selected_window_preparation(
@@ -584,6 +596,7 @@ def main():
                         evidence_dir=out / 'read-text-evidence', coordinator=co, target=target)
                 elif kind == "step":
                     response["result"] = run_step_command(co, target, command,
+                        execution_request_id=path.stem,
                         workflow_bindings=workflow_bindings, learning_context=learning_context)
                     observed = response["result"].get("observation", {})
                     response["observation"] = observed.get("capture")
@@ -679,6 +692,8 @@ def main():
             report["learning_enabled"] = None
         if api_grounder is not None:
             api_grounder.close()
+        from app.core.decision_configuration import close_session_decision_service
+        close_session_decision_service(decision_service, errors)
         if co is not None:
             from app.desktop_review.session_cleanup import shutdown_retaining_owner
             from app.core.json_snapshot import read_json_snapshot

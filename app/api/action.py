@@ -6,6 +6,7 @@ import re
 import shutil
 import uuid
 from contextlib import nullcontext
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -50,6 +51,8 @@ from app.api.models.request import (
 from app.api.models.response import APIResponse, ActionResultData, ErrorModel
 from app.trace.transition import TransitionRecord
 from app.learning_memory.learning_observation_capture import learning_capture_active, observe_learning_target
+from app.execution.decision_check import (DecisionCheckRejected, current_execution_decision,
+    evaluate_before_action, service_enabled, before_action_unavailable, validate_decision_check)
 from app.application_profiles.seek.scroll_containers import (
     discover_seek_scroll_containers,
     get_scroll_container,
@@ -1695,6 +1698,19 @@ def _capture_pre_action_state_with_foreground_retry(
 @router.post("/execute_recognition_plan", response_model=APIResponse)
 def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIResponse:
     timer = RuntimeTimer()
+    try:
+        declared_decision = validate_decision_check((request.metadata or {}).get("decision_check"))
+    except ValueError:
+        return APIResponse(success=False, message="Execution decision declaration is invalid",
+            data={"action_executed": False, "dispatch_status": "not_dispatched"},
+            error=ErrorModel(code="decision_check_invalid", details="Explicit condition and phase required"))
+    if (declared_decision is not None and declared_decision["phase"] == "before_action"
+            and current_execution_decision() is None):
+        return APIResponse(success=False, message="Execution decision check requires the maintained host",
+            data={"execution_path": {"action_executed": False}, "dispatch_status": "not_dispatched",
+                "decision_judgment": {"status": "not_applied", "reason": "execution_host_scope_required",
+                    "adopted": False, "authorizes_action": False, "automatic_retry_allowed": False}},
+            error=ErrorModel(code="decision_check_host_scope_required", details="Use the maintained step host"))
     if request.selection_intent is not None:
         from app.core.memory_grounding_target import current_memory_grounding
         selection_target = current_memory_grounding()
@@ -2788,6 +2804,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     learning_image_path = image_path
                     learning_plan = plan
                     learning_pre_click = pre_click
+                    decision_capture = None
                     memory_target = current_memory_grounding()
                     if memory_target is not None:
                         with timer.step("memory_grounding_dispatch_scene_check"):
@@ -2799,8 +2816,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                             learning_image_path = memory_capture["image_path"]
                             learning_plan = memory_plan
                             learning_pre_click = memory_plan["pre_click_decision"]
-                        memory_target.before_dispatch(selected_point,
-                            identity=current_local_operator_identity(window_manager))
+                            decision_capture = memory_capture
                     grounding_target = current_agent_grounding()
                     if grounding_target is not None:
                         # 在真正派发前再复核区域，不能沿用计划阶段的旧画面。
@@ -2813,10 +2829,64 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                             learning_image_path = dispatch_capture["image_path"]
                             learning_plan = dispatch_plan
                             learning_pre_click = dispatch_plan["pre_click_decision"]
+                            decision_capture = dispatch_capture
                             base_result["agent_grounding_dispatch_scene"] = {
                                 "image_path": dispatch_capture["image_path"],
                                 "validation_scope": "target_region_consistency_not_atomic_hit_proof",
                                 "region_changed_fraction": dispatch_plan["grounding_evidence"]["region_changed_fraction"]}
+                    decision_scope = current_execution_decision()
+                    if decision_scope is not None and decision_scope["check"]["phase"] == "before_action":
+                        if service_enabled(decision_scope["service"]):
+                            if not local_policy_off:
+                                raise DecisionCheckRejected("decision_check_host_scope_required", {
+                                    "status": "not_applied", "reason": "local_operator_scope_required",
+                                    "adopted": False, "authorizes_action": False, "automatic_retry_allowed": False})
+                            final_guard = base_result["final_submit_guard"]
+                            if (final_guard.get("allowed") is False
+                                    and (final_guard.get("action_taxonomy") in {"final_submit", "send", "confirm", "payment"}
+                                        or (final_guard.get("scoped_decision") or {}).get("blocked") is True)):
+                                # 只沿用既有动作分类和作用域，不把搜索提交扩大为最终提交。
+                                raise DecisionCheckRejected("decision_check_unsafe_target", {
+                                    "status": "not_applied", "reason": "existing_final_submit_guard_rejected",
+                                    "adopted": False, "authorizes_action": False, "automatic_retry_allowed": False})
+                        unavailable = before_action_unavailable(decision_scope)
+                        if unavailable is not None:
+                            base_result["decision_judgment"] = unavailable
+                        else:
+                            if decision_capture is None:
+                                source_sha256 = hashlib.sha256(Path(learning_image_path).read_bytes()).hexdigest()
+                                decision_capture = screenshot_service.capture_window(
+                                    focus_window=False, purpose="decision-before-candidate-boundary")
+                                if source_sha256 != hashlib.sha256(Path(decision_capture["image_path"]).read_bytes()).hexdigest():
+                                    raise DecisionCheckRejected("decision_check_stale_candidate", {
+                                        "status": "invalidated", "reason": "candidate_capture_changed",
+                                        "adopted": False, "authorizes_action": False, "automatic_retry_allowed": False})
+
+                            def revalidate_decision_candidate():
+                                current_identity = current_local_operator_identity(window_manager)
+                                fresh = screenshot_service.capture_window(
+                                    focus_window=False, purpose="decision-after-wait-revalidation")
+                                current_plan, current_pre_click = learning_plan, learning_pre_click
+                                target = memory_target if memory_target is not None else grounding_target
+                                if target is not None:
+                                    current_plan = target.plan(image_path=fresh["image_path"], goal=request.goal,
+                                        identity=current_identity)
+                                    current_pre_click = current_plan["pre_click_decision"]
+                                check_local_control_target(selected_point)
+                                check_local_text_focus(selected_point, window_manager)
+                                # 再次读取身份涵盖截图及控件验证期间的窗口变化。
+                                current_identity = current_local_operator_identity(window_manager)
+                                return fresh, current_identity, _selected_learning_candidate(current_plan, current_pre_click)
+
+                            base_result["decision_judgment"] = evaluate_before_action(decision_scope,
+                                capture=decision_capture, identity=current_local_operator_identity(window_manager),
+                                candidate=_selected_learning_candidate(learning_plan, learning_pre_click),
+                                point=selected_point, goal=request.goal, click_kind=request.click_kind,
+                                revalidate=revalidate_decision_candidate)
+                    if memory_target is not None:
+                        memory_target.before_dispatch(selected_point,
+                            identity=current_local_operator_identity(window_manager))
+                    if grounding_target is not None:
                         grounding_target.before_dispatch(selected_point,
                             current_local_operator_identity(window_manager))
                     if learning_capture_active() and "learning_observation" not in base_result:
@@ -2914,6 +2984,19 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             final_attempt = attempt
             if attempt_verified or not retry_allowed:
                 break
+    except DecisionCheckRejected as exc:
+        base_result["decision_judgment"] = exc.result
+        decision_scope = current_execution_decision()
+        if decision_scope is not None:
+            decision_scope["result"] = deepcopy(exc.result)
+        base_result["execution_path"]["action_executed"] = False
+        base_result.update(dispatch_status="not_dispatched", automatic_retry_allowed=False, attempts=attempts)
+        base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
+        attach_timings(base_result)
+        return APIResponse(success=False, message="Execution decision check rejected before input",
+            data=base_result, error=ErrorModel(code=exc.reason_code, details={
+                "verdict": exc.result.get("verdict"), "status": exc.result.get("status"),
+                "automatic_retry_allowed": False}))
     except TargetPointOccludedError as exc:
         failure_reason = str(exc.evidence.get("reason") or "target_point_occluded")
         base_result["execution_path"]["action_executed"] = False

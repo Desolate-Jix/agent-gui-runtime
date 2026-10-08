@@ -45,7 +45,8 @@ ROOT_FILES = ("LICENSE", ".gitignore", ".gitattributes", "pyproject.toml", "uv.l
               "docs/superpowers/plans/2026-10-01-learning-mainline-refocus.md",
               "docs/WORKFLOW_INTERRUPTION_CONTRACT.md",
               "README.md", "AGENT_GUIDE.md", "FRIEND_SETUP.md", "CHANGELOG.md", "RELEASE_SCOPE.md",
-              "configs/model_profiles/vista_4b_transformers.json", "packaging/learning_workbench.spec")
+              "configs/model_profiles/vista_4b_transformers.json", "configs/decision-profile.example.json",
+              "packaging/learning_workbench.spec")
 SCRIPTS = tuple("scripts/" + name for name in (
     "start_instant_mcp.py", "run_local_step_session.py", "start_instant_mcp_admin.py",
     "instant_admin_worker.py", "setup_instant.ps1", "configure_instant.ps1",

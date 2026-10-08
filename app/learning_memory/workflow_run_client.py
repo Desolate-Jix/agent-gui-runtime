@@ -23,6 +23,8 @@ _STATUS_FIELDS = ("host_alive", "phase", "recognition_source", "session_director
                   "pending_ids", "workflow_run", "workflow_runtime_error")
 _MARKER_SCHEMA = "workflow_editor_request.v1"
 _RUN = re.compile(r"trial-[0-9a-f]{64}\Z")
+_ATTACHMENT_FIELDS = ("name", "host_identity", "recognition_source", "delegate_profile", "api_profile",
+                      "decision_profile", "decision_profile_sha256")
 
 
 class WorkflowRunClient:
@@ -134,8 +136,7 @@ class WorkflowRunClient:
             raise RuntimeError("workflow_run_client_closed")
         installation = self._verify_installation()
         pointer, identity, _report = self._verify_attachment()
-        attachment = {key: deepcopy(pointer.get(key)) for key in
-                      ("name", "host_identity", "recognition_source", "delegate_profile", "api_profile")}
+        attachment = {key: deepcopy(pointer.get(key)) for key in _ATTACHMENT_FIELDS}
         if self._attachment is not None and self._attachment != attachment:
             raise ValueError("workflow_run_attachment_changed")
         if self._instant is None:
@@ -147,6 +148,8 @@ class WorkflowRunClient:
         self._instant.recognition_source = pointer["recognition_source"]
         self._instant.delegate_profile = pointer.get("delegate_profile")
         self._instant.api_profile = pointer.get("api_profile")
+        self._instant.decision_profile = pointer.get("decision_profile")
+        self._instant.decision_profile_sha256 = pointer.get("decision_profile_sha256")
         status = self._instant.status()
         # 旧会话可只读附着；仍存活的宿主必须通过完整身份和运行器核验。
         if status["host_alive"]:
@@ -170,8 +173,7 @@ class WorkflowRunClient:
         if not self._connected:
             self.connect()
         pointer, identity, report = self._verify_attachment()
-        attachment = {key: deepcopy(pointer.get(key)) for key in
-                      ("name", "host_identity", "recognition_source", "delegate_profile", "api_profile")}
+        attachment = {key: deepcopy(pointer.get(key)) for key in _ATTACHMENT_FIELDS}
         if attachment != self._attachment:
             raise ValueError("workflow_run_attachment_changed")
         from .workflow_terminal_recovery import WorkflowTerminalRecovery
@@ -402,8 +404,7 @@ class WorkflowRunClient:
         if not self._connected:
             raise RuntimeError("workflow_run_client_not_connected")
         pointer, _identity = self._verify_live()
-        if self._attachment != {key: pointer.get(key) for key in
-                                ("name", "host_identity", "recognition_source", "delegate_profile", "api_profile")}:
+        if self._attachment != {key: pointer.get(key) for key in _ATTACHMENT_FIELDS}:
             raise ValueError("workflow_run_attachment_changed")
         _validate_request_id(request_id)
         validated = validate_request(request)

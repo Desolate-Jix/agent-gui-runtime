@@ -444,6 +444,28 @@ def test_step_preserves_observation_options(env):
     assert coordinator.calls[0]["observation_condition"] == {"kind": "uia_text", "text": "Done"}
 
 
+@pytest.mark.parametrize("location", ["top", "metadata"])
+def test_step_decision_resumes_with_original_execution_id(env, location):
+    jobs, coordinator, store = env
+    check = {"phase": "after_action", "condition": "Results are visible"}
+    command = {"kind": "step", "operation": "execute_recognition_plan", "request": {"goal": "Search"}}
+    if location == "top":
+        command["decision_check"] = check
+    else:
+        command["request"]["metadata"] = {"decision_check": check}
+    jobs.start("job-1", command, {"handle": 100, "process_id": 200},
+               {"image_transport": "supported", "current_vision": "supported"})
+    pending = _wait(jobs, "job-1", "awaiting_grounding")["pending_grounding"]
+    store.resolve(pending["request_id"], _found(pending))
+    jobs.resume("job-1", pending["request_id"], "resume-1")
+    _wait(jobs, "job-1", "completed")
+    assert coordinator.calls[0]["execution_request_id"] == "job-1"
+    assert coordinator.calls[0]["decision_check"] == check
+    for _ in range(2):
+        assert jobs.get("job-1")["status"] == "completed"
+    assert len(coordinator.calls) == 1
+
+
 def test_external_grounding_cancel_stops_wait(env):
     jobs, coordinator, store = env
     _start(jobs)

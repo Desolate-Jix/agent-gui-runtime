@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.instant_attachment_transport import InstantAttachmentTransport, InstantAdmissionError, _validate_request_id
 
-INSTANT_VERSION = "0.1.2-preview.1"
+INSTANT_VERSION = "0.1.2-preview.2"
 
 
 def _run_wait_budget(kind, requested):
@@ -68,6 +68,7 @@ class InstantCommand(BaseModel):
     observation_condition: dict | None = None
     max_chars: int | None = Field(default=None, ge=1, le=20000)
     vision_capabilities: dict | None = None
+    decision_check: dict | None = None
 
     def command(self):
         from app.vision.grounding_commands import GROUNDING_COMMANDS, validate_grounding_command
@@ -77,7 +78,7 @@ class InstantCommand(BaseModel):
             "launch": (set(), {"app_id", "name", "path", "url", "prefer_existing"}),
             "select": ({"handle", "process_id"}, {"handle", "process_id"}),
             "close_launched_window": ({"handle", "process_id"}, {"handle", "process_id", "request"}),
-            "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
+            "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition", "vision_capabilities", "decision_check"}),
             "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
             "form_fill": ({"request"}, {"request", "vision_capabilities"}),
             "read_text": (set(), {"max_chars"}),
@@ -91,6 +92,11 @@ class InstantCommand(BaseModel):
         present = set(value) - {"kind"}
         if not required <= present or present - allowed:
             raise ValueError("command fields do not match kind")
+        if self.decision_check is not None:
+            from app.execution.decision_check import validate_decision_check
+            check = validate_decision_check(self.decision_check)
+            if check["phase"] == "before_action" and self.operation != "execute_recognition_plan":
+                raise ValueError("decision_before_action_route_unsupported")
         if self.kind in GROUNDING_COMMANDS:
             validate_grounding_command(self.kind, self.request)
         if self.kind in AGENT_COMMANDS:
@@ -141,13 +147,16 @@ def write_json(path, value):
 
 class InstantSession(InstantAttachmentTransport):
     def __init__(self, root, data_root, model_directory=None, *, allow_local_input=False,
-                 recognition_source="local", delegate_profile=None, api_profile=None):
+                 recognition_source="local", delegate_profile=None, api_profile=None, decision_profile=None):
         self.root = Path(root).resolve()
         self.data_root = Path(data_root).resolve()
         self.model_directory = Path(model_directory).resolve() if model_directory is not None else None
         self.recognition_source = recognition_source
         self.delegate_profile = delegate_profile
         self.api_profile = str(Path(api_profile).resolve()) if api_profile is not None else None
+        configured_decision = decision_profile or os.environ.get("AGENT_GUI_DECISION_PROFILE")
+        self.decision_profile = str(Path(configured_decision).resolve()) if configured_decision else None
+        self.decision_profile_sha256 = None
         self.allow_local_input = allow_local_input
         self.guard = RLock()
         self.process = None
@@ -175,6 +184,14 @@ class InstantSession(InstantAttachmentTransport):
         self.lock_file = stream
 
     def _startup_configuration(self):
+        if self.decision_profile is not None:
+            from app.judgment.profile import load_decision_profile
+            try:
+                load_decision_profile(self.decision_profile)
+                self.decision_profile_sha256 = hashlib.sha256(Path(self.decision_profile).read_bytes()).hexdigest()
+            except (OSError, ValueError):
+                raise InstantStartError("decision_profile_invalid", "invalid decision profile",
+                    "Check --decision-profile JSON; credentials belong in its named environment variable.") from None
         if not self.allow_local_input:
             raise InstantStartError("local_input_not_enabled",
                 "Local operator must explicitly launch with --allow-local-input; tools cannot change this",
@@ -216,6 +233,11 @@ class InstantSession(InstantAttachmentTransport):
                 self.host_identity = saved.get("host_identity")
             if self.session is not None:
                 status = self.status()
+                if (saved.get("decision_profile") != self.decision_profile
+                        or saved.get("decision_profile_sha256") != self.decision_profile_sha256):
+                    if not new_session or not status["cleanup_verified"] or status["pending_ids"]:
+                        raise InstantStartError("decision_profile_mismatch", "existing session uses a different decision profile",
+                            "Finish the original session and verify cleanup, then start a new session with the chosen profile.")
                 if (saved.get("recognition_source", "local") != config.source
                         or saved.get("delegate_profile") != config.delegate_profile
                         or saved.get("api_profile") != config.api_profile):
@@ -269,6 +291,8 @@ class InstantSession(InstantAttachmentTransport):
             command.extend(["--delegate-profile", config.delegate_profile])
         if config.api_profile:
             command.extend(["--api-profile", config.api_profile])
+        if self.decision_profile:
+            command.extend(["--decision-profile", self.decision_profile])
         self.process = subprocess.Popen(command, cwd=self.root,
             stdin=subprocess.DEVNULL, stdout=self.log_file, stderr=self.log_file,
             env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -279,7 +303,9 @@ class InstantSession(InstantAttachmentTransport):
             before_publish()
         write_json(self.data_root / "latest-session.json", {"name": self.session.name, "host_identity": self.host_identity,
             "recognition_source": config.source, "delegate_profile": config.delegate_profile,
-            "api_profile": config.api_profile})
+            "api_profile": config.api_profile,
+            **({"decision_profile": self.decision_profile, "decision_profile_sha256": self.decision_profile_sha256}
+               if self.decision_profile is not None else {})})
         return self.status()
 
     def preview_recovery(self):
@@ -609,6 +635,8 @@ def build_server(session):
         descriptions[name] += " Experimental grounding handoff: grounding_prepare request={goal,configuration:{source:'agent_current'|'agent_delegate',delegate_profile?:name},capabilities:{image_transport:'supported'|'unsupported'|'unknown',current_vision?:state,delegation?:state,model_selection?:state,delegate_vision?:state}} captures selected window and returns awaiting_grounding plus immutable image. grounding_resolve request={grounding_request_id:original_prepare_id,result:grounding.v1_object}; grounding_status/grounding_cancel request={grounding_request_id}. These four commands never click. Explicit grounding_execute request={grounding_request_id} dispatches one click through the existing action route only when the candidate is ready and live identity, viewport and target-region consistency checks pass. It does not load a local vision model or prove semantic hit. Execution is claimed durably before input and cannot be replayed: poll the original execution request ID and inspect its before/after images. Never turn coordinates into unchecked input."
         descriptions[name] += " form_fill accepts request={fields:[...],text_navigation:'recognize_each'|'tab_sequence'|'tab_groups'}, 1..32 declared fields: text {kind,field_goal,text,clear_existing,label?,tab_group?}, date {kind,field_goal,value,format}, dropdown {kind,label,option}, checkbox {kind,label,checked}, radio {kind,label}. Prefer one grouped call for all currently known fields, not one tool call per field; missing facts need not block independent known fields. Optional tab_sequence requires ONLY consecutive text fields with distinct exact accessible labels. tab_groups accepts mixed fields: assign identical tab_group strings only to adjacent text fields whose actual Tab order is known; labels must be exact and distinct within each run. New group, non-text or omitted tab_group always starts fresh recognition; tab_group is invalid outside tab_groups mode. Recognize each group head, then Tab, verify focused field label/identity, fill and read back locally; return one batch receipt and final image. Wrong focus interrupts BEFORE typing; never guesses/skips fields or auto-replays. Default recognize_each preserves mixed control handling. Compact fields include aggregate timings; full diagnostics remain available by ID. Date value must be a real ISO YYYY-MM-DD date; format is explicitly YYYY-MM-DD, DD/MM/YYYY or MM/DD/YYYY. Date fills an editable text field and checks exact displayed text; it does NOT navigate calendars, guess locale or verify server acceptance. Exact current accessible labels are required for choices; read current screenshots first. It never submits a form; already-satisfied choices are not toggled. Unknown/ambiguous/unreadable states interrupt with partial receipts. Dropdown options must belong to the opened control. Inspect original images; completion is not task success."
     descriptions["instant_result"] += " Optional detail=compact omits verbose traces; full (default) keeps the old receipt fields. images=after|both includes original PNGs in this same call; default none preserves JSON-only delivery."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Optional step.decision_check={phase:'after_action'|'before_action',condition:explicit_observable_condition} uses the host's configured Decision service. Absent/off remains inactive; configured default shadow only records advice. Automatic adoption requires auto mode and an exact allowlisted condition. After-action checks reuse original evidence and preserve input status; uncertainty never retries input. Before-action is supported only by step/execute_recognition_plan at the fresh candidate boundary, never by input_sequence/form_fill/grounding_execute. API judgment cannot authorize input. Poll the original execution result; asynchronous status uses its command_id. Learning agent_judgment verification may include a reviewed decision_condition alongside image_check; local image success remains zero API, dynamic output extraction still requires the existing reader/Agent."
     for name in ("instant_submit", "instant_run"):
         descriptions[name] += " Optional command.observation_condition={text:exact_accessible_name,control_type:Text|Hyperlink|Button|Document} enables read-only early observation for step or submit_search sequences. Requires a positive observation_wait_ms budget (navigation defaults to 2000). Only a newly appearing unique visible match, repeated and rechecked after capture, ends early. Accessible names can differ from screenshot captions. Missing/ambiguous/old matches time out and still return an image; inspect observation.condition, not operation_succeeded, for this outcome. This is not full-page readiness or task verification. Synchronous UIA and capture I/O are outside a hard timeout; no input replay. Omit the condition when no reliable marker is known."
     for fn in (instant_start, instant_status, instant_submit, instant_result, instant_image, instant_stop, instant_run,
