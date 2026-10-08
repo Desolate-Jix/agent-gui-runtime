@@ -1,4 +1,10 @@
-# 2026-10-08 preview.2 测试版使用说明 / preview.2 quickstart
+# 2026-10-09 preview.3 安装与使用 / Preview.3 setup and use
+
+学习 `0.1.0-preview.3` 与兼容执行 `0.1.2-preview.3` 使用两个独立安装器：[preview.3 发行页与下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3)。源码限定验收及 Main 新安装版实机通过；安装器 SHA、最终独立验收和发布核对状态见[发布记录](verification/CONTINUOUS_EXECUTION_RELEASE_20261009.md)。 / The preview.3 pair uses separate installers. Scoped source and Main installed acceptance passed; use the release record for exact hashes and final installed-independent/publication status.
+
+临时计划一次提交 1–8 个线性步骤，经声明结果核验后推进，不需要学习工作台；异常保留原请求，审核后原 wait 显式继续，不重放未知输入。源码 10 对预热两步 fixture 原生定位中位为 6.50→2.07 秒，不包含冷启动、准备、清理或 Main 推理；不是通用速度保证。见[合同](development/TASK_PLAN.md)与[源码验收](verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md)。 / Bounded plans advance verified steps and retain original evidence on uncertainty. The matched source fixture timing is scoped warm-run evidence, not universal performance.
+
+# 2026-10-08 preview.2 历史使用说明 / Historical preview.2 quickstart
 
 学习 `0.1.0-preview.2` 与兼容执行 `0.1.2-preview.2` 分别安装：[preview.2 下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.2)。本页说明安装与使用方式；本轮测量、安装验证范围及保留的首次失败详见[验收报告](verification/DECISION_API_RELEASE_ACCEPTANCE_20261008.md)。 / Learning and compatible execution preview.2 install independently. This guide describes setup and use; see the current report for measurements, installed validation scope and retained first failures.
 
@@ -15,13 +21,13 @@
 | 执行 / Execution | `0.1.2-preview.1` | source14 / installers-execution-13 | `fc8e343549d84d3deceb3d116451bc739729402fdefc2b5a1ba5a097e96ea5e7` |
 | 可选学习 / Optional learning | `0.1.0-preview.1` | GUI12 / installers-learning-12 | `d67443fdb9c77d60db4063a66b501e1be1ae45baf9c2af2b2a8cbecad86728b9` |
 
-[上一版限定验收 / Previous bounded acceptance](verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)。原失败保留；下面使用说明面向 preview.2 测试版，历史通过不转计为本轮通过。 / Preserve original failures. The usage guide below describes preview.2; historical passes are not current acceptance.
+[preview.1 历史限定验收 / Historical preview.1 acceptance](verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)。原失败保留；下面使用说明面向本轮 preview.3 目标，历史安装通过不转计。 / Preserve original failures; the usage guide below describes the preview.3 target, separately from historical installed results.
 
 ---
 
 # 可选学习工作台测试版使用说明 / Optional learning preview guide
 
-学习组件 `0.1.0-preview.2`、兼容执行组件 `0.1.2-preview.2` 分别安装、升级和卸载，学习是可选组件。上方 preview.2 为本版本下载，preview.1 链接及其验收作为历史保留。 / Learning 0.1.0-preview.2 and compatible execution 0.1.2-preview.2 have separate lifecycles; learning is optional. Use the preview.2 download for this version, with preview.1 and its acceptance retained as history.
+学习组件 `0.1.0-preview.3`、兼容执行组件 `0.1.2-preview.3` 分别安装、升级和卸载，学习是可选组件。发布与新安装候选验收以顶部本轮记录为准，preview.2/preview.1 的链接及验收保留为历史。 / The preview.3 learning and execution targets have separate lifecycles. Learning is optional; use this run's record for publication and installed acceptance, retaining previous releases separately.
 
 ## 选择组件 / Choose components
 
@@ -35,6 +41,8 @@
 
 **本地模型可选，Decision API 也可选。** 外部视觉 API、当前支持图像的 Agent、客户端明确配置的视觉委派都可使用；只有 `local` 定位路线要求本地模型权重。未配 Decision API 仍正常使用，结果沿用原审核；可选判断不替代定位模型。 / Local models and Decision API are optional. Only local grounding requires weights. Explicit API/current/delegated vision routes remain available; ordinary unconfigured use preserves review and optional decisions do not replace grounding.
 
+普通 Luna 的 12 案有界识图评估已结束，未执行返回点击点；本轮后续使用本地识图是个人选择，不关闭已有公开 API 路线，也不修改用户视觉配置。 / The twelve-case Luna image evaluation ended without executing returned points. This run's local profile does not disable existing API routes or change user-selected vision settings.
+
 ## 可选结果判断 / Optional outcome decisions
 
 在独立执行安装中，将 `configs/decision-profile.example.json` 复制到自己的配置目录，在已审核的 Python `scripts/configure_instant_mcp.py` 命令中增加 `--decision-profile <绝对 JSON 路径>`；保持原视觉来源及输入授权参数。Key 仅通过配置指定、实际宿主可见的命名环境变量提供，不写入 JSON。完整步骤见 [Decision 配置](development/DECISION_API.md)。 / Copy the execution installation's profile example and add its absolute path to the reviewed Python configurator command, retaining existing vision/input settings. Provide the key only through the configured host-visible environment variable, not JSON. See the configuration guide.
@@ -46,6 +54,8 @@
 首次打开工作台，选择一个已有、可写的数据根目录，例如 `D:/AgentLearningData`。程序在其中使用 `memory-library`；重开仍选择原数据根，避免把子目录误当新根。将数据放在安装目录外，分别升级或卸载组件时保留自己的库。 / Select an existing writable data root. Reopen that root rather than its memory-library subfolder, and keep it outside the installation.
 
 首次没有语言偏好时默认 English，不跟随系统语言；“设置 → 语言 → 简体中文 / English”可切换并保存选择，保存的偏好优先。用户标题、备注、输入值、日志和截图保留原文。 / First launch defaults to English regardless of system locale. Settings → Language switches and saves the UI language; saved preferences take priority. User content and original evidence are unchanged.
+
+已知限制：English 默认界面中少量历史来源状态标签仍显示中文（“新学内容”“有修改”）。 / Known limitation: a few legacy origin-status badges remain Chinese in the English UI.
 
 ## 教学、审核、修改、保存 / Teach, review, edit and save
 
@@ -67,7 +77,7 @@
 
 ## 已验证与限制 / Evidence and limits
 
-本轮测量与安装验证范围以[本轮报告](verification/DECISION_API_RELEASE_ACCEPTANCE_20261008.md)为准。上一版同冻结 Main 与独立 Sol 的填写、原图读取、结果核验和清理记录属于历史，不转计为本轮通过。 / Use the current report for measurements and installed validation scope. Previous same-payload Main/Sol runs remain historical and do not count as this version's acceptance.
+本轮[源码验收](verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md)与[安装验收/发布记录](verification/CONTINUOUS_EXECUTION_RELEASE_20261009.md)分别报告。Main 安装版执行与学习限定流程通过，首次零输入失败及修复保留；旧 [preview.2 验收](verification/DECISION_API_RELEASE_ACCEPTANCE_20261008.md)和 preview.1 结果均属历史。 / Main passed scoped installed execution and learning journeys; original zero-input failures and repairs are retained separately from previous preview evidence.
 
 有限实测不构成通用模型用量、准确率、速度或任意应用兼容的保证，具体已测与未测范围见本轮报告。旧便携候选首次自行退出原因未知，其他版本正常启动不代表该根因已修复。 / Bounded measurements do not establish universal model-usage, accuracy, speed or application compatibility. Use the report for tested and untested scope; the historical portable exit remains unexplained.
 

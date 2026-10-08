@@ -1737,6 +1737,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     local_target_validation: dict[str, Any] | None = None
     browser_content_snapshot: dict[str, Any] | None = None
     effective_provider_mode, effective_metadata = _execute_plan_request_defaults(request)
+    # 内部绑定永远来自本次门控采集；调用方提供的旧框、来源和哈希在这里丢弃。
+    effective_metadata.pop("task_plan_capture", None)
+    task_plan_bound_before = (_bound_window_snapshot(bound)
+        if effective_metadata.get("task_plan_target") is not None and bound is not None else None)
     effective_observe_trace_path = request.observe_trace_path
     resolved_memory_action_id = request.interface_memory_action_id
     memory_action_resolution: dict[str, Any] | None = None
@@ -2315,6 +2319,21 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 "gate_required": True,
                 "expected_effect": memory_expected_effect,
             }
+        if effective_metadata.get("task_plan_target") is not None:
+            from app.execution.task_plan_target import bind_task_plan_capture
+            from app.agent.native_identity import WindowsNativeIdentityReader
+            from app.core.local_input_policy import current_local_operator_identity
+            try:
+                current_bound = window_manager.get_bound_window()
+                effective_metadata = bind_task_plan_capture(effective_metadata, live_capture=live_capture,
+                    before=task_plan_bound_before,
+                    current=_bound_window_snapshot(current_bound) if current_bound is not None else None,
+                    identity=(current_local_operator_identity(window_manager) if local_policy_off
+                        else WindowsNativeIdentityReader(window_manager=window_manager).read_identity(current_bound.handle)))
+            except (ValueError, PermissionError) as error:
+                return APIResponse(success=False, message="Structured target requires a fresh bound-window capture",
+                    data={"action_executed": False, "dispatch_status": "not_dispatched", "timings": timer.to_dict()},
+                    error=ErrorModel(code="task_plan_target_capture_invalid", details=str(error)))
         plan_request = VisionRecognitionPlanRequestModel(
             image_path=image_path,
             task=request.task,
@@ -2896,6 +2915,22 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                                 click_point=selected_point)
                         if learning_observation is not None:
                             base_result["learning_observation"] = learning_observation
+                    if effective_metadata.get("task_plan_target") is not None:
+                        from app.execution.task_plan_target import (
+                            validate_task_plan_dispatch_capture, validate_task_plan_dispatch_target)
+                        from app.agent.native_identity import WindowsNativeIdentityReader
+                        current_bound = window_manager.get_bound_window()
+                        base_result["task_plan_capture_check"] = validate_task_plan_dispatch_capture(
+                            effective_metadata.get("task_plan_capture"), image_path=image_path,
+                            current=_bound_window_snapshot(current_bound) if current_bound is not None else None)
+                        candidate = _selected_learning_candidate(plan, pre_click)
+                        resolution = (((candidate or {}).get("element") or {}).get("evidence") or {}).get(
+                            "task_plan_current_uia_target")
+                        base_result["task_plan_dispatch_target_check"] = validate_task_plan_dispatch_target(
+                            effective_metadata["task_plan_target"], resolution=resolution,
+                            capture=effective_metadata.get("task_plan_capture"), point=selected_point,
+                            window_manager=window_manager, identity=(current_local_operator_identity(window_manager)
+                                if local_policy_off else WindowsNativeIdentityReader(window_manager=window_manager).read_identity(current_bound.handle)))
                     click_result = input_controller.click_point(
                         selected_point["x"],
                         selected_point["y"],

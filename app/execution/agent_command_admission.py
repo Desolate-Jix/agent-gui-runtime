@@ -10,6 +10,9 @@ _WORKFLOW_CONTROLS = {
 
 
 def requires_idle_agent(kind, command=None):
+    if (kind == "task_plan" and isinstance(command, dict)
+            and (command.get("request") or {}).get("action") in {"status", "cancel", "continue", "review"}):
+        return False
     if (kind == "learning_workflow" and isinstance(command, dict)
             and (command.get("request") or {}).get("action") in _WORKFLOW_CONTROLS):
         return False

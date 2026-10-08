@@ -1,3 +1,33 @@
+## 2026-10-09 preview.3 连续执行 / Preview.3 continuous execution
+
+执行 `0.1.2-preview.3` 与可选学习 `0.1.0-preview.3` 使用独立安装器，标签 `learning-v0.1.0-preview.3`。Main 与独立 Sol 的源码限定验收已通过；Main 新安装版完成执行 smoke/B/C/取消审核/弹窗恢复，303 项证据核对、13 次业务输入无错误，学习版完成新草稿保存/重开、原版本保持与正常关闭。安装独立验收及发布核对的最终状态见[发布记录](docs/verification/CONTINUOUS_EXECUTION_RELEASE_20261009.md)，旧安装结果不转计。 / Scoped source acceptance and Main's new installed execution/learning journeys passed. The release record owns final installed-independent and publication status.
+
+本轮使用本地识图是当前个人选择，已公开的外部视觉 API、当前/委派 Agent 仍可选；只有 local 需要本地权重。Decision 独立可选，不能代替定位或授权。首次工作台仍默认 English，设置可切换中文，保存偏好优先。 / This run selects local grounding without changing the optional API/Agent routes. Only local needs weights. Decisions remain optional; English defaults and saved Chinese/English preferences are preserved.
+
+已知限制：English 默认界面中少量历史来源状态标签仍显示中文（“新学内容”“有修改”）。 / Known limitation: a few legacy origin-status badges remain Chinese in the English UI.
+
+## 2026-10-09 连续计划源码验收 / Continuous-plan source acceptance
+
+**短计划源码验收完成 / Short-plan source acceptance passed.** 本方与独立 Sol 均使用同冻结产品候选完成本轮验收。普通 Luna API 的 12/12 有界识图评估已结束，后续使用本地定位；没有执行其返回点，不能把分类/几何正确率写成真实动作通过。browser03 的本地 Search 字段聚焦、25 字符填写和 UIA 读回及原 PNG 核对通过，14.153 秒，未 Enter/提交搜索，清理与源码冻结通过；此前拒绝记录保留。 / The bounded API evaluation ended without executing returned points. Browser03 passed scoped local focus/write/read-back and cleanup without submitting a search.
+
+旧候选 BC01、AB01 各有 10 对、20/20 完整正确 runs、40/40 业务输入，callback 0、Decision/API off、两个会话正常清理及起止 SHA 一致。BC01 的 B/C 中位为 6528.871/2057.443 ms，C 两步原生目标使 20 次视觉推理 skipped；AB01 的 A/B 中位为 6525.081/6611.686 ms，未显示编排直接提速。A 是零思考脚本逐步调用，不是真实 Main 模型基线；计时不含模型准备、冷启动和清理，Main 总推理时间/token 及收益仍未知。这两组早于最终派发身份和取消边界补强，不代替最终候选复测。 / These earlier matched fixtures demonstrate scoped target gains, not Main-model savings or final-candidate acceptance; the sequential baseline contains no Main reasoning.
+
+continuity01 的原失败独立保留：A 已执行，cancel 回执仍为 `cancel_requested` 并保留原 wait，客户端早退且宿主停止取消结算 tick，清理通过但任务失败。修复后联合 167 项与 Main 132 项窄回归通过，批次重叠不累加。`run_plan` 对取消过渡只读等待真实结算，超时保留原 ID/状态；合法原票据 review 返回 `continue_required`，保留原 wait ID，必须显式 continue，不能隐式重放或多发审核回调。 / Cancellation remains transitional until settlement; reviewed tickets require explicit continuation using the retained wait ID.
+
+最终候选 `continuity02` 两场景已通过：cancel 后原 A 只执行一次、无 B；新 case 的 review 返回 `continue_required`，原 wait 显式续接 B，A 未重放，各 1 次有意等待 callback。`notice01` 四个输入 Show/Close/A/B 与独立 oracle 一致：取消原计划、明确选择同 PID/birth 的新 Notice、gated Close、重新选原窗并用新 case/新 C 计划恢复。Close 保留 `returned_observation_unavailable` 原事实，由原 action 和 `notice_closed` oracle 证明关闭；不能重放。两份报告清理与源码冻结均通过。公开 owner HWND 仍未知，不宣称原计划自动跨窗恢复；脚本 oracle 审核不冒称 Main 模型审核。 / Final-candidate cancellation, original-wait continuation and explicit popup recovery passed. The unavailable dialog post-observation is retained, and neither manual reselection nor script review is relabelled as autonomous Main behavior.
+
+最终候选 `BC02` 10 对、20/20 runs、40/40 效果正确，B/C 中位 6502.2987/2069.75995 ms，中位耗时降幅 68.1688%；各对节省中位 4350.9142 ms、降幅中位 67.7351%。B 范围 6315.6136–7699.8159 ms，C 范围 2057.7367–2182.8397 ms；C 20 步视觉推理 skipped，API 0、callback 0、Decision off。两 block prepare 8160.008/8161.611 ms 另计，清理与运行中源码冻结通过；不合并旧候选 BC01/AB01，不把准备时间或缺失 Main 遥测算成 0。 / BC02 retains matched native-target gains with preparation timed separately; earlier candidates and missing Main telemetry remain separate.
+
+独立 Sol 的首轮 fresh BC 1 对/2 runs/4 个输入、连续取消/审核续接 3 个输入、弹窗显式恢复 4 个输入均通过，合计 11 份原执行回执且无自动重试。255 项独立审计 `errors=[]`，3 张实际后图目视核对；Main 原证据 892 项审计也为 `errors=[]`，两组审计项不冒充测试数、不累加。清理正常，648 个产品文件 SHA 清单均为 `e2567f3bff8a59086245d5ac09dbd8429adee754cc005fe1bb696215b811de4b`。独立原报告位于 `D:/AgentReviewAcceptance/independent-plan-final-01-{bc,continuity,notice}/report.json`。 / Independent first-run acceptance passed with original receipts, visual checks, cleanup and the same frozen product manifest.
+
+当前范围只闭合短计划优化；浏览器准备扫描、动态输出/学习引用、每配置 3 次冷启动、100 次调度百分位和真实 Main 模型基线仍为后续，不能据此宣称整个远期计划完成。 / Broader scan/dataflow/reuse, cold-start, scheduler-percentile and Main-baseline work remains open.
+
+[合同与控制边界 / Contract](docs/development/TASK_PLAN.md) · [源码证据及限制 / Source evidence and limits](docs/verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md) · [发布记录 / Release record](docs/verification/CONTINUOUS_EXECUTION_RELEASE_20261009.md) · [实施台账 / Plan ledger](docs/superpowers/plans/2026-10-08-continuous-execution.md)。旧版安装和以下日期段保留为历史；本轮安装验收另记。 / Earlier installations and dated notes remain historical; this run's installed acceptance is recorded separately.
+
+## 2026-10-08 临时连续计划源码 / Temporary continuous-plan source
+
+**未发布、验收进行中 / Unreleased, acceptance in progress.** `kind=task_plan` accepts bounded caller plans over the existing runner. Start once, then read plan status; resolve real grounding waits through the same visual worker and original command ID. Proven outcomes can advance without routine main-agent review. Uncertainty preserves the original ticket; never resubmit a plan to recover partial input. See [contract and limits](docs/development/TASK_PLAN.md). / 一次提交短计划，后续读取计划状态；识图等待仍复用同一视觉子会话和原命令，明确核验成功才自动推进，不确定或部分输入不得重建计划重放。此说明不表示安装版已更新或性能已经验证。
+
 ## 2026-10-03 明确恢复选择 / Explicit recovery choice
 
 ## 行选择失败的读值事实 / Row-selection failure facts

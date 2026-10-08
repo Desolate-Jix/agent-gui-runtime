@@ -189,3 +189,205 @@ def test_slot_released_after_error_and_explicit_busy(capture, monkeypatch):
         assert busy.value.attempt is None
         provider._slots.release()
         assert provider.ground(request_id="request-1",capture=capture,goal="Search")["result"]["status"] == "found"
+
+
+def test_provider_timing_and_usage_survive_invalid_grounding(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    payload = reply()
+    payload["usage"]["completion_tokens_details"] = {"reasoning_tokens": 12, "unknown": "secret-value"}
+    payload["usage"]["prompt_tokens_details"] = {"cached_tokens": 5}
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=payload,
+        headers={"openai-processing-ms": "23.5", "x-request-id": "req_vision_1"}))
+    with ChatCompletionsGrounder(profile(), transport=transport) as provider:
+        value = provider.ground(request_id="request-1", capture=capture, goal="Search")
+        with pytest.raises(ApiGroundingError, match="api_grounding_invalid") as invalid:
+            provider.ground(request_id="different-request", capture=capture, goal="Search")
+    for metadata in (value["provider"], invalid.value.provider):
+        assert metadata["server_processing_ms"] == 23.5
+        assert metadata["provider_request_id"] == "req_vision_1"
+        assert metadata["http_elapsed_ms"] >= 0
+        assert metadata["requested_reasoning_effort"] is None
+        assert metadata["usage"]["completion_tokens_details"] == {"reasoning_tokens": 12}
+        assert metadata["usage"]["prompt_tokens_details"] == {"cached_tokens": 5}
+        assert "secret-value" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("server_ms", ["NaN", "-1", "Infinity", "secret-value", "3600001"])
+def test_untrusted_provider_metadata_does_not_leak_or_invent_time(capture, monkeypatch, server_ms):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=reply(model="secret-value"),
+        headers={"openai-processing-ms": server_ms, "x-request-id": "secret-value"}))
+    with ChatCompletionsGrounder(profile(), transport=transport) as provider:
+        value = provider.ground(request_id="request-1", capture=capture, goal="Search")
+    assert value["provider"]["server_processing_ms"] is None
+    assert value["provider"]["provider_request_id"] is None
+    assert value["provider"]["returned_model"] is None
+    assert "secret-value" not in json.dumps(value)
+
+
+def test_opt_in_trace_preserves_utf8_model_text_and_parse_error(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    replies = [reply(), reply(choices=[{"finish_reason": "stop", "message": {
+        "content": '{"label":"搜索 secret-value", invalid JSON}'}}])]
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=replies.pop(0)))
+    with ChatCompletionsGrounder(profile(), transport=transport, capture_trace=True) as provider:
+        value = provider.ground(request_id="request-1", capture=capture, goal="搜索")
+        with pytest.raises(ApiGroundingError, match="api_grounding_invalid") as invalid:
+            provider.ground(request_id="request-1", capture=capture, goal="搜索")
+    assert value["trace"]["prompt"]["goal"] == "搜索"
+    assert "搜索" in value["trace"]["raw_model_text"]
+    assert value["trace"]["parsed_model_json"]["candidates"][0]["label"] == "搜索"
+    assert "搜索" in invalid.value.trace["raw_model_text"]
+    assert invalid.value.trace["parse_error"].startswith("grounding JSON invalid")
+    assert "secret-value" not in json.dumps(invalid.value.trace)
+    assert "secret-value" not in json.dumps(value["trace"])
+
+
+def benchmark_manifest(capture, **changes):
+    return {"schema_version": "external_vision_benchmark.v1", "suite_id": "fresh-unit-suite",
+        "truth_source": "independent test geometry", "cases": [{"case_id": "found", "goal": "Search",
+            "capture": {**capture, "captured_at_utc": "2026-10-08T00:00:00Z"},
+            "truth": {"status": "found", "bboxes": [{"x": 10, "y": 10, "width": 60, "height": 30}]}}],
+        **changes}
+
+
+def test_benchmark_keeps_first_failure_and_truth_out_of_model_request(capture, monkeypatch, tmp_path):
+    from scripts.benchmark_external_vision import BenchmarkManifest, run_benchmark
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    document = benchmark_manifest(capture)
+    first = document["cases"][0]
+    good = {**first, "case_id": "found-good"}
+    absent = {**first, "case_id": "absent", "goal": "Missing target",
+              "truth": {"status": "absent", "bboxes": []}}
+    ambiguous = {**first, "case_id": "ambiguous", "goal": "Duplicate target",
+        "truth": {"status": "ambiguous", "bboxes": [
+            {"x": 10, "y": 10, "width": 20, "height": 20},
+            {"x": 50, "y": 10, "width": 20, "height": 20}]}}
+    document["cases"] = [first, good, absent, ambiguous]
+    calls = []
+    def handler(request):
+        context = json.loads(json.loads(request.content)["messages"][1]["content"][0]["text"])
+        assert "truth" not in context and "bboxes" not in context
+        calls.append(context)
+        if len(calls) == 1:
+            return httpx.Response(500, text="secret-value")
+        payload = result()
+        payload["request_id"] = context["request_id"]
+        if len(calls) == 3:
+            payload.update(status="absent", candidates=[], selected_candidate_id=None)
+        if len(calls) == 4:
+            payload.update(status="ambiguous", selected_candidate_id=None, candidates=[
+                {"id": "right", "label": "Search", "evidence_source": "api_visual",
+                 "bbox": {"x": 50, "y": 10, "width": 20, "height": 20}, "click_point": {"x": 55, "y": 15}},
+                {"id": "left", "label": "Search", "evidence_source": "api_visual",
+                 "bbox": {"x": 10, "y": 10, "width": 20, "height": 20}, "click_point": {"x": 15, "y": 15}}])
+        return httpx.Response(200, json=reply(payload), headers={"openai-processing-ms": "2"})
+    output = tmp_path / "benchmark.json"
+    report = run_benchmark(BenchmarkManifest.model_validate(document), profile(), output_path=output,
+                           max_calls=4, transport=httpx.MockTransport(handler))
+    assert len(calls) == 4
+    assert report["cases"][0]["error"]["code"] == "api_server_error"
+    assert report["cases"][0]["first_attempt"] is True
+    assert report["cases"][0]["accuracy"]["passed"] is False
+    assert report["cases"][1]["accuracy"]["bbox_iou"] == 1.0
+    assert report["cases"][1]["accuracy"]["click_in_truth"] is True
+    assert report["cases"][3]["accuracy"]["ambiguous_boxes_correct"] is True
+    assert report["summary"]["cases"] == 4
+    assert report["summary"]["passed"] == 3
+    assert report["summary"]["failures"] == 1
+    assert report["summary"]["found_click_accuracy"] == 0.5
+    assert report["summary"]["classification_accuracy"] == 0.75
+    assert json.loads(output.read_text(encoding="utf-8")) == report
+    assert "secret-value" not in output.read_text(encoding="utf-8")
+
+
+def test_benchmark_distinguishes_bbox_quality_from_click_hit(capture, monkeypatch, tmp_path):
+    from scripts.benchmark_external_vision import BenchmarkManifest, run_benchmark
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    def handler(request):
+        context = json.loads(json.loads(request.content)["messages"][1]["content"][0]["text"])
+        payload = result()
+        payload["request_id"] = context["request_id"]
+        payload["candidates"][0].update(bbox={"x": 30, "y": 10, "width": 10, "height": 10},
+                                          click_point={"x": 35, "y": 15})
+        return httpx.Response(200, json=reply(payload))
+    report = run_benchmark(BenchmarkManifest.model_validate(benchmark_manifest(capture)), profile(),
+        output_path=tmp_path / "score.json", max_calls=1, transport=httpx.MockTransport(handler))
+    accuracy = report["cases"][0]["accuracy"]
+    assert accuracy["bbox_iou"] == pytest.approx(1 / 18, abs=0.000001)
+    assert accuracy["bbox_correct"] is False
+    assert accuracy["click_in_truth"] is True
+    assert accuracy["passed"] is False
+
+
+def test_benchmark_preflight_rejects_changed_capture_and_call_cap(capture, monkeypatch, tmp_path):
+    from scripts.benchmark_external_vision import BenchmarkManifest, run_benchmark
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    document = benchmark_manifest(capture)
+    document["cases"][0]["capture"]["sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="benchmark_capture_changed"):
+        run_benchmark(BenchmarkManifest.model_validate(document), profile(), output_path=tmp_path / "bad.json",
+            max_calls=1, transport=httpx.MockTransport(lambda _: pytest.fail("network")))
+    document = benchmark_manifest(capture)
+    document["cases"].append({**document["cases"][0], "case_id": "second"})
+    with pytest.raises(ValueError, match="benchmark_call_cap_exceeded"):
+        run_benchmark(BenchmarkManifest.model_validate(document), profile(), output_path=tmp_path / "cap.json",
+            max_calls=1, transport=httpx.MockTransport(lambda _: pytest.fail("network")))
+
+
+@pytest.mark.parametrize("truth", [
+    {"status": "found", "bboxes": []},
+    {"status": "absent", "bboxes": [{"x": 0, "y": 0, "width": 1, "height": 1}]},
+    {"status": "ambiguous", "bboxes": [{"x": 0, "y": 0, "width": 1, "height": 1}]},
+    {"status": "found", "bboxes": [{"x": 90, "y": 0, "width": 20, "height": 1}]}])
+def test_benchmark_truth_contract_is_validated_before_any_call(capture, truth):
+    from scripts.benchmark_external_vision import BenchmarkManifest
+    document = benchmark_manifest(capture)
+    document["cases"][0]["truth"] = truth
+    with pytest.raises(ValueError):
+        BenchmarkManifest.model_validate(document)
+
+
+def test_benchmark_dry_run_needs_no_key_or_network(capture, monkeypatch, tmp_path, capsys):
+    from scripts.benchmark_external_vision import main
+    monkeypatch.delenv("TEST_VISION_KEY", raising=False)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(benchmark_manifest(capture), ensure_ascii=False), encoding="utf-8")
+    profile_path = tmp_path / "profile.json"
+    profile_path.write_text(profile().model_dump_json(), encoding="utf-8")
+    assert main(["--manifest", str(manifest_path), "--profile", str(profile_path)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["network_called"] is False
+    assert report["truth_sent_to_provider"] is False
+    assert not (tmp_path / "result.json").exists()
+
+
+def test_benchmark_refuses_to_overwrite_first_results_before_network(capture, monkeypatch, tmp_path):
+    from scripts.benchmark_external_vision import BenchmarkManifest, run_benchmark
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    output = tmp_path / "first.json"
+    output.write_text('{"first_failure":"preserved"}\n', encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        run_benchmark(BenchmarkManifest.model_validate(benchmark_manifest(capture)), profile(),
+            output_path=output, transport=httpx.MockTransport(lambda _: pytest.fail("network")))
+    assert output.read_text(encoding="utf-8") == '{"first_failure":"preserved"}\n'
+
+
+@pytest.mark.parametrize("expected", ["absent", "ambiguous"])
+def test_benchmark_found_target_cannot_pass_absence_or_ambiguity_truth(capture, monkeypatch, tmp_path, expected):
+    from scripts.benchmark_external_vision import BenchmarkManifest, run_benchmark
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    document = benchmark_manifest(capture)
+    document["cases"][0]["truth"] = {"status": expected, "bboxes": [] if expected == "absent" else [
+        {"x": 10, "y": 10, "width": 20, "height": 20},
+        {"x": 50, "y": 10, "width": 20, "height": 20}]}
+    def handler(request):
+        context = json.loads(json.loads(request.content)["messages"][1]["content"][0]["text"])
+        payload = result()
+        payload["request_id"] = context["request_id"]
+        return httpx.Response(200, json=reply(payload))
+    report = run_benchmark(BenchmarkManifest.model_validate(document), profile(),
+        output_path=tmp_path / "false-positive.json", transport=httpx.MockTransport(handler))
+    assert report["cases"][0]["accuracy"]["status_correct"] is False
+    assert report["cases"][0]["accuracy"]["passed"] is False
+    assert report["summary"]["classification_accuracy"] == 0.0

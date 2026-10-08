@@ -121,6 +121,8 @@ class InstantAttachmentTransport:
                 "learning_recording_error": report.get("learning_recording_error"),
                 "workflow_run": report.get("workflow_run"),
                 "workflow_runtime_error": report.get("workflow_runtime_error"),
+                "task_plan_run": report.get("task_plan_run"),
+                "task_plan_runtime_error": report.get("task_plan_runtime_error"),
                 "automatic_safety_interception": False if alive else None,
                 "local_input_enabled_by_operator": self.allow_local_input,
                 "host_is_admin": report.get("host_is_admin"),
@@ -238,6 +240,11 @@ class InstantAttachmentTransport:
                     for key in ("handle", "process_id"))
             receipt = {"request_id": request_id, **response, "operation_succeeded": ok,
                        "task_effect_verified": False, "automatic_retry_allowed": False}
+            if isinstance(original_command, dict) and original_command.get("kind") == "task_plan":
+                # 控制请求返回不是整段任务完成；原动作图像仍用实际执行 ID 读取。
+                receipt.update(operation_succeeded=response.get("status") == "returned",
+                    operation_success_scope="task_plan_control", task_effect_verified=None,
+                    next_action="inspect_original_plan_status_without_resubmitting_start")
             if result.get("contract_version") == "agent_command.v1":
                 waiting = outcome in {"running", "awaiting_grounding"}
                 receipt.update(operation_succeeded=None if waiting else ok and outcome == "completed",

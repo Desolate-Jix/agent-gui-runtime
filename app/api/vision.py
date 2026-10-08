@@ -2807,7 +2807,7 @@ def _execute_fast_inventory_from_uia(
     # 明确菜单动作只使用同一窗口中完整采集的唯一菜单；整页截断事实仍保留。
     from app.operation.recognition.control_target import explicit_menu_item_goal, explicit_browser_navigation_goal
     chrome = uia_snapshot.get("browser_chrome_scope") or {}
-    if (explicit_browser_navigation_goal(goal) and chrome.get("status") == "ok"
+    if (not (metadata or {}).get("task_plan_target") and explicit_browser_navigation_goal(goal) and chrome.get("status") == "ok"
             and chrome.get("scan_scope") == "browser_chrome" and chrome.get("scan_complete") is True
             and chrome.get("truncated") is False
             and chrome.get("window", {}).get("handle") == uia_snapshot.get("window", {}).get("handle")
@@ -2816,7 +2816,7 @@ def _execute_fast_inventory_from_uia(
                         "parent_scan_visited_count": uia_snapshot.get("scan_visited_count")}
     menu_goal = explicit_menu_item_goal(goal)
     scopes = uia_snapshot.get("menu_scopes") or []
-    if menu_goal and len(scopes) == 1:
+    if not (metadata or {}).get("task_plan_target") and menu_goal and len(scopes) == 1:
         scope = scopes[0]
         root = (scope.get("controls") or [{}])[0]
         if (scope.get("status") == "ok" and scope.get("scan_complete") is True
@@ -2947,6 +2947,15 @@ def _recognition_plan_from_vista_point(
     from app.operation.recognition.control_target import validate_control_target, uia_control_is_action_identity
     raw_target = (request.metadata or {}).get("control_target")
     control_target = validate_control_target(raw_target) if raw_target is not None else None
+    from app.execution.task_plan_target import (validate_task_plan_control_target, resolve_current_uia_target,
+        task_plan_visual_goal, validate_task_plan_visual_selection)
+    structured_target = (request.metadata or {}).get("task_plan_target")
+    if structured_target is not None:
+        structured_target = validate_task_plan_control_target(structured_target)
+        if (control_target is not None or seeded_candidate is not None or path_graph_recall.get("candidates")
+                or isinstance(observe_reuse.get("screen_inventory"), dict)
+                or ((request.metadata or {}).get("visual_asset_recall") or {}).get("matches")):
+            raise ValueError("task_plan_target_requires_fresh_recognition")
     if control_target is not None and (
         seeded_candidate is not None or path_graph_recall.get("candidates")
         or isinstance(observe_reuse.get("screen_inventory"), dict)
@@ -3063,8 +3072,40 @@ def _recognition_plan_from_vista_point(
     current_uia_primary = False
     current_uia_literal_identity = False
     current_uia_generic_page_field = False
+    structured_resolution = None
+    structured_primary = None
+    if structured_target is not None:
+        structured_resolution = resolve_current_uia_target(structured_target,
+            capture=(request.metadata or {}).get("task_plan_capture"),
+            snapshot=fast_inventory.get("raw_uia_snapshot") or fast_inventory)
+        if structured_resolution["status"] == "matched":
+            actions = [item for item in (screen_inventory or {}).get("available_actions", [])
+                if item.get("source") == "windows_uia.controls"
+                and item.get("source_id") == structured_resolution["control_id"]
+                and item.get("bbox") == structured_resolution["bbox"]]
+            if len(actions) != 1:
+                raise ValueError("task_plan_target_uia_candidate_unavailable")
+            focused_reading = {**screen_reading_from_fast_inventory,
+                "screen_inventory": {**screen_inventory, "available_actions": actions}}
+            focused = rank_candidates(CandidateRankRequest(goal=goal,
+                page_structure=PageStructure(image_size=input_image_size, screen_summary="current structured UIA target",
+                    state_guess=request.state_hint, elements=[], texts=[]), top_k=1,
+                state_hint=request.state_hint, screen_reading=focused_reading))
+            exact = [item for item in focused.candidates
+                if item.element.evidence.get("screen_inventory_action", {}).get("source_id") == structured_resolution["control_id"]
+                and item.element.bbox.to_dict() == structured_resolution["bbox"]]
+            if len(exact) != 1:
+                raise ValueError("task_plan_target_uia_candidate_unavailable")
+            structured_primary = structured_resolution
+            candidates = exact
+            current_uia_primary = True
+            candidates[0].element.click_point = dict(structured_primary["click_point"])
+            candidates[0].element.evidence["task_plan_current_uia_target"] = dict(structured_primary)
+        else:
+            # 回到视觉也不能丢弃调用方显式语义；原提示和后续门禁都保留这些约束。
+            goal = task_plan_visual_goal(goal, structured_target)
     from app.operation.recognition.native_edit_target import native_edit_primary_point
-    native_edit_primary = native_edit_primary_point(fast_inventory, goal=goal,
+    native_edit_primary = None if structured_target is not None else native_edit_primary_point(fast_inventory, goal=goal,
         image_path=image_path, image_size=input_image_size.to_dict(), control_target=control_target,
         target_text=request.metadata.get("target_text") or request.metadata.get("observed_text"))
     if native_edit_primary and not candidates:
@@ -3087,7 +3128,7 @@ def _recognition_plan_from_vista_point(
     plain_field_label = _field_target_label(goal) if explicit_label is None else None
     literal_label = explicit_label or plain_field_label
     literal_identity_diagnostics = {"label": literal_label, "entered": False}
-    if (literal_label and not explicit_word_target(goal) and control_target is None and not candidates
+    if (structured_target is None and literal_label and not explicit_word_target(goal) and control_target is None and not candidates
             and fast_inventory.get("status") == "ready"):
         raw_uia = fast_inventory.get("raw_uia_snapshot") or {}
         literal_identity_diagnostics.update(entered=True, scan_complete=raw_uia.get("scan_complete"),
@@ -3163,7 +3204,7 @@ def _recognition_plan_from_vista_point(
                 candidates = exact_candidates
                 current_uia_primary = True
                 current_uia_literal_identity = True
-    if not candidates:
+    if not candidates and structured_target is None:
         page_field = _generic_page_field_primary_candidate(goal=goal, control_target=control_target,
             target_text=request.metadata.get("target_text") or request.metadata.get("observed_text"),
             fast_inventory=fast_inventory, image_size=input_image_size)
@@ -3171,7 +3212,7 @@ def _recognition_plan_from_vista_point(
             candidates = [page_field]
             current_uia_primary = True
             current_uia_generic_page_field = True
-    if ((request.metadata or {}).get("semantic_action") == "fill_field"
+    if (structured_target is None and (request.metadata or {}).get("semantic_action") == "fill_field"
             and control_target is None and not candidates
             and fast_inventory.get("status") == "ready" and isinstance(screen_inventory, dict)):
         normalized_goal = re.sub(r"\s+", " ", goal.strip().casefold())
@@ -3226,7 +3267,10 @@ def _recognition_plan_from_vista_point(
         from app.operation.recognition.current_text_target import current_text_primary_point
         current_text_primary = current_text_primary_point(fast_inventory, candidate=candidates[0],
             image_path=image_path, image_size=input_image_size.to_dict(), literal_label=literal_label)
-    if current_text_primary:
+    if structured_primary:
+        selected_candidate = candidates[0]
+        selected_candidate.reasons.append("current_unique_structured_uia_target")
+    elif current_text_primary:
         # 在调用模型之前选择当前字段主路径，绝不在模型拒绝后换点兜底。
         selected_candidate = candidates[0]
         selected_candidate.element.click_point = dict(current_text_primary["point"])
@@ -3838,6 +3882,28 @@ def _recognition_plan_from_vista_point(
         )
         rejected_candidates.sort(key=lambda candidate: candidate.score, reverse=True)
 
+    structured_visual_selection = None
+    if structured_target is not None and structured_primary is None:
+        try:
+            if selected_candidate is None or vista_payload is None:
+                raise ValueError("task_plan_target_visual_semantics_unconfirmed")
+            structured_visual_selection = validate_task_plan_visual_selection(structured_target,
+                capture=(request.metadata or {}).get("task_plan_capture"), snapshot=fast_inventory.get("raw_uia_snapshot"),
+                action=selected_candidate.element.evidence.get("screen_inventory_action"),
+                bbox=selected_candidate.element.bbox.to_dict(), point=vista_payload["point"])
+            selected_candidate.element.evidence["task_plan_current_uia_target"] = dict(structured_visual_selection)
+            candidates = [selected_candidate]
+        except ValueError as error:
+            structured_visual_selection = {"status": "rejected", "target": structured_target, "reason": str(error)}
+            vista_error = str(error)
+            for candidate in candidates:
+                candidate.eligible = False
+                candidate.element.interaction_policy.allowed = False
+                candidate.reasons = _unique_list([*candidate.reasons, str(error)])
+            rejected_candidates.extend(candidates)
+            candidates = []
+            selected_candidate = None
+
     vista_unselected_candidate_ids = []
     if (vista_direct_used and selected_candidate is not None and not vista_direct_identity_reconciled
             and field_direct):
@@ -3864,6 +3930,8 @@ def _recognition_plan_from_vista_point(
         recommended_candidate_id=recommendation.candidate_id if recommendation is not None else None,
         margin_to_second=margin,
         summary={
+            **({"task_plan_target_resolution": structured_resolution} if structured_resolution is not None else {}),
+            **({"task_plan_target_visual_selection": structured_visual_selection} if structured_visual_selection is not None else {}),
             **({"control_target": control_target} if control_target is not None else {}),
             "vista_unselected_candidate_ids": vista_unselected_candidate_ids,
             "returned_count": len(candidates),
@@ -3901,6 +3969,14 @@ def _recognition_plan_from_vista_point(
         },
     )
     grounding_results: list[LocalGroundingCandidateResult] = []
+    if structured_primary and selected_candidate is not None:
+        grounding_results.append(LocalGroundingCandidateResult(
+            candidate_id=selected_candidate.candidate_id, element_id=selected_candidate.element_id,
+            status="grounded", crop_path=None, crop_bbox=structured_primary["bbox"],
+            refined_click_point=dict(structured_primary["click_point"]), coordinate_source="windows_uia",
+            confidence=0.9, matched_text=structured_target["name"], matched_text_bbox=None,
+            reasons=["current_unique_structured_uia_target", "original_action_gate_required",
+                     "task_effect_requires_agent_review"]))
     if current_text_primary and selected_candidate is not None:
         grounding_results.append(LocalGroundingCandidateResult(
             candidate_id=selected_candidate.candidate_id, element_id=selected_candidate.element_id,
@@ -4073,8 +4149,8 @@ def _recognition_plan_from_vista_point(
         results=grounding_results,
         recommended_candidate_id=recommended_local_candidate_id,
         summary={
-            "provider": "current_uia_named_text_center" if current_text_primary else "current_native_edit_client_center" if native_edit_primary else "current_uia_unique_match_v1" if fast_grounding_used else "vista_point_grounding",
-            "output_contract": "current_named_text_target_v1" if current_text_primary else "native_edit_client_target_v1" if native_edit_primary else "vista_point_v1",
+            "provider": "windows_uia" if structured_primary else "current_uia_named_text_center" if current_text_primary else "current_native_edit_client_center" if native_edit_primary else "current_uia_unique_match_v1" if fast_grounding_used else "vista_point_grounding",
+            "output_contract": "task_plan_current_uia_target_v1" if structured_primary else "current_named_text_target_v1" if current_text_primary else "native_edit_client_target_v1" if native_edit_primary else "vista_point_v1",
             "candidate_count": len(candidates),
             "grounded_count": sum(1 for result in grounding_results if result.status == "grounded"),
             "error": vista_error,
@@ -4105,6 +4181,9 @@ def _recognition_plan_from_vista_point(
         )
     recommended = recommendation.to_dict() if recommendation is not None else None
     model_io = vista_direct_failure_model_io or _vista_model_io_trace(vista_payload, error=vista_error)
+    if structured_primary:
+        model_io = {"contract_version": "model_io_trace_v1", "status": "skipped",
+                    "reason": "current_unique_structured_uia_target", "attempt_count": 0}
     if current_text_primary:
         model_io = {"contract_version": "model_io_trace_v1", "status": "skipped",
                     "reason": "current_unique_named_text_primary", "attempt_count": 0}
@@ -4125,6 +4204,9 @@ def _recognition_plan_from_vista_point(
             grounding=narrow_search_result,
             selected_candidate=selected_candidate,
             current_candidate_source=(
+                "windows_uia"
+                if structured_primary
+                else
                 "current_uia_named_text_center"
                 if current_text_primary
                 else "current_uia_unique_match_v1"
@@ -4141,14 +4223,15 @@ def _recognition_plan_from_vista_point(
         "parse_result": {
             "vision_regions": {
                 "contract_version": "vision_regions_v1",
-                "provider": "current_uia_named_text_center" if current_text_primary else "vista_point_grounding",
+                "provider": "windows_uia" if structured_primary else "current_uia_named_text_center" if current_text_primary else "vista_point_grounding",
                 "image_size": input_image_size.to_dict(),
-                "screen_summary": ("Current uniquely labelled writable control geometry; no visual model inference."
+                "screen_summary": ("Current uniquely matched structured UIA control geometry; no visual model inference."
+                    if structured_primary else "Current uniquely labelled writable control geometry; no visual model inference."
                     if current_text_primary else "VISTA point grounding uses PathGraph recall instead of full-screen region parsing."),
                 "regions": [],
                 "targets": [],
                 "observers": [],
-                "notes": ["current_unique_named_text_primary"] if current_text_primary else ["vista_point_grounding_only"],
+                "notes": ["current_unique_structured_uia_target"] if structured_primary else ["current_unique_named_text_primary"] if current_text_primary else ["vista_point_grounding_only"],
             },
             "ocr_result": None,
             "ocr_anchors": observe_reuse.get("ocr_anchors"),
@@ -4165,7 +4248,8 @@ def _recognition_plan_from_vista_point(
         "pre_click_decision": pre_click_decision.to_dict(),
         "verification_plan": {
             "status": "planned_not_executed",
-            "pre_click_checks": (["current_unique_named_text_geometry", "live_writable_target_identity",
+            "pre_click_checks": (["current_unique_structured_uia_target", "current_capture_window_geometry",
+                "candidate_policy_allowed", "click_point_inside_candidate_bbox"] if structured_primary else ["current_unique_named_text_geometry", "live_writable_target_identity",
                 "candidate_policy_allowed", "click_point_inside_candidate_bbox"] if current_text_primary else [
                 "path_graph_state_match",
                 "vista_point_inside_candidate_bbox",
@@ -4186,6 +4270,9 @@ def _recognition_plan_from_vista_point(
                 ocr_region_refine_used=False,
             ),
             "vision_provider_used": (
+                "windows_uia"
+                if structured_primary
+                else
                 "current_uia_named_text_center"
                 if current_text_primary
                 else "current_native_edit_client_center"

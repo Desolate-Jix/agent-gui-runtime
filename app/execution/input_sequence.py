@@ -14,6 +14,15 @@ class InputSequenceRequest(BaseModel):
     clear_existing: bool = True
     submit_search: bool
     target_memory: dict[str, str] | None = None
+    target: dict | None = None
+
+    @field_validator("target")
+    @classmethod
+    def validate_target(cls, value):
+        if value is None:
+            return None
+        from .task_plan_target import validate_task_plan_control_target
+        return validate_task_plan_control_target(value, for_input=True)
 
     @field_validator("target_memory")
     @classmethod
@@ -218,6 +227,11 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
     """同一宿主串行命令内完成组合；不循环点击、不自动改写目标或重试输入。"""
     learning_context = deepcopy(learning_context) if learning_context is not None else None
     spec = InputSequenceRequest.model_validate(request)
+    if spec.target is not None:
+        if (spec.target_memory is not None or _tab_from is not None
+                or _declared_label is not None and _declared_label != spec.target["name"]):
+            raise ValueError("task_plan_target_input_route_conflict")
+        _declared_label = spec.target["name"]
     if memory_bindings is not None:
         if not isinstance(memory_bindings, dict) or spec.target_memory is None:
             raise ValueError("workflow_target_bindings_invalid")
@@ -337,10 +351,15 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         focus_target = LocalTextFocusTarget(target["handle"], target["process_id"],
             expected_label=_declared_label)
         if _tab_from is None:
+            focus_metadata = {}
+            if _prefer_current_uia:
+                focus_metadata["text_focus_route"] = "current_uia_primary"
+            if spec.target is not None:
+                focus_metadata["task_plan_target"] = deepcopy(spec.target)
             located = action("focus", "execute_recognition_plan", {
                 "goal": spec.field_goal, "click_kind": "single",
                 **({"target_memory": spec.target_memory} if spec.target_memory is not None else {}),
-                **({"metadata": {"text_focus_route": "current_uia_primary"}} if _prefer_current_uia else {})},
+                **({"metadata": focus_metadata} if focus_metadata else {})},
                 0, focus_target=focus_target,
                 memory_action=({"kind": "input_sequence", "field_goal": spec.field_goal,
                                 "submit_search": spec.submit_search} if spec.target_memory is not None else None))

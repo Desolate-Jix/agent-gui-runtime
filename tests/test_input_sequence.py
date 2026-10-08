@@ -98,6 +98,26 @@ def test_focus_reuses_plain_click_semantics_instead_of_strict_fill_route(monkeyp
     assert co.calls[0]["request"] == {"goal": "Search input", "click_kind": "single"}
 
 
+def test_structured_field_target_reaches_focus_with_exact_current_label(monkeypatch):
+    co = Coordinator()
+    snapshots(monkeypatch, ["", "maps"])
+    target = {"name": "Query", "control_type": "Edit", "container": {"name": "Search", "control_type": "Pane"}}
+    result = run(co, target=target, submit_search=False)
+    assert result["status"] == "completed"
+    assert co.calls[0]["request"]["metadata"]["task_plan_target"] == target
+    assert co.calls[0]["focus_target"].expected_label == "Query"
+    assert all("metadata" not in call["request"] for call in co.calls[1:])
+
+
+@pytest.mark.parametrize("target", [{"name": "Find", "control_type": "Button"},
+    {"name": "Query", "control_type": "Edit", "runtime_id": [1]}])
+def test_structured_field_target_rejects_nonfield_or_caller_identity_before_input(target):
+    co = Coordinator()
+    with pytest.raises(ValueError, match="task_plan_target"):
+        run(co, target=target)
+    assert co.calls == []
+
+
 def test_memory_reference_and_original_semantics_reach_only_focus_step(monkeypatch):
     co = Coordinator()
     snapshots(monkeypatch, ["", "maps"])

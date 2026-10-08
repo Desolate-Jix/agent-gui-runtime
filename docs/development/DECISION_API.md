@@ -1,5 +1,7 @@
 # Optional Decision API / 可选判断 API
 
+Unreleased source addition: [temporary task plans](TASK_PLAN.md) reuse this service for explicitly declared outcome checks and may advance the existing runner after authenticated success. This unreleased development slice is undergoing contract and live acceptance; configuration defaults, allowlists and input gates are unchanged. / 未发布源码新增临时计划自动推进入口，复用同一判断服务；本轮已恢复合同及真实验收，配置默认值、白名单与原输入门禁未改变。
+
 2026-10-08，执行 **0.1.2-preview.2** / 学习 **0.1.0-preview.2**。执行与学习共用 `app/judgment`，调用 OpenAI `POST /v1/decisions`（`gpt-6-luna`）。它判断明确条件，不提供点击坐标或动态文本值；视觉定位仍使用当前 Agent、委派 Agent、外部视觉 API 或可选本地模型。 / Execution **0.1.2-preview.2** and learning **0.1.0-preview.2** share the OpenAI Decisions adapter. It checks explicit conditions; grounding and dynamic reading keep their existing providers. Local model weights remain optional.
 
 ## Configure / 配置

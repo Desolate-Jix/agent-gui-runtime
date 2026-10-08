@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts.learning_benchmark_client import LearningBenchmarkClient
+from scripts.smoke_instant_mcp import server_arguments
 
 
 class ToolResult:
@@ -115,12 +116,47 @@ class ControlSDK(FakeSDK):
         return session
 
 
-def client(tmp_path, sdk, *, allow_actions=False, ready_timeout=1):
+def client(tmp_path, sdk, *, allow_actions=False, ready_timeout=1, decision_profile=None):
     return LearningBenchmarkClient(root=Path(__file__).resolve().parents[1], data_root=tmp_path / "data",
         evidence_dir=tmp_path / "evidence", recognition_source="agent_current", allow_actions=allow_actions,
         transport_factory=sdk.transport, client_factory=sdk.client,
         params_factory=lambda **kwargs: kwargs, poll_interval=.001,
-        ready_timeout=ready_timeout, cleanup_timeout=1)
+        ready_timeout=ready_timeout, cleanup_timeout=1, decision_profile=decision_profile)
+
+
+def test_optional_decision_profile_reaches_actual_server_arguments_without_loading_key(tmp_path, monkeypatch):
+    sdk = FakeSDK()
+    profile = tmp_path / "not-read-decision-profile.json"
+    monkeypatch.setenv("BENCHMARK_INHERITED_SENTINEL", "original-environment")
+    async def scenario():
+        async with client(tmp_path, sdk, decision_profile=profile):
+            pass
+    asyncio.run(scenario())
+    arguments = sdk.params["args"]
+    assert arguments[arguments.index("--decision-profile") + 1] == str(profile.resolve())
+    assert not profile.exists()
+    assert sdk.params["env"]["BENCHMARK_INHERITED_SENTINEL"] == "original-environment"
+    assert [name for name, args in sdk.calls] == ["instant_start", "instant_status", "instant_stop", "instant_status"]
+
+
+def test_missing_decision_profile_keeps_original_startup_arguments(tmp_path):
+    sdk = FakeSDK()
+    async def scenario():
+        async with client(tmp_path, sdk):
+            pass
+    asyncio.run(scenario())
+    assert sdk.params["args"] == [str(Path(__file__).resolve().parents[1] / "scripts" / "start_instant_mcp.py"),
+        "--data-dir", str((tmp_path / "data").resolve()), "--recognition-source", "agent_current", "--allow-local-input"]
+
+
+def test_decision_profile_requires_absolute_path_before_transport(tmp_path):
+    sdk = FakeSDK()
+    with pytest.raises(ValueError, match="decision_profile"):
+        client(tmp_path, sdk, decision_profile=Path("relative-decision.json"))
+    assert sdk.calls == [] and sdk.session_enters == 0
+    with pytest.raises(ValueError, match="absolute"):
+        server_arguments(tmp_path, None, tmp_path / "data", recognition_source="agent_current",
+                         decision_profile=Path("relative-decision.json"))
 
 
 def test_one_connection_original_id_and_cleanup(tmp_path):

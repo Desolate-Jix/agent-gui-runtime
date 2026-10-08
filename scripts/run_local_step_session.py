@@ -343,6 +343,7 @@ def main():
     co = None
     agent_jobs = None
     workflow_runtime = None
+    task_plan_runtime = None
     api_grounder = None
     decision_service = None
     target = None
@@ -395,20 +396,23 @@ def main():
                 stream.flush()
                 stop.wait(3 if args.observer == "minimal" else 1)
 
-    def capture():
+    def selected_target_identity():
         if target is None:
             raise ValueError("select a target window before observing")
         bound = co._windows().bind_window_by_handle(target["handle"])
         if bound is None or bound.process_id != target["process_id"]:
             raise ValueError("target window identity changed")
         process_created = psutil.Process(bound.process_id).create_time()
+        return {"handle": bound.handle, "process_id": bound.process_id, "process_create_time": process_created}
+
+    def capture():
+        identity = selected_target_identity()
         image = ScreenshotService(window_manager=co._windows(), capture_dir=out / "captures").capture_window(
             focus_window=False, purpose="live-latency-observation")
-        if psutil.Process(bound.process_id).create_time() != process_created:
+        if psutil.Process(identity["process_id"]).create_time() != identity["process_create_time"]:
             raise ValueError("target process identity changed during capture")
-        return {**image, "window": {"handle": bound.handle, "process_id": bound.process_id},
-                "window_identity": {"handle": bound.handle, "process_id": bound.process_id,
-                                    "process_create_time": process_created},
+        return {**image, "window": {"handle": identity["handle"], "process_id": identity["process_id"]},
+                "window_identity": identity,
                 "sha256": hashlib.sha256(Path(image["image_path"]).read_bytes()).hexdigest()}
 
     try:
@@ -444,6 +448,11 @@ def main():
                 api_grounder=api_grounder)
         from app.learning_memory.workflow_runtime import WorkflowRuntime
         workflow_runtime = WorkflowRuntime(out, co, agent_jobs=agent_jobs)
+        from app.execution.task_plan_admission import TaskPlanRuntime
+        task_plan_runtime = TaskPlanRuntime(out, co, agent_jobs=agent_jobs,
+            owner_id=grounding_store.owner_id, reviewed_runtime=workflow_runtime,
+            requires_client_vision=session_configuration.source in {"agent_current", "agent_delegate"},
+            target_identity=lambda: co._owner.call(selected_target_identity))
         sampler_thread = threading.Thread(target=sample_loop, daemon=True, name="live-process-sampler")
         sampler_thread.start()
         done = set()
@@ -468,6 +477,18 @@ def main():
                         "message": str(error), "automatic_retry_allowed": False,
                         "next": "Inspect the original workflow and command before continuing; never replay input."}
                     write(out / "report.json", report)
+                try:
+                    task_plan_snapshot = task_plan_runtime.tick()
+                    if task_plan_snapshot is not None:
+                        report["task_plan_run"] = task_plan_snapshot
+                        report.pop("task_plan_runtime_error", None)
+                        write(out / "report.json", report)
+                except Exception as error:
+                    task_plan_runtime.stop()
+                    report["task_plan_runtime_error"] = {"error_type": type(error).__name__,
+                        "message": str(error), "automatic_retry_allowed": False,
+                        "next": "Inspect the original plan and receipts; do not replay uncertain input."}
+                    write(out / "report.json", report)
                 paths = sorted(p for p in (out / "commands").glob("*.json") if p.name not in done)
             if (out / "closing.json").is_file():
                 closing_id = json.loads((out / "closing.json").read_text(encoding="utf-8"))["request_id"]
@@ -491,6 +512,7 @@ def main():
                 response["command"] = command
                 kind = command["kind"]
                 workflow_runtime.admit(path.stem, command)
+                task_plan_runtime.admit(path.stem, command)
                 check_agent_command_admission(agent_jobs, kind, command)
                 workflow_bindings = None
                 if (command.get("request") or {}).get("target_memory") is not None:
@@ -512,7 +534,12 @@ def main():
                     response["learning_recording_error"] = learning_error
                 agent_result = dispatch_agent_command(agent_jobs, path.stem, command, target,
                     workflow_bindings=workflow_bindings, learning_context=learning_context)
-                if kind == "learning_workflow" and workflow_runtime.handles(command.get("request") or {}):
+                if kind == "task_plan":
+                    response["result"] = task_plan_runtime.control(command["request"], path.stem)
+                    report["task_plan_run"] = response["result"]
+                    if command["request"]["action"] in {"start", "continue"}:
+                        report.pop("task_plan_runtime_error", None)
+                elif kind == "learning_workflow" and workflow_runtime.handles(command.get("request") or {}):
                     response["learning_control"] = kind
                     response["result"] = record_workflow_control(report, workflow_runtime,
                         command["request"], path.stem)
@@ -674,6 +701,8 @@ def main():
         terminal_phase = report.get('phase')
         if workflow_runtime is not None:
             workflow_runtime.stop()
+        if task_plan_runtime is not None:
+            task_plan_runtime.stop()
         if agent_jobs is not None:
             # 先停止组合命令再销毁协调器，未退出的输入线程不算清理完成。
             while not agent_jobs.close(timeout=5):

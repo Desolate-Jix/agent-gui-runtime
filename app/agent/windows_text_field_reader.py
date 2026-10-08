@@ -71,6 +71,117 @@ def _safe_read_diagnostic(value):
                 and type(item.get("depth")) is int and item["depth"] == index
                 and type(item.get("is_root")) is bool for index, item in enumerate(visits))):
             result[name] = [{key: item[key] for key in ("control_type", "depth", "is_root")} for item in visits]
+    provenance = _safe_focus_hit_diagnostic(value.get("hit_provenance"))
+    if provenance:
+        result["hit_provenance"] = provenance
+    focused = _safe_focused_field_diagnostic(value.get("focused_field_identity"))
+    if focused:
+        result["focused_field_identity"] = focused
+    return result
+
+
+def _safe_focused_field_diagnostic(value):
+    """聚焦失败现场只保留有限身份和几何，不接受字段名称、值或异常原文。"""
+    if type(value) is not dict or value.get("contract_version") != "text_focused_field_diagnostic.v1":
+        return {}
+    result = {"contract_version": "text_focused_field_diagnostic.v1",
+        "source": "windows_uia.get_focused_element", "coordinate_space": "capture_image_pixels",
+        "rect_format": "xywh", "observation_scope": "failure_only_same_wrapper"}
+    branch = value.get("failure_branch")
+    if type(branch) is str and branch in {"runtime_id", "control_type", "geometry", "point_outside",
+            "bbox_unavailable", "window_or_process"}:
+        result["failure_branch"] = branch
+    point = value.get("point")
+    if (type(point) in (tuple, list) and len(point) == 2
+            and all(type(part) is int and -(2 ** 31) <= part < 2 ** 31 for part in point)):
+        result["point"] = list(point)
+    if type(value.get("allow_geometry_rebind")) is bool:
+        result["allow_geometry_rebind"] = value["allow_geometry_rebind"]
+    for name in ("expected", "actual"):
+        item = value.get(name)
+        if type(item) is not dict:
+            continue
+        safe = {}
+        runtime_id = item.get("runtime_id")
+        if (type(runtime_id) in (tuple, list) and 1 <= len(runtime_id) <= 64
+                and all(type(part) is int and -(2 ** 31) <= part < 2 ** 31 for part in runtime_id)):
+            safe["runtime_id"] = list(runtime_id)
+        if "control_type" in item:
+            kind = item["control_type"]
+            safe["control_type"] = kind if type(kind) is str and kind in _RESOLVE_CONTROL_TYPES else "other"
+        box = item.get("bbox")
+        if (type(box) in (tuple, list) and len(box) == 4
+                and all(type(part) is int and -(2 ** 31) <= part < 2 ** 31 for part in box)
+                and box[2] > 0 and box[3] > 0):
+            safe["bbox"] = list(box)
+        for key in ("window_handle", "process_id", "native_window_handle", "native_root_handle", "native_root_process_id"):
+            number = item.get(key)
+            if type(number) is int and (0 if key == "native_window_handle" else 1) <= number < 2 ** 63:
+                safe[key] = number
+        for key in ("keyboard_focus", "point_inside"):
+            if type(item.get(key)) is bool:
+                safe[key] = item[key]
+        result[name] = safe
+    return result
+
+
+def _safe_focus_hit_diagnostic(value):
+    """命中诊断只保留有限身份和几何，不接受名称、值或对象原文。"""
+    if type(value) is not dict or value.get("contract_version") != "text_focus_hit_diagnostic.v1":
+        return {}
+    result = {"contract_version": "text_focus_hit_diagnostic.v1",
+        "coordinate_space": "capture_image_pixels", "rect_format": "xywh",
+        "window_rect_coordinate_space": "screen_pixels",
+        "capture_identity_status": "unavailable_at_focus_probe"}
+    for name, size in (("window_rect", 4), ("capture_point", 2), ("screen_point", 2)):
+        coordinates = value.get(name)
+        if (type(coordinates) in (list, tuple) and len(coordinates) == size
+                and all(type(item) is int and -(2 ** 31) <= item < 2 ** 31 for item in coordinates)):
+            result[name] = list(coordinates)
+    window = result.get("window_rect")
+    if window is not None and window[2] > 0 and window[3] > 0:
+        result["window_origin"] = {"x": window[0], "y": window[1]}
+        result["viewport_size"] = {"width": window[2], "height": window[3]}
+    identity = value.get("window_identity")
+    if type(identity) is dict:
+        safe_identity = {name: identity[name] for name in ("window_handle", "process_id")
+            if type(identity.get(name)) is int and 0 < identity[name] < 2 ** 63}
+        created = identity.get("process_create_time")
+        if type(created) in (int, float) and 0 <= created < 10 ** 12 and math.isfinite(created):
+            safe_identity["process_create_time"] = created
+        if safe_identity:
+            result["window_identity"] = safe_identity
+    dpi = value.get("thread_dpi_awareness")
+    result["thread_dpi_awareness"] = dpi if type(dpi) is int and dpi in (0, 1, 2) else "unavailable"
+    for name, allowed in (("readonly_check", {"value_readonly", "text_readonly"}),
+            ("readonly_attribute_class", {"writable", "readonly", "mixed", "not_supported", "unknown"})):
+        if type(value.get(name)) is str and value[name] in allowed:
+            result[name] = value[name]
+
+    def element(item, depth):
+        if type(item) is not dict:
+            return None
+        safe = {"depth": depth, "control_type": item.get("control_type")
+            if type(item.get("control_type")) is str and item["control_type"] in _RESOLVE_CONTROL_TYPES else "other"}
+        runtime_id = item.get("runtime_id")
+        if (type(runtime_id) in (list, tuple) and 1 <= len(runtime_id) <= 64
+                and all(type(part) is int and -(2 ** 31) <= part < 2 ** 31 for part in runtime_id)):
+            safe["runtime_id"] = list(runtime_id)
+        for name in ("screen_bbox", "capture_bbox"):
+            box = item.get(name)
+            if (type(box) in (list, tuple) and len(box) == 4
+                    and all(type(part) is int and -(2 ** 31) <= part < 2 ** 31 for part in box)
+                    and box[2] > 0 and box[3] > 0):
+                safe[name] = list(box)
+        return safe
+
+    raw = element(value.get("raw_hit"), 0)
+    if raw is not None:
+        result["raw_hit"] = raw
+    ancestors = value.get("ancestors")
+    if type(ancestors) is list and len(ancestors) <= 7:
+        result["ancestors"] = [safe for depth, item in enumerate(ancestors, 1)
+            if (safe := element(item, depth)) is not None]
     return result
 
 
@@ -281,6 +392,9 @@ class WindowsTextFieldReader:
         read_target_bbox = (*click_point, 1, 1) if allow_post_input_geometry_rebind else target_bbox
         self._verify_binding(target_window_handle, target_process_id, process_create_time, window_rect)
         bound_focused = expected is not None and require_keyboard_focus
+        # 仅原身份的当前焦点读值容纳物理边一像素舍入；定位和执行证明仍使用原框。
+        focused_description = ({"focused_binding": expected}
+            if bound_focused and not allow_post_input_geometry_rebind else {})
         desktop = None
         if not bound_focused:
             try:
@@ -301,7 +415,7 @@ class WindowsTextFieldReader:
                 window_rect, target_bbox, expected, allow_readiness=True,
                 allow_geometry_rebind=allow_post_input_geometry_rebind)
         before = _read_stage_call("describe_target", 1, self._describe_target, wrapper, target_window_handle, target_process_id, window_rect,
-                                       read_target_bbox, click_point)
+                                       read_target_bbox, click_point, **focused_description)
         if require_keyboard_focus and not _has_keyboard_focus(wrapper):
             raise TextFieldReadError("text_field_keyboard_focus_unavailable", diagnostic={"phase": "keyboard_focus", "read_index": 1})
         try:
@@ -325,7 +439,7 @@ class WindowsTextFieldReader:
                 window_rect, target_bbox, expected, allow_readiness=False,
                 allow_geometry_rebind=allow_post_input_geometry_rebind)
         after = _read_stage_call("describe_target", 2, self._describe_target, after_wrapper, target_window_handle, target_process_id, window_rect,
-                                      read_target_bbox, click_point)
+                                      read_target_bbox, click_point, **focused_description)
         if require_keyboard_focus and not _has_keyboard_focus(after_wrapper):
             raise TextFieldReadError("text_field_keyboard_focus_unavailable", diagnostic={"phase": "keyboard_focus", "read_index": 2})
         after_value, after_source, after_selection = _read_stage_call("read_text", 2, self._read_text, after_wrapper, after["control_type"])
@@ -383,16 +497,32 @@ class WindowsTextFieldReader:
         field = _focused_field()
         info = getattr(field, "element_info", None)
         runtime_id = getattr(info, "runtime_id", None)
+        actual_type = _DIAGNOSTIC_UNSET
         if (type(runtime_id) not in (tuple, list) or tuple(runtime_id) != expected[0]
-                or str(getattr(info, "control_type", "")) != expected[1]):
-            raise TextFieldReadError("text_field_expected_identity_changed")
-        if (_top_window_handle(field) != handle
-                or _process_id(info, getattr(info, "element", None)) != process_id):
-            raise TextFieldReadError("text_field_window_or_process_changed")
+                or (actual_type := str(getattr(info, "control_type", ""))) != expected[1]):
+            branch = ("runtime_id" if type(runtime_id) not in (tuple, list) or tuple(runtime_id) != expected[0]
+                else "control_type")
+            raise TextFieldReadError("text_field_expected_identity_changed", diagnostic={
+                "focused_field_identity": _focused_field_failure_diagnostic(field, expected, target_bbox,
+                    click_point, window_rect, handle, process_id, allow_geometry_rebind, branch,
+                    info=info, runtime_id=runtime_id, control_type=actual_type)})
+        actual_pid = _DIAGNOSTIC_UNSET
+        if ((root := _top_window_handle(field)) != handle
+                or (actual_pid := _process_id(info, getattr(info, "element", None))) != process_id):
+            raise TextFieldReadError("text_field_window_or_process_changed", diagnostic={
+                "focused_field_identity": _focused_field_failure_diagnostic(field, expected, target_bbox,
+                    click_point, window_rect, handle, process_id, allow_geometry_rebind, "window_or_process",
+                    info=info, runtime_id=runtime_id, control_type=actual_type, root=root, process_id=actual_pid)})
         current_bbox = _relative_rect(getattr(info, "rectangle", None), window_rect)
         if (current_bbox is None or not _contains_point(current_bbox, click_point)
-                or not allow_geometry_rebind and current_bbox != target_bbox):
-            raise TextFieldReadError("text_field_expected_identity_changed")
+                or not allow_geometry_rebind and not _within_focus_edge_rounding(current_bbox, target_bbox)):
+            branch = ("bbox_unavailable" if current_bbox is None else "point_outside"
+                if not _contains_point(current_bbox, click_point) else "geometry")
+            raise TextFieldReadError("text_field_expected_identity_changed", diagnostic={
+                "focused_field_identity": _focused_field_failure_diagnostic(field, expected, target_bbox,
+                    click_point, window_rect, handle, process_id, allow_geometry_rebind, branch,
+                    info=info, runtime_id=runtime_id, control_type=actual_type, root=root, process_id=actual_pid,
+                    bbox=current_bbox)})
         self._verify_binding(handle, process_id, created, window_rect)
         return field
 
@@ -464,7 +594,7 @@ class WindowsTextFieldReader:
 
     def _describe_target(self, wrapper: Any, handle: int, process_id: int,
                          window_rect: tuple[int, int, int, int], target_bbox: tuple[int, int, int, int],
-                         click_point: tuple[int, int]) -> dict[str, Any]:
+                         click_point: tuple[int, int], *, focused_binding=None) -> dict[str, Any]:
         info = getattr(wrapper, "element_info", None)
         control_type = str(getattr(info, "control_type", ""))
         if control_type not in {"Edit", "Document", "ComboBox", "Group"}:
@@ -484,8 +614,13 @@ class WindowsTextFieldReader:
         runtime_id = getattr(info, "runtime_id", None)
         if type(runtime_id) not in (tuple, list) or not runtime_id or any(type(item) is not int for item in runtime_id):
             raise TextFieldReadError("text_field_runtime_id_unavailable")
+        if (focused_binding is not None
+                and (tuple(runtime_id) != focused_binding[0] or control_type != focused_binding[1])):
+            raise TextFieldReadError("text_field_expected_identity_changed")
         control_bbox = _relative_rect(getattr(info, "rectangle", None), window_rect)
-        if control_bbox is None or not _contains_rect(control_bbox, target_bbox) or not _contains_point(control_bbox, click_point):
+        geometry_matches = (control_bbox is not None and (_within_focus_edge_rounding(control_bbox, target_bbox)
+            if focused_binding is not None else _contains_rect(control_bbox, target_bbox)))
+        if not geometry_matches or not _contains_point(control_bbox, click_point):
             raise TextFieldReadError("text_field_geometry_changed")
         if _top_window_handle(wrapper) != handle or _process_id(info, element) != process_id:
             raise TextFieldReadError("text_field_window_or_process_changed")
@@ -724,6 +859,58 @@ def _focused_field() -> Any:
     return UIAWrapper(UIAElementInfo(element))
 
 
+_DIAGNOSTIC_UNSET = object()
+
+
+def _focused_field_failure_diagnostic(field, expected, target_bbox, point, window, handle, pid,
+        allow_geometry_rebind, branch, *, info, runtime_id, control_type=_DIAGNOSTIC_UNSET,
+        root=_DIAGNOSTIC_UNSET, process_id=_DIAGNOSTIC_UNSET, bbox=_DIAGNOSTIC_UNSET):
+    """原拒绝后读取同一焦点代理的有限元数据；不重新取焦点或读取内容。"""
+    actual = {"runtime_id": runtime_id}
+    def observe(name, function):
+        try:
+            actual[name] = function()
+        except Exception:
+            # 诊断缺项不能覆盖原拒绝；不保留提供者异常原文。
+            pass
+    observe("control_type", lambda: getattr(info, "control_type", None)
+        if control_type is _DIAGNOSTIC_UNSET else control_type)
+    observe("bbox", lambda: _relative_rect(getattr(info, "rectangle", None), window)
+        if bbox is _DIAGNOSTIC_UNSET else bbox)
+    observe("process_id", lambda: _process_id(info, getattr(info, "element", None))
+        if process_id is _DIAGNOSTIC_UNSET else process_id)
+    observe("native_window_handle", lambda: getattr(info.element, "CurrentNativeWindowHandle", None))
+    observe("native_root_handle", lambda: _top_window_handle(field) if root is _DIAGNOSTIC_UNSET else root)
+    observe("native_root_process_id", lambda: _native_window_process_id(actual.get("native_root_handle")))
+    observe("keyboard_focus", lambda: getattr(info.element, "CurrentHasKeyboardFocus", None))
+    focus = actual.get("keyboard_focus")
+    if type(focus) in (bool, int) and focus in (0, 1):
+        actual["keyboard_focus"] = bool(focus)
+    else:
+        actual.pop("keyboard_focus", None)
+    if actual.get("bbox") is not None:
+        observe("point_inside", lambda: _contains_point(actual["bbox"], point))
+    return _safe_focused_field_diagnostic({"contract_version": "text_focused_field_diagnostic.v1",
+        "failure_branch": branch, "point": point, "allow_geometry_rebind": allow_geometry_rebind,
+        "expected": {"runtime_id": expected[0], "control_type": expected[1], "bbox": target_bbox,
+            "window_handle": handle, "process_id": pid}, "actual": actual})
+
+
+def _native_window_process_id(handle):
+    """失败诊断取原生根 PID；无效句柄或系统查询失败只记缺项。"""
+    if type(handle) is not int or handle <= 0:
+        return None
+    try:
+        query = ctypes.windll.user32.GetWindowThreadProcessId
+        query.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        query.restype = ctypes.c_ulong
+        pid = ctypes.c_ulong()
+        thread = query(handle, ctypes.byref(pid))
+        return int(pid.value) if thread and pid.value > 0 else None
+    except Exception:
+        return None
+
+
 def _verify_named_focus_hit(hit, handle, pid, window, label):
     """点击前完整扫描并核对标签与命中 RID；操作员模式也不能绕过。"""
     import unicodedata
@@ -755,8 +942,76 @@ def _verify_named_focus_hit(hit, handle, pid, window, label):
         raise TextFieldReadError("text_field_label_unavailable") from None
 
 
+def _focus_probe_failure_diagnostic(raw, visited_infos, window, point, handle, pid, fact, diagnostic):
+    """仅失败时补原命中和已访问节点，不再遍历祖先或读取字段内容。"""
+    def describe(info):
+        result = {}
+        try:
+            kind = info.control_type
+            result["control_type"] = kind if kind in _RESOLVE_CONTROL_TYPES else "other"
+        except Exception:
+            result["control_type"] = "other"
+        try:
+            result["runtime_id"] = info.runtime_id
+        except Exception:
+            pass
+        try:
+            rect = info.rectangle
+            box = (int(rect.left), int(rect.top), int(rect.right) - int(rect.left), int(rect.bottom) - int(rect.top))
+            result["screen_bbox"] = box
+            result["capture_bbox"] = (box[0] - window[0], box[1] - window[1], box[2], box[3])
+        except Exception:
+            pass
+        return result
+
+    try:
+        raw_info = visited_infos[0] if visited_infos else raw.element_info
+        raw_hit = describe(raw_info)
+    except Exception:
+        raw_hit = {"control_type": "other"}
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        user32.GetAwarenessFromDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        dpi = user32.GetAwarenessFromDpiAwarenessContext(user32.GetThreadDpiAwarenessContext())
+    except Exception:
+        dpi = "unavailable"
+    return _safe_focus_hit_diagnostic({"contract_version": "text_focus_hit_diagnostic.v1",
+        "window_rect": window, "capture_point": point,
+        "screen_point": (window[0] + point[0], window[1] + point[1]),
+        "window_identity": {"window_handle": handle, "process_id": pid,
+            "process_create_time": fact["process_create_time"]},
+        "thread_dpi_awareness": dpi, "raw_hit": raw_hit,
+        "ancestors": [describe(info) for info in visited_infos[1:8]],
+        "readonly_check": diagnostic.get("check"),
+        "readonly_attribute_class": diagnostic.get("attribute_class")})
+
+
+def _coarse_focus_failure(error, window, point):
+    """仅整块混合容器允许重采；几何从原拒绝诊断取，不增加提供者查询。"""
+    diagnostic = error.diagnostic
+    if (error.reason_code != "text_field_target_not_writable"
+            or diagnostic.get("check") not in {"text_readonly", "value_readonly"}
+            or diagnostic.get("attribute_class") not in {"mixed", "not_supported"}
+            or diagnostic.get("control_type") not in {"Document", "Group"}):
+        return False
+    provenance = diagnostic.get("hit_provenance", {})
+    raw = provenance.get("raw_hit", {})
+    if raw.get("control_type") not in {"Pane", "Group", "Document"}:
+        return False
+    def coarse(box):
+        return (isinstance(box, list) and len(box) == 4 and all(type(n) is int for n in box)
+            and 0 <= box[0] < box[0] + box[2] <= window[2]
+            and 0 <= box[1] < box[1] + box[3] <= window[3]
+            and box[2] * 2 >= window[2] and box[3] * 2 >= window[3]
+            and _contains_point(tuple(box), point))
+    target = next((node for node in [raw, *provenance.get("ancestors", [])]
+                   if node.get("control_type") == diagnostic["control_type"]), {})
+    return coarse(raw.get("capture_bbox")) and coarse(target.get("capture_bbox"))
+
+
 def probe_local_focus_target(manager, handle, pid, point, *, expected_label=None):
-    """原动作点击前只读命中；不能用事后焦点倒推点击目标。"""
+    """原动作点击前固定点只读收敛；混合容器从不授予输入或替代字段。"""
     if (type(point) is not tuple or len(point) != 2 or any(type(v) is not int for v in point)):
         raise TextFieldReadError("text_field_expected_identity_invalid")
     bound = manager.get_bound_window()
@@ -769,49 +1024,111 @@ def probe_local_focus_target(manager, handle, pid, point, *, expected_label=None
     if window is None or fact is None or not (0 <= point[0] < window[2] and 0 <= point[1] < window[3]):
         raise TextFieldReadError("text_field_window_binding_changed")
     reader = WindowsTextFieldReader(window_manager=manager, native_identity_reader=native)
-    raw = reader._from_point(reader._desktop_factory(backend="uia"), window[0] + point[0], window[1] + point[1])
-    if _top_window_handle(raw) != handle or _process_id(raw.element_info, raw.element_info.element) != pid:
-        raise TextFieldReadError("text_field_window_or_process_changed")
-    current = raw
+    desktop = reader._desktop_factory(backend="uia")
+    started = reader._readiness_clock()
+    hits = 0
+    first_failure = None
+    last_failure = None
+    for attempt in range(11):
+        if attempt and reader._readiness_clock() - started >= .25:
+            last_failure.diagnostic = _safe_read_diagnostic({**last_failure.diagnostic,
+                "attempt": hits, "elapsed_ms": round((reader._readiness_clock() - started) * 1000, 3),
+                "deadline_stage": "before_sample"})
+            raise last_failure
+        try:
+            reader._verify_binding(handle, pid, fact["process_create_time"], window)
+            hits += 1
+            result = _probe_local_focus_hit(reader, desktop, handle, pid, point, window, fact, expected_label)
+        except TextFieldReadError as error:
+            elapsed = reader._readiness_clock() - started
+            error.diagnostic = _safe_read_diagnostic({**error.diagnostic, "attempt": max(1, hits),
+                "elapsed_ms": round(elapsed * 1000, 3)})
+            if not _coarse_focus_failure(error, window, point):
+                raise
+            first_failure = first_failure or error
+            last_failure = error
+            try:
+                reader._verify_binding(handle, pid, fact["process_create_time"], window)
+            except TextFieldReadError as binding_error:
+                binding_error.diagnostic = _safe_read_diagnostic({**binding_error.diagnostic,
+                    "attempt": hits, "elapsed_ms": round((reader._readiness_clock() - started) * 1000, 3)})
+                raise
+            remaining = .25 - (reader._readiness_clock() - started)
+            if attempt == 10 or remaining <= 0:
+                raise
+            reader._readiness_wait(min(.025, remaining))
+        else:
+            if first_failure is not None:
+                if result["control_type"] not in {"Edit", "ComboBox"}:
+                    # 重采只能得到新精确字段，不能把后来可写的整块容器当作替代输入目标。
+                    last_failure.diagnostic = _safe_read_diagnostic({**last_failure.diagnostic,
+                        "attempt": hits, "elapsed_ms": round((reader._readiness_clock() - started) * 1000, 3),
+                        "deadline_stage": "after_match"})
+                    raise last_failure
+                logging.getLogger(__name__).info(
+                    "text_focus_hit_ready attempts=%d elapsed_ms=%.3f initial_reason=%s initial_attribute_class=%s",
+                    hits, (reader._readiness_clock() - started) * 1000, first_failure.reason_code,
+                    first_failure.diagnostic.get("attribute_class"))
+            return result
+
+
+def _probe_local_focus_hit(reader, desktop, handle, pid, point, window, fact, expected_label):
+    """单次完整原守卫；精确字段失败不得转向祖先或作为重采资格。"""
+    raw = reader._from_point(desktop, window[0] + point[0], window[1] + point[1])
     visits = []
-    for depth in range(8):
-        info = current.element_info
-        kind = info.control_type
-        visits.append({'depth': depth, 'control_type': kind if kind in _RESOLVE_CONTROL_TYPES else 'other',
-            'is_root': kind == 'Window' and getattr(info, 'handle', None) == handle})
-        if kind in {"Edit", "ComboBox", "Document", "Group"}:
-            box = _relative_rect(info.rectangle, window)
-            if box is not None and _contains_point(box, point):
-                if kind in {"Group", "Document"}:
-                    try:
-                        current.iface_text
-                    except _no_pattern_exception():
-                        pass
+    visited_infos = []
+    try:
+        if _top_window_handle(raw) != handle or _process_id(raw.element_info, raw.element_info.element) != pid:
+            raise TextFieldReadError("text_field_window_or_process_changed")
+        current = raw
+        for depth in range(8):
+            info = current.element_info
+            kind = info.control_type
+            visited_infos.append(info)
+            visits.append({'depth': depth, 'control_type': kind if kind in _RESOLVE_CONTROL_TYPES else 'other',
+                'is_root': kind == 'Window' and getattr(info, 'handle', None) == handle})
+            if kind in {"Edit", "ComboBox", "Document", "Group"}:
+                box = _relative_rect(info.rectangle, window)
+                if box is not None and _contains_point(box, point):
+                    if kind in {"Group", "Document"}:
+                        try:
+                            current.iface_text
+                        except _no_pattern_exception():
+                            pass
+                        else:
+                            # 混合或不支持的整段属性不允许全量替换，也不回退到更宽泛祖先。
+                            reader._describe_target(current, handle, pid, window, box, point)
+                            _require_writable_hit_patterns(current, kind)
+                            break
                     else:
-                        # 混合或不支持的整段属性不允许全量替换，也不回退到更宽泛祖先。
                         reader._describe_target(current, handle, pid, window, box, point)
                         _require_writable_hit_patterns(current, kind)
                         break
-                else:
-                    reader._describe_target(current, handle, pid, window, box, point)
-                    _require_writable_hit_patterns(current, kind)
-                    break
-        parent = current.parent()
-        if parent is None or parent is current or _top_window_handle(parent) != handle:
+            parent = current.parent()
+            if parent is None or parent is current or _top_window_handle(parent) != handle:
+                raise TextFieldReadError("text_field_target_not_writable", diagnostic={'focus_visits': visits})
+            current = parent
+        else:
             raise TextFieldReadError("text_field_target_not_writable", diagnostic={'focus_visits': visits})
-        current = parent
-    else:
-        raise TextFieldReadError("text_field_target_not_writable", diagnostic={'focus_visits': visits})
-    description = reader._describe_target(current, handle, pid, window, box, point)
-    _require_writable_hit_patterns(current, kind)
-    if expected_label is not None:
-        _verify_named_focus_hit(current, handle, pid, window, expected_label)
-        if description != reader._describe_target(current, handle, pid, window, box, point):
-            raise TextFieldReadError("text_field_expected_identity_changed")
-    reader._verify_binding(handle, pid, fact["process_create_time"], window)
-    return {"runtime_id": list(description["runtime_id"]), "control_type": kind,
-        "bbox": list(description["control_bbox"]), "window_handle": handle, "process_id": pid,
-        "process_create_time": fact["process_create_time"], "window_rect": list(window)}
+        description = reader._describe_target(current, handle, pid, window, box, point)
+        _require_writable_hit_patterns(current, kind)
+        if expected_label is not None:
+            _verify_named_focus_hit(current, handle, pid, window, expected_label)
+            if description != reader._describe_target(current, handle, pid, window, box, point):
+                raise TextFieldReadError("text_field_expected_identity_changed")
+        reader._verify_binding(handle, pid, fact["process_create_time"], window)
+        return {"runtime_id": list(description["runtime_id"]), "control_type": kind,
+            "bbox": list(description["control_bbox"]), "window_handle": handle, "process_id": pid,
+            "process_create_time": fact["process_create_time"], "window_rect": list(window)}
+    except TextFieldReadError as error:
+        try:
+            provenance = _focus_probe_failure_diagnostic(raw, visited_infos, window, point, handle, pid, fact, error.diagnostic)
+            error.diagnostic = _safe_read_diagnostic({**error.diagnostic,
+                "focus_visits": visits, "hit_provenance": provenance})
+        except Exception:
+            # 诊断自身失败不能替换原拒绝，也不能改变任何门禁结果。
+            pass
+        raise
 
 
 def probe_tab_focus_target(manager, handle, pid, label, previous):
@@ -908,6 +1225,17 @@ def _rect_valid(rect: object) -> bool:
     return type(rect) is tuple and len(rect) == 4 and all(type(item) is int for item in rect) and rect[2] > 0 and rect[3] > 0
 
 
+def _within_focus_edge_rounding(current, original):
+    """仅已绑定焦点读值使用；四条物理边各至多一像素，不调整点击坐标。"""
+    if not _rect_valid(current) or not _rect_valid(original):
+        return False
+    left, top, width, height = current
+    old_left, old_top, old_width, old_height = original
+    return all(abs(new - old) <= 1 for new, old in zip(
+        (left, top, left+width, top+height),
+        (old_left, old_top, old_left+old_width, old_top+old_height)))
+
+
 def _bound_matches(bound: Any, handle: int, process_id: int, expected: tuple[int, int, int, int]) -> bool:
     if bound is None or int(getattr(bound, "handle", 0)) != handle or getattr(bound, "process_id", None) != process_id:
         return False
@@ -984,7 +1312,7 @@ def _top_window_handle(wrapper: Any) -> int | None:
         current = wrapper
         seen = set()
         # 虚拟控件只认最近可验证原生根，不能越过模态窗口找 owner。
-        for _ in range(16):
+        for _ in range(32):
             if current is None:
                 return None
             info = current.element_info

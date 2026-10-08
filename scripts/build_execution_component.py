@@ -22,6 +22,9 @@ ENTRIES = (
     "scripts/start_instant_mcp_admin.py", "scripts/instant_admin_worker.py",
     "scripts/configure_instant_mcp.py", "scripts/check_instant_entrypoints.py",
     "scripts/check_execution_component.py",
+    "scripts/learning_benchmark_client.py",
+    # PowerShell 启动的维护 worker 不可从 Python 导入图发现，须显式闭合。
+    "app/vision/model_workers/vista_openai_server.py",
     # 真实预检动态拼接的兼容入口须明确纳入，不能靠原工作树补包。
     "app/desktop_review/local_direct_step.py", "app/desktop_review/post_action_recovery.py",
     "app/desktop_review/input_sequence.py", "app/desktop_review/form_fill.py",
@@ -33,6 +36,9 @@ RESOURCES = (
     "requirements/pylock.desktop-runtime-win311.toml", "pyproject.toml", "uv.lock",
     "LICENSE", "README.md", "FRIEND_SETUP.md", "AGENT_GUIDE.md", "RELEASE_SCOPE.md",
     "configs/decision-profile.example.json", "docs/development/DECISION_API.md",
+    "configs/vision-api-openai-luna.example.json", "docs/development/TASK_PLAN.md",
+    "docs/development/EXTERNAL_VISION_BENCHMARK.md",
+    "docs/verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md",
     "docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md",
     "configs/model_profiles/vista_4b_transformers.json", "skills/codex-vision-session/SKILL.md",
 )

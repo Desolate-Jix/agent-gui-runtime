@@ -7,13 +7,13 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 import os
-import re
 from pathlib import Path
 from time import perf_counter_ns
 from uuid import uuid4
 
 from app.desktop_review.workspace import _atomic_write_bytes
 from app.core.instant_command_queue import CommandQueueBusy
+from app.execution.run_backend import ReviewedProgramBackend, RunBackend
 
 from .workspace import MemoryWorkspace
 from .workflow_program import _id
@@ -89,18 +89,45 @@ def _exclusive(path):
 
 
 class WorkflowRunner:
-    def __init__(self, session_dir, *, library_root, submit_command, read_result, verify_step, settle_failed=None):
+    def __init__(self, session_dir, *, library_root=None, submit_command, read_result, verify_step,
+                 settle_failed=None, backend: RunBackend | None = None):
         if not all(callable(item) for item in (submit_command, read_result, verify_step)):
             raise ValueError("workflow_runner_callbacks_required")
         self.session = Path(session_dir).resolve()
-        self.library_root = Path(library_root).resolve()
+        self.library_root = Path(library_root).resolve() if library_root is not None else None
+        if backend is None:
+            if self.library_root is None:
+                raise ValueError("workflow_runner_library_required")
+            backend = ReviewedProgramBackend(self.session, self.library_root,
+                                             workspace_factory=lambda root: MemoryWorkspace(root))
+        if (getattr(backend, "source_kind", None) not in {"caller_plan", "reviewed_program"}
+                or not all(callable(getattr(backend, name, None)) for name in (
+                    "status", "prepare", "cancel", "pinned_step", "metrics", "validate_resume"))):
+            raise ValueError("workflow_runner_backend_invalid")
+        self.backend = backend
+        self.source_kind = backend.source_kind
         self.submit_command = submit_command
         self.read_result = read_result
         self.verify_step = verify_step
         self.settle_failed = settle_failed
-        self.root = self.session / "workflow-runners"
+        self.root = self.session / ("task-plan-runners" if self.source_kind == "caller_plan" else "workflow-runners")
         self.active_path = self.root / "active.json"
         self.lock_path = self.root / "active.lock"
+
+    def _source_fields(self):
+        # 旧学习账本保持原形状；临时计划必须明确记录来源。
+        return {"source_kind": "caller_plan"} if self.source_kind == "caller_plan" else {}
+
+    def _source_guard(self, *, state=None, trial=None):
+        if self.backend.source_kind != self.source_kind:
+            raise ValueError("workflow_runner_source_mismatch")
+        for value in (state, trial):
+            if value is not None and (not isinstance(value, dict)
+                    or value.get("source_kind", "reviewed_program") != self.source_kind):
+                raise ValueError("workflow_runner_source_mismatch")
+
+    def _control_kind(self):
+        return "task_plan" if self.source_kind == "caller_plan" else "learning_workflow"
 
     def _path(self, run_id):
         return self.root / (_run_id(run_id) + ".json")
@@ -112,6 +139,7 @@ class WorkflowRunner:
         value = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(value, dict) or value.get("schema") != _SCHEMA or value.get("run_id") != run_id:
             raise ValueError("workflow_runner_state_invalid")
+        self._source_guard(state=value)
         return value
 
     def _active_run(self):
@@ -120,41 +148,44 @@ class WorkflowRunner:
         value = json.loads(self.active_path.read_text(encoding="utf-8"))
         if not isinstance(value, dict) or value.get("schema") != _SCHEMA:
             raise ValueError("workflow_runner_active_invalid")
+        self._source_guard(state=value)
         return _run_id(value.get("run_id"))
 
     def _set_active(self, run_id):
-        _atomic_write_bytes(self.active_path, json.dumps({"schema": _SCHEMA, "run_id": run_id},
+        _atomic_write_bytes(self.active_path, json.dumps({"schema": _SCHEMA, "run_id": run_id, **self._source_fields()},
                                              sort_keys=True).encode("utf-8") + b"\n")
 
     def _save(self, state):
+        self._source_guard(state=state)
         _atomic_write_bytes(self._path(state["run_id"]), json.dumps(state, ensure_ascii=False, sort_keys=True,
                                                   separators=(",", ":")).encode("utf-8") + b"\n")
 
     def _trial(self, action, run_id, *args, **kwargs):
-        with MemoryWorkspace(self.library_root) as library:
-            method = getattr(library, action + "_workflow_trial")
-            return method(self.session, run_id, *args, **kwargs)
+        self._source_guard()
+        if action not in {"status", "prepare", "cancel"}:
+            raise ValueError("workflow_runner_backend_action_invalid")
+        result = getattr(self.backend, action)(run_id, *args, **kwargs)
+        if action in {"status", "cancel"}:
+            self._source_guard(trial=result)
+        return result
 
     def _step_vision_capabilities(self, state, trial):
         capabilities = state.get("vision_capabilities")
         if capabilities is None:
             return None
-        with MemoryWorkspace(self.library_root) as library:
-            program = library.load_workflow_program(trial["workflow_id"], trial["program_id"])
-        steps = program["definition"]["steps"]
-        matches = [step for step in steps if step["step_id"] == trial["current_step_id"]]
-        if len(matches) != 1:
+        step = self.backend.pinned_step(state["run_id"], trial["current_step_id"])
+        if not isinstance(step, dict) or step.get("step_id") != trial["current_step_id"]:
             raise ValueError("workflow_runner_step_not_in_pinned_program")
-        return deepcopy(capabilities) if matches[0]["action"]["kind"] in {"click", "input_sequence"} else None
+        return deepcopy(capabilities) if step["action"]["kind"] in {"click", "input_sequence"} else None
 
     def _snapshot(self, state, *, trial=None):
-        from .workflow_metrics import load_run_metrics
         if trial is None:
             trial = self._trial("status", state["run_id"])
+        self._source_guard(state=state, trial=trial)
         snapshot = {**trial, "runner_state": state["runner_state"], "mode": state["mode"],
                 "wait_reason": state.get("wait", {}).get("reason") if state.get("wait") else None,
                 "wait": deepcopy(state.get("wait")), "active_command_id": state["ticket"]["execution_request_id"] if state.get("ticket") else None,
-                "metrics": load_run_metrics(self.session, state["run_id"], trial=trial)}
+                "metrics": self.backend.metrics(state["run_id"], trial)}
         if trial.get("recovery_settlement"):
             snapshot.update(runner_state="waiting", wait_reason="recovery_paused")
         return snapshot
@@ -221,7 +252,7 @@ class WorkflowRunner:
         return True
 
     def _reconcile(self, state):
-        if state.get("recovery_import") is not None:
+        if self.source_kind == "caller_plan" or state.get("recovery_import") is not None:
             self._recovery_guard(self._trial("status", state["run_id"]), state)
         ticket = state["ticket"]
         command_id = ticket["execution_request_id"]
@@ -362,7 +393,7 @@ class WorkflowRunner:
         self._wait(state, "failed")
 
     def _submit_ticket(self, state):
-        if state.get("recovery_import") is not None:
+        if self.source_kind == "caller_plan" or state.get("recovery_import") is not None:
             self._recovery_guard(self._trial("status", state["run_id"]), state)
         ticket = state["ticket"]
         # 先落盘不确定派发状态；只有明确未写队列的忙碌错误允许重试原 ID。
@@ -409,14 +440,14 @@ class WorkflowRunner:
                 if active_state is None or active_state["runner_state"] not in _TERMINAL:
                     raise ValueError("workflow_runner_session_active")
             self._trial("status", run_id)
-            state = {"schema": _SCHEMA, "run_id": run_id, "start_request_id": request_id,
+            state = {"schema": _SCHEMA, "run_id": run_id, "start_request_id": request_id, **self._source_fields(),
                      "mode": mode, "vision_capabilities": vision_capabilities,
                      "runner_state": "ready", "current_step_id": None,
                      "ticket": None, "wait": None, "seen_steps": [], "steps_completed": 0,
                      "verification_wait": None, "verification_waits": [],
                      "cancel_request_id": None, "resume_requests": {},
                      "control_requests": {request_id: {"schema": "workflow_runner_control.v1",
-                         "command_sha256": _digest({"kind": "learning_workflow", "request": control_request})}}}
+                          "command_sha256": _digest({"kind": self._control_kind(), "request": control_request})}}}
             self._save(state)
             self._set_active(run_id)
             self._drive(state)
@@ -444,6 +475,8 @@ class WorkflowRunner:
             state = self._load(run_id)
             if state is None or state["run_id"] != run_id:
                 raise ValueError("workflow_runner_run_unknown")
+            if self.source_kind == "caller_plan":
+                self._recovery_guard(self._trial("status", run_id), state)
             if self._trial("status", run_id).get("recovery_settlement"):
                 raise ValueError("workflow_runner_recovery_paused")
             if state.get("cancel_request_id") not in (None, request_id):
@@ -488,7 +521,7 @@ class WorkflowRunner:
             if request_id in controls:
                 raise ValueError("workflow_runner_control_conflict")
             controls[request_id] = {"schema": "workflow_runner_control.v1", "command_sha256": _digest({
-                "kind": "learning_workflow", "request": {"action": "continue", "run_id": run_id, "wait_id": wait_id}})}
+                "kind": self._control_kind(), "request": {"action": "continue", "run_id": run_id, "wait_id": wait_id}})}
             state["resume_requests"][request_id] = wait_id
             state["wait"] = None
             state["runner_state"] = "ready" if state.get("ticket") is None else "dispatching"
@@ -497,68 +530,26 @@ class WorkflowRunner:
             return self._snapshot(state)
 
     def _recovery_claim(self, trial, phases):
-        marker = trial.get("recovery_import")
-        from .workflow_recovery_resolution import marker_resolution
-        try:
-            resolution = marker_resolution(marker)
-        except ValueError as error:
-            raise ValueError("workflow_runner_recovery_import_invalid") from error
-        def require(condition):
-            if not condition:
-                raise ValueError("workflow_runner_recovery_import_invalid")
-        for key in ("claim_id", "source_program_sha256", "source_settlement_sha256", "effect_evidence_sha256", "verified_history_sha256"):
-            require(isinstance(marker[key], str) and re.fullmatch(r"[0-9a-f]{64}", marker[key]) is not None)
-        require(all(_text(marker[key]) for key in ("request_id", "source_step_id", "source_execution_request_id", "effect_evidence_ref")))
-        require(isinstance(marker["source_session_name"], str) and re.fullmatch(r"session-[0-9a-f]{32}", marker["source_session_name"]) is not None)
-        _run_id(marker["source_run_id"])
-        steps = marker["consumed_step_ids"]
-        minimum = 0 if resolution == "resume_unexecuted" else 1
-        require(isinstance(steps, list) and minimum <= len(steps) <= 256
-                and all(_text(step) for step in steps) and len(set(steps)) == len(steps))
-        require(resolution != "resume_unexecuted" or marker["source_step_id"] not in steps)
-        ref = Path(marker["effect_evidence_ref"])
-        require(not ref.is_absolute() and (self.session / ref).resolve().is_relative_to(self.session))
-        path = self.session.parent / "workflow-takeovers" / (marker["claim_id"] + ".json")
-        require(path.resolve().parent == self.session.parent / "workflow-takeovers")
-        try:
-            claim = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as error:
-            raise ValueError("workflow_runner_recovery_claim_invalid") from error
-        require(isinstance(claim, dict) and claim.get("contract_version") == "workflow_takeover_claim.v1"
-                and claim.get("phase") in phases and claim.get("claim_id") == marker["claim_id"]
-                and claim.get("request_id") == marker["request_id"] and claim.get("new_session_name") == self.session.name
-                and claim.get("new_run_id") == trial["run_id"])
-        require(claim.get("recovery_import") == marker)
-        history = trial.get("history")
-        require(isinstance(history, list) and len(history) >= len(steps))
-        prefix = history[:len(steps)]
-        require(all(isinstance(row, dict) for row in prefix) and [row.get("step_id") for row in prefix] == steps)
-        require(isinstance(claim.get("imported_history_sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", claim["imported_history_sha256"]) is not None
-                and _digest(prefix) == claim["imported_history_sha256"])
-        if claim["phase"] == "importing":
-            require(claim.get("trial_state_sha256") == _digest(trial))
-        return marker
+        self._source_guard(trial=trial)
+        if self.source_kind != "reviewed_program" or not isinstance(self.backend, ReviewedProgramBackend):
+            raise ValueError("workflow_runner_recovery_source_unsupported")
+        return self.backend.recovery_claim(trial, phases)
 
     def _recovery_guard(self, trial, state, *, revalidate_initial=False):
-        if trial.get("recovery_import") is None:
-            if state is not None and state.get("recovery_import") is not None:
-                raise ValueError("workflow_runner_recovery_import_invalid")
-            return
-        marker = self._recovery_claim(trial, {"ready"})
-        if state is None or state.get("recovery_import") != {"claim_id": marker["claim_id"], "request_id": marker["request_id"]}:
-            raise ValueError("workflow_runner_recovery_import_required")
-        if (revalidate_initial and marker.get("resolution") == "resume_unexecuted"
-                and state.get("ticket") is None and state.get("runner_state") not in _TERMINAL):
-            from .workflow_recovery_import import validate_recovery_progress
-            with MemoryWorkspace(self.library_root) as library:
-                verified = validate_recovery_progress(library, self.session, trial)
-            consumed = verified["consumed_step_ids"]
-            if (state.get("seen_steps") != consumed or state.get("steps_completed") != len(consumed)
-                    or consumed == marker["consumed_step_ids"]
-                    and state.get("current_step_id") != marker["source_step_id"]):
-                raise ValueError("workflow_runner_recovery_initial_state_invalid")
+        self._source_guard(state=state, trial=trial)
+        if self.source_kind == "caller_plan" and any(value is not None and (
+                value.get("recovery_import") is not None or value.get("recovery_settlement") is not None)
+                for value in (trial, state)):
+            raise ValueError("workflow_runner_recovery_source_unsupported")
+        if self.source_kind == "reviewed_program" and isinstance(self.backend, ReviewedProgramBackend):
+            self.backend.validate_trial_resume(trial, state, revalidate_initial=revalidate_initial)
+        else:
+            self.backend.validate_resume(trial["run_id"], state, revalidate_initial=revalidate_initial)
 
     def import_recovery(self, run_id, request_id, *, mode, claim_id, seen_steps, vision_capabilities=None, trial_service=None):
+        self._source_guard()
+        if self.source_kind != "reviewed_program" or not isinstance(self.backend, ReviewedProgramBackend):
+            raise ValueError("workflow_runner_recovery_source_unsupported")
         _run_id(run_id)
         if not _text(request_id) or mode not in {"single", "until_wait"}:
             raise ValueError("workflow_runner_recovery_import_invalid")

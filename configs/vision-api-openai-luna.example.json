@@ -1,0 +1,11 @@
+{
+  "protocol": "chat_completions_json",
+  "endpoint": "https://api.openai.com/v1/chat/completions",
+  "model": "gpt-6-luna",
+  "api_key_env": "OPENAI_API_KEY",
+  "timeout_seconds": 45.0,
+  "max_completion_tokens": 2048,
+  "max_response_bytes": 262144,
+  "max_image_bytes": 20971520,
+  "max_concurrency": 1
+}

@@ -3,8 +3,10 @@ from base64 import b64encode
 from hashlib import sha256
 from io import BytesIO
 import json
+import math
 import os
 from pathlib import Path
+import re
 from threading import BoundedSemaphore
 import time
 from typing import Literal
@@ -19,10 +21,12 @@ from .recognition_source import _unique_object, _invalid_constant
 
 
 class ApiGroundingError(ValueError):
-    def __init__(self, code, *, status_code=None, attempt=None):
+    def __init__(self, code, *, status_code=None, attempt=None, provider=None):
         self.code = code
         self.status_code = status_code
         self.attempt = attempt
+        self.provider = provider
+        self.trace = None
         # 服务端正文、异常链、请求头可能包含凭证，不能放进公共错误。
         super().__init__(code)
 
@@ -44,6 +48,41 @@ def _measurement_usage(usage):
 def _attempt(started_ns, status, usage=None):
     return {"started_ns": started_ns, "ended_ns": time.perf_counter_ns(),
             "status": status, "usage": usage}
+
+
+def _provider_usage(usage):
+    if not isinstance(usage, dict):
+        return None
+    value = {k: v for k, v in usage.items() if k in {"prompt_tokens", "completion_tokens", "total_tokens"}
+             and type(v) is int and v >= 0}
+    for name, allowed in (("prompt_tokens_details", {"cached_tokens", "audio_tokens"}),
+                          ("completion_tokens_details", {"reasoning_tokens", "audio_tokens",
+                           "accepted_prediction_tokens", "rejected_prediction_tokens"})):
+        details = usage.get(name)
+        if isinstance(details, dict):
+            counts = {k: v for k, v in details.items() if k in allowed and type(v) is int and v >= 0}
+            if counts:
+                value[name] = counts
+    return value or None
+
+
+def _safe_identifier(value, key):
+    if (isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:/-]{1,128}", value)
+            and key not in value):
+        return value
+    return None
+
+
+def _response_timing(headers, key):
+    server_ms = None
+    try:
+        parsed = float(headers.get("openai-processing-ms", ""))
+        if math.isfinite(parsed) and 0 <= parsed <= 3_600_000:
+            server_ms = parsed
+    except ValueError:
+        pass
+    return {"server_processing_ms": server_ms,
+            "provider_request_id": _safe_identifier(headers.get("x-request-id"), key)}
 
 
 class ApiGroundingProfile(BaseModel):
@@ -87,9 +126,10 @@ def load_api_grounding_profile(path):
 
 
 class ChatCompletionsGrounder:
-    def __init__(self, profile: ApiGroundingProfile, *, transport=None):
+    def __init__(self, profile: ApiGroundingProfile, *, transport=None, capture_trace=False):
         self.profile = profile
         self._slots = BoundedSemaphore(profile.max_concurrency)
+        self._capture_trace = capture_trace
         self._client = httpx.Client(timeout=profile.timeout_seconds,
             follow_redirects=False, transport=transport)
 
@@ -105,12 +145,19 @@ class ChatCompletionsGrounder:
     def ground(self, *, request_id, capture, goal):
         if not self._slots.acquire(blocking=False):
             raise ApiGroundingError("api_busy")
+        trace = {} if self._capture_trace else None
         try:
-            return self._ground(request_id=request_id, capture=capture, goal=goal)
+            value = self._ground(request_id=request_id, capture=capture, goal=goal, trace=trace)
+            if trace is not None:
+                value["trace"] = trace
+            return value
+        except ApiGroundingError as error:
+            error.trace = trace
+            raise
         finally:
             self._slots.release()
 
-    def _ground(self, *, request_id, capture, goal):
+    def _ground(self, *, request_id, capture, goal, trace=None):
         started = time.perf_counter()
         key = os.environ.get(self.profile.api_key_env, "")
         if not key or not key.strip():
@@ -147,11 +194,19 @@ class ChatCompletionsGrounder:
                     {"type": "text", "text": json.dumps(context, ensure_ascii=False)},
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64encode(image_bytes).decode("ascii"),
                                                            "detail": "high"}}]}]}
+        if trace is not None:
+            trace.update(prompt=json.loads(json.dumps(context, ensure_ascii=False).replace(key, "[REDACTED]")),
+                         system_prompt=body["messages"][0]["content"], raw_model_text=None,
+                         parsed_model_json=None, parse_error=None)
         attempt_started_ns = time.perf_counter_ns()
+        provider = {"protocol": self.profile.protocol, "requested_model": self.profile.model,
+                    "requested_reasoning_effort": None, "returned_model": None, "usage": None,
+                    "http_elapsed_ms": None, "server_processing_ms": None, "provider_request_id": None}
         try:
             with self._client.stream("POST", self.profile.endpoint, json=body,
                                      headers={"Authorization": "Bearer " + key}) as response:
                 status = response.status_code
+                provider.update(_response_timing(response.headers, key))
                 if status != 200:
                     code = ({401:"api_authentication_failed",403:"api_access_denied",429:"api_rate_limited"}.get(status)
                         or ("api_redirect_rejected" if 300 <= status < 400 else
@@ -166,23 +221,29 @@ class ChatCompletionsGrounder:
                         raise ApiGroundingError("api_timeout")
         except httpx.TimeoutException:
             raise ApiGroundingError("api_timeout",
-                attempt=_attempt(attempt_started_ns, "timeout")) from None
+                attempt=_attempt(attempt_started_ns, "timeout"), provider=provider) from None
         except httpx.RequestError:
             raise ApiGroundingError("api_network_error",
-                attempt=_attempt(attempt_started_ns, "failure")) from None
+                attempt=_attempt(attempt_started_ns, "failure"), provider=provider) from None
         except ApiGroundingError as error:
             if error.attempt is None:
                 error.attempt = _attempt(attempt_started_ns,
                     "timeout" if error.code == "api_timeout" else "failure")
+            error.provider = provider
             raise
+        finally:
+            provider["http_elapsed_ms"] = round((time.perf_counter_ns() - attempt_started_ns) / 1_000_000, 3)
         try:
             payload = json.loads(data, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
-        except (ValueError, TypeError, KeyError, AttributeError):
+        except (ValueError, TypeError, KeyError, AttributeError) as error:
+            if trace is not None:
+                trace["parse_error"] = str(error).replace(key, "[REDACTED]")
             raise ApiGroundingError("api_response_invalid",
-                attempt=_attempt(attempt_started_ns, "failure")) from None
+                attempt=_attempt(attempt_started_ns, "failure"), provider=provider) from None
         usage = payload.get("usage") if isinstance(payload, dict) else None
-        usage = {k:v for k,v in usage.items() if k in {"prompt_tokens", "completion_tokens", "total_tokens"}
-                 and type(v) is int and v >= 0} if isinstance(usage, dict) else {}
+        usage = _provider_usage(usage)
+        provider["usage"] = usage
+        provider["returned_model"] = _safe_identifier(payload.get("model"), key) if isinstance(payload, dict) else None
         attempt_usage = _measurement_usage(usage)
         try:
             choices = payload["choices"]
@@ -190,6 +251,13 @@ class ChatCompletionsGrounder:
                 raise ValueError("invalid choices")
             choice = choices[0]
             message = choice["message"]
+            if trace is not None and isinstance(message.get("content"), str):
+                trace["raw_model_text"] = message["content"].replace(key, "[REDACTED]")
+                try:
+                    trace["parsed_model_json"] = json.loads(trace["raw_model_text"],
+                        object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
+                except ValueError as error:
+                    trace["parse_error"] = str(error).replace(key, "[REDACTED]")
             if message.get("refusal"):
                 raise ApiGroundingError("api_model_refused")
             if choice.get("finish_reason") == "length":
@@ -199,24 +267,23 @@ class ChatCompletionsGrounder:
         except ApiGroundingError as error:
             if error.attempt is None:
                 error.attempt = _attempt(attempt_started_ns, "failure", attempt_usage)
+            error.provider = provider
             raise
         except (ValueError, TypeError, KeyError, AttributeError):
             raise ApiGroundingError("api_response_invalid",
-                attempt=_attempt(attempt_started_ns, "failure", attempt_usage)) from None
+                attempt=_attempt(attempt_started_ns, "failure", attempt_usage), provider=provider) from None
         try:
             result = validate_grounding_result(message["content"], request_id=request_id,
                 capture_id=capture["capture_id"], image_size=size)
-        except ValueError:
+        except ValueError as error:
+            if trace is not None:
+                trace["parse_error"] = str(error).replace(key, "[REDACTED]")
             raise ApiGroundingError("api_grounding_invalid",
-                attempt=_attempt(attempt_started_ns, "failure", attempt_usage)) from None
+                attempt=_attempt(attempt_started_ns, "failure", attempt_usage), provider=provider) from None
         if any(c.evidence_source != "api_visual" for c in result.candidates):
             raise ApiGroundingError("api_source_mismatch",
-                attempt=_attempt(attempt_started_ns, "failure", attempt_usage))
-        returned_model = payload.get("model")
-        returned_model = returned_model if isinstance(returned_model, str) and len(returned_model) <= 128 else None
-        return {"result": result.model_dump(), "action_executed": False,
-            "provider": {"protocol": self.profile.protocol, "requested_model": self.profile.model,
-                "returned_model": returned_model, "usage": usage or None,
-                "elapsed_ms": round((time.perf_counter()-started)*1000, 3),
+                attempt=_attempt(attempt_started_ns, "failure", attempt_usage), provider=provider)
+        provider.update({"elapsed_ms": round((time.perf_counter()-started)*1000, 3),
                 "attempts": 1, "automatic_retry_allowed": False,
-                "attempt": _attempt(attempt_started_ns, "success", attempt_usage)}}
+                "attempt": _attempt(attempt_started_ns, "success", attempt_usage)})
+        return {"result": result.model_dump(), "action_executed": False, "provider": provider}

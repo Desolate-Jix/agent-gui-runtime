@@ -58,7 +58,7 @@ def test_virtual_root_unknown_or_broken_chain_never_uses_owner(monkeypatch, faul
         hit.element_info.handle = 777
     else:
         current = hit.parent()
-        for index in range(20):
+        for index in range(40):
             parent = current
             current = NS(element_info=NS(handle=None, process_id=37552,
                 runtime_id=[42, 999, index]), parent=lambda parent=parent: parent)

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.instant_attachment_transport import InstantAttachmentTransport, InstantAdmissionError, _validate_request_id
 
-INSTANT_VERSION = "0.1.2-preview.2"
+INSTANT_VERSION = "0.1.2-preview.3"
 
 
 def _run_wait_budget(kind, requested):
@@ -54,7 +54,7 @@ class InstantStartError(ValueError):
 
 class InstantCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "form_fill", "close_launched_window", "desktop_capture", "desktop_click", "grounding_prepare", "grounding_resolve", "grounding_status", "grounding_cancel", "grounding_execute", "agent_command_status", "agent_command_continue", "agent_command_cancel", "learning_start", "learning_status", "learning_stop", "learning_recover", "learning_event", "learning_review", "learning_projection", "learning_import", "learning_library", "learning_memory", "learning_save_interface", "learning_commit", "learning_project", "learning_reuse", "learning_adopt_source", "learning_template", "learning_feedback", "learning_workflow"]
+    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "form_fill", "close_launched_window", "desktop_capture", "desktop_click", "grounding_prepare", "grounding_resolve", "grounding_status", "grounding_cancel", "grounding_execute", "agent_command_status", "agent_command_continue", "agent_command_cancel", "learning_start", "learning_status", "learning_stop", "learning_recover", "learning_event", "learning_review", "learning_projection", "learning_import", "learning_library", "learning_memory", "learning_save_interface", "learning_commit", "learning_project", "learning_reuse", "learning_adopt_source", "learning_template", "learning_feedback", "learning_workflow", "task_plan"]
     app_id: str | None = None
     name: str | None = None
     path: str | None = None
@@ -82,6 +82,7 @@ class InstantCommand(BaseModel):
             "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
             "form_fill": ({"request"}, {"request", "vision_capabilities"}),
             "read_text": (set(), {"max_chars"}),
+            "task_plan": ({"request"}, {"request"}),
             "desktop_click": ({"request"}, {"request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
         }
         required, allowed = (({"request"}, {"request"}) if self.kind in GROUNDING_COMMANDS or self.kind in AGENT_COMMANDS
@@ -118,6 +119,9 @@ class InstantCommand(BaseModel):
         elif self.kind == "input_sequence":
             from app.execution.input_sequence import InputSequenceRequest
             InputSequenceRequest.model_validate(self.request)
+        elif self.kind == "task_plan":
+            from app.execution.task_plan_admission import validate_task_plan_request
+            validate_task_plan_request(self.request)
         elif self.kind.startswith("learning_"):
             from app.learning_memory.event_store import validate_control
             validate_control(self.kind, self.request or {})
@@ -541,7 +545,8 @@ def build_server(session):
         image_blocks = []
         feedback_image = (receipt.get("learning_control") == "learning_feedback"
                           and (receipt.get("result") or {}).get("image_role") == "feedback_baseline_not_live_observation")
-        if images != "none" and (not receipt.get("learning_control") or feedback_image) and receipt.get("status") not in {"pending", "not_found", "result_unknown"}:
+        plan_control = receipt.get("operation_success_scope") == "task_plan_control"
+        if images != "none" and not plan_control and (not receipt.get("learning_control") or feedback_image) and receipt.get("status") not in {"pending", "not_found", "result_unknown"}:
             delivery = []
             views = ("before",) if feedback_image else (("before", "after") if images == "both" else ("after",))
             for view in views:
@@ -617,6 +622,8 @@ def build_server(session):
         "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. If phase=cleanup_pending, inspect cleanup diagnostics and resolve the blocker before calling stop again: it explicitly retries cleanup only, never input. The owner may remain alive while cleanup is unresolved; do not delete session records. Does not close user apps itself; a Windows MCP client may terminate its launched descendants on disconnect. Explicitly close test-created windows first using close_launched_window and verify window_closed.",
     }
     descriptions["instant_submit"] += " Also supports kind=input_sequence, request={field_goal,text,clear_existing:true,submit_search:true|false}; observation_wait_ms applies to the final Enter observation. Use instant_run for bounded waiting and inline final image without separate polling/image calls."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Bounded task_plan control: request={action:'start',plan:{schema_version:'task_plan.v1',title,inputs,steps},vision_capabilities?}. One to eight linear steps use explicit step_id/action/verification. Actions are click(goal,click_kind?,target?), input_sequence(field_goal,text,clear_existing,submit_search,target?), or read_text(goal); target={name,control_type,container?:{name,control_type}} is a current semantic selector, not stored coordinates. No learned target_memory, branches or dynamic output references. Verification is native_condition(condition:{text,control_type}) for click/search transitions, or agent_judgment(decision_condition?). The host queues the original gated commands and advances only on verified success. Read instant_status.task_plan_run while execution is pending; status polling must not compete with input or resubmit start. Wait reason grounding_required still needs the existing client grounding protocol on active_command_id. Decision is optional and auto requires the frozen exact allowlist. For verification_required, review requires run_id/execution_request_id/step_id/verdict/reason/evidence_sha256 of the original after image, followed by explicit continue with the original wait_id. cancel preserves partial/unknown input; cancel_requested is not completion. No automatic cross-host resume. Plan status is not task success. See docs/development/TASK_PLAN.md and docs/verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md for the tested scope and remaining limits."
     for name in ("instant_submit", "instant_run"):
         descriptions[name] += " Experimental source-only receipt recording: learning_start request={scope:'interface',title:'...'} records standalone observations; scope:'workflow' also requires project_id (1-80 lowercase ASCII letters/digits/dashes/underscores). learning_status, learning_stop and learning_recover accept optional request={learning_id:'...'}, otherwise use current/last segment. These controls issue no GUI input. Recording is OFF initially; learning_stop stops recording, not the execution host. learning_event request={event_id:...} returns the exact event and its digest. learning_review request={review:...} stores Agent verdict and explicit before/after interface identities against event/frame hashes. learning_projection accepts optional event_ids (max 128) and returns an on-demand semantic projection, not a persisted graph. These three also accept learning_id. learning_import request={event_id,view,regions?,recognition_text?,application_binding?} imports an explicitly identified observation into the existing versioned interface library. learning_library supports query/offset/limit; learning_memory requires interface_id and optional exact version_id and returns semantic hints without historical coordinates. learning_save_interface uses interface_id/expected_revision/expected_sha256/changes, with no mandatory approval. learning_stop persists a workflow-scope graph when receipt recording is complete; standalone scope never creates a graph. learning_commit optionally names expected_sha256 to persist amended reviews or explicitly replace existing project sources. learning_project action=list|read|save|memory|adopt_interface accesses native projects; memory returns a pinned snapshot_id, optionally bounded by node_id. learning_reuse requires workflow_id/snapshot_id/edge_id and explicit variables; it returns advice or a suggested EXISTING instant command, never executes or automatically follows edges. New source-only native editor is separate from the executor. learning_recover only imports already persisted receipts and never replays input. Keep original session evidence; recording_complete is bookkeeping completeness, not learned task success."
     for name in ("instant_submit", "instant_run"):

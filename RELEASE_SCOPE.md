@@ -1,4 +1,16 @@
-# 2026-10-08 preview.2 测试版范围 / preview.2 scope
+# 2026-10-09 preview.3 有界连续执行 / Bounded continuous execution preview.3
+
+执行 `0.1.2-preview.3`、可选学习 `0.1.0-preview.3` 使用独立安装器，发行标签 `learning-v0.1.0-preview.3`：[发行页与下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3)。源码限定验收及 Main 新安装版执行/学习流程通过；安装独立验收与发布核对的最终状态见[本轮发布记录](docs/verification/CONTINUOUS_EXECUTION_RELEASE_20261009.md)。preview.2/preview.1 与稳定 `instant-v0.1.1` 保持历史发布。 / Scoped source and Main installed acceptance passed; the release record tracks final installed-independent/publication status. Earlier releases remain separate.
+
+- 一次提交 1–8 个线性步骤，通过声明结果核验后自动推进；保留原队列、输入 owner、窗口/目标 freshness 与动作门禁。 / Submit a 1–8-step linear plan once and advance verified outcomes through the existing queue and safety gates.
+- 修复现场原生目标身份、浏览器字段归属/焦点读回及审核等待取消结算；异常保留原票据，review 后原 wait 显式继续，不重放未知输入。弹窗恢复经取消、明确选窗、关闭和新计划验证，不保证原计划自动跨窗。 / Repair current native identity, browser field binding/read-back and waiting cancellation; retain original evidence and explicit continuation. Dialog recovery uses deliberate reselection and a fresh plan.
+- 源码最终 10 对预热两步 fixture：20/20 runs、40/40 效果正确，B/C 中位 6.502/2.070 秒（68.17% 降幅），C 20 步免视觉推理、零 API/回调；两次约 8.16 秒准备另计，不包含冷启动、清理或 Main 推理，不证明通用准确率/性能。 / Ten matched source-level warm fixture pairs passed; preparation and Main reasoning are separate from the scoped native-target gains.
+- 普通 Luna 12 案识图评估结束且未执行返回点；本轮本地识图为个人选择，用户仍可选既有 API/Agent 视觉路线，仅 local 需权重。Decision 独立可选，不替代定位/授权。 / The bounded Luna image evaluation ended; optional API/Agent grounding and separate outcome Decisions remain available.
+- 学习包纳入修改后的共用运行器/读取依赖；首次无语言偏好仍默认 English，可切换中文并保存。少量历史来源状态标签在 English 界面仍为中文。 / The rebuilt learning payload includes changed shared runtime dependencies. English-first and saved preferences remain; a few legacy origin badges still display Chinese.
+
+- 修复执行安装器漏纳入 PowerShell 启动 worker：首次实机启动以零输入失败，39 项相关检查通过后仅重建执行包，Main 复验业务通过；初次 adapter 进程路径检查的零输入失败另存。学习包未变，原失败不改记为首次成功。 / Include the omitted PowerShell launch worker in execution packaging; retain the zero-input packaging and adapter failures separately from the successful rerun. Learning bytes are unchanged.
+
+# 2026-10-08 preview.2 历史测试版范围 / Historical preview.2 scope
 
 学习 `0.1.0-preview.2`、兼容执行 `0.1.2-preview.2` 使用两个独立测试版安装器：[preview.2 下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.2)。本轮实测与安装验证范围详见[本轮验收报告](docs/verification/DECISION_API_RELEASE_ACCEPTANCE_20261008.md)。学习可选，执行可单独使用；学习离线编辑无需宿主或模型，教学/运行明确连接兼容执行安装与已有同数据根会话。 / The preview.2 pair uses separate installers. See the current report for measured and installed validation scope. Execution works alone; optional learning edits libraries offline and explicitly attaches to compatible execution for teaching/trials.
 
