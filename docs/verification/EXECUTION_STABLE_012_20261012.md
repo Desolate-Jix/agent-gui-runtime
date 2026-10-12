@@ -20,6 +20,23 @@ Installed Main request measurements:20 Decisions,22,930 input tokens. Field HTTP
 
 Learning remains0.1.0-preview.3 and is not rebuilt. Earlier candidate04/05, git-diff and curl failures remain below and in their original private receipts. Target wording limitations are recorded in [Decision usage](DECISION_TARGET_USAGE_20261013.md). / 学习包不更新，历史失败不改写。
 
+## 2026-10-13 Action-stage timing read-back / 动作阶段计时回读
+
+This documentation update reads the retained installed Main acceptance; it does not represent a new runtime test. The task was DuckDuckGo → search “NumPy ndarray documentation” → first matching official NumPy result. / 本次文档更新回读已有安装版 Main 验收记录，不代表新跑一轮测试；任务为 DuckDuckGo → 搜索“NumPy ndarray documentation” → 首个匹配的 NumPy 官方结果。
+
+| Round / 轮次 | Input action / 输入动作 | Recorded total_ms / 原始毫秒 | Execution request / 执行请求 |
+|---|---|---|---|
+| 1 | open_ddg | 9543.943 | `trial-exec-d741b255f595ee8392efbb09910aa2d0` |
+| 1 | search_numpy | 10137.636 | `trial-exec-5d19e9dfe55e5c4c0870702f7a4964d0` |
+| 2 | open_ddg | 9175.648 | `trial-exec-b539c3da69e13926fc9f9db1cac4fefa` |
+| 2 | search_numpy | 9126.013 | `trial-exec-e95658e214b7e07110417ca3523f54e5` |
+
+Rounded ranges: **9.2–9.5 seconds for the address action; 9.1–10.1 seconds for the search action**. The recorded input-sequence total includes grounding, input execution and post-action capture. The plan's final page-result verification is separate, as is outer task orchestration. These are action-stage durations, not whole-task latency or API-only response times. / 四舍五入后：**地址动作 9.2–9.5 秒，搜索动作 9.1–10.1 秒**。输入序列计时包含定位、输入执行及动作后截图；计划层最终页面结果审核和外部任务调度另计。这是动作阶段耗时，不是整任务总时长或仅 API 响应时间。
+
+Evidence root: `D:/AgentReviewAcceptance/execution-012-ddg-numpy-installed-main-01`. Read each step's `execution_request_id` from `round-1.response.json` / `round-2.response.json`, then use `result.total_ms` from the completed `runtime/session-6afd42a45bd54410b0b89f94b9db23ca/agent-commands/<execution_request_id>.json`. Early pending/poll receipts are not action totals. The final link-click action has no equivalent recorded total, so no third-action duration is published. / 按两轮回执中的执行请求 ID，读取已完成 agent-command 的 `result.total_ms`；早期 pending／轮询回执不能当作动作总耗时。最后一次链接点击没有相同口径的总计时，因此不发布第三个动作耗时。
+
+The same two-round acceptance, including cancellation verification, used **20 Decision requests, 22,930 Decision input tokens and 7 separate visual-grounding requests**. Grounding token usage is additional. No matching successful old-version baseline exists for this task and timing boundary, so no per-action seconds saved, percentage speedup or token reduction is claimed. / 同一两轮验收（含取消检查）为 **20 次 Decision、22,930 个 Decision 输入 token，另加 7 次视觉定位请求**；定位 token 另计。缺少同任务、同边界且完整成功的旧版基线，不宣称每步节省秒数、提速百分比或 token 降幅。
+
 ---
 
 ## Historical checkpoint: installed candidate04 field-value failure / 历史检查点：安装候选04字段值误判

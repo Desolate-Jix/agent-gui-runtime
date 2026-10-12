@@ -1,10 +1,12 @@
 # Agent Review Instant
 
-**Computer use that checks each step, with OpenAI Decisions API Choice.**
+**What happens when a decision model meets computer use? / 当决策模型遇到 Computer Use，会发生什么？**
 
-Ask an agent to open a website, search for a topic, and follow a result. It has to find the right target, act, and decide whether the visible result is enough to continue. If Main handles every exchange, even a short task can feel slow. Agent Review Instant moves supported steps into a Windows runtime: **Main supplies a short plan; a vision model finds targets; Decision checks current evidence.** Successful steps continue in the same session; exceptions return their original evidence to Main.
+A simple browser task—open a website, search, follow a result—once took minutes in our tests. Preparation, grounding and repeated handoffs all contributed to the wait. In **Agent Review Instant 0.1.2**, we connected **OpenAI’s Decisions API** to the Windows runtime and gave it a focused job: check the current target or the result of the current step.
 
-让 Agent 打开网站、搜索并进入结果，需要反复定位、操作和判断。Agent Review Instant 将受支持的步骤交给 Windows 运行时：**主 Agent 给出短计划，视觉模型负责定位，Decision 根据当前证据判断能否继续。** 普通成功步骤在同一会话推进，异常才交回原主 Agent。执行组件独立安装，学习工作台可选。
+Main supplies a short plan. A vision model locates the target. The runtime acts. Decision checks the evidence. **Satisfied steps continue in the same session; unmet or unclear conditions return to the existing main agent.** Cropped target images and click annotations keep each check focused on the relevant evidence. The execution component installs independently; the learning workbench is optional.
+
+一个打开网站、搜索、进入结果的简单任务，曾在我们的测试中耗时数分钟：准备、定位和反复交接都增加了等待。**0.1.2 将 OpenAI Decisions API 接入 Windows 运行时，专注判断当前目标或当前步骤的结果。** 主 Agent 给出短计划，视觉模型定位，运行时操作，Decision 核验证据。满足条件就在同一会话继续，未满足或证据不足才交回原主 Agent；裁剪与点击标注让审核聚焦相关证据。执行组件独立安装，学习工作台可选。
 
 ## 本次正式版 / This stable release
 
@@ -80,28 +82,36 @@ This demonstrates that supported ordinary steps can run without a Main-agent rou
 
 这些结果验证了受支持的普通步骤可以连续执行，减少逐步回到主 Agent 的等待；它们不是通用准确率证明。此前首败单独保留，不用复测成功覆盖。
 
-| Installed Main checkpoint / 安装版 Main 审核点 | API round trip, median (range) / API往返中位（范围） | Input tokens / 输入token |
-|---|---|---|
-| Target / 目标候选 | 243 ms (188–542) | 1093–1130 |
-| Requested text / 规定文字 | 153 ms (142–184) | 453–504 |
-| Submit point / Enter前点位 | 202 ms (173–216) | 1098–1108 |
-| Current result / 当前结果 | 271 ms (208–276) | 1626–1720 |
+### Actual action-stage time and token use / 实际动作阶段耗时与 token 用量
 
-The installed Main run used **20 Decision requests / 22,930 input tokens**, plus **7 separate grounding requests** including cancellation. These HTTP times exclude image preparation, grounding, native input and page loading; they are not whole-task latency or a before/after speedup. A new site or unclear screenshot may still need Main.
+These are the recorded action-stage durations from the **two installed Main runs**, rather than API response times:
 
-安装版 Main 两轮共 **20次 Decision、22,930输入tokens**，另有 **7次定位**（含取消检查）。表中仅API往返，不含制图、定位、真实输入和加载，不能当成整任务耗时或提速比例。新网站或含糊画面仍可能需要主 Agent。
+以下是**安装版 Main 连续两轮**记录的动作阶段耗时，而非单次 API 响应时间：
 
-The usage changes are deliberately focused: candidate review receives one overview/detail marked image; text verification receives a complete enlarged input crop with click ticks outside the text. One checkpoint asks one current-step Choice. Target wording distinguishes “first matching” from “first overall”; workflow controls and later results stay outside that target. Full source/coordinate/receipt authentication remains local.
+| Action stage / 动作阶段 | Recorded range / 实测范围 |
+|---|---|
+| Locate the address field → replace the URL → press Enter → capture the page / 定位地址栏 → 替换网址 → Enter → 页面截图 | **9.2–9.5 s / 秒** |
+| Locate the search field → enter the query → submit → capture the results / 定位搜索框 → 输入查询 → 提交 → 结果截图 | **9.1–10.1 s / 秒** |
 
-用法优化集中在证据：目标审核用一张概览＋细节标注图，输入核验用完整放大的字段裁剪，点击刻度移到文字外侧。每个审核点只问一个本步问题，明确“首个匹配”和“整体第一”的区别，流程控制与后续结果另放；完整来源、坐标和回执仍在本地认证。
+The durations include grounding, the input sequence and post-action capture. **Final page-result verification is additional; these are not full-task totals.** There is no matching successful baseline from the previous version, so we cannot yet claim how many seconds each action saved or a percentage speedup. Exact per-round measurements and the timing boundary are in the [release verification record](docs/verification/EXECUTION_STABLE_012_20261012.md).
+
+计时包含定位、输入序列和操作后截图，**最终页面结果审核另计，不是完整任务总耗时**。目前没有同口径、成功完成的旧版基线，因此不宣称每步缩短多少秒或提升多少百分比；逐轮原始数值与计时边界见验证记录。
+
+The two-round installed Main acceptance, including cancellation verification, used **20 Decision requests and 22,930 Decision input tokens**, plus **7 separate visual-grounding requests**. Grounding token usage is additional. These are measured usage totals, not token savings against an older release; HTTP-only timings remain in the verification record.
+
+安装版 Main 两轮验收（含取消检查）使用 **20 次 Decision 请求、22,930 个 Decision 输入 token**，另有 **7 次视觉定位请求**，定位 token 另计。这是实际用量，不是相对旧版节省的 token；单请求 HTTP 计时保留在验证记录中。
+
+The usage changes are deliberately focused: candidate review receives one overview/detail marked image; text verification receives a complete enlarged input crop, with historical-click ticks moved outside the text in normal-size value views. One checkpoint asks one current-step Choice. Target wording distinguishes “first matching” from “first overall”; workflow controls and later results stay outside that target. Full source/coordinate/receipt authentication remains local.
+
+用法优化集中在证据：目标审核用一张概览＋细节标注图，输入核验用完整放大的字段裁剪，常规尺寸的文字图将历史点击刻度移到文字外侧。每个审核点只问一个本步问题，明确“首个匹配”和“整体第一”的区别，流程控制与后续结果另放；完整来源、坐标和回执仍在本地认证。
 
 On a fixed 19-request field diagnostic, all 16 ordinary positive/counterexamples were correct and all three gray-completion cases returned to Main; exact predeclared labels matched18/19. HTTP times were123–197ms at374–594 input tokens. This small selected-image result does not establish general accuracy. Simply shortening prompts or uploading larger images did not consistently improve later candidate judgments; rejected variants and limitations are recorded in the [target-usage diagnosis](docs/verification/DECISION_TARGET_USAGE_20261013.md).
 
 固定19次字段诊断中，16个普通正反例全部正确，3个灰色补全样本全部转Main；精确预设标签符合18/19，HTTP123–197毫秒、374–594输入token。该小样本不代表通用准确率。后来候选诊断显示，单纯缩短提示词或增加全图并非稳定改进，失败方案和限制均保留。
 
-The next goal is broader real tasks with fewer repeated planning and judgment calls. The optional learning workbench can preserve recurring work as workflows people review and edit, while Decision checks changing evidence. Neither component promises unattended completion of arbitrary tasks.
+The next goal is broader real-task coverage and a consistent before-and-after benchmark, with fewer repeated planning and judgment calls. The optional learning workbench can preserve recurring work as workflows people review and edit, while Decision checks changing evidence. Neither component promises unattended completion of arbitrary tasks.
 
-后续目标是在更多真实任务中减少重复规划和审核。可选学习工作台将重复工作保存为可审核、可修改的流程，Decision检查每次变化的证据；当前不承诺任意任务无人干预完成。
+后续目标是覆盖更多真实任务，建立同口径的新旧版本对照，并减少重复规划和审核。可选学习工作台将重复工作保存为可审核、可修改的流程，Decision检查每次变化的证据；当前不承诺任意任务无人干预完成。
 
 ## 模型选择：本地模型不是必需品 / Local models are optional
 
