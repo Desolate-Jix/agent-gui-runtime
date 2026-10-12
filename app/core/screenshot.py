@@ -44,6 +44,43 @@ class CaptureVisibilityError(ValueError):
         super().__init__(self.reason + ": restore and uncover the target window before capture")
 
 
+def _occlusion_only_shrank(before, after, *, width, height):
+    """仅接受后遮挡完全落在先前遮罩并集内；不猜测两次读取间的新增像素。"""
+    if (type(before) is not list or type(after) is not list
+            or len(before) > 256 or len(after) > 256):
+        return False
+
+    def boxes(regions):
+        result = []
+        for region in regions:
+            if (type(region) is not dict or set(region) != {"x", "y", "width", "height"}
+                    or any(type(region[key]) is not int for key in region)):
+                return None
+            x, y, w, h = (region[key] for key in ("x", "y", "width", "height"))
+            if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
+                return None
+            result.append((x, y, x + w, y + h))
+        return result
+
+    old, new = boxes(before), boxes(after)
+    if old is None or new is None:
+        return False
+    for left, top, right, bottom in new:
+        edges = sorted({left, right, *(max(left, x1) for x1, _, x2, _ in old if x1 < right and x2 > left),
+            *(min(right, x2) for x1, _, x2, _ in old if x1 < right and x2 > left)})
+        for x0, x1 in zip(edges, edges[1:]):
+            covered = top
+            for y0, y1 in sorted((y0, y1) for bx0, y0, bx1, y1 in old if bx0 <= x0 and bx1 >= x1):
+                if y0 > covered:
+                    break
+                covered = max(covered, y1)
+                if covered >= bottom:
+                    break
+            if covered < bottom:
+                return False
+    return True
+
+
 class ScreenshotService:
     """Capture screenshots for the currently bound window using MSS."""
 
@@ -119,7 +156,13 @@ class ScreenshotService:
             if current is None or self._capture_binding(current) != binding:
                 raise ValueError("capture_binding_changed: discard the captured screen pixels")
             after_visibility = self._require_capture_visibility(current, monitor)
-            if visibility.get("occluded_regions", []) != after_visibility.get("occluded_regions", []):
+            if (visibility.get("occluded_regions", []) != after_visibility.get("occluded_regions", [])
+                    and (visibility.get("bound_window_handle") != bound.handle
+                        or after_visibility.get("bound_window_handle") != bound.handle
+                        or not _occlusion_only_shrank(visibility.get("occluded_regions", []),
+                            after_visibility.get("occluded_regions", []),
+                            width=bound.rect.right - bound.rect.left,
+                            height=bound.rect.bottom - bound.rect.top))):
                 logger.warning("Capture visibility changed: before={} after={}", visibility.get("occluded_regions"), after_visibility.get("occluded_regions"))
                 raise CaptureVisibilityError("capture_visibility_changed")
             mark("post_binding_and_visibility")
@@ -162,6 +205,9 @@ class ScreenshotService:
             "image_path": image_path,
             "image_width": image.width,
             "image_height": image.height,
+            "image_size": {"width": image.width, "height": image.height},
+            # 使用采图前后核对过的绑定，不以之后的窗口位置回填原图。
+            "window_rect": list(binding[2:]),
             "roi": capture_rect["roi"],
             "roi_adjusted": capture_rect["roi_adjusted"],
             "capture_purpose": purpose,
@@ -173,9 +219,9 @@ class ScreenshotService:
                 "total_ms": round((time.perf_counter() - started) * 1000, 3),
                 "steps": capture_stages, "nested_timings_additive": False},
         }
-        if visibility.get("occluded_regions"):
-            result["capture_visibility"] = {**visibility, "masked": True,
-                                             "coordinate_space": "window"}
+        # 完全可见和局部遮罩均携带原始证明，供启动与后续绑定核验。
+        result["capture_visibility"] = {**visibility,
+            "masked": bool(visibility.get("occluded_regions")), "coordinate_space": "window"}
         return result
 
     @staticmethod

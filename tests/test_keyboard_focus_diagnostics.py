@@ -9,6 +9,10 @@ from app.desktop_review import local_direct_step as direct
 from tests.test_local_step_timings import timed_scene, saved_report
 
 
+# 必须在 fixture 替换路由之前保存真实入口，避免测试集合与独立运行产生不同凭证。
+_POST_ACTION = direct._post_action
+
+
 @pytest.fixture
 def focus_scene(monkeypatch):
     controller = inputs.InputController()
@@ -59,10 +63,16 @@ def test_interrupted_dispatch_never_claims_no_input(focus_scene, monkeypatch):
 
 @pytest.mark.parametrize("missing_observation", [False, True])
 def test_owner_preserves_known_no_dispatch_with_observation(timed_scene, focus_scene, monkeypatch, missing_observation):
+    from app.api import action
     co, _, _, _ = timed_scene
-    _, _, events = focus_scene
-    monkeypatch.setattr(direct, "_post_action", lambda operation, request, manager:
-        press_local_key(LocalKeyRequest(**request)).model_dump())
+    controller, _, events = focus_scene
+    bound = controller._require_bound_window()
+    bound.handle, bound.process_id = 321, 12
+    bound.rect.right, bound.rect.bottom = 800, 600
+    manager = co._windows()
+    manager.get_bound_window = lambda: bound
+    monkeypatch.setattr(action, 'window_manager', manager)
+    monkeypatch.setattr(direct, '_post_action', _POST_ACTION)
     if missing_observation:
         def unavailable(*args):
             raise ValueError("observation unavailable")

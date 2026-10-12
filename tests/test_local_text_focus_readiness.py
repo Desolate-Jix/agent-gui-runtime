@@ -57,8 +57,8 @@ def isolated_uia(monkeypatch):
     monkeypatch.setattr(module, "_readonly_attribute_class", classify)
 
 
-def _scenario(monkeypatch, wrappers, *, on_wait=None, on_hit=None):
-    bound = NS(handle=10, process_id=20, rect=NS(left=0, top=0, right=600, bottom=500))
+def _scenario(monkeypatch, wrappers, *, on_wait=None, on_hit=None, viewport=(600, 500)):
+    bound = NS(handle=10, process_id=20, rect=NS(left=0, top=0, right=viewport[0], bottom=viewport[1]))
     fact = {"contract_version": "windows_native_identity_observation_v1", "provider": "windows_native_identity",
             "status": "observed", "target_window_handle": 10, "process_id": 20,
             "process_create_time": 123.0, "executable_path": "C:/fixture.exe"}
@@ -87,6 +87,176 @@ def _scenario(monkeypatch, wrappers, *, on_wait=None, on_hit=None):
 
 def _probe(manager, **kwargs):
     return module.probe_local_focus_target(manager, 10, 20, (40, 45), **kwargs)
+
+
+class _NoTextPattern(NS):
+    @property
+    def iface_text(self):
+        raise NoPattern()
+
+
+def _unpatterned_group(*, bbox, rid):
+    wrapper = _node("Group", bbox=bbox, rid=rid)
+    return _NoTextPattern(**{key: value for key, value in vars(wrapper).items() if key != "iface_text"})
+
+
+def _pending_pane():
+    wrapper = _node("Pane", bbox=(0, 0, 600, 500))
+    _attach_root(wrapper, depth=8)
+    return wrapper
+
+
+def _horizontal_group_to_mixed_document():
+    raw = _unpatterned_group(bbox=(10, 30, 580, 80), rid=2)
+    parent = _unpatterned_group(bbox=(0, 0, 600, 500), rid=3)
+    document = _node("Document", bbox=(0, 0, 600, 500), readonly=MIXED, rid=4)
+    _attach_root(document)
+    raw.parent = lambda: parent
+    parent.parent = lambda: document
+    return raw
+
+
+def test_pending_pane_and_horizontal_group_only_converge_to_new_exact_combobox(monkeypatch):
+    precise = _node("ComboBox", rid=7)
+    _attach_root(precise)
+    manager, calls, waits = _scenario(monkeypatch, [_pending_pane(), _horizontal_group_to_mixed_document(), precise])
+    result = _probe(manager)
+    assert result["runtime_id"] == [42, 7] and result["control_type"] == "ComboBox"
+    assert result["bbox"] == [20, 30, 100, 40]
+    assert calls == [(40, 45)] * 3 and waits == [.025, .025]
+
+
+def test_horizontal_group_raw_hit_can_converge_past_coarse_mixed_document(monkeypatch):
+    precise = _node("ComboBox", rid=7)
+    _attach_root(precise)
+    manager, calls, waits = _scenario(monkeypatch, [_horizontal_group_to_mixed_document(), precise])
+    assert _probe(manager)["runtime_id"] == [42, 7]
+    assert calls == [(40, 45)] * 2 and waits == [.025]
+
+
+def _downward_group_to_mixed_document(*, raw_bbox=(4, 80, 1387, 1836), readonly=MIXED):
+    raw = _unpatterned_group(bbox=raw_bbox, rid=2)
+    document = _node("Document", bbox=(4, 80, 1402, 948), readonly=readonly, rid=4)
+    _attach_root(document)
+    raw.parent = lambda: document
+    return raw
+
+
+@pytest.mark.parametrize("readonly", [MIXED, NOT_SUPPORTED])
+def test_downward_raw_group_overflow_can_only_converge_to_exact_visible_edit(monkeypatch, readonly):
+    precise = _node("Edit", bbox=(520, 102, 300, 20), rid=7)
+    _attach_root(precise)
+    manager, calls, waits = _scenario(monkeypatch, [_downward_group_to_mixed_document(readonly=readonly), precise],
+                                     viewport=(1410, 1032))
+    result = module.probe_local_focus_target(manager, 10, 20, (680, 112))
+    assert result["runtime_id"] == [42, 7] and result["bbox"] == [520, 102, 300, 20]
+    assert calls == [(680, 112)] * 2 and waits == [.025]
+
+
+def test_persistent_downward_group_overflow_retains_bounded_refusal(monkeypatch):
+    manager, calls, waits = _scenario(monkeypatch, [_downward_group_to_mixed_document()], viewport=(1410, 1032))
+    with pytest.raises(module.TextFieldReadError) as error:
+        module.probe_local_focus_target(manager, 10, 20, (680, 112))
+    diagnostic = error.value.to_reference()["diagnostic"]
+    assert error.value.reason_code == "text_field_target_not_writable"
+    assert diagnostic["attribute_class"] == "mixed" and diagnostic["attempt"] == 11
+    assert len(calls) == 11 and len(waits) == 10 and sum(waits) <= .25
+
+
+@pytest.mark.parametrize("raw_bbox", [(4, 1032, 1387, 1836), (4, 200, 1387, 1836),
+    (4, 80, 0, 1836), (4, 80, 1387, 0), (4, 80, 1387, -1),
+    (-4, 80, 1387, 1836), (4, 80, 1410, 1836), (4, -1, 1387, 1836), (4, 80, 200, 1836)])
+def test_downward_group_does_not_relax_other_geometry_failures(monkeypatch, raw_bbox):
+    manager, calls, waits = _scenario(monkeypatch, [_downward_group_to_mixed_document(raw_bbox=raw_bbox)],
+                                     viewport=(1410, 1032))
+    with pytest.raises(module.TextFieldReadError) as error:
+        module.probe_local_focus_target(manager, 10, 20, (680, 112))
+    assert error.value.reason_code == "text_field_target_not_writable"
+    assert calls == [(680, 112)] and waits == []
+
+
+@pytest.mark.parametrize("kind", ["Edit", "ComboBox"])
+def test_downward_group_readiness_does_not_allow_exact_field_overflow(monkeypatch, kind):
+    precise = _node(kind, bbox=(520, 102, 300, 1100), rid=7)
+    _attach_root(precise)
+    valid = _node("Edit", bbox=(520, 102, 300, 20), rid=8)
+    _attach_root(valid)
+    manager, calls, waits = _scenario(monkeypatch, [_downward_group_to_mixed_document(), precise, valid],
+                                     viewport=(1410, 1032))
+    with pytest.raises(module.TextFieldReadError) as error:
+        module.probe_local_focus_target(manager, 10, 20, (680, 112))
+    assert error.value.reason_code == "text_field_target_not_writable"
+    assert calls == [(680, 112)] * 2 and waits == [.025]
+
+
+def test_persistent_pending_pane_exhausts_same_read_and_time_budget(monkeypatch):
+    manager, calls, waits = _scenario(monkeypatch, [_pending_pane()])
+    with pytest.raises(module.TextFieldReadError) as error:
+        _probe(manager)
+    assert error.value.reason_code == "text_field_target_not_writable"
+    assert error.value.to_reference()["diagnostic"]["attempt"] == 11
+    assert len(calls) == 11 and len(waits) == 10 and sum(waits) <= .25
+
+
+@pytest.mark.parametrize("kind", ["Edit", "ComboBox", "Document"])
+def test_pending_pane_cannot_retry_a_later_known_readonly_field(monkeypatch, kind):
+    readonly = _node(kind, bbox=(0, 0, 600, 500), readonly=True, rid=7)
+    _attach_root(readonly)
+    precise = _node("Edit", rid=8)
+    _attach_root(precise)
+    manager, calls, waits = _scenario(monkeypatch, [_pending_pane(), readonly, precise])
+    with pytest.raises(module.TextFieldReadError) as error:
+        _probe(manager)
+    assert error.value.reason_code == "text_field_target_not_writable"
+    assert error.value.to_reference()["diagnostic"]["attribute_class"] == "readonly"
+    assert calls == [(40, 45)] * 2 and waits == [.025]
+
+
+@pytest.mark.parametrize("fault", ["hidden", "disabled", "password", "unknown_password", "small", "outside"])
+def test_pending_pane_with_unsafe_state_or_geometry_is_not_retried(monkeypatch, fault):
+    pane = _pending_pane()
+    if fault == "hidden":
+        pane.is_visible = lambda: False
+    elif fault == "disabled":
+        pane.is_enabled = lambda: False
+    elif fault in {"password", "unknown_password"}:
+        pane.element_info.element.CurrentIsPassword = True if fault == "password" else None
+    else:
+        x, y, w, h = (20, 30, 100, 40) if fault == "small" else (0, 100, 600, 400)
+        pane.element_info.rectangle = NS(left=x, top=y, right=x+w, bottom=y+h)
+    manager, calls, waits = _scenario(monkeypatch, [pane, _node()])
+    with pytest.raises(module.TextFieldReadError):
+        _probe(manager)
+    assert calls == [(40, 45)] and waits == []
+
+
+@pytest.mark.parametrize("fault", ["provider", "password"])
+def test_pending_pane_does_not_upgrade_new_provider_or_password_failure(monkeypatch, fault):
+    following = RuntimeError("private provider text") if fault == "provider" else _node("ComboBox", rid=7)
+    if fault == "password":
+        following.element_info.element.CurrentIsPassword = True
+        _attach_root(following)
+    manager, calls, waits = _scenario(monkeypatch, [_pending_pane(), following, _node()])
+    with pytest.raises(module.TextFieldReadError) as error:
+        _probe(manager)
+    assert error.value.reason_code == ("text_field_target_unavailable" if fault == "provider" else "text_field_target_not_writable")
+    assert "private" not in str(error.value.to_reference())
+    assert calls == [(40, 45)] * 2 and waits == [.025]
+
+
+@pytest.mark.parametrize("change,reason", [("birth", "text_field_process_identity_changed"),
+                                         ("rect", "text_field_window_binding_changed")])
+def test_pending_pane_rechecks_original_window_before_another_point_read(monkeypatch, change, reason):
+    def changed(bound, fact):
+        if change == "birth":
+            fact["process_create_time"] = 456.0
+        else:
+            bound.rect.left = 1
+    manager, calls, waits = _scenario(monkeypatch, [_pending_pane(), _node()], on_wait=changed)
+    with pytest.raises(module.TextFieldReadError) as error:
+        _probe(manager)
+    assert error.value.reason_code == reason
+    assert calls == [(40, 45)] and waits == [.025]
 
 
 @pytest.mark.parametrize("depth", [17, 31])

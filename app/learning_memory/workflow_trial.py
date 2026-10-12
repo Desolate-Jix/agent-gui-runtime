@@ -222,7 +222,20 @@ def _actual_action_executed(result, terminal=None):
             claims.append(True)
         elif len(values) == len(steps) and all(value is False for value in values):
             claims.append(False)
-    return claims[0] if claims and all(value is claims[0] for value in claims) else None
+    actual = claims[0] if claims and all(value is claims[0] for value in claims) else None
+    if actual is False:
+        from app.core.recognition_dispatch import local_receipt_zero_input_verified
+        if result.get("contract_version") == "local_direct_step_v1":
+            if not local_receipt_zero_input_verified(result):
+                return None
+        if isinstance(steps, list):
+            if not steps or any(not isinstance(row, dict) or row.get("action_executed") is not False
+                    or not isinstance(row.get("receipt"), dict)
+                    or row.get("status") != row["receipt"].get("phase")
+                    or not local_receipt_zero_input_verified(row["receipt"],
+                        row.get("operation", "execute_recognition_plan")) for row in steps):
+                return None
+    return actual
 
 
 def _execution_identity(receipt):
@@ -252,6 +265,9 @@ class TrialService:
         value = _read(self._path(run_id))
         if value.get("run_id") != run_id:
             raise ValueError("workflow_trial_identity_mismatch")
+        from .workflow_condition_templates import validate_frozen_conditions
+        program = self.programs.load(value["workflow_id"], value["program_id"])
+        validate_frozen_conditions(value, program, self.session)
         strategy = execution_strategy(value)
         pending = value.get("pending")
         if isinstance(pending, dict) and execution_strategy(pending) != strategy:
@@ -332,12 +348,16 @@ class TrialService:
                 raise ValueError("workflow_trial_required_input_missing:" + name)
             if name in inputs and not _type(inputs[name], item["type"]):
                 raise ValueError("workflow_trial_input_type_invalid:" + name)
+        from .workflow_condition_templates import program_condition_snapshots
+        snapshots = program_condition_snapshots(program, inputs)
         run_id = "trial-" + hashlib.sha256(canonical_json_bytes([str(self.session), request_id, request_hash])).hexdigest()
         state = {"run_id": run_id, "workflow_id": workflow_id, "program_id": program_id,
                  "execution_strategy": strategy,
                  "project_snapshot_id": program["project_snapshot_id"], "start_step_id": start_step_id,
                  "current_step_id": start_step_id, "inputs": deepcopy(inputs), "outputs": {},
                  "status": "ready", "pending": None, "history": [], "requests": {}, "prepare_requests": {}}
+        if snapshots:
+            state["condition_snapshots"] = snapshots
         _write(self._path(run_id), state)
         index[request_id] = {"request_sha256": request_hash, "run_id": run_id}
         _write(index_path, index)
@@ -550,6 +570,9 @@ class TrialService:
         program = self.programs.load(state["workflow_id"], state["program_id"])
         step = next(step for step in program["definition"]["steps"] if step["step_id"] == pending["step_id"])
         outputs = {key: {"run_id": run_id, "value": value} for key, value in state["outputs"].items()}
+        from .decision_verification import main_review_required
+        if result["source"] == "rule" and main_review_required(step, decision_service):
+            raise ValueError("workflow_decision_always_main")
         image_check = step.get("verification", {}).get("image_check")
         if image_check is not None:
             from .image_verification import load_reference_image, match_image_check
@@ -565,7 +588,7 @@ class TrialService:
             from .decision_verification import adopted_verification, decision_result_path
             saved = _read(decision_result_path(self.session, request_id))
             computed = adopted_verification(step, inputs=state["inputs"], outputs=outputs,
-                envelope=evidence, decision=saved.get("result"), service=decision_service)
+                envelope=evidence, decision=saved.get("result"), service=decision_service, program=program)
         else:
             computed = verify_step(step, inputs=state["inputs"], outputs=outputs, receipt=normalized, observation=observations)
         if computed != result:

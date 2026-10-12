@@ -75,6 +75,7 @@ def run_step_command(coordinator, target, command, *, workflow_bindings=None, le
         operation=operation, request=request, include_observation=True,
         **({"decision_check": decision_check, "execution_request_id": execution_request_id}
            if decision_check is not None else {}),
+        **({"action_review": command["action_review"]} if command.get("action_review") is not None else {}),
         observation_wait_ms=command.get("observation_wait_ms"),
         **({"memory_bindings": workflow_bindings} if workflow_bindings is not None else {}),
         **({"learning_context": learning_context} if learning_context is not None else {}),
@@ -636,9 +637,11 @@ def main():
                     response["observation"] = response["result"].get("observation", {}).get("capture")
                 elif kind == "input_sequence":
                     from app.execution.input_sequence import run_input_sequence
+                    from app.execution.input_review_options import build_input_review_options
                     progress = out / "sequence-progress"
                     progress.mkdir(exist_ok=True)
                     response["result"] = run_input_sequence(co, target, command["request"],
+                        **build_input_review_options(co, command, path.stem),
                         **({"memory_bindings": workflow_bindings} if workflow_bindings is not None else {}),
                         **({"learning_context": learning_context} if learning_context is not None else {}),
                         observation_wait_ms=command.get("observation_wait_ms"),

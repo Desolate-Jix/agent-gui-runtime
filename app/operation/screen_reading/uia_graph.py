@@ -1,6 +1,25 @@
 """有限 UIA 邻接图的共用身份契约；别名不是第二个控件，冲突不能归一化。"""
 
 
+def is_complete_canonical_uia_snapshot(snapshot):
+    """只接受完整原生树或已证实身份与规范父边的完整图，不改写原始树事实。"""
+    if not isinstance(snapshot, dict):
+        return False
+    errors = snapshot.get("traversal_errors", [])
+    if (snapshot.get("status") != "ok" or snapshot.get("scan_complete") is not True
+            or snapshot.get("truncated") is not False
+            or snapshot.get("scan_scope", "bound_window") != "bound_window"
+            or type(errors) is not list or errors):
+        return False
+    if snapshot.get("provider_tree_valid") is True:
+        return True
+    alias_count, cycle_count = snapshot.get("alias_count"), snapshot.get("cycle_count")
+    return (snapshot.get("provider_tree_valid") is False
+        and snapshot.get("graph_scan_complete") is True
+        and type(alias_count) is int and alias_count > 0
+        and type(cycle_count) is int and 0 <= cycle_count <= alias_count)
+
+
 class UIAGraphError(ValueError):
     def __init__(self, reason):
         self.reason = reason

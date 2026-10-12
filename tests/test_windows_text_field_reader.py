@@ -128,8 +128,7 @@ def test_chromium_edit_object_range_uses_actual_value_not_object_selection(value
 
 
 @pytest.mark.parametrize("fault", [
-    "framework", "role", "enclosing_role", "enclosing_framework", "enclosing_identity",
-    "enclosing_process", "enclosing_name", "children", "unknown_children",
+    "enclosing_identity", "enclosing_process", "unknown_children",
     "value_readonly", "text_readonly", "value_readonly_unknown", "text_readonly_unknown",
 ])
 def test_edit_object_range_never_relaxes_scope_or_writability(fault):
@@ -137,10 +136,15 @@ def test_edit_object_range_never_relaxes_scope_or_writability(fault):
         read(field(fault=fault))
 
 
+@pytest.mark.parametrize("fault", ["framework", "role", "enclosing_role", "enclosing_framework",
+    "enclosing_name", "children"])
+def test_value_authority_does_not_require_chromium_noncontent_semantics(fault):
+    assert read(field(fault=fault)) == ("", "uia_value", None)
+
+
 @pytest.mark.parametrize("text", ["Address:", "different", "\ufffc\ufffc", "\ufffc\n"])
-def test_edit_real_text_disagreement_still_fails(text):
-    with pytest.raises(module.TextFieldReadError, match="text_field_value_patterns_disagree"):
-        read(field(text=text))
+def test_edit_text_disagreement_uses_value_without_selection(text):
+    assert read(field(text=text)) == ("", "uia_value", None)
 
 
 def test_edit_object_marker_requires_authoritative_value_pattern():
@@ -247,7 +251,8 @@ def test_read_failure_records_exact_stage_without_private_text(monkeypatch, read
         reader.read_field(target_field_id="field", capture_id="fresh", target_window_handle=10,
             target_process_id=20, process_create_time=123.0, window_rect=(0,0,600,500),
             target_bbox=(50,40,1,1), click_point=(50,40))
-    assert raised.value.reason_code == "text_field_target_not_writable"
+    assert raised.value.reason_code == ("text_field_control_unavailable" if fault == "resolve"
+        else "text_field_target_not_writable")
     diagnostic = raised.value.to_reference()["diagnostic"]
     assert diagnostic["phase"] == phase
     assert diagnostic["read_index"] == read_index
@@ -264,7 +269,8 @@ def test_error_diagnostic_rejects_non_whitelisted_data():
 
 
 @pytest.mark.parametrize("kinds", [["Window"], ["Text", "Group", "Pane", "Window"],
-    ["Button", "Group", "Pane", "Group", "Pane", "Window"], ["PRIVATE_SENTINEL", "Window"]])
+    ["Button", "Group", "Pane", "Group", "Pane", "Window"], ["Pane"] * 5 + ["Window"],
+    ["PRIVATE_SENTINEL", "Window"]])
 def test_failed_resolve_reports_only_original_visited_types_without_extra_reads(kinds):
     visits = []
     parent_calls = []
@@ -286,6 +292,7 @@ def test_failed_resolve_reports_only_original_visited_types_without_extra_reads(
         wrapper.parent = parent
     with pytest.raises(module.TextFieldReadError) as raised:
         module.WindowsTextFieldReader._resolve_field(wrappers[0], 10)
+    assert raised.value.reason_code == "text_field_control_unavailable"
     expected_count = min(5, len(kinds))
     expected = [{"control_type": kind if kind != "PRIVATE_SENTINEL" else "other", "depth": index,
                  "is_root": index == len(kinds)-1} for index, kind in enumerate(kinds[:5])]
@@ -590,3 +597,109 @@ def test_owned_dialog_field_resolution_rejects_other_native_root(monkeypatch):
     with pytest.raises(module.TextFieldReadError) as raised:
         module.WindowsTextFieldReader._resolve_field(edit, 787188)
     assert raised.value.reason_code == "text_field_window_or_process_changed"
+
+
+def focused_point_case(monkeypatch, *, fault=None):
+    reader, original = post_input_case(monkeypatch, new_box=(985, 457, 533, 50),
+        fault=fault if fault not in {"button", "other_field", "type_second", "selection"} else None)
+    focused = module._focused_field
+    reads = []
+    def current():
+        wrapper = focused()
+        reads.append(wrapper)
+        if fault == "button":
+            wrapper.element_info.control_type = "Button"
+        elif fault == "other_field":
+            wrapper.element_info.rectangle = NS(left=1500, top=457, right=1700, bottom=507)
+        elif fault == "type_second" and len(reads) == 2:
+            wrapper.element_info.control_type = "Edit"
+        return wrapper
+    monkeypatch.setattr(module, "_focused_field", current)
+    reader._desktop_factory = lambda **kwargs: pytest.fail("post-click focus must not locate from point or scan")
+    kwargs = {k: original[k] for k in ("target_field_id", "capture_id", "target_window_handle",
+        "target_process_id", "process_create_time", "window_rect", "click_point")}
+    if fault == "selection":
+        selections = iter([(0, 0), (0, 6)])
+        monkeypatch.setattr(reader, "_read_text_with_evidence", lambda *args:
+            ("museum", "uia_value", next(selections), None))
+    return reader, kwargs, reads
+
+
+def test_post_click_current_focus_at_point_reads_real_field_without_point_lookup(monkeypatch):
+    reader, kwargs, reads = focused_point_case(monkeypatch)
+    result = reader.read_focused_at_point(**kwargs)
+    assert result.value == "museum" and result.identity.runtime_id == (42, 1)
+    assert result.identity.control_bbox == (985, 457, 533, 50)
+    assert len(reads) == 2
+
+
+@pytest.mark.parametrize("fault,reason", [
+    ("button", "target_not_writable"), ("other_field", "geometry_changed"),
+    ("unfocused", "keyboard_focus_unavailable"), ("focus_second", "keyboard_focus_unavailable"),
+    ("runtime_second", "changed_during_read"), ("type_second", "changed_during_read"),
+    ("changing_geometry", "changed_during_read"), ("value_change", "changed_during_read"),
+    ("selection", "changed_during_read"), ("readonly", "target_not_writable"),
+    ("process", "window_or_process_changed"),
+])
+def test_post_click_current_focus_at_point_rejects_negative_or_changed_field(monkeypatch, fault, reason):
+    reader, kwargs, reads = focused_point_case(monkeypatch, fault=fault)
+    with pytest.raises(module.TextFieldReadError, match=reason):
+        reader.read_focused_at_point(**kwargs)
+    assert len(reads) <= 2
+
+
+@pytest.mark.parametrize("pending_type", ["Pane", "Text"])
+def test_focused_read_waits_for_same_window_transient_container(monkeypatch, pending_type):
+    reader, kwargs, reads = focused_point_case(monkeypatch)
+    wrapper = module._focused_field()
+    reads.clear()
+    now, waits = [0.0], []
+    def wait(seconds):
+        waits.append(seconds)
+        now[0] += seconds
+    def current():
+        reads.append(wrapper)
+        wrapper.element_info.control_type = pending_type if len(reads) <= 2 else "ComboBox"
+        return wrapper
+    monkeypatch.setattr(module, "_focused_field", current)
+    reader._readiness_clock, reader._readiness_wait = lambda: now[0], wait
+    result = reader.read_focused_at_point(**kwargs)
+    assert result.value == "museum" and result.identity.runtime_id == (42, 1)
+    assert len(reads) == 4 and waits == [.025, .025]
+
+
+def test_focused_transient_read_is_bounded_and_preserves_negative(monkeypatch):
+    reader, kwargs, reads = focused_point_case(monkeypatch)
+    wrapper = module._focused_field()
+    reads.clear()
+    now, waits = [0.0], []
+    def wait(seconds):
+        waits.append(seconds)
+        now[0] += seconds
+    def current():
+        reads.append(wrapper)
+        wrapper.element_info.control_type = "Pane"
+        return wrapper
+    monkeypatch.setattr(module, "_focused_field", current)
+    reader._readiness_clock, reader._readiness_wait = lambda: now[0], wait
+    with pytest.raises(module.TextFieldReadError, match="target_not_writable") as error:
+        reader.read_focused_at_point(**kwargs)
+    assert len(reads) <= 11 and sum(waits) <= .25
+    assert error.value.diagnostic["control_type"] == "Pane"
+    assert error.value.diagnostic["attempt"] == len(reads)
+
+
+def test_transient_focus_from_other_window_is_not_retried(monkeypatch):
+    reader, kwargs, reads = focused_point_case(monkeypatch)
+    wrapper = module._focused_field()
+    reads.clear()
+    def current():
+        reads.append(wrapper)
+        wrapper.element_info.control_type = "Pane"
+        return wrapper
+    monkeypatch.setattr(module, "_focused_field", current)
+    monkeypatch.setattr(module, "_top_window_handle", lambda wrapper: 999999)
+    reader._readiness_wait = lambda seconds: pytest.fail("foreign focus must not retry")
+    with pytest.raises(module.TextFieldReadError, match="target_not_writable"):
+        reader.read_focused_at_point(**kwargs)
+    assert len(reads) == 1

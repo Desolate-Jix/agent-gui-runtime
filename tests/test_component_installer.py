@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -43,6 +44,67 @@ def package(tmp_path, component='learning', version='1.0', content=b'first'):
 def run(exe, command, root):
     return subprocess.run([str(exe), command, str(root)], capture_output=True, text=True,
                           encoding='utf-8', timeout=30)
+
+
+def read_installer_shortcut(exe, tmp_path):
+    script = tmp_path / 'read-shortcut.ps1'
+    script.write_text('param([string]$Installer)\n'
+        '$assembly = [Reflection.Assembly]::LoadFile($Installer)\n'
+        '$type = $assembly.GetType("ComponentInstaller")\n'
+        '$property = $type.GetProperty("ShortcutPath", [Reflection.BindingFlags]"Static,NonPublic")\n'
+        '$property.GetValue($null) | ConvertTo-Json -Compress\n', encoding='utf-8')
+    powershell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    result = subprocess.run([str(powershell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+                             '-File', str(script), '-Installer', str(exe)], capture_output=True,
+                            text=True, encoding='utf-8', timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return Path(json.loads(result.stdout))
+
+
+@pytest.mark.parametrize('component,version,product_id,display_name,filename,shortcut_name', [
+    ('execution', '0.1.2', 'AgentGUIRuntimeExecutionPreview',
+     'Agent GUI Runtime Execution', 'AgentGUIRuntimeExecution-Setup.exe', 'Agent GUI Runtime Execution Preview.lnk'),
+    ('execution', '0.1.2-preview.3', 'AgentGUIRuntimeExecutionPreview',
+     'Agent GUI Runtime Execution Preview', 'AgentGUIRuntimeExecutionPreview-Setup.exe', 'Agent GUI Runtime Execution Preview.lnk'),
+    ('learning', '0.1.0-preview.3', 'AgentLearningWorkbenchPreview',
+     'Agent Learning Workbench Preview', 'AgentLearningWorkbenchPreview-Setup.exe', 'Agent Learning Workbench Preview.lnk'),
+])
+def test_installer_presentation_preserves_component_upgrade_identity(
+        tmp_path, component, version, product_id, display_name, filename, shortcut_name):
+    setup = package(tmp_path, component=component, version=version)
+    manifest = json.loads((setup.parent / 'payload-manifest.json').read_text(encoding='utf-8'))
+    assert setup.name == filename
+    assert manifest['product_id'] == product_id
+    assert manifest['display_name'] == display_name
+    assert manifest['version'] == version
+    assert read_installer_shortcut(setup, tmp_path).name == shortcut_name
+
+
+def test_execution_preview_upgrades_in_place_to_stable_without_changing_learning(tmp_path):
+    preview = package(tmp_path, component='execution', version='0.1.2-preview.3')
+    learning = package(tmp_path, version='0.1.0-preview.3')
+    target = tmp_path / 'check-upgrade'
+    assert run(preview, '--check-install', target).returncode == 0
+    assert run(learning, '--check-install', target).returncode == 0
+    installed = target / 'AgentGUIRuntimeExecutionPreview'
+    other = target / 'AgentLearningWorkbenchPreview'
+    other_before = {path.relative_to(other).as_posix(): path.read_bytes()
+                    for path in other.rglob('*') if path.is_file()}
+    (installed / 'personal.txt').write_bytes(b'keep')
+    stable = package(tmp_path, component='execution', version='0.1.2', content=b'stable')
+    result = run(stable, '--check-install', target)
+    assert result.returncode == 0, result.stdout + result.stderr
+    contract = json.loads(result.stdout)
+    assert Path(contract['root']) == installed
+    assert contract['integration_written'] is False
+    marker = json.loads((installed / '.component-install.json').read_text(encoding='utf-8'))
+    assert marker['product_id'] == 'AgentGUIRuntimeExecutionPreview'
+    assert marker['version'] == '0.1.2'
+    assert (installed / 'scripts/setup_instant.ps1').read_bytes() == b'stable'
+    assert (installed / 'personal.txt').read_bytes() == b'keep'
+    assert not (target / 'AgentGUIRuntimeExecution').exists()
+    assert {path.relative_to(other).as_posix(): path.read_bytes()
+            for path in other.rglob('*') if path.is_file()} == other_before
 
 
 def test_compiled_install_upgrade_uninstall_preserves_unknown_and_modified(tmp_path):

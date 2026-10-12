@@ -57,7 +57,7 @@ def compact_receipt(receipt, *, full_receipt_path=None):
         value["sequence"] = {key: deepcopy(result.get(key)) for key in (
             "sequence_id", "status", "completed_steps", "interrupted_at", "input_check",
             "action_executed", "error", "total_ms", "next_action", "selected_click_point",
-            "selected_click_point_coordinate_space", "check_timings") if key in result}
+            "selected_click_point_coordinate_space", "check_timings", "main_handoff") if key in result}
         value["sequence"]["steps"] = _compact_steps(result.get("steps", []))
         value["observation"] = {key: deepcopy(result.get("observation", {}).get(key)) for key in
             ("status", "error_code", "next_action", "recovery") if key in result.get("observation", {})}
@@ -80,6 +80,11 @@ def compact_receipt(receipt, *, full_receipt_path=None):
         # 发现结果、正文和窗口身份是下一步决策必需信息，不作无差别截断。
         if result:
             value["result"] = deepcopy(result)
+    assessment = result.get("action_assessment", action.get("action_assessment"))
+    if isinstance(assessment, dict):
+        value["action_assessment"] = {key: deepcopy(assessment[key]) for key in
+            ("schema", "scope", "disposition", "reason", "envelope_sha256", "freshness", "authorizes_action")
+            if key in assessment}
     observation = result.get("observation") or {}
     if observation.get("condition") is not None:
         value.setdefault("observation", {}).update({key: deepcopy(observation[key]) for key in

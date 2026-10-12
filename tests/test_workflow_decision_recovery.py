@@ -42,8 +42,10 @@ def decision_recovery_scene(epoch_scene, services, monkeypatch, request):
     frame = {"capture_id": "decision-after", "image_path": str(image),
         "sha256": sha256(image.read_bytes()).hexdigest(), "image_size": {"width": 160, "height": 100},
         "window_rect": [0, 0, 160, 100], "window_identity": identity}
+    variant = getattr(request, "param", None)
+    v2 = variant in {"v2", "v2_image_miss"}
     image_check, capture_count = None, 1
-    if getattr(request, "param", None) == "image_miss":
+    if variant in {"image_miss", "v2_image_miss"}:
         from tests.test_image_verification import sample
         from tests.test_image_wait_early_exit import Clock
         image_check, _, _, _ = sample(library_root)
@@ -62,15 +64,19 @@ def decision_recovery_scene(epoch_scene, services, monkeypatch, request):
 
     def reply(request):
         calls.append(request)
-        return httpx.Response(200, json={"model": "gpt-6-luna", "answers": [
+        answers = [
             {"type": "predicate", "name": "condition_met", "probability": 0.98},
-            {"type": "predicate", "name": "visible_error", "probability": 0.01}],
+            {"type": "predicate", "name": "visible_error", "probability": 0.01}]
+        if v2:
+            answers.append({"type": "predicate", "name": "needs_agent_review", "probability": 0.01})
+        return httpx.Response(200, json={"model": "gpt-6-luna", "answers": answers,
             "usage": {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}})
 
     monkeypatch.setattr("app.learning_memory.memory_observation.capture_memory_observation", capture)
     monkeypatch.setenv("RECOVERY_DECISION_SYNTHETIC_KEY", "synthetic-recovery-key")
     client = httpx.Client(transport=httpx.MockTransport(reply))
-    profile = DecisionProfile(mode="auto", api_key_env="RECOVERY_DECISION_SYNTHETIC_KEY", auto_conditions=[CONDITION])
+    profile = DecisionProfile(mode="auto", api_key_env="RECOVERY_DECISION_SYNTHETIC_KEY", auto_conditions=[CONDITION],
+                              **({"contract_version": "decision_profile.v2"} if v2 else {}))
     decision = DecisionService(epoch.old, profile=profile, provider=OpenAIDecisionsProvider(
         api_key_env="RECOVERY_DECISION_SYNTHETIC_KEY", client=client))
     freeze_decision_profile(decision)
@@ -173,6 +179,7 @@ def test_maintained_catalog_includes_authenticated_decision_dependencies(decisio
     assert required <= set(_catalog(s.epoch.old))
 
 
+@pytest.mark.parametrize("decision_recovery_scene", ["v1", "v2"], indirect=True)
 def test_original_decision_history_recovery_is_authenticated_readonly(decision_recovery_scene):
     s = decision_recovery_scene
     result = verify_history(s)
@@ -183,6 +190,7 @@ def test_original_decision_history_recovery_is_authenticated_readonly(decision_r
     assert old_bytes(s.epoch) == s.old_before and len(s.calls) == len(s.captures) == 1
 
 
+@pytest.mark.parametrize("decision_recovery_scene", ["v1", "v2"], indirect=True)
 def test_decision_history_survives_real_admission_prepare_commit_without_replay(decision_recovery_scene):
     s = decision_recovery_scene
     prepared = prepare(s)
@@ -195,6 +203,7 @@ def test_decision_history_survives_real_admission_prepare_commit_without_replay(
     assert old_bytes(s.epoch) == s.old_before and len(s.calls) == len(s.captures) == 1
 
 
+@pytest.mark.parametrize("decision_recovery_scene", ["v1", "v2"], indirect=True)
 def test_recovery_never_reads_key_opens_writable_ledger_or_evaluates(decision_recovery_scene, monkeypatch):
     s = decision_recovery_scene
     original_get = os.environ.get
@@ -214,6 +223,20 @@ def test_recovery_never_reads_key_opens_writable_ledger_or_evaluates(decision_re
     assert verify_history(s)["history"][0]["judged_by"] == "decision"
     assert prepare(s)["trial_state"]["history"][0]["source_entry"]["judged_by"] == "decision"
     assert old_bytes(s.epoch) == s.old_before and len(s.calls) == len(s.captures) == 1
+
+
+@pytest.mark.parametrize("decision_recovery_scene", ["v2"], indirect=True)
+@pytest.mark.parametrize("field", ["source_id", "source_sha256", "step_goal", "remaining_plan"])
+def test_recovery_rebuilds_v2_context_from_frozen_program(decision_recovery_scene, field):
+    s = decision_recovery_scene
+    path = s.epoch.old / "workflow-observations/decision-verify.json"
+    value = read_json_snapshot(path)
+    value["decision_review_context"][field] = ["Changed suffix."] if field == "remaining_plan" else "changed"
+    write_json_snapshot(path, value)
+    before = old_bytes(s.epoch)
+    with pytest.raises(ValueError, match="review_context_mismatch"):
+        verify_history(s)
+    assert old_bytes(s.epoch) == before and len(s.calls) == len(s.captures) == 1
 
 
 @pytest.mark.parametrize("change", ["result", "binding", "index", "policy", "threshold", "ledger", "pre_capture", "window", "input_fact", "review_request"])
@@ -285,7 +308,7 @@ def test_tampering_after_admission_cannot_prepare_import(decision_recovery_scene
     assert len(s.calls) == len(s.captures) == 1
 
 
-@pytest.mark.parametrize("decision_recovery_scene", ["image_miss"], indirect=True)
+@pytest.mark.parametrize("decision_recovery_scene", ["image_miss", "v2_image_miss"], indirect=True)
 def test_recovery_recomputes_original_semantic_image_miss(decision_recovery_scene):
     s = decision_recovery_scene
     assert verify_history(s)["history"][0]["judged_by"] == "decision"

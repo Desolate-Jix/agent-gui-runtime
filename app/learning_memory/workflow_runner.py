@@ -230,7 +230,8 @@ class WorkflowRunner:
         command = deepcopy(prepared["suggested_command"])
         state["seen_steps"].append(step_id)
         state["ticket"] = {"step_id": step_id, "execution_request_id": command_id,
-                           "prepare_request_id": "wr-prepare-" + _digest([state["run_id"], step_id, len(state["seen_steps"])])[:32],
+                           "prepare_request_id": "wr-prepare-" + _digest([state["run_id"], step_id, len(state["seen_steps"])]
+                               + ([state["intervention_attempts"][step_id]] if state.get("intervention_attempts", {}).get(step_id) else []))[:32],
                            "verify_request_id": "wr-verify-" + _digest([state["run_id"], command_id])[:32],
                            "command_sha256": _digest(command), "suggested_command": command,
                            "dispatch_state": "dispatching"}
@@ -378,7 +379,8 @@ class WorkflowRunner:
             if not _text(step_id) or step_id in state["seen_steps"] or len(state["seen_steps"]) >= 256:
                 self._wait(state, "failed")
                 return
-            request_id = "wr-prepare-" + _digest([state["run_id"], step_id, len(state["seen_steps"]) + 1])[:32]
+            request_id = "wr-prepare-" + _digest([state["run_id"], step_id, len(state["seen_steps"]) + 1]
+                + ([state["intervention_attempts"][step_id]] if state.get("intervention_attempts", {}).get(step_id) else []))[:32]
             capabilities = self._step_vision_capabilities(state, trial)
             prepared = self._trial("prepare", state["run_id"], request_id,
                                    vision_capabilities=capabilities) if capabilities is not None else self._trial("prepare", state["run_id"], request_id)
@@ -414,9 +416,17 @@ class WorkflowRunner:
         self._save(state)
         return True
 
-    def start(self, run_id, request_id, mode, *, vision_capabilities=None):
+    def _assert_start_available(self):
+        active = self._active_run()
+        if active is not None:
+            active_state = self._load(active)
+            if active_state is None or active_state["runner_state"] not in _TERMINAL:
+                raise ValueError("workflow_runner_session_active")
+
+    def start(self, run_id, request_id, mode, *, vision_capabilities=None, _prepare_trial=None):
         _run_id(run_id)
-        if not _text(request_id) or mode not in {"single", "until_wait"}:
+        if (not _text(request_id) or mode not in {"single", "until_wait"}
+                or _prepare_trial is not None and not callable(_prepare_trial)):
             raise ValueError("workflow_runner_start_invalid")
         control_request = {"action": "run", "run_id": run_id, "mode": mode}
         if vision_capabilities is not None:
@@ -428,17 +438,19 @@ class WorkflowRunner:
             vision_capabilities = ClientVisionCapabilities.model_validate(vision_capabilities).model_dump(exclude_none=True)
         with _exclusive(self.lock_path):
             state = self._load(run_id)
+            if _prepare_trial is not None:
+                # 新 Trial 只在同一活动锁与准入检查之后创建；幂等回读仍核验原绑定。
+                if state is None:
+                    self._assert_start_available()
+                _prepare_trial()
             self._recovery_guard(self._trial("status", run_id), state)
             if state is not None:
                 if (state["start_request_id"] != request_id or state["mode"] != mode
                         or state.get("vision_capabilities") != vision_capabilities):
                     raise ValueError("workflow_runner_start_conflict")
                 return self._snapshot(state)
-            active = self._active_run()
-            if active is not None:
-                active_state = self._load(active)
-                if active_state is None or active_state["runner_state"] not in _TERMINAL:
-                    raise ValueError("workflow_runner_session_active")
+            if _prepare_trial is None:
+                self._assert_start_available()
             self._trial("status", run_id)
             state = {"schema": _SCHEMA, "run_id": run_id, "start_request_id": request_id, **self._source_fields(),
                      "mode": mode, "vision_capabilities": vision_capabilities,
@@ -527,6 +539,46 @@ class WorkflowRunner:
             state["runner_state"] = "ready" if state.get("ticket") is None else "dispatching"
             self._save(state)
             self._drive(state, allow_new_dispatch=state["mode"] == "single" and state.get("ticket") is None)
+            return self._snapshot(state)
+
+    def resume_pre_dispatch(self, run_id, request_id, wait_id, review):
+        """仅显式可信零输入恢复可退役原票据；新派发必须使用新 ID。"""
+        if self.source_kind != "caller_plan":
+            raise ValueError("workflow_runner_intervention_source_unsupported")
+        with _exclusive(self.lock_path):
+            state = self._load(run_id)
+            if state is None:
+                raise ValueError("workflow_runner_run_unknown")
+            trial = self._trial("status", run_id)
+            prior = state.get("intervention_resume_requests", {}).get(request_id)
+            if prior is not None:
+                if prior != _digest(review):
+                    raise ValueError("workflow_runner_intervention_resume_conflict")
+                return self._snapshot(state)
+            if state.get("cancel_request_id") or trial["status"] in {"cancel_requested", "cancelled", "failed", "completed"}:
+                raise ValueError("workflow_runner_intervention_cancelled_or_terminal")
+            controls = state.setdefault("control_requests", {})
+            digest = _digest({"kind": "task_plan", "request": review})
+            prior_control = controls.get(request_id)
+            if prior_control is not None and prior_control.get("command_sha256") != digest:
+                raise ValueError("workflow_runner_control_conflict")
+            backend_prior = trial.get("intervention_resumes", {}).get(request_id)
+            if backend_prior is None:
+                self._recovery_guard(trial, state, revalidate_initial=True)
+                if not state.get("wait") or state["wait"]["wait_id"] != wait_id or not state.get("ticket"):
+                    raise ValueError("workflow_runner_intervention_wait_id_mismatch")
+            fresh = self.backend.resume_pre_dispatch(run_id, request_id, wait_id, review)
+            old = fresh["intervention_resumes"][request_id]["packet"]
+            if not state.get("ticket") or state["ticket"]["execution_request_id"] != old["execution_request_id"]:
+                raise ValueError("workflow_runner_intervention_original_ticket_mismatch")
+            controls[request_id] = {"schema": "workflow_runner_control.v1", "command_sha256": digest}
+            state.setdefault("intervention_resume_requests", {})[request_id] = _digest(review)
+            state.setdefault("intervention_attempts", {})[old["step_id"]] = 1
+            state["seen_steps"] = [item for item in state["seen_steps"] if item != old["step_id"]]
+            self._finish_verification_wait(state, "resumed_pre_dispatch")
+            state.update(ticket=None, wait=None, runner_state="ready")
+            self._save(state)
+            self._drive(state, allow_new_dispatch=True)
             return self._snapshot(state)
 
     def _recovery_claim(self, trial, phases):

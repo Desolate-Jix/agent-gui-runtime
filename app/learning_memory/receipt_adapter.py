@@ -68,7 +68,7 @@ def _step(value):
 def _target_observation(kind, result):
     if kind == "input_sequence":
         rows = result.get("steps", [])
-        if not rows or rows[0].get("name") != "focus" or rows[0].get("operation") != "execute_recognition_plan":
+        if not rows or rows[0].get("name") not in {"focus", "focus_type"} or rows[0].get("operation") != "execute_recognition_plan":
             return None
         result = rows[0].get("receipt") or {}
     elif kind != "step":

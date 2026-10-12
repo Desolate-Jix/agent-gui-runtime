@@ -1,5 +1,21 @@
 # 组合输入与合并回执 / Input sequences and bundled receipts
 
+## 2026-10-13 当前视觉输入顺序 / Current visual input sequence
+
+当前实现已替代下方 2026-10-11 初版：Luna 定位 → 候选 Decision → 同一次输入内点击、Ctrl+A、粘贴 → 裁剪标注字段的文字核验 → 按需复核当前字段点击点，再连续点击与 Enter → 当前步骤结果核验。不再单独判断空框、焦点外观、全选外观或点击是否被吞；原身份、坐标、授权、取消和派发回执仍保留。/ The current path replaces the initial design below: ground, review the candidate, atomically click/select-all/paste, verify the annotated field text, optionally review the current field point and execute click→Enter, then verify the current step. There are no separate empty-field, focus-appearance, selection-appearance or click-consumption judgments; identity, coordinates, authority, cancellation and dispatch receipts remain enforced.
+
+当前连续验收仍未通过：Bing–IANA 首轮成功，第二轮输入值正确但 Enter 未见跳转；已增加通用提交绑定，231 项离线检查通过，实测待完成。详细证据见[当前验收记录](VISUAL_EXECUTION_DECISION_FLOW_20261011.md)。下方为保留的历史设计与验收，不能用于证明当前候选已通过。/ Continuous acceptance remains incomplete: Bing–IANA round 1 passed, while round 2 showed correct input without navigation after Enter. The new common submit binding has 231 passing offline checks; live regression is pending. The sections below retain historical designs and results and do not validate the current candidate.
+
+## 2026-10-11 未发布视觉字段路径 / Unreleased visual field route
+
+新 v3 的普通 `input_sequence`（未声明控件 target）默认使用 `field_evidence_mode=visual`。公开命令只传冻结的 `action_review` 上下文，原宿主注入服务、取消回调与同一个剩余截止时间；不接受 JSON 自造字段凭据或派发许可。显式控件 target 和旧 v1/v2 保持原路径。 / Untargeted v3 input sequences use visual field evidence. The existing host injects service, cancellation and deadline; caller JSON cannot manufacture field capabilities. Explicit targets and old plans retain their route.
+
+顺序为：Luna 定位 → 候选 Decision → 真实焦点点击 → 新截图焦点证明 → 全选证明 → 填写一次 → 精确内容读取和后验 Decision → 可选搜索 Enter。没有每步整树扫描，也不加载 VISTA。UIA 只允许有界字段读取；不可用时精确值可以使用已经预热的维护 RapidOCR 目标区域读取，不冷启动 OCR 模型。若两者均不可读或文字不精确，保留输入回执交 Main，不自动再填写。 / Ground and review, click once, prove focus and selection, type once, verify the exact value, then optionally submit search. Use bounded reads or prepared ROI OCR without full-tree scans, VISTA or cold OCR startup. Unreadable/ambiguous values return to Main without retyping.
+
+首版只支持可读普通字段的替换（`clear_existing=true`），不支持密码、追加或任意提交。v3 无控件 target 的追加在启动校验时以 `visual_input_append_unsupported` 拒绝。焦点和值分别至少需要各1次 Decision；如有界本地证据不能证明已有文字已全选，最多另加1次 selection 请求。2026-10-12已移除认证后的字段像素/光标重复审核；仍核对原生输入事实和真实选区变化，本次只做离线验证。 / Initial visual support covers replacement in readable fields, excluding passwords, append and arbitrary submission. Untargeted v3 append fails before queueing. Focus/value each require a check; selection may add one. Post-approval field-pixel/caret rechecks were removed on2026-10-12; native input facts and real selection changes remain checked. This update has offline verification only.
+
+Ctrl+A、正文输入是否开始/完成分别写入真实子回执。超时或取消可能发生在全选之后、正文之前；这属于部分输入，不能记为零输入或成功。相关离线证据见[本轮记录](VISUAL_EXECUTION_DECISION_FLOW_20261011.md)。下方2026-09-21记录为历史版本证据，不验证新路径。 / Selection and text dispatch states are recorded separately. Cancellation after selection is partial input, never zero input or full success. Earlier live results below do not validate this source path.
+
 状态 / Status: **2026-09-21：785 项测试通过，真实 Google 同会话连续搜索 3/3、只填不提交 1/1；未打包、未发布。**
 **785 tests passed, with final same-session Google searches 3/3 and fill-only 1/1. Not packaged or released.**
 首次失败、修复、对照耗时和限制见 [验收记录 / Verification record](EXECUTION_INPUT_SEQUENCE_TESTS.md)。 / The linked record retains initial failures, fixes, comparison timings and limits.
@@ -50,7 +66,7 @@
 ## 中断和限制 / Interruptions and limits
 
 - UIA 可读且当前拥有焦点的字段才支持自动核对。没有 UIA、只绘制在画布上的输入框、密码字段或值读取失败会返回具体读取原因和已完成步骤；不以“粘贴 API 返回成功”冒充内容正确。 / Automatic checking requires a readable, focused UIA field. Unsupported canvas/password/unreadable controls return the read error and partial progress rather than claiming pasted text was verified.
-- 点击后 UIA 焦点发布可能略滞后，仅对 `text_field_keyboard_focus_unavailable` 最多只读等待 500ms，不重复点击。字段聚焦保留整图模型定位，避免相同方位提示在局部裁图中改选另一个字段；框内单词、按钮及严格填写路径不受此优化影响。 / Focus publication may lag; only that transient error gets up to 500ms of read-only waiting. Plain field focusing retains full-image grounding instead of reinterpreting spatial prompts on a crop. Word/button and strict fill paths are unchanged.
+- 点击后UIA焦点发布可能略滞后，仅对text_field_keyboard_focus_unavailable最多只读等待500ms，不重复点击。普通字段聚焦识别已验证的内部scope，长field_goal保留interior提示和整图定位，默认max_edge=1024；显式尺度/关闭设置仍优先，显式单词、非input目标及strict-fill保持原义。scope不提供输入授权，也不保证模型点命中。 / Only transient focus-publication lag permits a bounded read-only wait. Verified internal scope preserves interior prompts and full-image grounding for descriptive field goals, with a 1024px default. Explicit scale/disable settings retain precedence; word/non-input/strict-fill semantics remain. Scope grants no input authority and proves no point accuracy.
 - 输入变化使用同一字段实例核对，允许该实例的字段尺寸变化；窗口/实例改变或内容不匹配则中断，不自动重输或回车。 / Check the same field instance, allowing its field-size changes; identity/value mismatches interrupt without retyping or Enter.
 - 每步先记录派发中状态，完成后保存子步回执；`sequence-progress/<request_id>.json` 保留崩溃/等待期间的部分进度。后图缺失时绝不拿前一步图替代。 / Per-step dispatch checkpoints and receipts preserve partial progress; missing after evidence is never substituted with a prior step's frame.
 - Windows 进度文件使用唯一临时文件和原子发布；只对共享冲突类 WinError 5/32/33 最多重试发布 500ms。输入不会因此重放，持续文件错误仍暴露。 / Unique temporary files and atomic JSON publication retry only sharing-related WinError 5/32/33 for up to 500ms; input is never replayed and persistent errors remain visible.

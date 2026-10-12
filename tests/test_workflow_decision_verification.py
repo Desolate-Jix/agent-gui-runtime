@@ -36,7 +36,7 @@ class DecisionDouble:
         return self.saved.get(result.get("request_id")) == result and all(result.get(key) == value for key, value in binding.items())
 
 
-def scene(services, monkeypatch, *, service=None, condition=CONDITION, image=None, success_conditions=None):
+def scene(services, monkeypatch, *, service=None, condition=CONDITION, image=None, success_conditions=None, review_policy=None):
     programs, trials, saved, session = services
     library = programs.library
     value = deepcopy(saved["definition"])
@@ -44,6 +44,8 @@ def scene(services, monkeypatch, *, service=None, condition=CONDITION, image=Non
     rule = {"kind": "agent_judgment"}
     if condition is not None:
         rule["decision_condition"] = condition
+    if review_policy is not None:
+        rule["review_policy"] = review_policy
     if image is not None:
         library._artifact_root = image[0]
         rule["image_check"] = image[1]

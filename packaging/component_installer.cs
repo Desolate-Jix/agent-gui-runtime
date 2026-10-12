@@ -279,7 +279,8 @@ internal static class ComponentInstaller {
         foreach(string leaf in dirs) { string directory=leaf; while(directory.StartsWith(root,StringComparison.OrdinalIgnoreCase)) { NoReparse(directory); if(Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory); if(Same(directory,root)) break; directory=Path.GetDirectoryName(directory); } }
         if(Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any()) Directory.Delete(root);
     }
-    static string ShortcutPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),Identity.display_name+".lnk"); } }
+    // 执行组件沿用旧快捷方式名称，避免正式升级新增第二个入口。
+    static string ShortcutPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs),(Identity.component=="execution"?"Agent GUI Runtime Execution Preview":Identity.display_name)+".lnk"); } }
     static string DataDirectory { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AgentGUIRuntime","data"); } }
     static string ShortcutTarget(string root) {
         return Identity.component=="execution" ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"WindowsPowerShell","v1.0","powershell.exe") : Path.Combine(root,Identity.entrypoint);
@@ -499,7 +500,7 @@ internal static class ComponentInstaller {
             if(args.Length!=0) Fail("Unsupported installer arguments");
             var payload=PreflightPayload();
             using(var form=new Form {Text=Identity.display_name+" Setup",ClientSize=new Size(640,210),StartPosition=FormStartPosition.CenterScreen,FormBorderStyle=FormBorderStyle.FixedDialog,MaximizeBox=false}) {
-                var label=new Label {Left=20,Top=20,Width=600,Height=120,Text=Identity.display_name+" "+Identity.version+"\n\nInstall for current user:\n"+DefaultRoot+"\n\nNo model weights or user library are installed by this installer. Unsigned preview."};
+                var label=new Label {Left=20,Top=20,Width=600,Height=120,Text=Identity.display_name+" "+Identity.version+"\n\nInstall for current user:\n"+DefaultRoot+"\n\nNo model weights or user library are installed by this installer. Unsigned installer."};
                 var button=new Button {Text="Install",Left=510,Top=160,Width=110};
                 button.Click+=(sender,eventArgs)=>{ try { Install(DefaultRoot,false,payload); MessageBox.Show("Installed successfully. User libraries remain outside the install directory.",Identity.display_name); form.Close(); } catch(Exception error) {MessageBox.Show(error.Message,"Installation refused/failed",MessageBoxButtons.OK,MessageBoxIcon.Error);} };
                 form.Controls.Add(label);form.Controls.Add(button);Application.Run(form);

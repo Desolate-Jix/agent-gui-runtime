@@ -1,11 +1,13 @@
 """关闭本地安全策略时复用原动作路由，不建立学习段或另一个输入后端。"""
 from copy import deepcopy
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from hashlib import sha256
 import asyncio
 import json
 from pathlib import Path
+from threading import get_ident
 from time import perf_counter
 from uuid import uuid4
 
@@ -19,6 +21,62 @@ from app.execution.local_action_contract import LocalActionFieldsError, _validat
 from app.execution.decision_check import (execution_decision_scope, evaluate_post_action,
     validate_decision_check, validate_execution_request_id)
 from .post_action_recovery import observe_recovery_windows
+
+
+_TYPE_ROUTE_ISSUER = object()
+_TYPE_ROUTE_SCOPE = ContextVar('local_typing_route_receipt', default=None)
+
+
+@contextmanager
+def _typing_route_scope(operation, report):
+    from app.core.recognition_dispatch import _receipt_digest
+    scope = ((_TYPE_ROUTE_ISSUER, object(), get_ident(), _receipt_digest(report['request']),
+        _receipt_digest(report['target_identity']), _receipt_digest(report['target_window_geometry']))
+        if operation in {'type_text', 'press_key'} else None)
+    token = _TYPE_ROUTE_SCOPE.set(scope)
+    try:
+        yield scope
+    finally:
+        _TYPE_ROUTE_SCOPE.reset(token)
+
+
+class _TypeTextRouteResponse(dict):
+    def __init__(self, value, *, request, bound, _issuer):
+        scope = _TYPE_ROUTE_SCOPE.get()
+        if _issuer is not _TYPE_ROUTE_ISSUER or scope is None or scope[2] != get_ident():
+            raise ValueError('local typing route issuer unavailable')
+        super().__init__(value)
+        from app.core.recognition_dispatch import _receipt_digest
+        self._issuer, self._owner = _issuer, get_ident()
+        self._scope = scope
+        self._request_digest = _receipt_digest(_audit_request(request))
+        self._binding = (bound.handle, bound.process_id, _window_rect(bound))
+        self._response_digest, self._claimed = _receipt_digest(value), False
+
+
+def _adopt_type_text_no_dispatch(report, request, window_rect, scope):
+    from app.core.recognition_dispatch import _receipt_digest, _type_text_no_dispatch_proof, _key_no_dispatch_proof
+    response, identity = report['response'], report['target_identity']
+    if (scope is None or type(response) is not _TypeTextRouteResponse or response._issuer is not _TYPE_ROUTE_ISSUER
+            or response._scope is not scope
+            or response._owner != get_ident() or response._claimed
+            or response._binding != (identity['target_window_handle'], identity['process_id'], window_rect)):
+        return
+    response._claimed = True
+    try:
+        if (scope[3] != response._request_digest or scope[4] != _receipt_digest(identity)
+                or scope[5] != _receipt_digest(report['target_window_geometry'])
+                or response._request_digest != _receipt_digest(_audit_request(request))
+                or response._request_digest != _receipt_digest(report['request'])
+                or response._response_digest != _receipt_digest(response)):
+            return
+        key = report['operation'] == 'press_key'
+        proof = (_key_no_dispatch_proof if key else _type_text_no_dispatch_proof)(report)
+        if proof is not None:
+            report.update(phase='not_dispatched', action_executed=False,
+                **{'key_no_dispatch' if key else 'type_text_no_dispatch': proof})
+    except (ValueError, TypeError, OverflowError):
+        return
 
 
 class LocalDirectStepMixin:
@@ -116,7 +174,8 @@ class LocalDirectStepMixin:
                            control_target=None, keyboard_target=None, focus_target=None, grounding_target=None,
                            memory_target=None, memory_action=None, memory_resolution=None,
                            memory_bindings=None, learning_context=None, selection_dispatch_boundary=None,
-                           decision_check=None, execution_request_id=None) -> dict:
+                            decision_check=None, execution_request_id=None, action_review=None,
+                             action_review_deadline_ns=None, input_cancelled=None) -> dict:
         """仅本地协调器入口；不经 Agent JSON 关闭策略，也不要求一次性执行凭据。"""
         timer = RuntimeTimer(contract_version="local_step_invocation_timing_v1")
         timing_context = {"invocation_id": "local-invocation-" + uuid4().hex,
@@ -129,6 +188,22 @@ class LocalDirectStepMixin:
         failure = None
         try:
             with timer.step("request_validation"):
+                if input_cancelled is not None:
+                    if not callable(input_cancelled):
+                        raise ValueError("input_cancel_predicate_invalid")
+                    timing_context["input_cancelled"] = input_cancelled
+                from .action_review import normalize_action_review_context
+                action_review = normalize_action_review_context(action_review)
+                if action_review is not None:
+                    if operation != "execute_recognition_plan":
+                        raise ValueError("action_review_requires_recognition_action")
+                    if action_review_deadline_ns is None:
+                        from time import perf_counter_ns
+                        action_review_deadline_ns = perf_counter_ns() + action_review["budget_ms"] * 1_000_000
+                    if type(action_review_deadline_ns) is not int or action_review_deadline_ns <= 0:
+                        raise ValueError("action_review_deadline_invalid")
+                    timing_context.update(action_review=action_review,
+                        action_review_deadline_ns=action_review_deadline_ns)
                 declared = (request.get("metadata") or {}).get("decision_check") if isinstance(request.get("metadata", {}), dict) else None
                 checked = validate_decision_check(decision_check)
                 embedded = validate_decision_check(declared)
@@ -148,6 +223,7 @@ class LocalDirectStepMixin:
                     if operation != 'execute_recognition_plan' or request.get('target_memory') is None:
                         raise ValueError('selection_row_name_reference_required')
                 from app.core.agent_grounding_target import AgentGroundingTarget
+                from app.core.visual_submit_target import VisualSubmitTarget
                 from app.core.memory_grounding_target import MemoryGroundingTarget
                 if memory_target is not None and (operation != "execute_recognition_plan"
                         or type(memory_target) is not MemoryGroundingTarget
@@ -165,7 +241,7 @@ class LocalDirectStepMixin:
                         or request.get("target_memory") is None or not isinstance(memory_bindings, dict)):
                     raise ValueError("internal memory bindings mismatch")
                 if grounding_target is not None and (operation != "execute_recognition_plan"
-                        or type(grounding_target) is not AgentGroundingTarget
+                        or type(grounding_target) not in {AgentGroundingTarget, VisualSubmitTarget}
                         or grounding_target.goal != request.get("goal")
                         or keyboard_target is not None):
                     raise ValueError("internal agent grounding target mismatch")
@@ -174,8 +250,8 @@ class LocalDirectStepMixin:
                         or not isinstance(control_target, LocalControlTarget)):
                     raise ValueError("internal control target requires a recognition click")
                 if focus_target is not None:
-                    from app.core.local_text_focus import LocalTextFocusTarget
-                    if (operation != "execute_recognition_plan" or type(focus_target) is not LocalTextFocusTarget
+                    from app.core.local_text_focus import LocalTextFocusTarget, VisualTextFocusTarget
+                    if (operation != "execute_recognition_plan" or type(focus_target) not in {LocalTextFocusTarget, VisualTextFocusTarget}
                             or focus_target.handle != target_window_handle or focus_target.pid != target_process_id):
                         raise ValueError("internal text focus target mismatch")
                 if type(include_observation) is not bool:
@@ -188,10 +264,13 @@ class LocalDirectStepMixin:
                     raise ValueError("local step requires a valid HWND and PID")
                 request = _validated_request(operation, request)
                 if keyboard_target is not None:
-                    from app.core.local_keyboard_target import LocalKeyboardTarget
-                    if (type(keyboard_target) is not LocalKeyboardTarget
-                            or keyboard_target.snapshot.identity.window_handle != target_window_handle
-                            or keyboard_target.snapshot.identity.process_id != target_process_id):
+                    from app.core.local_keyboard_target import LocalKeyboardTarget, VisualKeyboardTarget
+                    if type(keyboard_target) not in {LocalKeyboardTarget, VisualKeyboardTarget}:
+                        raise ValueError("internal keyboard field target mismatch")
+                    actual_identity = (keyboard_target.window_identity if type(keyboard_target) is VisualKeyboardTarget else
+                        {"handle": keyboard_target.snapshot.identity.window_handle,
+                         "process_id": keyboard_target.snapshot.identity.process_id})
+                    if actual_identity["handle"] != target_window_handle or actual_identity["process_id"] != target_process_id:
                         raise ValueError("internal keyboard field target mismatch")
                     keyboard_target.validate_command(operation, request)
                 timing_context["observation_wait_ms"] = (resolve_render_grace_ms(
@@ -281,7 +360,7 @@ class LocalDirectStepMixin:
             from app.vision.configuration import pinned_vision_configuration
             from app.core.local_control_target import local_control_target_scope
             from app.core.local_keyboard_target import local_keyboard_target_scope
-            from app.core.local_text_focus import local_text_focus_scope
+            from app.core.local_text_focus import local_text_focus_scope, visual_text_focus_scope, VisualTextFocusTarget
             from app.core.agent_grounding_target import agent_grounding_scope
             from app.core.memory_grounding_target import memory_grounding_scope
             if request.get('selection_intent') is not None:
@@ -295,13 +374,22 @@ class LocalDirectStepMixin:
             if learning_context is not None:
                 from app.learning_memory.learning_observation_capture import learning_capture_scope
                 capture_scope = learning_capture_scope(self, learning_context)
-            with _local_operator_step_scope(), local_control_target_scope(control_target), local_keyboard_target_scope(keyboard_target), local_text_focus_scope(focus_target), agent_grounding_scope(grounding_target), memory_grounding_scope(memory_target), (pinned_vision_configuration(configuration) if configuration else nullcontext()), capture_scope:
+            focus_scope = (visual_text_focus_scope(focus_target) if type(focus_target) is VisualTextFocusTarget
+                else local_text_focus_scope(focus_target))
+            with _local_operator_step_scope(), local_control_target_scope(control_target), local_keyboard_target_scope(keyboard_target), focus_scope, agent_grounding_scope(grounding_target), memory_grounding_scope(memory_target), (pinned_vision_configuration(configuration) if configuration else nullcontext()), capture_scope:
                 return self._perform_local_step_on_owner(handle, pid, operation, request, timer, timing_context)
         finally:
             timing_context["local_step_timings"] = {**timer.to_dict(), "scope": "owner_execution",
                 "inclusive": True, "nested_timings_additive": False}
 
     def _perform_local_step_on_owner(self, handle, pid, operation, request, timer, timing_context):
+        def cancelled():
+            predicate = timing_context.get("input_cancelled")
+            value = False if predicate is None else predicate()
+            if type(value) is not bool:
+                raise ValueError("input_cancel_state_unknown")
+            return value or self._cancel_wait.is_set() or self._shutdown
+
         with timer.step("binding_identity"):
             manager = self._windows()
             bound = manager.bind_window_by_handle(handle)
@@ -354,7 +442,7 @@ class LocalDirectStepMixin:
             with _local_operator_input_scope(manager=manager, identity_reader=reader, identity=identity,
                     window_rect=window_rect,
                     enabled=lambda: not self._automatic_safety_interception and not self._shutdown
-                                    and not self._cancel_wait.is_set()):
+                                    and not cancelled()):
                 report["phase"] = "dispatching"
                 if 'selection_dispatch_boundary' in timing_context:
                     timing_context['selection_dispatch_boundary']()
@@ -363,13 +451,27 @@ class LocalDirectStepMixin:
                 with timer.step("route_call", inclusive=True):
                     checked = timing_context.get("decision_check")
                     execution_id = timing_context.get("execution_request_id")
-                    with execution_decision_scope(getattr(self, "_decision_service", None),
+                    from app.execution.popup_decision import popup_decision_scope
+                    from app.execution.action_review import action_review_scope
+                    with _typing_route_scope(operation, report) as typing_scope, \
+                            execution_decision_scope(getattr(self, "_decision_service", None),
                             decision_check=checked, execution_request_id=execution_id,
                             request_id="decision-before-" + execution_id if execution_id else None,
-                            step_id=step_id, evidence_root=output / "decision-evidence") as decision_scope:
+                            step_id=step_id, evidence_root=output / "decision-evidence") as decision_scope, \
+                            popup_decision_scope(getattr(self, "_decision_service", None),
+                                execution_request_id=execution_id or step_id, step_id=step_id,
+                                evidence_root=output / "decision-evidence") as popup_scope, \
+                            action_review_scope(getattr(self, "_decision_service", None),
+                                context=timing_context.get("action_review"),
+                                deadline_ns=timing_context.get("action_review_deadline_ns"),
+                                cancelled=cancelled) as review_scope:
                         report["response"] = _post_action(operation, request, manager)
                         if decision_scope is not None and decision_scope["result"] is not None:
                             report["decision_judgment"] = deepcopy(decision_scope["result"])
+                        if popup_scope["result"] is not None:
+                            report["popup_decision_judgment"] = deepcopy(popup_scope["result"])
+                        if review_scope is not None and review_scope["assessment"] is not None:
+                            report["action_assessment"] = deepcopy(review_scope["assessment"])
             # 进入原路由后可能已产生部分输入，失败返回不能证明没有副作用。
             report["phase"] = "returned" if report["response"].get("success") is True else "result_unknown"
             if request.get('selection_intent') is not None:
@@ -389,14 +491,16 @@ class LocalDirectStepMixin:
                 else:
                     report['status'] = 'failed'
             response_data = report["response"].get("data") or {}
-            if (report["response"].get("success") is False and isinstance(response_data, dict)
+            from app.core.recognition_dispatch import recognition_plan_rejected_before_dispatch
+            if (operation == "execute_recognition_plan"
+                    and recognition_plan_rejected_before_dispatch(report["response"])):
+                report.update(phase="not_dispatched", action_executed=False)
+            elif operation in {'type_text', 'press_key'}:
+                _adopt_type_text_no_dispatch(report, request, window_rect, typing_scope)
+            elif (report["response"].get("success") is False and isinstance(response_data, dict)
                     and response_data.get("dispatch_status") == "not_dispatched"
                     and response_data.get("decision_judgment") is not None
                     and (response_data.get("execution_path") or {}).get("action_executed") is False):
-                report["phase"] = "not_dispatched"
-            elif (operation == "press_key" and report["response"].get("success") is False
-                    and response_data.get("dispatch_status") == "not_dispatched"
-                    and response_data.get("pressed") is False):
                 report["phase"] = "not_dispatched"
             elif (operation == "scroll" and report["response"].get("success") is False
                     and isinstance(response_data, dict)
@@ -551,11 +655,24 @@ def _post_action(operation, request, manager):
                       "scroll": (ScrollRequest, action.scroll),
                       "execute_recognition_plan": (ExecuteRecognitionPlanRequest, action.execute_recognition_plan)}[operation]
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    typing_route = {}
 
     @app.post("/action/" + operation)
     async def endpoint(payload: dict):
         # 保持 Windows COM/窗口访问在当前串行 owner，不让 FastAPI 切换到工作线程。
-        return handler(model.model_validate(payload)).model_dump()
+        validated = model.model_validate(payload)
+        if operation not in {'type_text', 'press_key'}:
+            return handler(validated).model_dump()
+        # 仅实际原路由同次返回可产生凭证，公开 JSON 或替换 _post_action 不能重新盖章。
+        before = manager.get_bound_window()
+        binding = (before.handle, before.process_id, _window_rect(before)) if before is not None else None
+        value = handler(validated).model_dump()
+        after = manager.get_bound_window()
+        if (_TYPE_ROUTE_SCOPE.get() is not None and binding is not None and after is not None
+                and binding == (after.handle, after.process_id, _window_rect(after))):
+            typing_route['response'] = _TypeTextRouteResponse(deepcopy(value), request=request,
+                bound=after, _issuer=_TYPE_ROUTE_ISSUER)
+        return value
 
     async def send():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://local-operator") as client:
@@ -563,7 +680,9 @@ def _post_action(operation, request, manager):
             response.raise_for_status()
             return response.json()
 
-    return asyncio.run(send())
+    response = asyncio.run(send())
+    original = typing_route.get('response')
+    return original if original is not None and original == response else response
 
 
 def _audit_request(request):

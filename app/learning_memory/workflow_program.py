@@ -139,7 +139,7 @@ def _step_rules(step, inputs, available, declarations):
         required = {"kind"} if kind == "agent_judgment" else {"kind", "target"}
         if kind in {"field_equals", "text_equals", "text_contains"}:
             required.add("expected")
-        optional = {"output_name", "image_check", "decision_condition"} if kind == "agent_judgment" else {"output_name"}
+        optional = {"output_name", "image_check", "decision_condition", "condition_binding", "review_policy"} if kind == "agent_judgment" else {"output_name"}
         if not required <= set(verification) or set(verification) - required - optional:
             raise ValueError("task_program_verification_fields_invalid")
         if "decision_condition" in verification:
@@ -148,6 +148,19 @@ def _step_rules(step, inputs, available, declarations):
                 raise ValueError("task_program_decision_condition_invalid")
             if step.get("outputs") or "read_spec" in step or step["action"]["kind"] == "read_text":
                 raise ValueError("task_program_decision_dynamic_read_forbidden")
+        if "condition_binding" in verification:
+            from app.judgment.condition_templates import validate_condition_binding
+            if "decision_condition" in verification:
+                raise ValueError("task_program_decision_condition_binding_conflict")
+            if step.get("outputs") or "read_spec" in step or step["action"]["kind"] == "read_text":
+                raise ValueError("task_program_decision_dynamic_read_forbidden")
+            validate_condition_binding(verification["condition_binding"], input_types={
+                name: "string" if typ == "text" else typ for name, typ in inputs.items()})
+        if "review_policy" in verification:
+            if not isinstance(verification["review_policy"], str) or verification["review_policy"] not in {"adaptive", "always_main"}:
+                raise ValueError("task_program_decision_review_policy_invalid")
+            if step.get("outputs") or "read_spec" in step or step["action"]["kind"] == "read_text":
+                raise ValueError("task_program_decision_review_dynamic_read_forbidden")
         if "image_check" in verification:
             from .image_verification import validate_image_check
             validate_image_check(verification["image_check"])
@@ -262,6 +275,8 @@ def validate_definition(definition, node_ids):
             if branches[branch] is not None and branches[branch] not in ids:
                 raise ValueError("task_program_branch_target_invalid")
         available.update(own_outputs)
+    from .workflow_condition_templates import validate_template_revisions
+    validate_template_revisions(definition)
     declared = {(step["step_id"], item["name"]): item["type"] for step in steps for item in step["outputs"]}
     for item in definition["outputs"]:
         if (item.get("step_id"), item["name"]) not in declared:
@@ -379,6 +394,10 @@ def _derive_provenance(definition, baseline, *, verified_read_sources=frozenset(
             changed_steps.add(step["step_id"])
     references_by_step = {step["step_id"]: ([step["action"].get("text")] if isinstance(step["action"], dict) else []) + [(step.get("verification") or {}).get("expected")] + [
         item.get("left") for label in ("preconditions", "success_conditions") for item in step[label]] for step in checked["steps"]}
+    for step in checked["steps"]:
+        binding = step.get("verification", {}).get("condition_binding")
+        if binding is not None:
+            references_by_step[step["step_id"]].extend(binding["typed_parameters"].values())
     for step_id, references in (target_dependencies or {}).items():
         references_by_step[step_id].extend(references)
     affected_steps = changed_steps | changed_program_outputs | {step_id for step_id, references in references_by_step.items()
@@ -514,6 +533,8 @@ class WorkflowProgramService:
         memory = read_project(self.library, workflow_id, current["project_snapshot_id"])
         node_ids = {node["node_id"] for node in memory["graph"]["nodes"]}
         validated = validate_definition(definition, node_ids)
+        from .workflow_condition_templates import validate_template_revisions
+        validate_template_revisions(validated, current["definition"])
         from .image_verification import load_reference_image
         for step in validated["steps"]:
             check = step.get("verification", {}).get("image_check")

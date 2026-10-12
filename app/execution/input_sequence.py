@@ -1,36 +1,10 @@
 """通用输入组合：复用单步执行与字段读取，检查失败即返回已完成部分。"""
 from copy import deepcopy
 from hashlib import sha256
-from time import perf_counter, sleep
+from time import perf_counter, perf_counter_ns, sleep
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-
-class InputSequenceRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    field_goal: str = Field(min_length=1, max_length=2000)
-    text: str = Field(min_length=1, max_length=20000)
-    clear_existing: bool = True
-    submit_search: bool
-    target_memory: dict[str, str] | None = None
-    target: dict | None = None
-
-    @field_validator("target")
-    @classmethod
-    def validate_target(cls, value):
-        if value is None:
-            return None
-        from .task_plan_target import validate_task_plan_control_target
-        return validate_task_plan_control_target(value, for_input=True)
-
-    @field_validator("target_memory")
-    @classmethod
-    def validate_target_memory(cls, value):
-        if value is None:
-            return None
-        from app.learning_memory.target_recipe import validate_target_reference
-        return validate_target_reference(value)
+from app.core.input_sequence_contract import InputSequenceRequest
 
 
 class InputSequenceInterrupted(ValueError):
@@ -223,10 +197,37 @@ def _read_local_focus(coordinator, target, capture, field_id, binding, expected_
 
 def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None, observation_condition=None, persist=None,
                        _tab_from=None, _expected_label=None, _on_field_complete=None, _prefer_current_uia=False,
-                       _declared_label=None, memory_bindings=None, learning_context=None):
+                       _declared_label=None, memory_bindings=None, learning_context=None,
+                        field_evidence_mode="legacy", visual_field_context=None,
+                        action_review=None, action_review_deadline_ns=None):
     """同一宿主串行命令内完成组合；不循环点击、不自动改写目标或重试输入。"""
     learning_context = deepcopy(learning_context) if learning_context is not None else None
     spec = InputSequenceRequest.model_validate(request)
+    if field_evidence_mode not in {"legacy", "visual"}:
+        raise ValueError("visual_field_evidence_mode_invalid")
+    visual = field_evidence_mode == "visual"
+    if visual:
+        if (not isinstance(visual_field_context, dict) or visual_field_context.get("field_kind") not in {
+                "text", "search", "address_bar"}
+                or spec.submit_search and visual_field_context["field_kind"] not in {"search", "address_bar"}
+                or spec.target is not None or spec.target_memory is not None or _tab_from is not None
+                or _prefer_current_uia or _on_field_complete is not None or learning_context is not None):
+            raise ValueError("visual_field_route_unsupported")
+        from .visual_field_proof import _deadline
+        _deadline(visual_field_context)
+        native_evidence = visual_field_context.get("native_field_evidence", False)
+        if type(native_evidence) is not bool:
+            raise ValueError("visual_field_native_evidence_mode_invalid")
+        visual_field_context = {**visual_field_context,
+            "native_field_evidence": native_evidence,
+            "review_context": deepcopy(visual_field_context.get("review_context"))}
+        if not spec.clear_existing:
+            raise ValueError("visual_field_append_requires_explicit_native_route")
+        visual_field_context.pop("field_content_check", None)
+        visual_field_context.pop("field_content_ocr", None)
+    elif visual_field_context is not None:
+        raise ValueError("visual_field_context_requires_explicit_visual_mode")
+    compound_visual = visual and not native_evidence
     if spec.target is not None:
         if (spec.target_memory is not None or _tab_from is not None
                 or _declared_label is not None and _declared_label != spec.target["name"]):
@@ -263,6 +264,10 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
     group_id = "input-sequence-" + uuid4().hex
     field_binding = None
     local_binding = None
+    started_actions = []
+    focus_read_error = None
+    visual_focus_readonly_error = None
+    visual_focus_readonly_stage = None
     started = perf_counter()
     result = {"contract_version": "input_sequence_v1", "sequence_id": group_id,
         "status": "running", "phase": "focus", "target": dict(target), "steps": [],
@@ -277,7 +282,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         if persist is not None:
             persist(result)
 
-    def action(name, operation, payload, wait_ms, *, keyboard_target=None, focus_target=None, memory_action=None):
+    def action(name, operation, payload, wait_ms, *, keyboard_target=None, focus_target=None, memory_action=None, grounding_target=None):
         result["phase"] = name
         # 后图必须属于最后一次尝试，不能把上一步的图冒充本次输入后的图。
         result["observation"] = {"status": "unavailable", "reason": "action_in_progress"}
@@ -286,11 +291,16 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         checkpoint()
         at = perf_counter()
         try:
+            started_actions.append(name)
             step = coordinator.execute_local_step(target_window_handle=target["handle"],
                 target_process_id=target["process_id"], operation=operation, request=payload,
                 include_observation=True, observation_wait_ms=wait_ms,
                 **({"keyboard_target": keyboard_target} if keyboard_target is not None else {}),
                 **({"focus_target": focus_target} if focus_target is not None else {}),
+                **({"grounding_target": grounding_target} if grounding_target is not None else {}),
+                 **({key: value for key, value in {"action_review": action_review,
+                     "action_review_deadline_ns": action_review_deadline_ns}.items() if value is not None}
+                    if name in {"focus", "focus_type"} or grounding_target is not None else {}),
                 **({"memory_action": memory_action, "memory_bindings": memory_bindings}
                    if memory_action is not None and memory_bindings is not None else
                    {"memory_action": memory_action} if memory_action is not None else {}),
@@ -310,6 +320,13 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         data = _action_data(step)
         dispatched = ((data.get("execution_path") or {}).get("action_executed", data.get("action_executed"))
                       if operation != "press_key" else data.get("pressed"))
+        from app.core.local_step_no_dispatch import pre_capture_failure_verified
+        if pre_capture_failure_verified(step, operation):
+            dispatched = False
+        if dispatched is False:
+            from app.core.recognition_dispatch import local_receipt_zero_input_verified
+            if not local_receipt_zero_input_verified(step, operation):
+                dispatched = None
         row["action_executed"] = dispatched if type(dispatched) is bool else None
         if dispatched is True:
             result["action_executed"] = True
@@ -325,6 +342,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         return data
 
     def read(name, point):
+        nonlocal focus_read_error
         result["phase"] = name
         checkpoint()
         at = perf_counter()
@@ -336,9 +354,17 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                     coordinator, target, point, capture, group_id, expected_identity,
                     **({"field_binding": field_binding, "post_input": name == "check_input"}
                        if field_binding is not None else {})))
-            result.setdefault("field_reads", []).append({"name": name, **snapshot.to_reference()})
+            patterns = snapshot.pattern_evidence
+            result.setdefault("field_reads", []).append({"name": name, **snapshot.to_reference(),
+                **({"pattern_evidence": patterns.to_reference()} if patterns is not None else {})})
+            if name == "check_focus" and spec.clear_existing is False and snapshot.selection is None:
+                from app.agent.windows_text_field_reader import TextFieldReadError
+                raise TextFieldReadError("text_field_selection_unavailable")
             return snapshot
         except Exception as error:
+            from app.agent.windows_text_field_reader import TextFieldReadError
+            if name == "check_focus" and isinstance(error, TextFieldReadError):
+                focus_read_error = error
             result["input_check"] = {"status": "unavailable", "phase": name,
                 "reason": getattr(error, "reason_code", "field_read_failed")}
             raise
@@ -347,16 +373,20 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 "elapsed_ms": round((perf_counter() - at) * 1000, 3)})
 
     try:
-        from app.core.local_text_focus import LocalTextFocusTarget
-        focus_target = LocalTextFocusTarget(target["handle"], target["process_id"],
+        from app.core.local_text_focus import LocalTextFocusTarget, VisualTextFocusTarget
+        focus_type = VisualTextFocusTarget if visual else LocalTextFocusTarget
+        focus_target = focus_type(target["handle"], target["process_id"],
             expected_label=_declared_label)
+        if compound_visual:
+            from app.core.visual_compound_input import bind_visual_compound_input
+            bind_visual_compound_input(focus_target, text=spec.text, context=visual_field_context, field_goal=spec.field_goal)
         if _tab_from is None:
             focus_metadata = {}
             if _prefer_current_uia:
                 focus_metadata["text_focus_route"] = "current_uia_primary"
             if spec.target is not None:
                 focus_metadata["task_plan_target"] = deepcopy(spec.target)
-            located = action("focus", "execute_recognition_plan", {
+            located = action("focus_type" if compound_visual else "focus", "execute_recognition_plan", {
                 "goal": spec.field_goal, "click_kind": "single",
                 **({"target_memory": spec.target_memory} if spec.target_memory is not None else {}),
                 **({"metadata": focus_metadata} if focus_metadata else {})},
@@ -391,6 +421,169 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         else:
             result["local_focus_binding"] = dict(local_binding)
         result["phase"] = "check_focus"
+        if visual:
+            from app.agent.windows_text_field_reader import TextFieldReadError
+            from .visual_field_proof import (assess_visual_field, read_visual_value,
+                read_visual_focus_snapshot, assess_visual_selection, assess_visual_field_freshness,
+                VisualFieldReviewRequired)
+            from .decision_check import _candidate, _identity
+            from app.core.local_keyboard_target import issue_visual_keyboard_target
+            focus_receipt = result["steps"][0]["receipt"]
+            candidate = (located.get("recognition_plan") or {}).get("recommended_target")
+            rect = focus_receipt["target_window_geometry"]["rect"]
+            expected_field = {"field_goal": spec.field_goal, "bbox": _candidate(candidate, point)["bbox"],
+                "click_point": deepcopy(point), "window_identity": _identity(focus_receipt["target_identity"]),
+                "window_rect": [rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1]],
+                "field_kind": visual_field_context["field_kind"], "expected_text": spec.text}
+            result["field_evaluations"] = []
+            def evaluate_field(stage, callback):
+                row = {"stage": stage, "status": "started"}
+                result["field_evaluations"].append(row)
+                at = perf_counter()
+                try:
+                    proof = callback()
+                    reference = proof.to_reference()
+                    row.update(status="adopted", request_sha256=reference["request_sha256"])
+                    return proof, reference
+                except VisualFieldReviewRequired as error:
+                    handoff = VisualFieldReviewRequired.to_reference(error)
+                    row.update(status="not_adopted", request_sha256=handoff["assessment"]["request_sha256"])
+                    result["main_handoff"] = {**handoff, "stage": stage}
+                    raise
+                except ValueError:
+                    row["status"] = "not_adopted"
+                    raise
+                finally:
+                    row["elapsed_ms"] = round((perf_counter() - at) * 1000, 3)
+                    checkpoint()
+            def review_selection(proof, frame, dispatch):
+                selected, reference = evaluate_field("after_selection", lambda: assess_visual_selection(
+                    proof, frame=frame, dispatch=dispatch))
+                result["field_proofs"].append(reference)
+                return selected
+            def review_field_freshness(proof, frame, native_snapshot):
+                stage = "before_type_freshness" if proof.request()["action"]["field_phase"] == "focus" else "before_enter_freshness"
+                reviewed, reference = evaluate_field(stage, lambda: assess_visual_field_freshness(
+                    proof, frame=frame, native_snapshot=native_snapshot))
+                result["field_proofs"].append(reference)
+                return reviewed
+            def readonly_focus(stage, callback):
+                nonlocal visual_focus_readonly_error, visual_focus_readonly_stage
+                try:
+                    return callback()
+                except Exception as error:
+                    if native_evidence:
+                        raise
+                    # 保留兼容阶段名；纯视觉只确认实际点击点属于目标输入框。
+                    reason = str(error) if isinstance(error, ValueError) and 0 < len(str(error)) <= 256 else "visual_focus_readonly_failed"
+                    visual_focus_readonly_error = InputSequenceInterrupted(reason)
+                    visual_focus_readonly_stage = stage
+                    raise visual_focus_readonly_error from error
+            if compound_visual:
+                result["field_proofs"] = []
+            else:
+                try:
+                    focus_snapshot = None
+                    focus_frame = result["observation"]["capture"]
+                    try:
+                        if native_evidence:
+                            focus_snapshot = coordinator._owner.call(lambda: read_visual_focus_snapshot(
+                                frame=result["observation"]["capture"], expected_field=expected_field, manager=coordinator._windows()))
+                    except TextFieldReadError as error:
+                        # 只登记真实只读快照失败，评估或键盘目标构造异常不能冒充原生读取证明。
+                        focus_read_error = error
+                        raise
+                    focus_proof, focus_reference = readonly_focus("after_click_assessment", lambda: coordinator._owner.call(lambda: evaluate_field("after_click",
+                        lambda: assess_visual_field(phase="focus",
+                        focus_receipt=focus_receipt, input_receipt=None, frame=focus_frame,
+                        expected_field=expected_field, context=visual_field_context, focus_snapshot=focus_snapshot))))
+                    effective_clear = spec.clear_existing
+                    if not native_evidence:
+                        result["visual_click_evidence"] = coordinator._owner.call(lambda: {
+                            "session_directory": str(focus_proof._service.session_dir),
+                            "profile": focus_proof._service.profile.model_dump(mode="json", exclude_unset=True),
+                            "request": focus_proof.request(), "assessment": focus_proof.assessment()})
+                    visual_field_context["typing_focus_proof"] = focus_proof
+                    keyboard_target = coordinator._owner.call(lambda: issue_visual_keyboard_target(
+                        focus_proof, "type_text", text=spec.text, clear_existing=effective_clear, selection_reviewer=review_selection,
+                        freshness_reviewer=review_field_freshness))
+                except ValueError as error:
+                    result["input_check"] = {"status": "unavailable", "phase": "check_focus", "reason": str(error)}
+                    if error is visual_focus_readonly_error:
+                        result["input_check"].update(evidence_kind="visual", focus_stage="after_click",
+                            read_only_stage=visual_focus_readonly_stage)
+                        raise
+                    if error is focus_read_error:
+                        raise
+                    raise InputSequenceInterrupted(str(error)) from error
+                result["field_proofs"] = [focus_reference]
+                action("type", "type_text", {"text": spec.text, **point,
+                    "click_before_typing": False, "clear_existing": effective_clear}, 0, keyboard_target=keyboard_target)
+            result["phase"] = "check_input"
+            typed = result["steps"][-1]["receipt"]
+            try:
+                value_reading = None
+                if native_evidence:
+                    value_reading = coordinator._owner.call(lambda: read_visual_value(
+                        frame=result["observation"]["capture"], expected_field=expected_field,
+                        context=visual_field_context, manager=coordinator._windows()))
+                value_proof, value_reference = coordinator._owner.call(lambda: evaluate_field("after_type",
+                    lambda: assess_visual_field(phase="value",
+                    focus_receipt=focus_receipt, input_receipt=typed, frame=result["observation"]["capture"],
+                    expected_field=expected_field, context=visual_field_context, value_reading=value_reading)))
+            except ValueError as error:
+                result["input_check"] = {"status": "unavailable", "phase": "check_input", "reason": str(error)}
+                raise InputSequenceInterrupted(str(error)) from error
+            result["field_proofs"].append(value_reference)
+            result["input_check"] = ({"status": "matched", "source": value_reference["reading"]["source"],
+                "value_sha256": value_reference["value_sha256"], "evidence_kind": "visual"}
+                if native_evidence else {"status": "verified", "source": "decision_visual", "evidence_kind": "visual"})
+            result["completed_steps"].append("check_input")
+            if spec.submit_search:
+                result["phase"] = "prepare_search"
+                def prepare_enter():
+                    try:
+                        keyboard = issue_visual_keyboard_target(value_proof, "press_key", submit_search=True,
+                            freshness_reviewer=review_field_freshness)
+                        if compound_visual:
+                            from app.core.visual_submit_target import VisualSubmitTarget
+                            return VisualSubmitTarget(keyboard, action_review=action_review)
+                        return keyboard
+                    except ValueError:
+                        # 只认证签发前沿的真实取消或期限；异常文字不能证明 Enter 未派发。
+                        cancelled = visual_field_context.get("cancelled")
+                        stopped = cancelled() if callable(cancelled) else False
+                        observed = perf_counter_ns()
+                        deadline = visual_field_context["deadline_ns"]
+                        if (native_evidence or started_actions != (["focus_type"] if compound_visual else ["focus", "type"])
+                                or type(stopped) is not bool or not (stopped or observed >= deadline)):
+                            raise
+                        import json
+                        from app.core.input_sequence_partial import _digest
+                        value = json.loads(value_proof._json_value)
+                        reason = "visual_field_cancelled" if stopped else "visual_field_deadline_expired"
+                        result["enter_preparation_failure"] = {
+                            "schema": "visual_enter_preparation_partial.v1", "stage": "before_enter_dispatch",
+                            "sequence_id": group_id, "request_sha256": _digest(spec.model_dump(mode="json")),
+                            "focus_receipt_sha256": _digest(focus_receipt), "input_receipt_sha256": _digest(typed),
+                            "value_request_sha256": value_reference["request_sha256"], "stop_reason": reason,
+                            "cancelled": stopped, "deadline_ns": deadline, "observed_at_ns": observed,
+                            "started_actions": list(started_actions), "suffix_dispatch_started": False,
+                            # 已过期证明只作失败结算，由消费者读原账本认证，绝不重新授权。
+                            "evidence": {"session_directory": str(value_proof._service.session_dir),
+                                "profile": value_proof._service.profile.model_dump(mode="json", exclude_unset=True),
+                                "request": value["request"], "assessment": value["assessment"]}}
+                        raise InputSequenceInterrupted(reason) from None
+                keyboard_target = coordinator._owner.call(prepare_enter)
+                if compound_visual:
+                    action("search", "execute_recognition_plan", {"goal": spec.field_goal,
+                        "click_kind": "single"}, observation_wait_ms, grounding_target=keyboard_target)
+                else:
+                    action("search", "press_key", {"key": "Enter", **point}, observation_wait_ms,
+                        keyboard_target=keyboard_target)
+            result.update(status="completed", phase="returned", evidence_kind="visual",
+                next_action="inspect_returned_image_and_judge_task_effect")
+            return result
         field_binding = (_focus_field_binding(located, result["steps"][0]["receipt"], target)
                          if _tab_from is None else None)
         if (field_binding is not None and focus_target.binding is not None
@@ -482,6 +675,26 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             diagnostic = TextFieldReadError.to_reference(error).get("diagnostic")
             if diagnostic:
                 result["error"]["diagnostic"] = diagnostic
+            if error is focus_read_error:
+                from app.core.input_sequence_partial import make_focus_partial_proof
+                proof = make_focus_partial_proof(result, spec.model_dump(mode="json"),
+                    started_actions=started_actions)
+                if proof is not None:
+                    result["partial_input_terminal"] = proof
+        if error is visual_focus_readonly_error:
+            from app.core.input_sequence_partial import make_focus_partial_proof
+            proof = make_focus_partial_proof(result, spec.model_dump(mode="json"),
+                started_actions=started_actions, read_only_stage=visual_focus_readonly_stage)
+            if proof is not None:
+                result["partial_input_terminal"] = proof
+        if "main_handoff" in result:
+            # 派发事实仍取原子步回执；只读交接不推断未知输入，也不授予重放。
+            data = _action_data(result["steps"][-1]["receipt"]) if result["steps"][-1].get("receipt") else {}
+            result["main_handoff"]["original_input"] = {
+                "completed_steps": deepcopy(result["completed_steps"]), "interrupted_at": result["interrupted_at"],
+                "action_executed": result["action_executed"], "input_check": deepcopy(result["input_check"]),
+                "typing_dispatch": deepcopy(data.get("typing_dispatch") or (data.get("type_result") or {}).get("typing_dispatch"))}
+            result["next_action"] = "review_original_evidence_with_main_before_a_new_command"
     finally:
         checkpoint()
     return result

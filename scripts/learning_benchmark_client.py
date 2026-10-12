@@ -9,6 +9,7 @@ import inspect
 import math
 import os
 from pathlib import Path
+import re
 import sys
 from time import monotonic, monotonic_ns
 from uuid import uuid4
@@ -28,9 +29,41 @@ _READ_ONLY_WORKFLOW_ACTIONS = frozenset({
     "compile", "read", "save", "start", "prepare", "review", "verify", "status", "cancel",
     "synthesis_prepare", "synthesis_status", "synthesis_complete", "synthesis_resume",
 })
-_READ_ONLY_PLAN_ACTIONS = frozenset({"status", "cancel"})
+_READ_ONLY_PLAN_ACTIONS = frozenset({"status", "cancel", "observe"})
 _PLAN_TERMINAL = frozenset({"completed", "failed", "cancelled"})
 _TOOLS = frozenset({"instant_status", "instant_submit", "instant_result", "instant_run", "instant_image"})
+
+
+def _validate_manual_packet_progress(packet, previous):
+    ancestors = packet.get("packet_ancestors")
+    revision = packet.get("packet_revision")
+    basis = packet.get("assessment_basis")
+    if (type(revision) is not int or not 1 <= revision <= 2
+            or not isinstance(ancestors, list) or len(ancestors) != revision
+            or any(not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item) for item in ancestors)
+            or len(set(ancestors)) != len(ancestors) or packet["packet_sha256"] in ancestors
+            or packet.get("previous_packet_sha256") != ancestors[-1]
+            or not isinstance(basis, dict) or set(basis) != {"packet_sha256", "evidence_set_sha256", "assessment_round"}
+            or basis["packet_sha256"] != ancestors[0]
+            or type(basis["assessment_round"]) is not int or basis["assessment_round"] != packet["assessment_round"]
+            or not isinstance(basis["evidence_set_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", basis["evidence_set_sha256"])
+            or not isinstance(packet.get("latest_observation"), dict)
+            or packet["latest_observation"].get("role") != "observation"
+            or not isinstance(packet.get("input_evidence_refs"), list)
+            or not any(isinstance(ref, dict) and ref.get("sha256") == packet["latest_observation"].get("sha256")
+                for ref in packet["input_evidence_refs"])):
+        raise ValueError("benchmark_task_plan_review_packet_revision_invalid")
+    if previous is None or previous == packet:
+        return
+    old_revision = previous.get("packet_revision", 0)
+    if (type(old_revision) is not int or old_revision >= revision
+            or ancestors[:old_revision] != previous.get("packet_ancestors", [])
+            or ancestors[old_revision] != previous["packet_sha256"]
+            or any(packet.get(key) != previous.get(key) for key in ("after", "assessment_round",
+                "original_input_status", "action_executed", "wait_id", "execution_request_id"))
+            or any(ref not in packet["input_evidence_refs"] for ref in previous.get("input_evidence_refs", previous["evidence_refs"]))
+            or any(ref not in packet["evidence_refs"] for ref in previous["evidence_refs"])):
+        raise ValueError("benchmark_task_plan_stale_review_packet")
 
 
 class BenchmarkCallError(RuntimeError):
@@ -96,6 +129,15 @@ class LearningBenchmarkClient:
         with (self.evidence_dir / "calls.jsonl").open("a", encoding="utf-8", newline="\n") as stream:
             stream.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
+    def _decode_response(self, response, tool, args):
+        value = getattr(response, "structuredContent", None)
+        if not isinstance(value, dict):
+            blocks = [block.text for block in response.content if block.type == "text"]
+            if not blocks:
+                raise ValueError("benchmark_client_response_missing")
+            value = json.loads(blocks[0])
+        return value
+
     async def _invoke(self, tool, args):
         if self._session is None:
             raise ValueError("benchmark_client_not_connected")
@@ -103,12 +145,7 @@ class LearningBenchmarkClient:
         started = monotonic_ns()
         try:
             response = await self._session.call_tool(tool, args)
-            value = getattr(response, "structuredContent", None)
-            if not isinstance(value, dict):
-                blocks = [block.text for block in response.content if block.type == "text"]
-                if not blocks:
-                    raise ValueError("benchmark_client_response_missing")
-                value = json.loads(blocks[0])
+            value = self._decode_response(response, tool, args)
             status = str(value.get("status") or value.get("phase") or "returned")
             self._journal(tool, request_id, status, (monotonic_ns() - started) / 1_000_000)
             if getattr(response, "is_error", False) or getattr(response, "isError", False):
@@ -227,7 +264,9 @@ class LearningBenchmarkClient:
                 or start_request_id is not None and value["start_request_id"] != start_request_id):
             raise ValueError("benchmark_task_plan_identity_mismatch")
         binding = {key: deepcopy(value.get(key)) for key in (
-            "run_id", "plan_id", "plan_sha256", "start_request_id", "target_identity", "owner_id", "session_directory")}
+            "run_id", "plan_id", "plan_sha256", "start_request_id", "target_identity", "owner_id", "session_directory",
+            "plan_schema_version", "lineage_generation", "successor", "successor_of", "start_transport_request_id",
+            "recovery_policy", "completion_snapshot_sha256")}
         known = self._plan_bindings.get(value["run_id"])
         if known is not None and known != binding:
             raise ValueError("benchmark_task_plan_binding_mismatch")
@@ -237,12 +276,29 @@ class LearningBenchmarkClient:
                for row in history):
             raise ValueError("benchmark_task_plan_history_invalid")
         previous = previous or self._plan_progress.get(value["run_id"])
+        resumed_ticket = False
         if previous is not None:
             if history[:len(previous["history"])] != previous["history"]:
                 raise ValueError("benchmark_task_plan_stale_history")
             if (len(history) == len(previous["history"]) and previous.get("active_command_id")
                     and value.get("active_command_id") and previous["active_command_id"] != value["active_command_id"]):
-                raise ValueError("benchmark_task_plan_original_ticket_changed")
+                from app.execution.task_plan_review import digest
+                packet = previous.get("review_packet")
+                rows = value.get("intervention_resumes", {})
+                step_id = previous.get("current_step_id")
+                expected_id = "trial-exec-" + digest([value["run_id"], step_id, 1])[:32]
+                resumed_ticket = (value.get("recovery_policy") == "intervention_v1"
+                    and isinstance(packet, dict) and packet.get("reason") == "blocked_before_dispatch"
+                    and packet.get("action_executed") is False and packet.get("after") is None
+                    and value.get("current_step_id") == step_id
+                    and value.get("step_attempts", {}).get(step_id) == 1
+                    and value["active_command_id"] == expected_id and isinstance(rows, dict)
+                    and any(isinstance(row, dict) and row.get("packet") == packet
+                        and row.get("request_sha256") == digest(row.get("request"))
+                        and row.get("request", {}).get("review_packet_sha256") == packet.get("packet_sha256")
+                        for row in rows.values()))
+                if not resumed_ticket:
+                    raise ValueError("benchmark_task_plan_original_ticket_changed")
         status, runner = value.get("status"), value.get("runner_state")
         if (status not in {"ready", "pending", "paused_uncertain", "cancel_requested", *_PLAN_TERMINAL}
                 or runner not in {"ready", "dispatching", "waiting", "cancel_requested", *_PLAN_TERMINAL}):
@@ -286,6 +342,45 @@ class LearningBenchmarkClient:
                     or any(not isinstance(capture.get(key), str) or not capture[key]
                            for key in ("capture_id", "image_path", "sha256"))):
                 raise ValueError("benchmark_task_plan_grounding_evidence_invalid")
+        packet = value.get("review_packet")
+        if packet is not None:
+            from app.execution.task_plan_review import digest
+            body = {key: item for key, item in packet.items() if key != "packet_sha256"} if isinstance(packet, dict) else {}
+            v2_packet = isinstance(packet, dict) and packet.get("schema") in {"review_packet.v2", "review_packet.v3", "review_packet.v4"}
+            if (not isinstance(packet, dict) or packet.get("schema") not in {"review_packet.v1", "review_packet.v2", "review_packet.v3", "review_packet.v4"}
+                    or packet.get("packet_sha256") != digest(body)
+                    or packet.get("evidence_set_sha256") != digest(packet.get("input_evidence_refs" if v2_packet else "evidence_refs"))
+                    or type(packet.get("assessment_round")) is not int
+                    or packet["assessment_round"] not in ((0, 1, 2) if v2_packet else (0,))
+                    or v2_packet and (packet.get("artifact_refs") != packet.get("evidence_refs")
+                        or packet.get("artifact_set_sha256") != digest(packet.get("artifact_refs")))
+                    or value.get("wait_reason") != "verification_required" or not isinstance(wait, dict)
+                    or packet.get("wait_id") != wait["wait_id"]
+                    or packet.get("execution_request_id") != value.get("active_command_id")
+                    or packet.get("step_id") != value.get("current_step_id")
+                    or any(packet.get(key) != value.get(key) for key in
+                        ("run_id", "plan_id", "plan_sha256", "target_identity", "owner_id", "session_directory"))):
+                raise ValueError("benchmark_task_plan_review_packet_binding_invalid")
+            if packet.get("schema") == "review_packet.v4":
+                video = packet.get("video_playback")
+                if (not isinstance(video, dict) or video.get("schema") not in {"video_playback_binding.v1", "video_playback_binding.v2", "dynamic_content_binding.v1"}
+                        or packet["assessment_round"] not in (0, 1)
+                        or any(video.get(key) != packet.get(key) for key in ("execution_request_id",
+                            "input_evidence_refs", "evidence_set_sha256", "assessment_round", "assessment_ref",
+                            "original_receipt_sha256"))
+                        or not isinstance(video.get("ledger_refs"), list) or not video["ledger_refs"]
+                        or video.get("ledger_sha256") != digest(video["ledger_refs"])
+                        or any(ref not in packet["artifact_refs"] for ref in video["ledger_refs"])):
+                    raise ValueError("benchmark_task_plan_video_review_packet_binding_invalid")
+            previous_packet = (previous or {}).get("review_packet")
+            if packet.get("schema") == "review_packet.v3":
+                _validate_manual_packet_progress(packet, previous_packet)
+            elif previous_packet is not None and previous_packet != packet and not resumed_ticket:
+                raise ValueError("benchmark_task_plan_stale_review_packet")
+        if value.get("observation_pending") is True and (packet is not None
+                or value.get("wait_reason") != "verification_required" or value.get("pending") is None
+                or runner != "waiting" or status not in {"pending", "paused_uncertain"}):
+            raise ValueError("benchmark_task_plan_observation_state_invalid")
         if status in _PLAN_TERMINAL or runner in _PLAN_TERMINAL:
             if not reviewed_wait and (status != runner or wait is not None or value.get("pending") is not None
                     or value.get("active_command_id") is not None):
@@ -306,15 +401,21 @@ class LearningBenchmarkClient:
     def _compact_plan(snapshot):
         value = {key: deepcopy(snapshot[key]) for key in (
             "schema", "source_kind", "run_id", "plan_id", "plan_sha256", "start_request_id", "status",
-            "runner_state", "mode", "current_step_id", "active_command_id", "wait_reason", "metrics")
+            "runner_state", "mode", "current_step_id", "active_command_id", "wait_reason", "metrics",
+            "plan_schema_version", "review_packet", "review_required", "main_handoff", "prefix_sha256", "lineage_generation", "successor_of",
+            "successor", "start_transport_request_id", "recovery_policy", "step_attempts",
+            "intervention_resumes", "intervention_recovery", "completion_snapshot_sha256")
             if key in snapshot}
+        value.update({key: deepcopy(snapshot[key]) for key in ("observation_pending", "observation", "observation_read_only",
+            "manual_observation", "manual_observation_budget", "allowed_controls")
+            if key in snapshot})
         wait = snapshot.get("wait")
         if wait is not None:
             value["wait"] = {key: deepcopy(wait[key]) for key in (
                 "wait_id", "reason", "run_id", "step_id", "command_id", "error") if key in wait}
         value["history"] = [{key: deepcopy(row[key]) for key in (
             "step_id", "execution_request_id", "verdict", "judged_by", "reason", "action_executed",
-            "original_input_status", "verification_request_id", "verification_result_sha256", "evidence_refs")
+             "original_input_status", "verification_request_id", "verification_result_sha256", "evidence_refs", "goal_completion")
             if key in row} for row in snapshot["history"]]
         return value
 
@@ -324,6 +425,12 @@ class LearningBenchmarkClient:
             "detail": "full", "images": "none"}}
 
     def _plan_result(self, receipt, *, original_request_id, status_request_id, snapshot, client_state, known_run_id=None):
+        if (snapshot or {}).get("observation_pending") is True and client_state in {"pending", "verification_required"}:
+            client_state = "observation_pending"
+        if client_state == "verification_required" and (snapshot or {}).get("review_packet") is not None:
+            client_state = "review_required"
+        if client_state in {"terminal", "verification_required"} and (snapshot or {}).get("main_handoff") is not None:
+            client_state = "review_required"
         value = {key: deepcopy(receipt[key]) for key in (
             "request_id", "status", "error", "error_type", "operation_success_scope", "command_wall_ms",
             "started_at", "finished_at", "wait_expired", "command_cancelled", "partial_execution",
@@ -337,17 +444,32 @@ class LearningBenchmarkClient:
             value.update({key: deepcopy(snapshot.get(key)) for key in (
                 "run_id", "plan_id", "start_request_id", "active_command_id", "wait_reason")})
             value["wait_id"] = (snapshot.get("wait") or {}).get("wait_id")
-            value["start_receipt"] = self._receipt_reference(snapshot["start_request_id"])
+            value["start_receipt"] = self._receipt_reference(snapshot.get("start_transport_request_id") or snapshot["start_request_id"])
             executions = list(dict.fromkeys([row["execution_request_id"] for row in snapshot["history"]]
                 + ([snapshot["active_command_id"]] if snapshot.get("active_command_id") else [])))
             value["execution_receipts"] = [self._receipt_reference(item) for item in executions]
-            value["images"] = [{"tool": "instant_image", "arguments": {"request_id": item, "view": "after"}}
+            value["images"] = [{"tool": "instant_image", "arguments": {"request_id": item,
+                "view": ("before" if item == snapshot.get("active_command_id") and
+                    (snapshot.get("review_packet") or {}).get("reason") in {"blocked_before_dispatch", "repeated_obstruction"}
+                    else "after")}}
                                for item in executions]
+            manual = snapshot.get("manual_observation") or {}
+            packet = snapshot.get("review_packet") or {}
+            # 状态投影没有冻结当前审核包，不能把原 start 回执当作这条采样链。
+            if packet.get("schema") == "review_packet.v4" and receipt.get("status_source") != "instant_status":
+                value["video_playback_images"] = {"tool": "instant_result", "arguments": {
+                    "request_id": receipt["request_id"], "detail": "full", "images": "after"},
+                    "role": "observation_sequence", "packet_sha256": packet["packet_sha256"]}
+            if (manual.get("status") == "captured" and receipt.get("status_source") != "instant_status"
+                    and manual.get("packet_sha256") in [packet.get("packet_sha256"), *packet.get("packet_ancestors", [])]):
+                value["observation_image"] = {"tool": "instant_result", "arguments": {
+                    "request_id": receipt["request_id"], "detail": "full", "images": "after"},
+                    "role": "observation", "packet_sha256": manual["packet_sha256"]}
         else:
             value["execution_receipts"], value["images"] = [], []
             if known_run_id is not None:
                 value.update(run_id=known_run_id, run_binding_verified=False)
-        if client_state in {"pending", "result_unknown", "control_failed"}:
+        if client_state in {"pending", "observation_pending", "result_unknown", "control_failed"}:
             value.setdefault("command_cancelled", False)
             if client_state == "control_failed" and isinstance(receipt.get("next"), dict):
                 value["next"] = deepcopy(receipt["next"])
@@ -366,13 +488,15 @@ class LearningBenchmarkClient:
         return value
 
     async def _plan_event(self, result, snapshot, callback):
-        if callback is None:
+        if callback is None or result["client_state"] == "observation_pending":
             return
         wait = (snapshot or {}).get("wait") or {}
         grounding = wait.get("pending_grounding") or {}
         key = (result.get("run_id") or result["original_request_id"], wait.get("wait_id"),
-               result["client_state"], grounding.get("request_id"),
-               None if wait.get("wait_id") else result["request_id"])
+                result["client_state"], grounding.get("request_id"),
+                (snapshot or {}).get("review_packet", {}).get("packet_sha256"),
+                ((snapshot or {}).get("main_handoff") or {}).get("evidence_set_sha256")
+                    or (None if wait.get("wait_id") else result["request_id"]))
         if key in self._plan_events:
             return
         self._plan_events.add(key)
@@ -395,10 +519,12 @@ class LearningBenchmarkClient:
             raise ValueError("benchmark_task_plan_options_invalid")
         request = command.get("request") if isinstance(command, dict) else None
         if (not isinstance(command, dict) or command.get("kind") != "task_plan" or not isinstance(request, dict)
-                or request.get("action") not in {"start", "status", "continue", "cancel", "review"}):
+                or request.get("action") not in {"start", "status", "continue", "cancel", "review", "observe", "recover", "resume_pre_dispatch"}):
             raise ValueError("benchmark_task_plan_command_invalid")
         self._check_command("instant_run", {"request_id": request_id, "command": command})
         run_id = request.get("run_id")
+        expected_start_id = ((request.get("successor") or {}).get("successor_request_id", request_id)
+                             if request["action"] == "start" else None)
         if request["action"] != "start" and (not isinstance(run_id, str) or not run_id):
             raise ValueError("benchmark_task_plan_run_id_required")
         deadline = monotonic() + total_timeout
@@ -435,7 +561,7 @@ class LearningBenchmarkClient:
                 projected = value.get("task_plan_run")
                 if projected is not None:
                     snapshot = self._plan_snapshot(projected, run_id=run_id,
-                        start_request_id=request_id if request["action"] == "start" else None, previous=snapshot)
+                        start_request_id=expected_start_id, previous=snapshot)
                 host = {key: deepcopy(value[key]) for key in (
                     "phase", "host_alive", "task_plan_runtime_error") if key in value}
                 if value.get("host_alive") is not True:
@@ -462,7 +588,7 @@ class LearningBenchmarkClient:
                 state = "pending"
             elif value.get("status") == "returned":
                 snapshot = self._plan_snapshot(value.get("result"), run_id=run_id,
-                    start_request_id=request_id if request["action"] == "start" else None, previous=snapshot)
+                    start_request_id=expected_start_id, previous=snapshot)
                 run_id = snapshot["run_id"]
                 runner, reason = snapshot["runner_state"], snapshot.get("wait_reason")
                 if runner in _PLAN_TERMINAL:
@@ -475,7 +601,7 @@ class LearningBenchmarkClient:
                                 or settled.get("verification_request_id") != request_id):
                             raise ValueError("benchmark_task_plan_review_receipt_mismatch")
                     state = "continue_required"
-                elif reason and reason != "execution_pending" and snapshot["status"] != "cancel_requested" and runner != "cancel_requested":
+                elif reason and reason != "execution_pending" and snapshot.get("observation_pending") is not True and snapshot["status"] != "cancel_requested" and runner != "cancel_requested":
                     state = reason
                 elif monotonic() >= deadline:
                     state = "pending"
@@ -500,14 +626,36 @@ class LearningBenchmarkClient:
                 raise ValueError("benchmark_task_plan_receipt_invalid")
             result = self._plan_result(value, original_request_id=request_id, status_request_id=status_id,
                                        snapshot=snapshot, client_state=state, known_run_id=run_id)
-            if state not in {"terminal", "continue_required"}:
+            if result["client_state"] not in {"terminal", "continue_required"}:
                 await self._plan_event(result, snapshot, event_callback)
             return result
 
+    def _unsubmitted_result(self, request_id, command, status_request_id, command_id):
+        value = {"request_id": request_id, "original_request_id": request_id,
+            "current_status_request_id": status_request_id, "status": "not_submitted",
+            "client_state": "not_submitted", "accepted": False, "action_executed": False,
+            "wait_expired": True, "command_cancelled": False, "automatic_retry_allowed": False}
+        if command_id is not None:
+            value["command_id"] = command_id
+        return value
+
     async def run(self, request_id: str, command: dict, *, total_timeout: float = 120):
-        if type(total_timeout) not in (int, float) or total_timeout < 0:
+        if type(total_timeout) not in (int, float) or not math.isfinite(total_timeout) or total_timeout < 0:
             raise ValueError("benchmark_total_timeout_invalid")
+        self._check_command("instant_run", {"request_id": request_id, "command": command})
         deadline = monotonic() + total_timeout
+
+        async def bounded_call(tool, arguments):
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                return await asyncio.wait_for(self.call(tool, arguments), timeout=remaining)
+            except TimeoutError:
+                # MCP 等待可能被取消；不发送业务取消，也不推断已入队动作停止。
+                return {"request_id": arguments["request_id"], "status": "result_unknown",
+                    "wait_expired": True, "command_cancelled": False}
+
         original_request_id = request_id
         # 控制回执属于外层请求，worker 身份只能来自明确的原输入引用。
         controls_worker = command.get("kind") in {"agent_command_status", "agent_command_continue"}
@@ -517,13 +665,17 @@ class LearningBenchmarkClient:
             raise ValueError("benchmark_agent_command_identity_missing")
         status_request_id = original_request_id if controls_worker else None
         command_id = expected_command_id if controls_worker else None
-        value = await self.call("instant_run", {"request_id": request_id, "command": command,
+        value = await bounded_call("instant_run", {"request_id": request_id, "command": command,
                                                 "wait_ms": min(int(total_timeout * 1000), 25000),
                                                 "detail": "full", "images": "none"})
+        if value is None:
+            return self._unsubmitted_result(request_id, command, status_request_id, command_id)
         while True:
             expected_id = status_request_id or original_request_id
             if value.get("request_id") != expected_id:
                 raise ValueError("benchmark_receipt_request_id_mismatch")
+            if value.get("status") == "result_unknown" and value.get("wait_expired") is True:
+                return self._result(value, original_request_id, status_request_id, command_id, "pending")
             result = value.get("result") if isinstance(value, dict) else None
             if isinstance(result, dict) and result.get("contract_version") == "agent_command.v1":
                 if result.get("command_id") != expected_command_id:
@@ -541,11 +693,14 @@ class LearningBenchmarkClient:
                 await asyncio.sleep(min(self.poll_interval, max(0, deadline - monotonic())))
                 if monotonic() >= deadline:
                     return self._result(value, original_request_id, status_request_id, command_id, "pending")
-                status_request_id = "agent-status-" + uuid4().hex
-                value = await self.call("instant_run", {"request_id": status_request_id,
+                next_status_id = "agent-status-" + uuid4().hex
+                updated = await bounded_call("instant_run", {"request_id": next_status_id,
                     "command": {"kind": "agent_command_status", "request": {"command_id": command_id}},
                     "wait_ms": min(int(max(0, deadline - monotonic()) * 1000), 25000),
                     "detail": "full", "images": "none"})
+                if updated is None:
+                    return self._result(value, original_request_id, status_request_id, command_id, "pending")
+                status_request_id, value = next_status_id, updated
                 continue
             if value.get("status") == "pending":
                 if monotonic() >= deadline:
@@ -555,8 +710,11 @@ class LearningBenchmarkClient:
                     return self._result(value, original_request_id, status_request_id, command_id, "pending")
                 # 尚未形成回执的查询只回读它自己的 ID；执行命令不会重交。
                 current_id = status_request_id or original_request_id
-                value = await self.call("instant_result", {"request_id": current_id,
+                updated = await bounded_call("instant_result", {"request_id": current_id,
                                                            "detail": "full", "images": "none"})
+                if updated is None:
+                    return self._result(value, original_request_id, status_request_id, command_id, "pending")
+                value = updated
                 continue
             if status_request_id is not None:
                 raise ValueError("benchmark_agent_status_contract_invalid")
@@ -572,7 +730,7 @@ class LearningBenchmarkClient:
             value["command_id"] = command_id
         if client_state == "pending":
             current_id = status_request_id or original_request_id
-            if value.get("status") == "pending":
+            if value.get("status") in {"pending", "result_unknown"}:
                 value["next"] = {"tool": "instant_result", "arguments": {"request_id": current_id,
                     "detail": "full", "images": "none"}}
             elif command_id is not None:

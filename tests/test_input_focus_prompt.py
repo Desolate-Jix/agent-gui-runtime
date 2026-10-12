@@ -2,6 +2,13 @@
 import pytest
 
 from app.api import vision
+from app.core import local_text_focus
+
+
+DESCRIPTIVE_FIELD_GOAL = (
+    "The long folder path address input directly below the toolbar, on the left side inside "
+    "its white text area just after the folder icon, above the file list. "
+    "Enter the specified fresh test directory path here.")
 
 
 @pytest.mark.parametrize("goal", [
@@ -40,3 +47,50 @@ def test_explicit_field_preserves_label_without_retargeting_button():
 
 def test_fill_field_keeps_existing_interior_focus_instruction():
     assert "interior of the editable field" in vision._vista_direct_prompt("Search", semantic_action="fill_field")
+
+
+def test_internal_sequence_focus_preserves_descriptive_goal_and_interior_instruction():
+    with local_text_focus.local_text_focus_scope(local_text_focus.LocalTextFocusTarget(10, 20)):
+        prompt = vision._vista_direct_prompt(DESCRIPTIVE_FIELD_GOAL)
+    assert DESCRIPTIVE_FIELD_GOAL in prompt
+    assert "interior of the editable field" in prompt
+    assert "away from its borders" in prompt
+
+
+@pytest.mark.parametrize("target", [None, {
+    "contract_version": "recognition_control_target_v1", "role": "button",
+    "label": "Search", "source_binding_sha256": "a" * 64}])
+def test_internal_focus_keeps_explicit_word_and_noninput_target_exclusions(target):
+    goal = "Double click the word Rotorua inside the search input box" if target is None else "Search"
+    original = vision._vista_direct_prompt(goal, target)
+    with local_text_focus.local_text_focus_scope(local_text_focus.LocalTextFocusTarget(10, 20)):
+        assert vision._vista_direct_prompt(goal, target) == original
+    assert "interior of the editable field" not in original
+
+
+def test_internal_focus_does_not_change_strict_fill_prompt():
+    original = vision._vista_direct_prompt("Search", semantic_action="fill_field")
+    with local_text_focus.local_text_focus_scope(local_text_focus.LocalTextFocusTarget(10, 20)):
+        assert vision._vista_direct_prompt("Search", semantic_action="fill_field") == original
+
+
+def test_claimed_and_exited_focus_scopes_do_not_change_prompt(monkeypatch):
+    original = vision._vista_direct_prompt(DESCRIPTIVE_FIELD_GOAL)
+    monkeypatch.setattr(local_text_focus, "require_local_operator_input", lambda manager: True)
+    monkeypatch.setattr(local_text_focus, "probe_local_focus_target", lambda *args, **kwargs:
+        {"control_type": "Edit", "runtime_id": [42, 1]})
+    with local_text_focus.local_text_focus_scope(local_text_focus.LocalTextFocusTarget(10, 20)):
+        local_text_focus.check_local_text_focus({"x": 90, "y": 87}, object())
+        assert vision._vista_direct_prompt(DESCRIPTIVE_FIELD_GOAL) == original
+    assert vision._vista_direct_prompt(DESCRIPTIVE_FIELD_GOAL) == original
+
+
+def test_copied_focus_scope_in_another_thread_does_not_change_prompt():
+    from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+    original = vision._vista_direct_prompt(DESCRIPTIVE_FIELD_GOAL)
+    with local_text_focus.local_text_focus_scope(local_text_focus.LocalTextFocusTarget(10, 20)):
+        copied = copy_context()
+        with ThreadPoolExecutor(max_workers=1) as worker:
+            prompt = worker.submit(copied.run, vision._vista_direct_prompt, DESCRIPTIVE_FIELD_GOAL).result()
+    assert prompt == original

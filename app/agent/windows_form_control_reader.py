@@ -6,6 +6,7 @@ import math
 import time
 from pathlib import PureWindowsPath
 from app.operation.screen_reading.uia_graph import CanonicalUIAGraph, UIAGraphError
+from app.operation.screen_reading.uia_provider import HARD_UIA_MAX_CONTROLS
 from app.operation.recognition.form_label_binding import bind_form_label
 
 from .native_identity import WindowsNativeIdentityReader, validate_native_identity_fact
@@ -23,7 +24,8 @@ _CONTROL_TYPES = frozenset({
 })
 _readiness_clock = time.monotonic
 _readiness_wait = time.sleep
-MAX_FORM_SCAN_EDGES = 1024
+# 名称消歧与正式页面采集使用同一有限预算，仍必须遍历完整树才允许输入。
+MAX_FORM_SCAN_EDGES = HARD_UIA_MAX_CONTROLS
 
 
 def _safe_diagnostics(value, *, include_option=True, include_readiness=True):
@@ -473,6 +475,26 @@ def _dropdown(node, walker, wrap, handle, pid, window, diagnostics=None, *, expa
     return value, options
 
 
+def _outside_bound_window(node, window):
+    # 仅排除已证明完全在窗口外的候选；部分相交或未知几何仍参与重名拒绝。
+    if (type(window) not in (tuple, list) or len(window) != 4
+            or any(type(value) is not int for value in window) or window[2] <= 0 or window[3] <= 0):
+        return False
+    try:
+        rect = node.element_info.rectangle
+        edges = (rect.left, rect.top, rect.right, rect.bottom)
+    except Exception:
+        # 供应方几何读取失败不构成排除证据，保留候选及后续门禁。
+        return False
+    if any(type(value) is not int for value in edges):
+        return False
+    left, top, right, bottom = edges
+    if right <= left or bottom <= top:
+        return False
+    x, y, width, height = window
+    return right <= x or bottom <= y or left >= x + width or top >= y + height
+
+
 def _scan_controls(root, walker, wrap, label, control_type, diagnostics, window, *, normalize_name=_name,
                    include_aliases=False):
     matches = []
@@ -489,6 +511,8 @@ def _scan_controls(root, walker, wrap, label, control_type, diagnostics, window,
         counts[diagnostic_type] = counts.get(diagnostic_type, 0) + 1
         diagnostics["document_count"] += int(diagnostic_type == "Document")
         if actual_type == control_type and isinstance(info.name, str) and normalize_name(info.name) == label:
+            if _outside_bound_window(node, window):
+                continue
             matches.append(node)
             diagnostics["match_count"] += 1
     # 完整遍历仍检查迟到重名和树身份；只有无直接名称时才构建几何标签索引。

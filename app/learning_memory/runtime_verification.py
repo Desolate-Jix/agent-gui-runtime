@@ -26,7 +26,9 @@ def verify_trial_step(coordinator, *, session_dir, request, request_id):
     session = Path(session_dir).resolve()
     service = getattr(coordinator, "_decision_service", None)
     from .decision_verification import (decision_eligible, decision_binding, adopted_verification,
-                                        decision_result_path, validate_original_evidence)
+                                        decision_result_path, validate_original_evidence,
+                                        decision_review_context, main_review_required,
+                                        authenticate_decision_result, DecisionAuthenticationError)
     with MemoryWorkspace(coordinator._memory_library_root) as library:
         trials = TrialService(library, session)
         state = trials.status(run_id)
@@ -54,7 +56,23 @@ def verify_trial_step(coordinator, *, session_dir, request, request_id):
         program = trials.programs.load(state["workflow_id"], state["program_id"])
         step = next(item for item in program["definition"]["steps"] if item["step_id"] == pending["step_id"])
         image_check = step.get("verification", {}).get("image_check")
-        use_decision = decision_eligible(step, service)
+        force_main = main_review_required(step, service)
+        if force_main and image_check is None:
+            return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_always_main",
+                    "execution_request_id": execution_id, "automatic_retry_allowed": False}
+        use_decision = not force_main and decision_eligible(step, service, inputs=state["inputs"])
+        v2 = getattr(getattr(service, "profile", None), "contract_version", None) == "decision_profile.v2"
+        review_context = None
+        review_context_invalid = False
+        if use_decision and v2:
+            try:
+                review_context = decision_review_context(program, step,
+                    **({"inputs": state["inputs"]} if "condition_binding" in step["verification"] else {}))
+            except ValueError:
+                review_context_invalid = True
+                if image_check is None:
+                    return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_review_context_invalid",
+                            "execution_request_id": execution_id, "automatic_retry_allowed": False}
         if use_decision:
             cancel = getattr(coordinator, "_cancel_wait", None)
             if (cancel is not None and cancel.is_set()) or (session / "closing.json").exists():
@@ -180,6 +198,12 @@ def verify_trial_step(coordinator, *, session_dir, request, request_id):
                     "frame": deepcopy(frame), "source_receipt_sha256": receipt_hash,
                     "terminal_receipt": terminal, "native_evidence": deepcopy(live["evidence"]),
                     "measurement": {"started_ns": started_ns, "ended_ns": ended_ns}}
+        if use_decision and v2 and not review_context_invalid:
+            envelope["decision_review_context"] = review_context
+            from .workflow_condition_templates import step_condition_snapshot
+            condition_snapshot = step_condition_snapshot(step, state["inputs"])
+            if condition_snapshot is not None:
+                envelope["condition_snapshot"] = condition_snapshot
         _write_immutable(artifact, canonical_json_bytes(envelope) + b"\n")
     if envelope.get("contract_version") == "workflow_image_observation_attempt.v1":
         record_rule_observation(session, envelope, "uncertain")
@@ -196,7 +220,17 @@ def verify_trial_step(coordinator, *, session_dir, request, request_id):
     result = verify_step(step, inputs=state["inputs"], outputs=outputs,
                          receipt=envelope["receipt"], observation=envelope["observation"])
     record_rule_observation(session, envelope, result["verdict"])
+    if force_main:
+        return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_always_main",
+                "execution_request_id": execution_id, "automatic_retry_allowed": False,
+                "evidence_ref": str(artifact.relative_to(session)), "local_verification": deepcopy(result)}
     if use_decision and result["verdict"] == "uncertain" and result["reason"] == "agent_judgment_required":
+        if review_context_invalid:
+            return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_review_context_invalid",
+                    "execution_request_id": execution_id, "automatic_retry_allowed": False}
+        if v2 and "decision_review_context" not in envelope:
+            return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_review_context_missing",
+                    "execution_request_id": execution_id, "automatic_retry_allowed": False}
         # 判断等待期间不持库锁；回到原结算入口再核对票据、取消态与证据。
         with MemoryWorkspace(coordinator._memory_library_root) as library:
             trials = TrialService(library, session)
@@ -207,12 +241,19 @@ def verify_trial_step(coordinator, *, session_dir, request, request_id):
                 raise ValueError("workflow_trial_pending_ticket_mismatch")
             if current["status"] == "cancel_requested":
                 return trials.record_cancelled_execution(run_id, request_id, execution_id)
-            validate_original_evidence(trials, current, pending, step, envelope, request_id=request_id)
+            validate_original_evidence(trials, current, pending, step, envelope, request_id=request_id, program=program)
             cancel = getattr(coordinator, "_cancel_wait", None)
             if (cancel is not None and cancel.is_set()) or (session / "closing.json").exists():
                 return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_cancelled",
                         "execution_request_id": execution_id, "automatic_retry_allowed": False}
-        binding = decision_binding(step, envelope)
+            if v2 and getattr(getattr(service, "profile", None), "mode", None) == "auto":
+                from .workflow_trial import _conditions
+                if _conditions(step.get("success_conditions", []), current["inputs"], current["outputs"],
+                               envelope["observation"]["values"]) != "true":
+                    return {"run_id": run_id, "status": "verification_required",
+                            "reason": "workflow_decision_success_conditions_require_agent",
+                            "execution_request_id": execution_id, "automatic_retry_allowed": False}
+        binding = decision_binding(step, envelope, program=program, inputs=current["inputs"])
         decision_path = decision_result_path(session, request_id)
         if decision_path.is_file():
             saved = _read(decision_path)
@@ -220,11 +261,33 @@ def verify_trial_step(coordinator, *, session_dir, request, request_id):
                 raise ValueError("workflow_decision_request_binding_mismatch")
             decision = saved.get("result")
         else:
-            decision = service.evaluate(**binding)
-            if not isinstance(decision, dict):
+            try:
+                decision = service.evaluate(**binding)
+            except Exception as error:
+                # 只记录异常类型；持久化这次失败，重新读取不得再次派发模型或输入。
+                saved = {"binding": binding, "result": None,
+                         "runtime_error": {"reason": "workflow_decision_evaluation_failed", "error_type": type(error).__name__}}
+                _write_immutable(decision_path, canonical_json_bytes(saved) + b"\n")
+                decision = None
+            else:
+                if not isinstance(decision, dict):
+                    if not v2:
+                        raise ValueError("workflow_decision_result_invalid")
+                    saved = {"binding": binding, "result": None,
+                             "runtime_error": {"reason": "workflow_decision_result_invalid", "error_type": "TypeError"}}
+                    decision = None
+                else:
+                    saved = {"binding": binding, "result": decision}
+                _write_immutable(decision_path, canonical_json_bytes(saved) + b"\n")
+        runtime_error = saved.get("runtime_error")
+        if runtime_error is not None:
+            if (set(saved) != {"binding", "result", "runtime_error"} or decision is not None
+                    or not isinstance(runtime_error, dict) or set(runtime_error) != {"reason", "error_type"}
+                    or not isinstance(runtime_error.get("reason"), str)
+                    or runtime_error.get("reason") not in {"workflow_decision_evaluation_failed", "workflow_decision_result_invalid"}
+                    or not isinstance(runtime_error.get("error_type"), str)):
                 raise ValueError("workflow_decision_result_invalid")
-            _write_immutable(decision_path, canonical_json_bytes({"binding": binding, "result": decision}) + b"\n")
-        if not isinstance(decision, dict):
+        elif not isinstance(decision, dict):
             raise ValueError("workflow_decision_result_invalid")
         with MemoryWorkspace(coordinator._memory_library_root) as library:
             trials = TrialService(library, session)
@@ -235,24 +298,44 @@ def verify_trial_step(coordinator, *, session_dir, request, request_id):
                 raise ValueError("workflow_trial_pending_ticket_mismatch")
             if current["status"] == "cancel_requested":
                 return trials.record_cancelled_execution(run_id, request_id, execution_id)
-            validate_original_evidence(trials, current, pending, step, envelope, request_id=request_id)
+            validate_original_evidence(trials, current, pending, step, envelope, request_id=request_id, program=program)
             cancel = getattr(coordinator, "_cancel_wait", None)
             if (cancel is not None and cancel.is_set()) or (session / "closing.json").exists():
                 return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_cancelled",
                         "execution_request_id": execution_id, "automatic_retry_allowed": False,
                         "decision_advice": deepcopy(decision)}
-            if decision.get("adopted") is not True and not service.validate_result(decision, **binding):
+            if runtime_error is not None:
+                return {"run_id": run_id, "status": "verification_required", **runtime_error,
+                        "execution_request_id": execution_id, "automatic_retry_allowed": False}
+            authenticated = True
+            if v2 or decision.get("adopted") is not True:
+                try:
+                    authenticated = authenticate_decision_result(service, decision, binding)
+                except DecisionAuthenticationError as error:
+                    return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_authentication_failed",
+                            "error_type": error.error_type, "execution_request_id": execution_id,
+                            "automatic_retry_allowed": False}
+            if (authenticated is not True or v2 and (decision.get("schema_version") != "decision_assessment.v2"
+                                                    or not isinstance(decision.get("disposition"), str)
+                                                    or decision.get("disposition") not in {"continue", "review_required"})):
                 return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_result_untrusted",
                         "execution_request_id": execution_id, "automatic_retry_allowed": False}
+            if decision.get("disposition") == "review_required":
+                return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_review_required",
+                        "execution_strategy": execution_strategy(state), "execution_request_id": execution_id,
+                        "automatic_retry_allowed": False, "decision_advice": deepcopy(decision)}
             if decision.get("adopted") is True:
                 try:
                     computed = adopted_verification(step, inputs=current["inputs"], outputs=outputs,
-                        envelope=envelope, decision=decision, service=service)
+                        envelope=envelope, decision=decision, service=service, program=program)
+                    return trials.record_verified_result(run_id, request_id, execution_id, computed, decision_service=service)
+                except DecisionAuthenticationError as error:
+                    return {"run_id": run_id, "status": "verification_required", "reason": "workflow_decision_authentication_failed",
+                            "error_type": error.error_type, "execution_request_id": execution_id,
+                            "automatic_retry_allowed": False}
                 except ValueError as error:
                     if str(error) != "workflow_decision_success_conditions_require_agent":
                         raise
-                else:
-                    return trials.record_verified_result(run_id, request_id, execution_id, computed, decision_service=service)
         return {"run_id": run_id, "status": "verification_required", "reason": "agent_judgment_required",
                 "execution_strategy": execution_strategy(state), "execution_request_id": execution_id,
                 "automatic_retry_allowed": False, "decision_advice": deepcopy(decision)}
@@ -260,4 +343,5 @@ def verify_trial_step(coordinator, *, session_dir, request, request_id):
         return {"run_id": run_id, "status": "verification_required", "reason": result["reason"],
                 "execution_request_id": execution_id, "automatic_retry_allowed": False}
     with MemoryWorkspace(coordinator._memory_library_root) as library:
-        return TrialService(library, session).record_verified_result(run_id, request_id, execution_id, result)
+        return TrialService(library, session).record_verified_result(run_id, request_id, execution_id, result,
+            decision_service=service)

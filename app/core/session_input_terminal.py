@@ -132,9 +132,13 @@ def _worker(worker, eid):
     return worker["status"], worker["action_executed"]
 
 
-def _batch(result, kind):
+def _batch(result, kind, *, response=None, command=None):
     _require(result.get("contract_version") == ("input_sequence_v1" if kind == "input_sequence" else "form_fill_v1")
              and result.get("status") in {"completed", "interrupted"} and type(result.get("action_executed")) is bool, "batch_unknown")
+    if kind == "input_sequence" and response is not None and command is not None:
+        from .input_sequence_partial import visual_prefix_failure_verified
+        if visual_prefix_failure_verified(response, command):
+            return "failed", True
     rows = result.get("steps") if kind == "input_sequence" else result.get("fields")
     _require(isinstance(rows, list), "batch_invalid")
     steps = rows if kind == "input_sequence" else []
@@ -143,11 +147,19 @@ def _batch(result, kind):
             _require(isinstance(field, dict) and isinstance(field.get("steps"), list), "batch_invalid")
             steps.extend(field["steps"])
     for row in steps:
+        from app.core.recognition_dispatch import local_receipt_zero_input_verified
+        rejected = (isinstance(row, dict) and row.get("action_executed") is False
+            and row.get("status") == "not_dispatched" and local_receipt_zero_input_verified(
+                row.get("receipt"), row.get("operation", "execute_recognition_plan")))
         _require(isinstance(row, dict) and type(row.get("action_executed")) is bool
-                 and row.get("status") == "returned" and isinstance(row.get("receipt"), dict)
-                 and row["receipt"].get("phase") == "returned"
+                 and (rejected or row.get("status") == "returned" and isinstance(row.get("receipt"), dict)
+                      and row["receipt"].get("phase") == "returned")
                  and _receipt_action(row["receipt"], row.get("operation", "execute_recognition_plan")) is row["action_executed"], "batch_unknown")
     _require(not any(row["action_executed"] is True for row in steps) or result["action_executed"] is True, "action_downgraded")
+    if kind == "input_sequence" and "partial_input_terminal" in result:
+        from .input_sequence_partial import focus_only_partial_verified
+        _require(focus_only_partial_verified(response, command), "batch_unknown")
+        return "failed", True
     return result["status"], result["action_executed"]
 
 
@@ -330,6 +342,13 @@ def inspect_session_input_terminal(session_dir, library_root, *, admission_recor
                 operation = command.get("operation") if kind == "step" else "execute_recognition_plan"
                 action = _receipt_action(result, operation)
                 data = (result.get("response") or {}).get("data") or {}
+                from app.core.recognition_dispatch import recognition_plan_rejected_before_dispatch
+                if (operation == "execute_recognition_plan" and result.get("operation") == operation
+                        and result.get("contract_version") == "local_direct_step_v1"
+                        and result.get("phase") == "not_dispatched" and result.get("action_executed") is False
+                        and action is False and recognition_plan_rejected_before_dispatch(result.get("response"))):
+                    results[eid] = {"kind": kind, "terminal_status": "not_dispatched", "action_executed": False}
+                    return results[eid]
                 rejected_scroll = (operation == "scroll" and result.get("operation") == "scroll"
                     and result.get("contract_version") == "local_direct_step_v1"
                     and result.get("phase") == "not_dispatched"
@@ -347,7 +366,7 @@ def inspect_session_input_terminal(session_dir, library_root, *, admission_recor
                 _require(result.get("phase") == "returned" and type(action) is bool, "synchronous_unknown")
                 status = "completed" if response["status"] == "returned" else "failed"
             elif kind in {"input_sequence", "form_fill"}:
-                status, action = _batch(result, kind)
+                status, action = _batch(result, kind, response=response, command=command)
             elif kind == "grounding_execute":
                 request = command.get("request") or {}
                 state = values.get("grounding/" + str(request.get("grounding_request_id")) + ".json")

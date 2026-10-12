@@ -162,11 +162,18 @@ def _build(session, request_id, old, state, program, history, envelope, effect_s
         "verified_history_sha256": history["content_sha256"], "consumed_step_ids": consumed, "status": "prepared"}
     if resolution == "resume_unexecuted":
         marker.update(contract_version="workflow_recovery_import.v2", resolution=resolution)
-    return {"run_id": run_id, "workflow_id": state["workflow_id"], "program_id": state["program_id"],
+    imported_state = {"run_id": run_id, "workflow_id": state["workflow_id"], "program_id": state["program_id"],
         "execution_strategy": execution_strategy(state), "project_snapshot_id": program["project_snapshot_id"],
         "start_step_id": state["start_step_id"], "current_step_id": target, "inputs": deepcopy(state["inputs"]),
         "outputs": values, "status": "ready" if target else "completed", "pending": None, "history": imported,
         "requests": {}, "prepare_requests": {}, "recovery_import": marker}
+    from .workflow_condition_templates import program_condition_snapshots
+    snapshots = program_condition_snapshots(program, state["inputs"])
+    if snapshots:
+        if state.get("condition_snapshots") != snapshots:
+            raise ValueError("workflow_condition_recovery_snapshot_mismatch")
+        imported_state["condition_snapshots"] = deepcopy(snapshots)
+    return imported_state
 
 
 def prepare_recovery_import(library_root, session_dir, *, admission_request_id, source_run_id,
@@ -321,6 +328,11 @@ def validate_import_claim(state, session_dir, *, ready=True):
              "imported_history_changed")
     if not ready:
         _require(_digest(state) == claim.get("trial_state_sha256"), "imported_trial_changed")
+    original = claim.get("prepared", {}).get("trial_state", {})
+    if "condition_snapshots" in original or "condition_snapshots" in state:
+        _require(all(state.get(key) == original.get(key) for key in
+            ("workflow_id", "program_id", "start_step_id", "inputs", "condition_snapshots")),
+            "condition_binding_changed")
     return claim
 
 

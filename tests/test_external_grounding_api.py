@@ -2,12 +2,15 @@
 import base64
 import hashlib
 import json
+from io import BytesIO
+from pathlib import Path
 
 import httpx
 from PIL import Image
 import pytest
 
 from app.vision.external_grounding_api import ApiGroundingError, ApiGroundingProfile, ChatCompletionsGrounder
+from app.vision import external_grounding_api as api
 
 
 @pytest.fixture
@@ -67,6 +70,168 @@ def test_exact_png_utf8_and_model_provenance(capture, monkeypatch):
     assert set(attempt) == {"started_ns", "ended_ns", "status", "usage"}
     assert value["action_executed"] is False
     assert "secret-value" not in json.dumps(value)
+
+
+def test_default_transport_reuses_one_deadline_pool_and_keeps_provider_reasoning(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    pools, calls = [], []
+    def factory(**options):
+        pools.append(options)
+        def handler(request):
+            calls.append(request)
+            assert "reasoning_effort" not in json.loads(request.content)
+            assert request.headers["Accept-Encoding"] == "identity"
+            assert request.extensions["total_deadline"] > api.time.monotonic()
+            assert 0 < request.extensions["timeout"]["read"] <= 45.0
+            return httpx.Response(200, json=reply())
+        return httpx.MockTransport(handler)
+    monkeypatch.setattr(api, "DeadlineHTTPTransport", factory)
+    with ChatCompletionsGrounder(profile()) as provider:
+        client = provider._client
+        provider.ground(request_id="request-1", capture=capture, goal="Search")
+        provider.ground(request_id="request-1", capture=capture, goal="Search")
+        assert provider._client is client
+    assert len(pools) == 1
+    assert {key: value for key, value in pools[0].items() if key != "limits"} == {
+        "max_response_bytes": 262144, "error_prefix": "api", "thread_name": "vision-api-http"}
+    limits = pools[0]["limits"]
+    assert limits.max_connections == limits.max_keepalive_connections == 1
+    assert limits.keepalive_expiry == 60.0
+    assert len(calls) == 2
+
+
+def test_explicit_resize_maps_geometry_back_to_original_capture(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    path = Path(capture["image_path"])
+    Image.new("RGB", (400, 300), "white").save(path)
+    original = path.read_bytes()
+    capture.update(sha256=hashlib.sha256(original).hexdigest(), image_size={"width": 400, "height": 300})
+    calls = []
+    def handler(request):
+        calls.append(request)
+        parts = json.loads(request.content)["messages"][1]["content"]
+        context = json.loads(parts[0]["text"])
+        assert context["capture_id"] == "capture-1"
+        assert context["image_size"] == {"width": 200, "height": 150}
+        with Image.open(BytesIO(base64.b64decode(parts[1]["image_url"]["url"].split(",", 1)[1]))) as image:
+            assert image.size == (200, 150)
+        payload = result()
+        payload["image_size"] = context["image_size"]
+        return httpx.Response(200, json=reply(payload))
+    with ChatCompletionsGrounder(profile(max_image_edge=200), transport=httpx.MockTransport(handler)) as provider:
+        value = provider.ground(request_id="request-1", capture=capture, goal="Search")
+    assert len(calls) == 1
+    assert path.read_bytes() == original
+    assert value["result"]["image_size"] == capture["image_size"]
+    candidate = value["result"]["candidates"][0]
+    assert candidate["bbox"] == {"x": 20, "y": 20, "width": 120, "height": 60}
+    assert candidate["click_point"] == {"x": 60, "y": 40}
+    assert value["provider"]["image_preprocess"]["original_sha256"] == capture["sha256"]
+    assert value["provider"]["image_preprocess"]["inference_size"] == {"width": 200, "height": 150}
+
+
+def test_resized_model_geometry_is_validated_before_mapping(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    payload = result()
+    payload["image_size"] = {"width": 50, "height": 40}
+    payload["candidates"][0].update(bbox={"x": 10, "y": 10, "width": 40, "height": 20},
+                                    click_point={"x": 60, "y": 20})
+    with ChatCompletionsGrounder(profile(max_image_edge=50), transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=reply(payload)))) as provider:
+        with pytest.raises(ApiGroundingError, match="api_grounding_invalid") as failure:
+            provider.ground(request_id="request-1", capture=capture, goal="Search")
+    assert failure.value.attempt["status"] == "failure"
+
+
+def test_resize_maps_rounded_axes_and_edge_box_without_clamping(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    path = Path(capture["image_path"])
+    Image.new("RGB", (101, 81), "white").save(path)
+    capture.update(sha256=hashlib.sha256(path.read_bytes()).hexdigest(), image_size={"width": 101, "height": 81})
+    payload = result()
+    payload["image_size"] = {"width": 50, "height": 40}
+    payload["candidates"][0].update(bbox={"x": 49, "y": 39, "width": 1, "height": 1},
+                                    click_point={"x": 49, "y": 39})
+    with ChatCompletionsGrounder(profile(max_image_edge=50), transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=reply(payload)))) as provider:
+        value = provider.ground(request_id="request-1", capture=capture, goal="Search")
+    candidate = value["result"]["candidates"][0]
+    assert candidate["bbox"] == {"x": 98, "y": 78, "width": 3, "height": 3}
+    assert candidate["click_point"] == {"x": 98, "y": 78}
+
+
+@pytest.mark.parametrize("max_edge", [None, 1280])
+def test_pixel_bound_rejects_compressed_large_image_before_decode(capture, monkeypatch, max_edge):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    capture["image_size"] = {"width": 40001, "height": 1000}
+    class HeaderOnlyImage:
+        width, height, size, format = 40001, 1000, (40001, 1000), "PNG"
+        def __enter__(self):
+            return self
+        def __exit__(self, *_):
+            pass
+        def verify(self):
+            pytest.fail("pixel bound must precede image verification/decode")
+        def convert(self, *_):
+            pytest.fail("oversized compressed image must not decode")
+    monkeypatch.setattr(api.Image, "open", lambda _: HeaderOnlyImage())
+    with ChatCompletionsGrounder(profile(max_image_edge=max_edge), transport=httpx.MockTransport(
+            lambda _: pytest.fail("network"))) as provider:
+        with pytest.raises(ApiGroundingError, match="api_image_too_many_pixels") as failure:
+            provider.ground(request_id="request-1", capture=capture, goal="Search")
+    assert failure.value.attempt is None
+
+
+def test_total_deadline_consumed_before_dispatch_does_not_call_provider(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    clock = {"now": 10.0}
+    monkeypatch.setattr(api.time, "monotonic", lambda: clock["now"])
+    original_prepare = api._prepare_api_image
+    def prepare(*args, **kwargs):
+        value = original_prepare(*args, **kwargs)
+        clock["now"] += 46.0
+        return value
+    monkeypatch.setattr(api, "_prepare_api_image", prepare)
+    with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(lambda _: pytest.fail("network"))) as provider:
+        with pytest.raises(ApiGroundingError, match="api_timeout") as failure:
+            provider.ground(request_id="request-1", capture=capture, goal="Search")
+    assert failure.value.attempt is None
+
+
+def test_total_deadline_rejects_late_parsed_result_without_retry(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    clock, calls = {"now": 10.0}, []
+    monkeypatch.setattr(api.time, "monotonic", lambda: clock["now"])
+    original_validate = api.validate_grounding_result
+    def validate(*args, **kwargs):
+        value = original_validate(*args, **kwargs)
+        clock["now"] += 46.0
+        return value
+    monkeypatch.setattr(api, "validate_grounding_result", validate)
+    transport = httpx.MockTransport(lambda request: calls.append(request) or httpx.Response(200, json=reply()))
+    with ChatCompletionsGrounder(profile(), transport=transport) as provider:
+        with pytest.raises(ApiGroundingError, match="api_timeout") as failure:
+            provider.ground(request_id="request-1", capture=capture, goal="Search")
+    assert len(calls) == 1
+    assert failure.value.attempt["status"] == "timeout"
+    assert failure.value.attempt["usage"]["total_tokens"] == 50
+
+
+@pytest.mark.parametrize("error,code", [
+    (TimeoutError("api_provider_timeout"), "api_timeout"),
+    (ValueError("api_response_too_large"), "api_response_too_large"),
+    (ValueError("api_content_encoding_unsupported"), "api_content_encoding_unsupported")])
+def test_shared_transport_errors_remain_structured_and_single_attempt(capture, monkeypatch, error, code):
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    calls = []
+    def handler(request):
+        calls.append(request)
+        raise error
+    with ChatCompletionsGrounder(profile(), transport=httpx.MockTransport(handler)) as provider:
+        with pytest.raises(ApiGroundingError, match=code) as failure:
+            provider.ground(request_id="request-1", capture=capture, goal="Search")
+    assert len(calls) == 1
+    assert failure.value.attempt["status"] == ("timeout" if code == "api_timeout" else "failure")
 
 
 @pytest.mark.parametrize("status,code", [(401,"api_authentication_failed"),(403,"api_access_denied"),
@@ -391,3 +556,55 @@ def test_benchmark_found_target_cannot_pass_absence_or_ambiguity_truth(capture, 
     assert report["cases"][0]["accuracy"]["status_correct"] is False
     assert report["cases"][0]["accuracy"]["passed"] is False
     assert report["summary"]["classification_accuracy"] == 0.0
+
+
+@pytest.mark.parametrize("original_size", [(2560, 1400), (1400, 2560), (2400, 2400), (1001, 777)])
+def test_luna_default_bounds_submitted_image_and_restores_original_coordinates(tmp_path, monkeypatch, original_size):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-test-key")
+    path = tmp_path / "luna-frame.png"
+    Image.new("RGB", original_size, "white").save(path)
+    source_bytes = path.read_bytes()
+    capture = {"image_path": str(path), "sha256": hashlib.sha256(source_bytes).hexdigest(),
+        "capture_id": "capture-1", "image_size": {"width": original_size[0], "height": original_size[1]}}
+    configured = api.load_api_grounding_profile(
+        Path(__file__).resolve().parents[1] / "configs/vision-api-openai-luna.example.json")
+    seen = []
+    def handler(request):
+        parts = json.loads(request.content)["messages"][1]["content"]
+        context = json.loads(parts[0]["text"])
+        with Image.open(BytesIO(base64.b64decode(parts[1]["image_url"]["url"].split(",", 1)[1]))) as image:
+            actual = image.size
+        assert max(actual) <= 1600
+        assert actual[0] <= original_size[0] and actual[1] <= original_size[1]
+        assert context["image_size"] == {"width": actual[0], "height": actual[1]}
+        payload = result()
+        payload["image_size"] = context["image_size"]
+        if original_size == (2560, 1400):
+            assert actual == (1600, 875)
+            payload["candidates"][0].update(
+                bbox={"x": 47, "y": 27, "width": 1437, "height": 22},
+                click_point={"x": 765, "y": 38})
+        else:
+            payload["candidates"][0].update(
+                bbox={"x": actual[0]-1, "y": actual[1]-1, "width": 1, "height": 1},
+                click_point={"x": actual[0]-1, "y": actual[1]-1})
+        seen.append(actual)
+        return httpx.Response(200, json=reply(payload))
+    with ChatCompletionsGrounder(configured, transport=httpx.MockTransport(handler)) as provider:
+        value = provider.ground(request_id="request-1", capture=capture, goal="Browser address bar")
+    assert len(seen) == 1
+    assert path.read_bytes() == source_bytes
+    assert value["result"]["image_size"] == capture["image_size"]
+    candidate = value["result"]["candidates"][0]
+    if original_size == (2560, 1400):
+        assert candidate["click_point"] == {"x": 1224, "y": 60}
+        assert candidate["bbox"] == {"x": 75, "y": 43, "width": 2300, "height": 36}
+    else:
+        width, height = original_size
+        box = candidate["bbox"]
+        assert box["x"] + box["width"] == width
+        assert box["y"] + box["height"] == height
+        assert candidate["click_point"] == {"x": (seen[0][0]-1)*width//seen[0][0],
+            "y": (seen[0][1]-1)*height//seen[0][1]}
+    assert value["provider"]["image_preprocess"]["original_sha256"] == capture["sha256"]
+    assert value["action_executed"] is False

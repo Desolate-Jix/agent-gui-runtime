@@ -114,6 +114,29 @@ def test_active_session_cannot_silently_reload_changed_decision_policy(tmp_path,
         session.start()
 
 
+def test_v2_review_policy_is_frozen_for_reopen_without_credentials(tmp_path):
+    from app.core.decision_configuration import create_session_decision_service, PROFILE_SNAPSHOT
+    from app.judgment import load_decision_profile
+
+    profile = tmp_path / "profile.json"
+    payload = {"contract_version": "decision_profile.v2", "mode": "auto",
+        "proactive_review": True, "review_policy": "adaptive",
+        "auto_conditions": ["The selected detail is visible"]}
+    profile.write_text(json.dumps(payload), encoding="utf-8")
+    session = tmp_path / "new-session"
+    service = create_session_decision_service(session, profile_path=profile)
+    service.close()
+    frozen = load_decision_profile(session / PROFILE_SNAPSHOT)
+    assert frozen.contract_version == "decision_profile.v2" and frozen.proactive_review is True
+    assert frozen.review_policy == "adaptive"
+    reopened = create_session_decision_service(session, profile_path=profile)
+    reopened.close()
+    profile.write_text(json.dumps({**payload, "review_policy": "always_main"}), encoding="utf-8")
+    with pytest.raises(ValueError, match="decision_session_profile_mismatch"):
+        create_session_decision_service(session, profile_path=profile)
+    assert load_decision_profile(session / PROFILE_SNAPSHOT) == frozen
+
+
 def test_provider_close_failure_is_recorded_without_stopping_remaining_cleanup(tmp_path):
     from app.core.decision_configuration import close_session_decision_service
     from app.judgment import DecisionService

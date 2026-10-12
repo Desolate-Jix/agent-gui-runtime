@@ -2,9 +2,36 @@
 from pathlib import Path
 
 from app.judgment import DecisionService, load_decision_profile
+from app.judgment.service import decision_profile_sha256, read_decision_budget_status
 
 
 PROFILE_SNAPSHOT = "decision-profile.snapshot.json"
+
+
+def read_session_decision_status(session_dir, saved_status):
+    status = dict(saved_status)
+    if status.get("mode", "off") == "off":
+        return status
+    unavailable = {"used": None, "remaining": None, "unknown_dispatches": None,
+                   "budget_status": "unavailable"}
+    try:
+        root = Path(session_dir).resolve(strict=True)
+        path = root / PROFILE_SNAPSHOT
+        if path.is_symlink() or path.resolve(strict=True) != path:
+            raise OSError("decision_session_profile_path_invalid")
+        profile = load_decision_profile(path)
+        expected = {"enabled": profile.mode != "off", "mode": profile.mode,
+                    "configured": profile.mode != "off", "contract_version": profile.contract_version,
+                    "request_cap": profile.request_cap, "timeout_seconds": profile.timeout_seconds}
+        if profile.contract_version == "decision_profile.v2":
+            expected.update(profile_sha256=decision_profile_sha256(profile),
+                            proactive_review=profile.proactive_review, review_policy=profile.review_policy)
+        if any(status.get(key) != value for key, value in expected.items()):
+            raise ValueError("decision_session_profile_mismatch")
+        # 只更新当前用量；原评估回执的认证预算保持入场快照。
+        return {**status, **read_decision_budget_status(root, profile)}
+    except (OSError, ValueError, TypeError):
+        return {**status, **unavailable}
 
 
 def freeze_decision_profile(service):

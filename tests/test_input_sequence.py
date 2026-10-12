@@ -150,15 +150,15 @@ def test_trial_bindings_reach_only_memory_focus_and_text_must_match(monkeypatch)
              "target_memory": reference}, memory_bindings=bindings)
 
 
-def test_explicit_recognition_rejection_is_zero_input_not_unknown(monkeypatch):
+def test_nested_false_without_pre_dispatch_proof_remains_unknown(monkeypatch):
     co = Coordinator()
     co.execute_local_step = lambda **kwargs: {"phase": "result_unknown",
         "capture": {"sha256": "a" * 64}, "response": {"success": False,
             "data": {"action_executed": False}, "error": {"code": "local_recognition_invalid"}},
         "observation": {"status": "captured", "capture": {"sha256": "b" * 64}}}
     result = run(co)
-    assert result["action_executed"] is False
-    assert result["steps"][0]["action_executed"] is False
+    assert result["action_executed"] is None
+    assert result["steps"][0]["action_executed"] is None
 
 
 def test_focus_read_waits_for_uia_publication_without_reclick(monkeypatch):
@@ -237,7 +237,8 @@ def test_unknown_insert_selection_stops_before_typing(monkeypatch):
     co = Coordinator()
     snapshots(monkeypatch, ["old query"])
     result = run(co, clear_existing=False)
-    assert result["error"]["code"] == "input_selection_unavailable" and len(co.calls) == 1
+    assert result["error"] == {"code": "text_field_selection_unavailable", "type": "TextFieldReadError"}
+    assert result["input_check"]["phase"] == "check_focus" and len(co.calls) == 1
 
 
 def test_dispatch_exception_keeps_progress_and_never_reuses_previous_after(monkeypatch):

@@ -1,6 +1,7 @@
 """判断接口复用真实动作路由；外部服务和桌面输入均用边界替身。"""
 from copy import deepcopy
 from hashlib import sha256
+from pathlib import Path
 from types import SimpleNamespace
 
 from PIL import Image, ImageDraw
@@ -41,7 +42,8 @@ class Decisions:
             "evidence_hashes": [row["sha256"] for row in request["frames"]]}
 
 
-def run_route(scene, monkeypatch, service, *, condition="Search is safe", repeat=1, hosted=True, coordinator=None):
+def run_route(scene, monkeypatch, service, *, condition="Search is safe", repeat=1, hosted=True, coordinator=None,
+              capture_visibility=None):
     from app.api import action
     from app.api.models.request import ExecuteRecognitionPlanRequest
     from app.core.agent_grounding_target import AgentGroundingTarget, agent_grounding_scope
@@ -64,7 +66,10 @@ def run_route(scene, monkeypatch, service, *, condition="Search is safe", repeat
 
     def capture(**kwargs):
         captures.append(kwargs)
-        return {"image_path": str(current), "window_size": {"width": 200, "height": 150}, "roi": None}
+        return {"image_path": str(current), "window_size": {"width": 200, "height": 150}, "roi": None,
+            **({"image_size": {"width": 200, "height": 150}, "window_rect": [100, 200, 300, 350],
+                "sha256": sha256(current.read_bytes()).hexdigest(),
+                "capture_visibility": deepcopy(capture_visibility)} if capture_visibility is not None else {})}
 
     monkeypatch.setattr(action.screenshot_service, "capture_window", capture)
     monkeypatch.setattr(action, "prepare_browser_content", lambda *args: None)
@@ -123,7 +128,82 @@ def test_before_success_uses_current_candidate_and_preserves_coordinates(scene, 
     assert sent["action"]["candidate"]["click_point"] == {"x": 65, "y": 55}
     assert sent["action"]["candidate"]["bbox"] == {"x": 30, "y": 40, "w": 71, "h": 31}
     assert receipt.data["result"]["decision_judgment"]["authorizes_action"] is False
-    assert any(row["purpose"] == "decision-after-wait-revalidation" for row in captures)
+    assert not any(row["purpose"] == "decision-after-wait-revalidation" for row in captures)
+
+
+@pytest.mark.parametrize("masked,want_clicks", [(True, []), (False, [(65, 55)])])
+def test_source_capture_mask_rejects_selected_point_before_any_decision_or_input(
+        scene, monkeypatch, masked, want_clicks):
+    from app.core.recognition_dispatch import recognition_plan_rejected_before_dispatch
+
+    region = {"x": 64, "y": 54, "width": 3, "height": 3} if masked else {
+        "x": 120, "y": 100, "width": 3, "height": 3}
+    visibility = {"contract_version": "bound_capture_visibility_v2", "allowed": True,
+        "reason": "capture_window_partially_visible", "bound_window_handle": 10,
+        "visible_fraction": 0.99, "occluded_regions": [region], "masked": True,
+        "coordinate_space": "window"}
+    service = Decisions()
+    receipt, clicks, _, target, _, _, _ = run_route(
+        scene, monkeypatch, service, capture_visibility=visibility)
+    assert clicks == want_clicks and receipt.success is bool(want_clicks)
+    if masked:
+        assert service.calls == [] and target.input_claimed is False
+        assert receipt.data["dispatch_status"] == "not_dispatched"
+        assert receipt.data["execution_path"]["action_executed"] is False
+        assert receipt.data["pre_click_input_rejection"]["validator"] == "capture_visibility"
+        assert recognition_plan_rejected_before_dispatch(receipt.model_dump()) is True
+    else:
+        assert len(service.calls) == 1
+
+
+def test_capture_visibility_no_dispatch_proof_rejects_point_tampering(scene, monkeypatch):
+    from app.core.recognition_dispatch import recognition_plan_rejected_before_dispatch
+
+    visibility = {"contract_version": "bound_capture_visibility_v2", "allowed": True,
+        "reason": "capture_window_partially_visible", "bound_window_handle": 10,
+        "visible_fraction": 0.99,
+        "occluded_regions": [{"x": 64, "y": 54, "width": 3, "height": 3}],
+        "masked": True, "coordinate_space": "window"}
+    receipt, _, _, _, _, _, _ = run_route(
+        scene, monkeypatch, Decisions(), capture_visibility=visibility)
+    report = receipt.model_dump()
+    assert recognition_plan_rejected_before_dispatch(report) is True
+    altered = deepcopy(report)
+    altered["data"]["capture_visibility_check"]["click_point"]["x"] += 1
+    assert recognition_plan_rejected_before_dispatch(altered) is False
+    altered = deepcopy(report)
+    altered["data"]["capture_visibility_check"]["source_sha256"] = "0" * 64
+    assert recognition_plan_rejected_before_dispatch(altered) is False
+    for invalid_path in (None, "bad\x00path"):
+        altered = deepcopy(report)
+        altered["data"]["capture_visibility_check"]["source_image_path"] = invalid_path
+        assert recognition_plan_rejected_before_dispatch(altered) is False
+    altered = deepcopy(report)
+    altered["data"]["capture_visibility_check"]["source_capture"]["capture_visibility"]["occluded_regions"][0]["x"] = 70
+    assert recognition_plan_rejected_before_dispatch(altered) is False
+
+
+def test_capture_visibility_unmasked_roi_keeps_old_path_without_reading_png(tmp_path, monkeypatch):
+    from app.core.recognition_dispatch import capture_visibility_point_check
+
+    path = tmp_path / "missing.png"
+    visibility = {"contract_version": "bound_capture_visibility_v2", "allowed": True,
+        "bound_window_handle": 10, "coordinate_space": "window", "occluded_regions": [], "masked": False}
+    capture = {"image_path": str(path), "roi": {"x": 1, "y": 1, "width": 4, "height": 4},
+        "capture_visibility": visibility}
+    assert capture_visibility_point_check(capture, image_path=path, point={"x": 1, "y": 1},
+        bound_handle=10, bound_rect=[100, 200, 300, 350]) is None
+
+    path = tmp_path / "full.png"
+    Image.new("RGB", (200, 150)).save(path)
+    capture.update(image_path=str(path), roi=None, image_size={"width": 200, "height": 150},
+        window_rect=[100, 200, 300, 350])
+    visibility.update(occluded_regions=[{"x": 120, "y": 100, "width": 3, "height": 3}], masked=True)
+    def fail_read(_):
+        raise AssertionError("outside-mask candidate must not re-read PNG")
+    monkeypatch.setattr(Path, "read_bytes", fail_read)
+    assert capture_visibility_point_check(capture, image_path=path, point={"x": 65, "y": 55},
+        bound_handle=10, bound_rect=[100, 200, 300, 350]) is None
 
 
 @pytest.mark.parametrize("verdict", ["failure", "uncertain"])
@@ -206,6 +286,36 @@ def test_window_or_candidate_change_during_wait_never_dispatches(scene, monkeypa
     receipt, clicks, _, target, _, _, _ = run_route(scene, monkeypatch, service)
     assert not receipt.success and clicks == [] and target.input_claimed is False
     assert receipt.error.code == "decision_check_stale_after_wait"
+
+
+@pytest.mark.parametrize("mode", ["auto", "shadow"])
+def test_control_change_during_decision_wait_keeps_existing_zero_input_route(scene, monkeypatch, mode):
+    from app.core.local_control_target import LocalControlTarget, local_control_target_scope
+    from tests.test_form_fill import control
+
+    identity = {"contract_version": "windows_native_identity_observation_v1",
+        "provider": "windows_native_identity", "status": "observed", "target_window_handle": 10,
+        "process_id": 20, "process_create_time": 30.0, "executable_path": "c:\\fixture\\editor.exe"}
+    before = control(window_identity=identity, window_rect=[100, 200, 200, 150],
+                     bbox={"x": 30, "y": 40, "w": 71, "h": 31})
+    current = deepcopy(before)
+    reads = []
+
+    def read_current():
+        reads.append(deepcopy(current))
+        return deepcopy(current)
+
+    service = Decisions(mode=mode, during=lambda: current.update(runtime_id=[999]))
+    with local_control_target_scope(LocalControlTarget(read_current, before)):
+        receipt, clicks, _, target, _, _, _ = run_route(scene, monkeypatch, service)
+    assert len(service.calls) == 1 and len(reads) == 2
+    assert reads[0]["runtime_id"] == before["runtime_id"] and reads[1]["runtime_id"] == [999]
+    assert not receipt.success and clicks == [] and target.input_claimed is False
+    assert receipt.error.code == "decision_check_stale_after_wait"
+    assert receipt.data["dispatch_status"] == "not_dispatched"
+    assert receipt.data["execution_path"]["action_executed"] is False
+    assert receipt.data["decision_judgment"]["adopted"] is False
+    assert "pre_click_input_rejection" not in receipt.data
 
 
 @pytest.mark.parametrize("mode,want_clicks", [("auto", []), ("shadow", [(65, 55)])])
@@ -343,7 +453,7 @@ def test_invalid_before_evidence_is_explicit_not_dispatched_without_provider(tmp
         with pytest.raises(DecisionCheckRejected) as raised:
             evaluate_before_action(scope, capture=capture, identity={"handle": 10, "process_id": 20,
                 "process_create_time": 30.0}, candidate=candidate, point={"x": 20, "y": 20},
-                goal="Search", click_kind="single", revalidate=lambda: None)
+                goal="Search", click_kind="single", revalidate=lambda: None, validate_binding=lambda: None)
         assert raised.value.reason_code == "decision_check_invalid_evidence"
         assert scope["result"]["adopted"] is False and service.calls == []
 

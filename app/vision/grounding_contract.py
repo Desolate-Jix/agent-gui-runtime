@@ -32,8 +32,10 @@ class ClickPoint(_StrictModel):
 class GroundingCandidate(_StrictModel):
     id: StrictStr = Field(min_length=1)
     label: StrictStr = Field(min_length=1)
-    bbox: BoundingBox
-    click_point: ClickPoint
+    bbox: BoundingBox = Field(description="Real target bounding box. For an input field, cover the entire visible input field, "
+        "including its existing text area, even when the requested click is in a blank or other clickable subregion.")
+    click_point: ClickPoint = Field(description="Point inside bbox chosen independently for the requested clickable subregion, "
+        "not necessarily the bbox center.")
     evidence_source: Literal["agent_visual", "api_visual", "local_visual"]
     confidence: float | None = Field(default=None, strict=True, ge=0, le=1, allow_inf_nan=False)
 

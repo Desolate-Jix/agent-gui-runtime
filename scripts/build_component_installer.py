@@ -88,6 +88,11 @@ def build(*, component, version, payload_dir, manifest, output_dir, csc=CSC):
         raise ValueError('output must be outside payload')
     rows = validate(payload, manifest)
     config = {**COMPONENTS[component], 'component': component, 'version': version}
+    setup_name = config['product_id']
+    if component == 'execution' and '-' not in version:
+        # 保留已安装执行组件的升级身份，仅更新正式版展示和下载名称。
+        config['display_name'] = 'Agent GUI Runtime Execution'
+        setup_name = 'AgentGUIRuntimeExecution'
     if config['entrypoint'].casefold() not in {r['path'].casefold() for r in rows}:
         raise ValueError('component entrypoint missing from manifest')
     if not Path(csc).is_file():
@@ -106,7 +111,7 @@ def build(*, component, version, payload_dir, manifest, output_dir, csc=CSC):
     generated.write_text('internal static class Identity {\n' + ''.join(
         'internal const string ' + key + ' = ' + json.dumps(value, ensure_ascii=True) + ';\n'
         for key, value in constants.items()) + '}\n', encoding='utf-8')
-    setup = output / (config['product_id'] + '-Setup.exe')
+    setup = output / (setup_name + '-Setup.exe')
     windows_manifest = output / 'asInvoker.manifest'
     windows_manifest.write_text('<?xml version="1.0" encoding="UTF-8"?><assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0"><trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo></assembly>', encoding='utf-8')
     framework = Path(csc).parent

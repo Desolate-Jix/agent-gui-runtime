@@ -48,6 +48,52 @@ class TextFieldIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class TextFieldPatternEvidence:
+    """模式摘要只作受限诊断，不含原文，也不作为可写或输入授权。"""
+    authority: str
+    pattern_consistency: str
+    value_sha256: str | None
+    value_length: int | None
+    text_sha256: str | None
+    text_length: int | None
+    selection_basis: str
+
+    def __post_init__(self):
+        if (not isinstance(self.authority, str) or self.authority not in {"uia_value", "uia_text"}
+                or not isinstance(self.pattern_consistency, str)
+                or self.pattern_consistency not in {"matched", "disagrees", "value_only", "text_only"}
+                or not isinstance(self.selection_basis, str)
+                or self.selection_basis not in {"aligned_text", "non_content_range", "disabled_disagreement", "unavailable"}):
+            raise ValueError("text field pattern evidence is invalid")
+        for digest, length in ((self.value_sha256, self.value_length), (self.text_sha256, self.text_length)):
+            if digest is None and length is None:
+                continue
+            if (not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                    or type(length) is not int or not 0 <= length <= 32768
+                    or length == 0 and digest != sha256(b"").hexdigest()):
+                raise ValueError("text field pattern digest is invalid")
+        has_value, has_text = self.value_sha256 is not None, self.text_sha256 is not None
+        equal = (self.value_sha256, self.value_length) == (self.text_sha256, self.text_length)
+        consistency = ("matched" if equal else "disagrees") if has_value and has_text else (
+            "value_only" if has_value else "text_only" if has_text else None)
+        if (self.pattern_consistency != consistency
+                or self.authority != ("uia_value" if has_value else "uia_text")
+                or self.selection_basis == "disabled_disagreement" and consistency != "disagrees"
+                or consistency == "disagrees" and self.selection_basis != "disabled_disagreement"
+                or self.selection_basis == "non_content_range" and not (has_value and has_text)
+                or self.selection_basis == "aligned_text" and consistency not in {"matched", "text_only"}):
+            raise ValueError("text field pattern evidence is inconsistent")
+
+    def to_reference(self):
+        def summary(digest, length):
+            return {"sha256": digest, "length": length} if digest is not None else None
+        return {"contract_version": "text_field_pattern_evidence.v1", "authority": self.authority,
+            "pattern_consistency": self.pattern_consistency,
+            "value": summary(self.value_sha256, self.value_length),
+            "text": summary(self.text_sha256, self.text_length), "selection_basis": self.selection_basis}
+
+
+@dataclass(frozen=True, slots=True)
 class TextFieldSnapshot:
     identity: TextFieldIdentity
     capture_id: str
@@ -56,6 +102,7 @@ class TextFieldSnapshot:
     source: str
     value: str = field(repr=False)
     selection: tuple[int, int] | None
+    pattern_evidence: TextFieldPatternEvidence | None = None
 
     def __post_init__(self):
         if (type(self.identity) is not TextFieldIdentity or not _positive(self.observed_at_ns)
@@ -68,6 +115,16 @@ class TextFieldSnapshot:
                 or any(type(item) is not int for item in selected)
                 or not 0 <= selected[0] <= selected[1] <= len(self.value)):
             raise ValueError("text field selection is invalid")
+        patterns = self.pattern_evidence
+        if patterns is not None:
+            if type(patterns) is not TextFieldPatternEvidence:
+                raise ValueError("text field pattern evidence requires immutable input")
+            digest, length = ((patterns.value_sha256, patterns.value_length) if self.source == "uia_value"
+                else (patterns.text_sha256, patterns.text_length))
+            if (patterns.authority != self.source or digest != sha256(self.value.encode("utf-8")).hexdigest()
+                    or length != len(self.value)
+                    or (selected is not None) != (patterns.selection_basis == "aligned_text")):
+                raise ValueError("text field pattern evidence differs from snapshot")
 
     def to_reference(self):
         return {"contract_version": "text_field_snapshot_reference_v1", "identity": self.identity.to_reference(),

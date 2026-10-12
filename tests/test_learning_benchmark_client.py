@@ -3,6 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 from pathlib import Path
+import time
 
 import pytest
 
@@ -86,6 +87,27 @@ class FakeSDK:
                 return ToolResult({"status": "returned", "request_id": args.get("request_id")})
 
         return Session()
+
+
+def exhaust_initial_wait_budget(sdk):
+    original_client = sdk.client
+
+    def delayed_client(read, write):
+        session = original_client(read, write)
+        original_call = session.call_tool
+
+        async def call_tool(name, args):
+            result = await original_call(name, args)
+            if name == "instant_run":
+                # 让首次假回执耗尽正预算，避免依赖 Windows 亚毫秒定时器精度。
+                time.sleep(.02)
+            return result
+
+        session.call_tool = call_tool
+        return session
+
+    sdk.client = delayed_client
+    return sdk
 
 
 class ControlSDK(FakeSDK):
@@ -192,10 +214,10 @@ def test_read_only_rejects_input_before_transport_and_never_logs_values(tmp_path
 
 
 def test_timeout_returns_pending_original_id_without_resubmit(tmp_path):
-    sdk = FakeSDK()
+    sdk = exhaust_initial_wait_budget(FakeSDK())
     async def scenario():
         async with client(tmp_path, sdk) as opened:
-            result = await opened.run("capture-2", {"kind": "capture"}, total_timeout=0)
+            result = await opened.run("capture-2", {"kind": "capture"}, total_timeout=.0005)
             assert result["request_id"] == "capture-2" and result["status"] == "pending"
     asyncio.run(scenario())
     assert [name for name, _ in sdk.calls].count("instant_run") == 1
@@ -265,16 +287,41 @@ def test_agent_awaiting_grounding_returns_without_status_or_input_replay(tmp_pat
     assert [name for name, _ in sdk.calls].count("instant_run") == 1
 
 
-def test_agent_status_query_timeout_reuses_only_that_query_id(tmp_path):
+def test_agent_status_query_timeout_reuses_only_that_query_id(tmp_path, monkeypatch):
+    from scripts import learning_benchmark_client as benchmark_module
+
     sdk = FakeSDK()
     sdk.agent_initial = "running"
     sdk.pending_agent_status = True
+    query_returned = False
+    original_client = sdk.client
+    original_clock = benchmark_module.monotonic
+
+    def watched_client(read, write):
+        session = original_client(read, write)
+        original_call = session.call_tool
+
+        async def call_tool(name, args):
+            nonlocal query_returned
+            result = await original_call(name, args)
+            if name == "instant_run" and args["command"]["kind"] == "agent_command_status":
+                query_returned = True
+            return result
+
+        session.call_tool = call_tool
+        return session
+
+    sdk.client = watched_client
+    # 仅在状态查询已返回 pending 后耗尽虚拟预算，固定检查已提交查询的身份。
+    monkeypatch.setattr(benchmark_module, "monotonic",
+        lambda: original_clock() + (60 if query_returned else 0))
     async def scenario():
         async with client(tmp_path, sdk, allow_actions=True) as opened:
             return await opened.run("original-3", {"kind": "step", "operation": "execute_recognition_plan",
-                                                  "request": {"goal": "Open"}}, total_timeout=.02)
+                                                  "request": {"goal": "Open"}}, total_timeout=5)
     result = asyncio.run(scenario())
     current = result["current_status_request_id"]
+    assert query_returned is True
     assert result["client_state"] == "pending" and result["no_replay"] is True
     assert result["original_request_id"] == result["command_id"] == "original-3"
     assert current.startswith("agent-status-") and result["next"]["arguments"]["request_id"] == current
@@ -406,11 +453,11 @@ def test_explicit_control_rejects_different_worker(tmp_path, kind):
 @pytest.mark.parametrize("kind", ["agent_command_status", "agent_command_continue"])
 @pytest.mark.parametrize("pending", [False, True])
 def test_control_timeout_next_never_replays_input_or_continue(tmp_path, kind, pending):
-    sdk = ControlSDK(["running"], pending=pending)
+    sdk = exhaust_initial_wait_budget(ControlSDK(["running"], pending=pending))
     async def scenario():
         async with client(tmp_path, sdk, allow_actions=True) as opened:
             return await opened.run("control-timeout", {"kind": kind, "request": {
-                "command_id": "original-input"}}, total_timeout=0)
+                "command_id": "original-input"}}, total_timeout=.0005)
     result = asyncio.run(scenario())
     assert result["no_replay"] is True and result["command_id"] == "original-input"
     assert result["current_status_request_id"] == "control-timeout"

@@ -8,25 +8,10 @@ import unicodedata
 from PIL import Image
 
 
-CONTROL_TYPES = frozenset({"Button", "Hyperlink", "Edit", "ComboBox", "MenuItem", "TabItem"})
-CONTAINER_TYPES = frozenset({"Window", "Pane", "Group", "Custom", "ToolBar", "Menu", "Tab"})
-
-
-def validate_task_plan_control_target(value, *, for_input=False):
-    if (not isinstance(value, dict) or not {"name", "control_type"} <= set(value)
-            or set(value) - {"name", "control_type", "container"}):
-        raise ValueError("task_plan_target_fields_invalid")
-    def semantic(item, types):
-        if (not isinstance(item, dict) or set(item) != {"name", "control_type"}
-                or not isinstance(item["name"], str) or not item["name"].strip()
-                or len(item["name"]) > 512 or not isinstance(item["control_type"], str)
-                or item["control_type"] not in types):
-            raise ValueError("task_plan_target_semantics_invalid")
-    semantic({key: value[key] for key in ("name", "control_type")},
-             {"Edit", "ComboBox"} if for_input else CONTROL_TYPES)
-    if "container" in value:
-        semantic(value["container"], CONTAINER_TYPES)
-    return deepcopy(value)
+from app.core.control_target_contract import (
+    CONTROL_TYPES, CONTAINER_TYPES, validate_task_plan_control_target,
+)
+from app.operation.screen_reading.uia_graph import is_complete_canonical_uia_snapshot
 
 
 def _name(value):
@@ -45,6 +30,13 @@ def bind_task_plan_capture(metadata, *, live_capture, before, current, identity=
     if metadata.get("task_plan_target") is None:
         return metadata
     metadata["task_plan_target"] = validate_task_plan_control_target(metadata["task_plan_target"])
+    metadata["task_plan_capture"] = bind_current_execution_capture(
+        live_capture=live_capture, before=before, current=current, identity=identity)
+    return metadata
+
+
+def bind_current_execution_capture(*, live_capture, before, current, identity=None):
+    """共用截图绑定只核对像素与窗口事实，不读取或定位控件。"""
     if (not isinstance(before, dict) or not isinstance(current, dict)
             or any(type(before.get(key)) is not int or before[key] <= 0
                    or current.get(key) != before[key] for key in ("handle", "process_id"))
@@ -66,10 +58,9 @@ def bind_task_plan_capture(metadata, *, live_capture, before, current, identity=
     window_identity = {key: before[key] for key in ("handle", "process_id")}
     if isinstance(identity, dict) and identity.get("process_create_time") is not None:
         window_identity["process_create_time"] = identity["process_create_time"]
-    metadata["task_plan_capture"] = {"capture_id": str(path), "image_path": str(path), "sha256": digest,
+    return {"capture_id": str(path), "image_path": str(path), "sha256": digest,
         "image_size": {"width": screen_rect["w"], "height": screen_rect["h"]},
         "window_identity": window_identity, "screen_rect": screen_rect}
-    return metadata
 
 
 def validate_task_plan_dispatch_capture(capture, *, current, image_path):
@@ -119,13 +110,18 @@ def validate_task_plan_dispatch_target(target, *, resolution, capture, point, wi
         container = {**container, "bbox": tuple(container["bbox"][key] for key in ("x", "y", "w", "h"))}
     elif container is not None:
         raise ValueError("task_plan_target_dispatch_container_invalid")
+    popup = resolution.get("expected_owned_popup_handle")
+    if popup is not None and (target["control_type"] != "MenuItem" or type(popup) is not int
+            or popup <= 0 or popup == identity["target_window_handle"]):
+        raise ValueError("task_plan_target_dispatch_binding_invalid")
     observation = WindowsControlHitReader(window_manager=window_manager).observe_target_hit(
         window_handle=identity["target_window_handle"], process_id=identity["process_id"],
         process_create_time=identity["process_create_time"], window_rect=tuple(rect[k] for k in ("x", "y", "w", "h")),
         capture_id=capture["capture_id"], control_id=resolution["control_id"],
         point=(point["x"], point["y"]), expected_runtime_id=resolution["runtime_id"],
         expected_control_type=target["control_type"], expected_name=target["name"],
-        expected_bbox=tuple(box[k] for k in ("x", "y", "w", "h")), expected_container=container)
+        expected_bbox=tuple(box[k] for k in ("x", "y", "w", "h")), expected_container=container,
+        **({"expected_owned_popup_handle": popup} if popup is not None else {}))
     return {"status": "matched", **observation}
 
 
@@ -135,6 +131,76 @@ def task_plan_visual_goal(goal, target):
         + json.dumps(target, ensure_ascii=False, sort_keys=True)
         + ". Match its exact name, control_type and ancestor container; do not choose a substitute. "
         "If you cannot uniquely locate this target, refuse.")
+
+
+def _owned_menu_popup_handle(snapshot, selected, by_id):
+    """只从同次完整菜单子树交叉核对原身份，不解码 RID 或发现替代浮窗。"""
+    if selected["control_type"] != "MenuItem":
+        return None
+    scopes = snapshot.get("menu_scopes", [])
+    if (not isinstance(scopes, list) or any(not isinstance(scope, dict)
+            or ("controls" in scope and not isinstance(scope["controls"], list)) for scope in scopes)):
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    matching = [(scope, item) for scope in scopes if isinstance(scope, dict)
+        for item in scope.get("controls", []) if isinstance(item, dict)
+        and item.get("runtime_id") == selected["runtime_id"]]
+    if not matching:
+        return None
+    if len(matching) != 1:
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    scope, scoped_target = matching[0]
+    # 子树范围必须原样为 menu_subtree；仅复用完整规范图的布尔事实校验。
+    if (scope.get("provider") != "windows_uia" or scope.get("scan_scope") != "menu_subtree"
+            or not is_complete_canonical_uia_snapshot({**scope, "scan_scope": "bound_window"})
+            or scope.get("window") != snapshot["window"]):
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    controls = scope.get("controls")
+    if not isinstance(controls, list) or not all(isinstance(item, dict) for item in controls):
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    identifiers = [item.get("control_id") for item in controls]
+    if any(not isinstance(key, str) or not key for key in identifiers) or len(set(identifiers)) != len(identifiers):
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    scoped = dict(zip(identifiers, controls))
+    runtimes = []
+    for item in controls:
+        ancestors, runtime = item.get("ancestor_control_ids"), item.get("runtime_id")
+        if (item.get("provider") != "windows_uia" or not isinstance(ancestors, list)
+                or any(not isinstance(key, str) or key not in scoped or key == item["control_id"] for key in ancestors)
+                or len(set(ancestors)) != len(ancestors)
+                or type(runtime) not in (list, tuple) or not 1 <= len(runtime) <= 64
+                or any(type(part) is not int for part in runtime) or tuple(runtime) in runtimes):
+            raise ValueError("task_plan_target_menu_scope_invalid")
+        runtimes.append(tuple(runtime))
+    if any(item["control_id"] in scoped[key]["ancestor_control_ids"]
+            for item in controls for key in item["ancestor_control_ids"]):
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    menu = scoped.get(scope.get("source_menu_control_id"))
+    if (menu is None or menu.get("control_type") != "Menu"
+            or menu["control_id"] not in scoped_target["ancestor_control_ids"]):
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    original_menus = [by_id[key] for key in selected["ancestor_control_ids"]
+        if by_id[key].get("control_type") == "Menu" and by_id[key].get("runtime_id") == menu["runtime_id"]]
+    if len(original_menus) != 1:
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    for original, observed in ((selected, scoped_target), (original_menus[0], menu)):
+        if (any(original.get(key) != observed.get(key) for key in
+                ("runtime_id", "control_type", "name", "bbox", "screen_bbox"))
+                or any(value.get(key) is not True for value in (original, observed) for key in ("enabled", "visible"))):
+            raise ValueError("task_plan_target_menu_scope_invalid")
+    box, parent, viewport = selected["bbox"], menu.get("bbox"), snapshot["window"]["bbox"]
+    if (not _box(parent) or parent["x"] < 0 or parent["y"] < 0
+            or parent["x"] + parent["w"] > viewport["w"] or parent["y"] + parent["h"] > viewport["h"]
+            or box["x"] < parent["x"] or box["y"] < parent["y"]
+            or box["x"] + box["w"] > parent["x"] + parent["w"]
+            or box["y"] + box["h"] > parent["y"] + parent["h"]
+            or menu.get("screen_bbox") != {**parent,
+                "x": parent["x"] + selected["screen_bbox"]["x"] - box["x"],
+                "y": parent["y"] + selected["screen_bbox"]["y"] - box["y"]}):
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    popup = scope.get("owned_popup_handle")
+    if popup is not None and (type(popup) is not int or popup <= 0 or popup == snapshot["window"]["handle"]):
+        raise ValueError("task_plan_target_menu_scope_invalid")
+    return popup
 
 
 def validate_task_plan_visual_selection(target, *, capture, snapshot, action, bbox, point):
@@ -159,9 +225,7 @@ def resolve_current_uia_target(target, *, capture, snapshot, _visual_control_id=
         raise ValueError("task_plan_target_capture_unavailable")
     if snapshot.get("provider") != "windows_uia" or snapshot.get("status") != "ok":
         raise ValueError("task_plan_target_uia_provider_failed")
-    if (snapshot.get("scan_scope", "bound_window") != "bound_window"
-            or snapshot.get("scan_complete") is not True or snapshot.get("truncated") is not False
-            or snapshot.get("provider_tree_valid") is not True):
+    if not is_complete_canonical_uia_snapshot(snapshot):
         raise ValueError("task_plan_target_uia_incomplete")
     window, identity = snapshot.get("window"), capture.get("window_identity")
     if (not isinstance(window, dict) or not isinstance(identity, dict)
@@ -266,7 +330,9 @@ def resolve_current_uia_target(target, *, capture, snapshot, _visual_control_id=
                 or any(selected.get(key) is True for key in ("is_read_only", "read_only", "readonly",
                          "is_password", "is_protected", "protected"))):
             raise ValueError("task_plan_target_field_not_writable")
+    popup = _owned_menu_popup_handle(snapshot, selected, by_id)
     return {**result, "status": "matched", "match_count": 1, "control_id": selected["control_id"],
             "runtime_id": list(runtime_id), "bbox": deepcopy(box),
             **({"container_binding": container_binding} if container_binding is not None else {}),
+            **({"expected_owned_popup_handle": popup} if popup is not None else {}),
             "click_point": {"x": box["x"] + box["w"] // 2, "y": box["y"] + box["h"] // 2}}

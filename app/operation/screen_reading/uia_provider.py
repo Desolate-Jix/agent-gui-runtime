@@ -7,12 +7,16 @@ from dataclasses import dataclass, replace
 from typing import Any, Iterator, Mapping
 
 from app.core.window_manager import BoundWindow, window_manager
-from app.operation.screen_reading.uia_graph import CanonicalUIAGraph, UIAGraphError
+from app.operation.screen_reading.uia_cache import (
+    ACQUISITION_MODE, CachedUIAWrapper, UIACacheError, cached_graph_identity, cached_root,
+)
+from app.operation.screen_reading.uia_graph import CanonicalUIAGraph, UIAGraphError, tree_identity
 
 UIA_PROVIDER_ID = "windows_uia"
 UIA_PROVIDER_VERSION = "windows_uia_provider_v1"
 DEFAULT_UIA_MAX_CONTROLS = 1000
 HARD_UIA_MAX_CONTROLS = 4000
+_cached_uia_root = cached_root
 
 
 def _annotate_form_labels(snapshot):
@@ -49,6 +53,8 @@ class _FiniteUIAChildren:
 
 def _finite_uia_children(wrapper):
     """直接读取有限子元素数组；不使用会吞 COM 异常的 children 包装或兄弟游标。"""
+    if isinstance(wrapper, CachedUIAWrapper):
+        return wrapper.cached_children()
     from pywinauto.uia_defines import IUIA
     from pywinauto.uia_element_info import UIAElementInfo
 
@@ -63,11 +69,12 @@ def _bounded_uia_walk(root, *, budget, prune_documents=False):
     wrappers, errors, frames, seen = [], [], [], set()
     current, path, expected_parent = root, frozenset(), None
     try:
-        graph = CanonicalUIAGraph(root)
-    except Exception:
+        graph = (CanonicalUIAGraph(root, identity=lambda node: cached_graph_identity(node, tree_identity))
+                 if isinstance(root, CachedUIAWrapper) else CanonicalUIAGraph(root))
+    except Exception as exc:
         graph = None
         errors.append({"reason": "runtime_identity_unavailable" if _runtime_id_key(root) is None
-                       else "tree_identity_unavailable", "index": 0})
+                       else "tree_identity_unavailable", "index": 0, **_cache_error_detail(exc)})
     visited = 0
     excluded = 0
     while current is not None:
@@ -81,7 +88,7 @@ def _bounded_uia_walk(root, *, budget, prune_documents=False):
                     path={tuple(value for _, value in item) for item in path})
             except Exception as exc:
                 errors.append({"reason": exc.reason if isinstance(exc, UIAGraphError)
-                               else "tree_identity_unavailable", "index": visited - 1})
+                               else "tree_identity_unavailable", "index": visited - 1, **_cache_error_detail(exc)})
         if not alias:
             wrappers.append(current)
         if key is None:
@@ -102,7 +109,8 @@ def _bounded_uia_walk(root, *, budget, prune_documents=False):
                                _public_runtime_id(current.element_info)])
             except Exception as exc:
                 errors.append({"reason": "children_enumeration_failed", "index": len(wrappers) - 1,
-                               "message": str(exc), "winerror": getattr(exc, "winerror", None)})
+                               "message": str(exc), "winerror": getattr(exc, "winerror", None),
+                               **_cache_error_detail(exc)})
         current = None
         while frames:
             children, index, child_path, parent_id = frames[-1]
@@ -116,7 +124,8 @@ def _bounded_uia_walk(root, *, budget, prune_documents=False):
             except Exception as exc:
                 frames.pop()
                 errors.append({"reason": "children_enumeration_failed", "child_index": index,
-                               "message": str(exc), "winerror": getattr(exc, "winerror", None)})
+                               "message": str(exc), "winerror": getattr(exc, "winerror", None),
+                               **_cache_error_detail(exc)})
     truncated = visited == budget
     return {"wrappers": wrappers, "scan_visited_count": visited,
             "scan_complete": not truncated and not errors, "truncated": truncated,
@@ -128,8 +137,33 @@ def _bounded_uia_walk(root, *, budget, prune_documents=False):
             "traversal_errors": errors, "excluded_document_count": excluded}
 
 
+def _cache_error_detail(error):
+    return {"cache_error": error.to_dict()} if isinstance(error, UIACacheError) else {}
+
+
+def _cache_failure_metadata(error):
+    if not isinstance(error, UIACacheError):
+        return {}
+    detail = error.to_dict()
+    return {"acquisition_mode": ACQUISITION_MODE, "cache_error_count": 1,
+            "cache_com_error_count": int(detail.get("error_type") == "COMError" or "hresult" in detail),
+            "cache_errors": [detail], "scan_complete": False, "graph_scan_complete": False,
+            "provider_tree_valid": False, "traversal_errors": [detail]}
+
+
 def _walk_metadata(walk):
-    return {key: value for key, value in walk.items() if key not in {"wrappers", "excluded_document_count"}}
+    metadata = {key: value for key, value in walk.items() if key not in {"wrappers", "excluded_document_count"}}
+    cached = [(index, node) for index, node in enumerate(walk["wrappers"]) if isinstance(node, CachedUIAWrapper)]
+    # 投影中的 _safe 仍兼容旧适配器；缓存接口异常必须重新纳入完整性，而不是消失为空值。
+    projection_errors = [{**detail, "index": index} for index, node in cached for detail in node.cache_errors]
+    errors = [item["cache_error"] for item in walk["traversal_errors"] if "cache_error" in item] + projection_errors
+    metadata.update(acquisition_mode=ACQUISITION_MODE if cached else "current_properties.v1",
+                    cache_error_count=len(errors),
+                    cache_com_error_count=sum(item.get("error_type") == "COMError" or "hresult" in item for item in errors),
+                    cache_errors=errors, traversal_errors=walk["traversal_errors"] + projection_errors)
+    if errors:
+        metadata.update(scan_complete=False, graph_scan_complete=False, provider_tree_valid=False)
+    return metadata
 
 _PINNED_UIA_SNAPSHOT: ContextVar[dict[str, Any] | None] = ContextVar(
     "pinned_uia_snapshot",
@@ -245,22 +279,41 @@ class WindowsUIAProvider:
             "merge_keys": ["bbox_overlap", "role_guess", "label_or_name", "window_process"],
         }
 
-    def snapshot_bound_window(self, *, max_controls: int = DEFAULT_UIA_MAX_CONTROLS) -> dict[str, Any]:
+    def snapshot_bound_window(self, *, max_controls: int = DEFAULT_UIA_MAX_CONTROLS,
+                              browser_chrome_only: bool = False) -> dict[str, Any]:
         pinned = _PINNED_UIA_SNAPSHOT.get()
         if pinned is not None:
             return deepcopy(pinned)
         bound = window_manager.get_bound_window()
         if bound is None:
             return self._unavailable("no_bound_window", "Bind a target window before collecting UIA controls.")
-        return self.snapshot_window(bound, max_controls=max_controls)
+        return self.snapshot_window(bound, max_controls=max_controls,
+            **({"browser_chrome_only": True} if browser_chrome_only is True else {}))
 
-    def snapshot_window(self, bound: BoundWindow, *, max_controls: int = DEFAULT_UIA_MAX_CONTROLS) -> dict[str, Any]:
+    def snapshot_window(self, bound: BoundWindow, *, max_controls: int = DEFAULT_UIA_MAX_CONTROLS,
+                        browser_chrome_only: bool = False) -> dict[str, Any]:
         try:
             control_budget = max(1, min(int(max_controls), HARD_UIA_MAX_CONTROLS))
             from pywinauto import Desktop
 
             desktop = Desktop(backend="uia")
-            root = desktop.window(handle=bound.handle).wrapper_object()
+            root = _cached_uia_root(desktop.window(handle=bound.handle).wrapper_object())
+            window = {
+                "handle": bound.handle,
+                "title": bound.title,
+                "process_id": bound.process_id,
+                "process_name": bound.process_name,
+                "bbox": {
+                    "x": 0,
+                    "y": 0,
+                    "w": max(1, bound.rect.right - bound.rect.left),
+                    "h": max(1, bound.rect.bottom - bound.rect.top),
+                },
+            }
+            # 明确导航只采集当前浏览器外壳；默认仍取整窗，不下钻正文后再回头采集。
+            if (browser_chrome_only is True
+                    and str(bound.process_name).casefold() in {"msedge.exe", "chrome.exe", "chromium.exe"}):
+                return self._browser_chrome_scope(root, bound=bound, window=window)
             walk = _bounded_uia_walk(root, budget=control_budget)
             wrappers = walk["wrappers"]
             observed: list[tuple[Any, UIAControl]] = []
@@ -282,18 +335,7 @@ class WindowsUIAProvider:
                 "status": "ok",
                 "scan_budget": control_budget,
                 **_walk_metadata(walk),
-                "window": {
-                    "handle": bound.handle,
-                    "title": bound.title,
-                    "process_id": bound.process_id,
-                    "process_name": bound.process_name,
-                    "bbox": {
-                        "x": 0,
-                        "y": 0,
-                        "w": max(1, bound.rect.right - bound.rect.left),
-                        "h": max(1, bound.rect.bottom - bound.rect.top),
-                    },
-                },
+                "window": window,
                 "control_count": len(controls),
                 "controls": controls,
             }
@@ -317,7 +359,7 @@ class WindowsUIAProvider:
                 snapshot["browser_document_observation"] = browser_document_observation(snapshot)
             return snapshot
         except Exception as exc:
-            return self._unavailable("uia_scan_failed", str(exc))
+            return {**self._unavailable("uia_scan_failed", str(exc)), **_cache_failure_metadata(exc)}
 
     def _browser_chrome_scope(self, root, *, bound, window):
         """独立有界遍历浏览器外壳；不下钻网页 Document，也不声称整页完整。"""
@@ -346,7 +388,7 @@ class WindowsUIAProvider:
                     "window": deepcopy(window), "controls": controls, "control_count": len(controls)}
         except Exception as exc:
             return {"status": "unavailable", "scan_scope": "browser_chrome", "scan_complete": False,
-                    "reason": "browser_chrome_scan_failed", "message": str(exc)}
+                    "reason": "browser_chrome_scan_failed", "message": str(exc), **_cache_failure_metadata(exc)}
 
     def _complete_menu_scopes(self, observed, *, controls, bound, window, root_is_owned_popup=False):
         """只补采当前树已证实归属的唯一可见菜单，不扩大全窗口扫描预算。"""
@@ -386,7 +428,8 @@ class WindowsUIAProvider:
                      "window": dict(window), "control_count": len(scoped), "controls": scoped}]
         except Exception as exc:
             return [{"status": "unavailable", "scan_scope": "menu_subtree",
-                     "reason": "menu_subtree_scan_failed", "message": str(exc), "scan_complete": False}]
+                     "reason": "menu_subtree_scan_failed", "message": str(exc), "scan_complete": False,
+                     **_cache_failure_metadata(exc)}]
 
     @staticmethod
     def _owned_popup_handles(bound):
@@ -410,7 +453,7 @@ class WindowsUIAProvider:
             return [{"status": "unavailable", "reason": "owned_popup_count_exceeds_budget", "scan_complete": False}]
         for handle in handles:
             try:
-                root = desktop.window(handle=handle).wrapper_object()
+                root = _cached_uia_root(desktop.window(handle=handle).wrapper_object())
                 walk = _bounded_uia_walk(root, budget=128)
                 wrappers = walk["wrappers"]
                 if not walk["scan_complete"]:
@@ -426,6 +469,10 @@ class WindowsUIAProvider:
                     zero_area_structural_ids=zero_ids)
                 controls = [replace(control, ancestor_control_ids=ancestors.get(id(wrapper), ())).to_dict()
                             for wrapper, control in observed]
+                metadata = _walk_metadata(walk)
+                if not metadata["scan_complete"]:
+                    scopes.append({"status": "unavailable", "reason": "owned_popup_scan_incomplete", **metadata})
+                    continue
                 found = self._complete_menu_scopes(observed, controls=controls, bound=bound, window=window,
                     root_is_owned_popup=True)
                 for scope in found:
@@ -433,7 +480,7 @@ class WindowsUIAProvider:
                 scopes.extend(found)
             except Exception as exc:
                 scopes.append({"status": "unavailable", "reason": "owned_popup_scan_failed",
-                               "message": str(exc), "scan_complete": False})
+                               "message": str(exc), "scan_complete": False, **_cache_failure_metadata(exc)})
         return scopes
 
     def _control_from_wrapper(self, wrapper: Any, *, bound: BoundWindow, index: int,
@@ -708,6 +755,8 @@ def _patterns(wrapper: Any) -> tuple[str, ...]:
 
 def _scroll_axes(wrapper: Any) -> dict[str, bool | None]:
     # COM BOOL 仅接受明确的 0/1 或 bool；读取失败保留未知，不能伪装成不可滚动。
+    if isinstance(wrapper, CachedUIAWrapper):
+        return wrapper.scroll_axes()
     result = {}
     for axis, attr in (("vertical", "CurrentVerticallyScrollable"), ("horizontal", "CurrentHorizontallyScrollable")):
         value = _safe_call(lambda: getattr(wrapper.iface_scroll, attr))

@@ -136,7 +136,11 @@ def test_agent_job_before_image_unwraps_completed_original_receipt(tmp_path):
     session = InstantSession(tmp_path, tmp_path, None, recognition_source='agent_current')
     session.session = tmp_path
     (tmp_path / 'responses').mkdir()
-    write_json(tmp_path / 'responses/completed-1.json', {'status': 'returned', 'result': {
+    (tmp_path / 'commands').mkdir()
+    command = InstantCommand.model_validate({'kind': 'agent_command_status',
+        'request': {'command_id': 'batch-1'}}).command()
+    write_json(tmp_path / 'commands/completed-1.json', command)
+    write_json(tmp_path / 'responses/completed-1.json', {'command': command, 'status': 'returned', 'result': {
         'contract_version': 'agent_command.v1', 'command_id': 'batch-1', 'status': 'completed',
         'action_executed': True, 'result': {'capture': capture}}})
     assert session.image('completed-1', 'before') == image.read_bytes()

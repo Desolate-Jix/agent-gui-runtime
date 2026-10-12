@@ -36,7 +36,8 @@ def _snapshot(handle: int) -> dict:
     }
 
 
-def test_pinned_snapshot_is_private_deep_copied_and_restores_fallback(monkeypatch) -> None:
+@pytest.mark.parametrize("chrome_only", [False, True])
+def test_pinned_snapshot_is_private_deep_copied_and_restores_fallback(monkeypatch, chrome_only) -> None:
     provider = provider_module.WindowsUIAProvider()
     fallback = _snapshot(99)
     monkeypatch.setattr(
@@ -49,22 +50,23 @@ def test_pinned_snapshot_is_private_deep_copied_and_restores_fallback(monkeypatc
 
     with provider_module.pinned_uia_snapshot(supplied):
         supplied["controls"][0]["control_id"] = "caller-mutated"
-        first = provider.snapshot_bound_window()
+        first = provider.snapshot_bound_window(browser_chrome_only=chrome_only)
         first["controls"][0]["control_id"] = "consumer-mutated"
-        second = provider.snapshot_bound_window()
+        second = provider.snapshot_bound_window(browser_chrome_only=chrome_only)
 
     assert second["controls"][0]["control_id"] == "control-42"
-    assert provider.snapshot_bound_window() == fallback
+    assert provider.snapshot_bound_window(browser_chrome_only=chrome_only) == fallback
 
 
-def test_pinned_snapshot_is_isolated_between_concurrent_contexts() -> None:
+@pytest.mark.parametrize("chrome_only", [False, True])
+def test_pinned_snapshot_is_isolated_between_concurrent_contexts(chrome_only) -> None:
     provider = provider_module.WindowsUIAProvider()
     barrier = Barrier(2)
 
     def read(handle: int) -> int:
         with provider_module.pinned_uia_snapshot(_snapshot(handle)):
             barrier.wait()
-            return int(provider.snapshot_bound_window()["window"]["handle"])
+            return int(provider.snapshot_bound_window(browser_chrome_only=chrome_only)["window"]["handle"])
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(read, [11, 22])) == [11, 22]

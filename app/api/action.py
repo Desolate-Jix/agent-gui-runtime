@@ -867,18 +867,38 @@ def _write_execute_trace_if_enabled(request: ExecuteRecognitionPlanRequest, **kw
 
 
 def _execute_plan_request_defaults(request: ExecuteRecognitionPlanRequest) -> tuple[Optional[str], dict[str, Any]]:
-    """Return execution-mode defaults without mutating the API request."""
+    """普通执行按截图定位；只有明确学习或复用请求保留原路径。"""
     metadata = dict(request.metadata or {})
+    metadata.pop("execution_grounding", None)
     provider_mode = request.provider_mode
     if request.agent_mode != "execute":
         return provider_mode, metadata
 
+    direct_visual = not any((request.target_memory, request.interface_memory_id,
+        request.interface_memory_action_id, request.learned_instruction_id,
+        request.approved_plan_id, request.learning_mode))
+    if direct_visual:
+        metadata["execution_grounding"] = "direct_visual"
+        target = metadata.pop("task_plan_target", None)
+        if target is not None:
+            from app.core.control_target_contract import validate_task_plan_control_target
+            metadata["visual_target"] = validate_task_plan_control_target(target)
+        for key in ("task_plan_capture", "text_focus_route", "operational_memory_fast_grounding"):
+            metadata.pop(key, None)
+
     provider_mode = provider_mode or "local_grounding"
+    from app.core.local_text_focus import has_local_text_focus
+    from app.api.vision import _field_focus_uses_full_context
+    control_target = metadata.get("control_target")
+    # 仅本次已确认的普通字段聚焦保留整图细节，显式尺度仍由下方合并覆盖。
+    field_focus = (has_local_text_focus() and metadata.get("semantic_action") != "fill_field"
+        and (control_target is None or isinstance(control_target, dict))
+        and _field_focus_uses_full_context(request.goal, control_target))
     vista_direct_defaults = {
         "enabled": True,
         "timeout_seconds": 45.0,
-        "max_edge": 640,
-        "refine": True,
+        "max_edge": 1024 if field_focus else 640,
+        "refine": not direct_visual,
         "refine_roi_size": 512,
         "refine_max_edge": 640,
     }
@@ -889,6 +909,12 @@ def _execute_plan_request_defaults(request: ExecuteRecognitionPlanRequest) -> tu
         merged = dict(vista_direct_defaults)
         merged.update(vista_direct)
         metadata["vista_direct_grounding"] = merged
+    if direct_visual:
+        metadata["execute_mode_policy"] = {
+            "state_match": "not_used", "recall": "not_used", "grounding": "direct_visual",
+            "requires_pre_click_gate": True,
+            "requires_post_click_verification": bool(request.enable_post_click_verification),
+        }
     metadata.setdefault(
         "execute_mode_policy",
         {
@@ -983,16 +1009,24 @@ def _latest_attempt(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _click_sequence_execution_state(sequence: dict[str, Any]) -> bool | None:
-    if sequence.get("completed_clicks", 0) > 0:
+    requested, completed, attempted = (sequence.get(key) for key in
+        ("requested_click_count", "completed_clicks", "input_attempted"))
+    if (type(requested) is not int or requested not in (1, 2) or type(completed) is not int
+            or not 0 <= completed <= requested or type(attempted) is not bool
+            or completed and attempted is not True):
+        return None
+    if completed > 0:
         return True
-    return None if sequence.get("input_attempted") else False
+    return None if attempted else False
 
 
 def _record_click_sequence_failure(result: dict[str, Any], error: Exception) -> None:
     sequence = getattr(error, "click_sequence", None)
     if isinstance(sequence, dict):
         result["click_sequence"] = dict(sequence)
-        result["execution_path"]["action_executed"] = _click_sequence_execution_state(sequence)
+        # 后续失败不能抹掉此前确已完成的点击。
+        if result["execution_path"].get("action_executed") is not True:
+            result["execution_path"]["action_executed"] = _click_sequence_execution_state(sequence)
 
 
 def _agent_step_result(
@@ -1027,9 +1061,10 @@ def _agent_step_result(
         "goal": request.goal,
         "status": status,
         "dry_run": bool(request.dry_run),
-        "action_executed": (_click_sequence_execution_state(result["click_sequence"])
+        "action_executed": (True if execution_path.get("action_executed") is True else
+                            _click_sequence_execution_state(result["click_sequence"])
                             if isinstance(result.get("click_sequence"), dict)
-                            else bool(execution_path.get("action_executed") or attempt.get("click_result"))),
+                            else execution_path.get("action_executed")),
         "failure_reason": failure_reason,
         "approved_plan_id": result.get("approved_plan_id") or request.approved_plan_id,
         "selected_click_point": selected_point,
@@ -1739,9 +1774,12 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
     effective_provider_mode, effective_metadata = _execute_plan_request_defaults(request)
     # 内部绑定永远来自本次门控采集；调用方提供的旧框、来源和哈希在这里丢弃。
     effective_metadata.pop("task_plan_capture", None)
+    effective_metadata.pop("direct_visual_capture", None)
     task_plan_bound_before = (_bound_window_snapshot(bound)
-        if effective_metadata.get("task_plan_target") is not None and bound is not None else None)
-    effective_observe_trace_path = request.observe_trace_path
+        if (effective_metadata.get("task_plan_target") is not None
+            or effective_metadata.get("execution_grounding") == "direct_visual") and bound is not None else None)
+    effective_observe_trace_path = (None if effective_metadata.get("execution_grounding") == "direct_visual"
+                                    else request.observe_trace_path)
     resolved_memory_action_id = request.interface_memory_action_id
     memory_action_resolution: dict[str, Any] | None = None
     memory_seed: dict[str, Any] | None = None
@@ -1971,7 +2009,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 )
             try:
                 content_preparation = None
-                if local_policy_off and request.agent_mode == "execute":
+                if (local_policy_off and request.agent_mode == "execute"
+                        and effective_metadata.get("execution_grounding") != "direct_visual"):
                     with timer.step("browser_content_preparation"):
                         content_preparation = prepare_browser_content(window_manager, request.goal)
                 with timer.step("capture_live_window"):
@@ -2037,7 +2076,8 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 error=ErrorModel(code="missing_image_source", details="Provide image_path or set capture_live=true"),
             )
 
-        if _auto_observe_learning_artifacts_enabled(request) and not effective_observe_trace_path:
+        if (effective_metadata.get("execution_grounding") != "direct_visual"
+                and _auto_observe_learning_artifacts_enabled(request) and not effective_observe_trace_path):
             observe_request = VisionObserveScreenRequestModel(
                 app_name=request.app_name,
                 state_hint=request.state_hint,
@@ -2319,6 +2359,17 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 "gate_required": True,
                 "expected_effect": memory_expected_effect,
             }
+        if effective_metadata.get("execution_grounding") == "direct_visual":
+            from app.execution.task_plan_target import bind_current_execution_capture
+            current_bound = window_manager.get_bound_window()
+            try:
+                effective_metadata["direct_visual_capture"] = bind_current_execution_capture(
+                    live_capture=live_capture, before=task_plan_bound_before,
+                    current=_bound_window_snapshot(current_bound) if current_bound is not None else None)
+            except ValueError as error:
+                return APIResponse(success=False, message="Visual execution requires a fresh bound-window capture",
+                    data={"action_executed": False, "dispatch_status": "not_dispatched", "timings": timer.to_dict()},
+                    error=ErrorModel(code="direct_visual_capture_invalid", details=str(error)))
         if effective_metadata.get("task_plan_target") is not None:
             from app.execution.task_plan_target import bind_task_plan_capture
             from app.agent.native_identity import WindowsNativeIdentityReader
@@ -2369,6 +2420,11 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 "live_capture": live_capture,
                 "recognition_plan_response": plan_response.model_dump(),
                 "fallback_plan": fallback_plan,
+                # 识别尚未产生可执行计划，此分支没有进入任何点击派发。
+                "dispatch_status": "not_dispatched",
+                "dispatch_stage": "recognition_plan",
+                "input_started": False,
+                "execution_path": {"action_executed": False},
             }
             failed_result["agent_execution_guidance"] = _agent_execution_guidance(
                 request=request,
@@ -2415,6 +2471,10 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                 message="Recognition plan failed",
                 data={
                     "trace_path": trace_path,
+                    "dispatch_status": failed_result["dispatch_status"],
+                    "dispatch_stage": failed_result["dispatch_stage"],
+                    "input_started": failed_result["input_started"],
+                    "execution_path": failed_result["execution_path"],
                     "recognition_plan_response": plan_response.model_dump(),
                     "fallback_plan": fallback_plan,
                     "agent_execution_guidance": failed_result["agent_execution_guidance"],
@@ -2533,10 +2593,12 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         }
 
     if plan.get("grounding_evidence"):
+        verified_field = plan["grounding_evidence"].get("evidence_source") == "verified_visual_field"
         execution_path.update(page_structure_used=False, candidate_rank_used=False,
-            narrow_search_used=False, external_grounding_used=True, local_model_used=False,
+            narrow_search_used=False, external_grounding_used=not verified_field, local_model_used=False,
+            verified_field_grounding_used=verified_field,
             coordinate_source=plan["grounding_evidence"].get("evidence_source", "agent_visual"),
-            selection_source="grounding.v1")
+            selection_source="verified_visual_field.v1" if verified_field else "grounding.v1")
 
     if "low_risk_visual_fast_lane" not in locals():
         low_risk_visual_fast_lane = _low_risk_visual_fast_lane_profile(
@@ -2756,6 +2818,9 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
 
     attempts: list[dict[str, Any]] = []
     final_attempt: dict[str, Any] | None = None
+    click_dispatch_started = False
+    confirmed_click = False
+    pre_click_input_rejection = None
     try:
         for attempt_index in range(1, int(request.max_execution_attempts) + 1):
             with timer.step("execution_attempt", attempt=attempt_index):
@@ -2810,11 +2875,25 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         base_result["control_target_check"] = {"status": "rejected",
                             "error_code": error.reason_code, "action_executed": False,
                             **({"failure_evidence": error.failure_evidence} if error.failure_evidence is not None else {})}
+                        if not click_dispatch_started:
+                            pre_click_input_rejection = {
+                                "contract_version": "recognition_pre_click_rejection.v1",
+                                "validator": "control_target", "reason_code": error.reason_code,
+                                "click_dispatch_started": False}
                         raise
                     if control_check is not None:
                         base_result["control_target_check"] = control_check
                     from app.core.local_text_focus import check_local_text_focus
-                    focus_check = check_local_text_focus(selected_point, window_manager)
+                    from app.agent.windows_text_field_reader import TextFieldReadError
+                    try:
+                        focus_check = check_local_text_focus(selected_point, window_manager)
+                    except TextFieldReadError as error:
+                        if not click_dispatch_started:
+                            pre_click_input_rejection = {
+                                "contract_version": "recognition_pre_click_rejection.v1",
+                                "validator": "text_focus", "reason_code": error.reason_code,
+                                "click_dispatch_started": False}
+                        raise
                     if focus_check is not None:
                         base_result["local_text_focus_check"] = focus_check
                     from app.core.memory_grounding_target import current_memory_grounding
@@ -2853,8 +2932,71 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                                 "image_path": dispatch_capture["image_path"],
                                 "validation_scope": "target_region_consistency_not_atomic_hit_proof",
                                 "region_changed_fraction": dispatch_plan["grounding_evidence"]["region_changed_fraction"]}
+                    source_capture = decision_capture if decision_capture is not None else live_capture
+                    if isinstance(source_capture, dict) and source_capture.get("capture_visibility") is not None:
+                        from app.core.recognition_dispatch import capture_visibility_point_check
+                        source_point_check = capture_visibility_point_check(source_capture,
+                            image_path=learning_image_path, point=selected_point,
+                            bound_handle=bound.handle,
+                            bound_rect=[bound.rect.left, bound.rect.top, bound.rect.right, bound.rect.bottom])
+                        if source_point_check is not None:
+                            base_result["capture_visibility_check"] = source_point_check
+                            pre_click_input_rejection = {
+                                "contract_version": "recognition_pre_click_rejection.v1",
+                                "validator": "capture_visibility",
+                                "reason_code": source_point_check["error_code"],
+                                "click_dispatch_started": False}
+                            raise ValueError(source_point_check["error_code"])
+                    from app.execution.action_review import current_action_review, CANDIDATE_CONDITION
+                    from app.execution.action_review_dispatch import review_original_action
+                    unified = None
+                    if current_action_review() is not None:
+                        if not local_policy_off:
+                            raise DecisionCheckRejected("action_review_host_scope_required", {"adopted": False})
+                        final_guard = base_result["final_submit_guard"]
+                        if (final_guard.get("allowed") is False
+                                and (final_guard.get("action_taxonomy") in {"final_submit", "send", "confirm", "payment"}
+                                    or (final_guard.get("scoped_decision") or {}).get("blocked") is True)):
+                            raise DecisionCheckRejected("action_review_unsafe_target", {
+                                "adopted": False, "reason": "existing_final_submit_guard_rejected"})
+                        if decision_capture is None and effective_metadata.get("execution_grounding") == "direct_visual":
+                            from app.execution.task_plan_target import validate_task_plan_dispatch_capture
+                            current_bound = window_manager.get_bound_window()
+                            source_capture = effective_metadata["direct_visual_capture"]
+                            validate_task_plan_dispatch_capture(source_capture, image_path=image_path,
+                                current=_bound_window_snapshot(current_bound) if current_bound is not None else None)
+                            # 定位与审核共用原帧；不把旧坐标贴到新图，也不以整页动画重复否决。
+                            decision_capture = {**deepcopy(live_capture),
+                                "capture_id": source_capture["capture_id"], "sha256": source_capture["sha256"]}
+                        if decision_capture is None:
+                            decision_capture = screenshot_service.capture_window(
+                                focus_window=False, purpose="action-review-candidate")
+                            # 显式兼容路线仍要求其原有的截图绑定。
+                            if hashlib.sha256(Path(learning_image_path).read_bytes()).hexdigest() != hashlib.sha256(
+                                    Path(decision_capture["image_path"]).read_bytes()).hexdigest():
+                                raise DecisionCheckRejected("action_review_candidate_changed", {"adopted": False})
+                        def validate_unified_binding():
+                            check_local_control_target(selected_point)
+                            from app.core.local_text_focus import revalidate_local_text_focus
+                            revalidate_local_text_focus(selected_point, window_manager)
+                            return current_local_operator_identity(window_manager), _selected_learning_candidate(
+                                learning_plan, learning_pre_click)
+                        unified = review_original_action(capture=decision_capture,
+                            identity=current_local_operator_identity(window_manager),
+                            candidate=_selected_learning_candidate(learning_plan, learning_pre_click),
+                            point=selected_point, goal=request.goal, click_kind=request.click_kind,
+                            manager=window_manager, validate_binding=validate_unified_binding)
+                        base_result["action_assessment"] = unified["assessment"]
+                        base_result["click_visibility_scope"] = deepcopy(unified["click_visibility"])
+                        reviewed_box = unified["click_visibility"]["target_bbox"]
+                        visibility_options["target_bbox"] = tuple(reviewed_box[key] for key in ("x", "y", "width", "height"))
+                        visibility_options["pre_input_validator"] = unified["validate"]
                     decision_scope = current_execution_decision()
-                    if decision_scope is not None and decision_scope["check"]["phase"] == "before_action":
+                    same_review = (unified is not None and decision_scope is not None
+                        and decision_scope["check"] == {"condition": CANDIDATE_CONDITION, "phase": "before_action"})
+                    if same_review:
+                        decision_scope["result"] = deepcopy(unified["assessment"]["judgment"])
+                    if decision_scope is not None and decision_scope["check"]["phase"] == "before_action" and not same_review:
                         if service_enabled(decision_scope["service"]):
                             if not local_policy_off:
                                 raise DecisionCheckRejected("decision_check_host_scope_required", {
@@ -2897,11 +3039,36 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                                 current_identity = current_local_operator_identity(window_manager)
                                 return fresh, current_identity, _selected_learning_candidate(current_plan, current_pre_click)
 
+                            def validate_decision_binding():
+                                check_local_control_target(selected_point)
+                                check_local_text_focus(selected_point, window_manager)
+                                return current_local_operator_identity(window_manager), _selected_learning_candidate(
+                                    learning_plan, learning_pre_click)
+
                             base_result["decision_judgment"] = evaluate_before_action(decision_scope,
                                 capture=decision_capture, identity=current_local_operator_identity(window_manager),
                                 candidate=_selected_learning_candidate(learning_plan, learning_pre_click),
                                 point=selected_point, goal=request.goal, click_kind=request.click_kind,
-                                revalidate=revalidate_decision_candidate)
+                                revalidate=revalidate_decision_candidate, validate_binding=validate_decision_binding)
+                    from app.execution.popup_decision import prepare_popup_continuation
+                    from app.core.local_text_focus import revalidate_local_text_focus
+                    popup_guard, popup_judgment = prepare_popup_continuation(
+                        manager=window_manager,
+                        capture=lambda: screenshot_service.capture_window(
+                            focus_window=False, purpose="popup-decision-current"),
+                        identity=lambda: current_local_operator_identity(window_manager),
+                        candidate=_selected_learning_candidate(learning_plan, learning_pre_click),
+                        point=selected_point, bbox=visibility_options.get("target_bbox"),
+                        goal=request.goal, click_kind=request.click_kind,
+                        click_count=(request.click_options or {}).get("click_count", 1),
+                        image_path=learning_image_path,
+                        expected_owned_popup_handle=visibility_options.get("expected_owned_popup_handle"),
+                        revalidate_target=lambda: revalidate_local_text_focus(selected_point, window_manager),
+                        combined_review=unified)
+                    if popup_guard is not None:
+                        visibility_options["popup_continuation_guard"] = popup_guard
+                    if popup_judgment is not None:
+                        base_result["popup_decision_judgment"] = popup_judgment
                     if memory_target is not None:
                         memory_target.before_dispatch(selected_point,
                             identity=current_local_operator_identity(window_manager))
@@ -2915,6 +3082,19 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                                 click_point=selected_point)
                         if learning_observation is not None:
                             base_result["learning_observation"] = learning_observation
+                    if effective_metadata.get("execution_grounding") == "direct_visual":
+                        from app.execution.task_plan_target import validate_task_plan_dispatch_capture
+                        def validate_direct_capture():
+                            current_bound = window_manager.get_bound_window()
+                            checked = validate_task_plan_dispatch_capture(
+                                effective_metadata.get("direct_visual_capture"), image_path=image_path,
+                                current=_bound_window_snapshot(current_bound) if current_bound is not None else None)
+                            # 文件读取也消耗期限，最后再核对审核绑定与取消状态。
+                            if unified is not None:
+                                unified["validate"]()
+                            base_result["direct_visual_capture_check"] = {**checked, "source": "direct_visual"}
+                        validate_direct_capture()
+                        visibility_options["pre_input_validator"] = validate_direct_capture
                     if effective_metadata.get("task_plan_target") is not None:
                         from app.execution.task_plan_target import (
                             validate_task_plan_dispatch_capture, validate_task_plan_dispatch_target)
@@ -2926,11 +3106,48 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         candidate = _selected_learning_candidate(plan, pre_click)
                         resolution = (((candidate or {}).get("element") or {}).get("evidence") or {}).get(
                             "task_plan_current_uia_target")
-                        base_result["task_plan_dispatch_target_check"] = validate_task_plan_dispatch_target(
-                            effective_metadata["task_plan_target"], resolution=resolution,
-                            capture=effective_metadata.get("task_plan_capture"), point=selected_point,
-                            window_manager=window_manager, identity=(current_local_operator_identity(window_manager)
-                                if local_policy_off else WindowsNativeIdentityReader(window_manager=window_manager).read_identity(current_bound.handle)))
+                        from app.agent.windows_control_hit_reader import NativeControlHitError
+                        dispatch_identity = (current_local_operator_identity(window_manager) if local_policy_off
+                            else WindowsNativeIdentityReader(window_manager=window_manager).read_identity(current_bound.handle))
+                        try:
+                            base_result["task_plan_dispatch_target_check"] = validate_task_plan_dispatch_target(
+                                effective_metadata["task_plan_target"], resolution=resolution,
+                                capture=effective_metadata.get("task_plan_capture"), point=selected_point,
+                                window_manager=window_manager, identity=dispatch_identity)
+                        except NativeControlHitError as error:
+                            base_result["task_plan_dispatch_target_check"] = {"status": "rejected",
+                                "error_code": error.reason_code, "action_executed": False}
+                            if not click_dispatch_started:
+                                pre_click_input_rejection = {
+                                    "contract_version": "recognition_pre_click_rejection.v1",
+                                    "validator": "structured_target", "reason_code": error.reason_code,
+                                    "click_dispatch_started": False}
+                            raise
+                        dispatch_check = base_result["task_plan_dispatch_target_check"]
+                        if "expected_owned_popup_handle" in dispatch_check:
+                            popup_handle = dispatch_check["expected_owned_popup_handle"]
+                            if (dispatch_check.get("status") != "matched"
+                                    or effective_metadata["task_plan_target"]["control_type"] != "MenuItem"
+                                    or type(popup_handle) is not int or popup_handle <= 0):
+                                raise ValueError("task_plan_target_popup_scope_invalid")
+                            # 只透传最终原生命中已绑定的菜单 popup，不覆盖既有范围。
+                            if visibility_options.get("expected_owned_popup_handle") not in (None, popup_handle):
+                                raise ValueError("task_plan_target_popup_scope_conflict")
+                            visibility_options["expected_owned_popup_handle"] = popup_handle
+                    # 从真实输入入口开始即保留未知，只有原入口明确回传才确认点击。
+                    from app.core.visual_compound_input import (prepare_visual_compound_input,
+                        perform_visual_compound_input)
+                    from app.core.visual_submit_target import prepare_visual_submit, perform_visual_submit
+                    prepare_visual_compound_input(window_manager, selected_point, unified)
+                    prepare_visual_submit(window_manager, selected_point, unified)
+                    base_result["input_dispatch_request"] = {
+                        "window_point": dict(selected_point),
+                        "bound_window": {"handle": bound.handle, "process_id": bound.process_id,
+                            "rect": [bound.rect.left, bound.rect.top, bound.rect.right, bound.rect.bottom]},
+                        "button": request.click_options.get("button", "left"),
+                        "requested_click_count": request.click_options.get("click_count", 1)}
+                    click_dispatch_started = True
+                    base_result["execution_path"]["action_executed"] = True if confirmed_click else None
                     click_result = input_controller.click_point(
                         selected_point["x"],
                         selected_point["y"],
@@ -2940,6 +3157,15 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         **request.click_options,
                         **visibility_options,
                     )
+                    if not isinstance(click_result, dict) or click_result.get("clicked") is not True:
+                        raise RuntimeError("recognition_click_dispatch_result_unverified")
+                    confirmed_click = True
+                    base_result["execution_path"]["action_executed"] = True
+                    base_result["click_result"] = click_result
+                    perform_visual_compound_input(input_controller, window_manager, selected_point,
+                        click_result, output=base_result)
+                    perform_visual_submit(input_controller, window_manager, selected_point,
+                        click_result, output=base_result)
                 with timer.step("post_click_verification", attempt=attempt_index, enabled=request.enable_post_click_verification):
                     post_click_verification = (
                         verifier.verify_action(
@@ -3024,24 +3250,58 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
         decision_scope = current_execution_decision()
         if decision_scope is not None:
             decision_scope["result"] = deepcopy(exc.result)
-        base_result["execution_path"]["action_executed"] = False
-        base_result.update(dispatch_status="not_dispatched", automatic_retry_allowed=False, attempts=attempts)
+        base_result["execution_path"]["action_executed"] = (True if confirmed_click else
+            None if click_dispatch_started else False)
+        base_result.update(automatic_retry_allowed=False, attempts=attempts)
+        if not click_dispatch_started and not confirmed_click and attempts == [] and "click_sequence" not in base_result:
+            # 证明来自本地派发边界；模型的拒绝结果本身不能证明没有输入。
+            base_result.update(dispatch_status="not_dispatched", dispatch_stage="decision_check", input_started=False,
+                decision_check_no_dispatch={"contract_version": "decision_check_no_dispatch.v1",
+                    "stage": "before_click_point", "click_dispatch_started": False, "reason_code": exc.reason_code})
+            base_result["fallback_plan"] = _execute_fallback_plan(request=request,
+                failure_reason=exc.reason_code, plan=plan, pre_click=pre_click, attempts=attempts, error=exc.result)
+        base_result["agent_execution_guidance"] = _agent_execution_guidance(request=request,
+            status="blocked", result=base_result, failure_reason=exc.reason_code)
+        base_result["agent_step_result"] = _agent_step_result(request=request,
+            status="blocked", result=base_result, failure_reason=exc.reason_code)
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
         attach_timings(base_result)
         return APIResponse(success=False, message="Execution decision check rejected before input",
             data=base_result, error=ErrorModel(code=exc.reason_code, details={
-                "verdict": exc.result.get("verdict"), "status": exc.result.get("status"),
+                "verdict": exc.result.get("verdict"), "status": exc.result.get("status"), "reason": exc.result.get("reason"),
                 "automatic_retry_allowed": False}))
     except TargetPointOccludedError as exc:
         failure_reason = str(exc.evidence.get("reason") or "target_point_occluded")
-        base_result["execution_path"]["action_executed"] = False
+        base_result["execution_path"]["action_executed"] = (True if confirmed_click else
+            None if click_dispatch_started else False)
         _record_click_sequence_failure(base_result, exc)
+        # 零序列不足以替代绑定证明；进入输入函数后须由下方完整校验确认未派发。
+        if click_dispatch_started and base_result["execution_path"]["action_executed"] is False:
+            base_result["execution_path"]["action_executed"] = None
         base_result["operation_trace_link"] = operation_trace_link(operation_context, result_status="blocked")
         base_result["attempts"] = attempts
         # 点归属与区域遮挡分别留证，不能把区域拒绝伪装成点被遮住。
         base_result["point_visibility"] = exc.evidence.get("point_visibility", exc.evidence)
         if "region_visibility" in exc.evidence:
             base_result["region_visibility"] = exc.evidence["region_visibility"]
+        from app.core.recognition_dispatch import (
+            point_visibility_rejection_matches, point_visibility_sequence_has_no_input,
+        )
+        # 入口已进入 click_point 不等于已按下；只采用输入层明确的首次按下前证明。
+        if (getattr(exc, "button_down_attempted", None) is False and not confirmed_click and attempts == []
+                and point_visibility_sequence_has_no_input(base_result.get("click_sequence"))
+                and point_visibility_rejection_matches(exc.evidence,
+                    point=base_result.get("selected_click_point"), reason=failure_reason,
+                    input_request=base_result.get("input_dispatch_request"), sequence=base_result.get("click_sequence"))):
+            base_result.update(dispatch_status="not_dispatched", dispatch_stage="point_visibility",
+                input_started=False, point_visibility_no_dispatch={
+                    "contract_version": "point_visibility_no_dispatch.v1",
+                    "stage": "before_first_mouse_down", "button_down_attempted": False,
+                    "reason_code": failure_reason})
+            base_result["execution_path"]["action_executed"] = False
+            base_result["fallback_plan"] = _execute_fallback_plan(request=request,
+                failure_reason=failure_reason, plan=plan, pre_click=pre_click, attempts=attempts,
+                error=exc.evidence)
         base_result["agent_execution_guidance"] = _agent_execution_guidance(
             request=request,
             status="blocked",
@@ -3080,7 +3340,11 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             error=ErrorModel(code=failure_reason, details=exc.evidence),
         )
     except Exception as exc:
-        base_result["execution_path"]["action_executed"] = bool(attempts)
+        base_result["execution_path"]["action_executed"] = True if confirmed_click else None
+        if pre_click_input_rejection is not None and not click_dispatch_started:
+            base_result.update(dispatch_status="not_dispatched", dispatch_stage="pre_click_validation",
+                input_started=False, pre_click_input_rejection=pre_click_input_rejection)
+            base_result["execution_path"]["action_executed"] = False
         from app.agent.windows_text_field_reader import TextFieldReadError
         if isinstance(exc, TextFieldReadError):
             # 仅回传读取器的脱敏枚举，不丢失点击前字段校验的真实失败原因。
@@ -3155,7 +3419,7 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             "attempts": attempts,
         }
     )
-    base_result["execution_path"]["action_executed"] = bool(attempts)
+    base_result["execution_path"]["action_executed"] = True if confirmed_click else None
     base_result["execution_path"]["execution_attempt_count"] = len(attempts)
     base_result["execution_path"]["retry_count"] = max(0, len(attempts) - 1)
     base_result["execution_path"]["semantic_post_click_verification_used"] = bool(semantic_post_click_verification.get("applicable"))
@@ -3661,6 +3925,12 @@ def type_text(request: TypeTextRequest) -> APIResponse:
         data = ActionResultData(action="type_text", result=result)
         return APIResponse(success=True, message="Text input dispatched", data=data.model_dump(), error=None)
     except Exception as exc:
+        from app.core.typing_dispatch import typing_dispatch_from_error
+        dispatch = typing_dispatch_from_error(exc)
+        result["execution_path"]["action_executed"] = dispatch["action_executed"] if dispatch is not None else None
+        result["input_started"] = dispatch["input_started"] if dispatch is not None else None
+        if dispatch is not None:
+            result["typing_dispatch"] = dispatch
         result["operation_trace_link"] = operation_trace_link(operation_context, result_status="execution_failed")
         result["trace_path"] = write_trace(
             category="actions",

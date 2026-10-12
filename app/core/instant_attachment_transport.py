@@ -111,10 +111,14 @@ class InstantAttachmentTransport:
             if self.session:
                 pending = [p.stem for p in (self.session / "commands").glob("*.json")
                            if not (self.session / "responses" / p.name).exists()]
+            decision_status = report.get("decision_service", {"mode": "off"})
+            if self.session and decision_status.get("mode", "off") != "off":
+                from app.core.decision_configuration import read_session_decision_status
+                decision_status = read_session_decision_status(self.session, decision_status)
             return {"mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
                 "recognition_source": self.recognition_source, "delegate_profile": self.delegate_profile,
                 "api_profile": self.api_profile,
-                "decision_service": report.get("decision_service", {"mode": "off"}),
+                "decision_service": decision_status,
                 "learning_enabled": learning_state.get("recording_enabled") if alive else False,
                 "legacy_learning_executor_enabled": False,
                 "learning_recording": learning_state,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from io import BytesIO
 import json
+import math
 import re
 import time
 from copy import deepcopy
@@ -1473,6 +1474,7 @@ def _call_vista_point_prompt(
     timeout_seconds: float,
     max_tokens: int,
     provider_name: str,
+    strict_direct_visual: bool = False,
 ) -> dict[str, Any]:
     endpoint = str(local_config.get("endpoint") or "").strip()
     if not endpoint:
@@ -1492,14 +1494,26 @@ def _call_vista_point_prompt(
         request_timeout_seconds=server_timeout_seconds,
     )
     raw_text = provider._extract_message_text(raw_response).strip()
-    parsed = _parse_vista_point_text(raw_text)
-    processed_point = _vista_point_to_original_pixel(parsed, image_size=image_size)
+    parsed = None
+    try:
+        parsed = _parse_vista_point_text(raw_text, strict_direct_visual=strict_direct_visual)
+        if strict_direct_visual:
+            from app.operation.recognition.direct_visual import validate_direct_point_payload
+            validate_direct_point_payload(parsed, image_size=image_size)
+        processed_point = _vista_point_to_original_pixel(parsed, image_size=image_size)
+    except (ValueError, TypeError, OverflowError) as error:
+        if strict_direct_visual:
+            error.diagnostics = {"provider":provider_name,"model_name":model_name,"attempt_count":1,
+                "model_io":{"prompt":prompt,"raw_text":raw_text,"raw_response":raw_response,
+                    "parsed_model_json":parsed,"parse_error":str(error),"image_path":str(image_path)}}
+        raise
     output_image_size = original_image_size or image_size
     point = (
         _map_vista_processed_point_to_original(
             processed_point,
             original_image_size=output_image_size,
             coordinate_transform=coordinate_transform,
+            strict_direct_visual=strict_direct_visual,
         )
         if coordinate_transform
         else processed_point
@@ -1542,12 +1556,18 @@ def _call_vista_point_prompt(
     }
 
 
-def _parse_vista_point_text(raw_text: str) -> dict[str, Any]:
+def _parse_vista_point_text(raw_text: str, *, strict_direct_visual: bool = False) -> dict[str, Any]:
     text = raw_text.strip()
     parsed: Any
     try:
-        parsed = json.loads(text)
+        if strict_direct_visual:
+            from app.vision.recognition_source import _unique_object, _invalid_constant
+            parsed = json.loads(text, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
+        else:
+            parsed = json.loads(text)
     except Exception:
+        if strict_direct_visual:
+            raise ValueError("direct_visual_model_point_json_invalid") from None
         start = text.find("[")
         end = text.find("]", start + 1)
         if start < 0 or end < 0:
@@ -1555,7 +1575,7 @@ def _parse_vista_point_text(raw_text: str) -> dict[str, Any]:
         parsed = json.loads(text[start : end + 1])
     if isinstance(parsed, dict):
         if parsed.get("point") is None and isinstance(parsed.get("raw_text"), str) and parsed.get("raw_text"):
-            nested = _parse_vista_point_text(str(parsed["raw_text"]))
+            nested = _parse_vista_point_text(str(parsed["raw_text"]), strict_direct_visual=strict_direct_visual)
             nested["wrapped_unparsed_payload"] = parsed
             return nested
         point = parsed.get("point") if isinstance(parsed.get("point"), dict) else parsed
@@ -1582,10 +1602,19 @@ def _parse_vista_point_text(raw_text: str) -> dict[str, Any]:
         raise ValueError(f"Unsupported VISTA point payload: {raw_text[:200]}")
     if x is None or y is None:
         raise ValueError(f"VISTA point payload missing x/y: {raw_text[:200]}")
-    return {
+    if strict_direct_visual and (type(x) not in {int, float} or type(y) not in {int, float}):
+        raise ValueError("direct_visual_model_point_numbers_required")
+    result = {
         "contract_version": "vista_point_v1",
         "point": {"x": float(x), "y": float(y), "coordinate_space": space},
     }
+    if isinstance(parsed, dict):
+        for key in ("confidence", "status"):
+            if key in parsed:
+                result[key] = parsed[key]
+            elif isinstance(parsed.get("point"), dict) and key in parsed["point"]:
+                result[key] = parsed["point"][key]
+    return result
 
 
 def _vista_point_to_original_pixel(parsed: dict[str, Any], *, image_size: ImageSize) -> dict[str, int]:
@@ -2111,10 +2140,21 @@ def _map_vista_processed_point_to_original(
     *,
     original_image_size: ImageSize,
     coordinate_transform: dict[str, Any] | None,
+    strict_direct_visual: bool = False,
 ) -> dict[str, int]:
     transform = coordinate_transform if isinstance(coordinate_transform, dict) else {}
     origin = transform.get("origin_original") if isinstance(transform.get("origin_original"), dict) else {}
     scale = transform.get("scale_processed_to_original") if isinstance(transform.get("scale_processed_to_original"), dict) else {}
+    if strict_direct_visual:
+        # 严格执行路线不能用缺失、非有限比例或截断掩盖坐标映射错误。
+        values = [origin.get("x"), origin.get("y"), scale.get("x"), scale.get("y")]
+        if (any(type(value) not in {int, float} or not math.isfinite(value) for value in values)
+                or min(values[:2]) < 0 or min(values[2:]) <= 0):
+            raise ValueError("direct_visual_coordinate_transform_invalid")
+        mapped = {axis: round(origin[axis] + point[axis] * scale[axis]) for axis in ("x", "y")}
+        if not (0 <= mapped["x"] < original_image_size.width and 0 <= mapped["y"] < original_image_size.height):
+            raise ValueError("direct_visual_coordinate_transform_invalid")
+        return mapped
     x = round(float(origin.get("x") or 0) + float(point.get("x") or 0) * float(scale.get("x") or 1.0))
     y = round(float(origin.get("y") or 0) + float(point.get("y") or 0) * float(scale.get("y") or 1.0))
     return {
@@ -2171,8 +2211,9 @@ def _vista_direct_prompt(goal: str, control_target: dict[str, Any] | None = None
                 + (focus_instruction if target["role"] == "input" else ""))
     from app.operation.recognition.text_match import explicit_target_label, explicit_word_target
     from app.operation.recognition.control_target import _field_target_label
+    from app.core.local_text_focus import has_local_text_focus
     # 点击输入框与填写共享内部聚焦语义；保留完整目标，不把框内单词或按钮改成字段。
-    if _field_target_label(goal) is not None and explicit_word_target(goal) is None:
+    if explicit_word_target(goal) is None and (has_local_text_focus() or _field_target_label(goal) is not None):
         return goal + focus_instruction
     from app.operation.recognition.candidate_ranker import _goal_label_match
     label = explicit_target_label(goal)
@@ -2196,7 +2237,8 @@ def _field_focus_uses_full_context(goal, control_target=None):
         return False
     if control_target is not None:
         return control_target.get("role") == "input"
-    return _field_target_label(goal) is not None
+    from app.core.local_text_focus import has_local_text_focus
+    return has_local_text_focus() or _field_target_label(goal) is not None
 
 
 def _bbox_around_point(point: dict[str, int], *, image_size: ImageSize, size: int) -> dict[str, int]:
@@ -2458,6 +2500,45 @@ def _corroborate_vista_direct_point(
                 result.reasons.append("current_control_text_center_from_observed_ocr")
     result.reasons.append("vista_point_matches_local_ocr" if agrees else "vista_point_lacks_local_corroboration")
     return result
+
+
+def _vista_direct_composite_field_candidate(*, image_path, image_size, goal, point, source_candidate,
+                                           fast_inventory):
+    """明确聚焦能力只解析同帧复合字段，不改变原点击策略或授予权限。"""
+    from app.agent.windows_text_field_reader import TextFieldReadError
+    from app.operation.recognition.composite_field_target import resolve_composite_field_target, EVIDENCE_KEY
+    from app.operation.screen_inventory.builder import _action_from_uia
+    from app.operation.recognition.candidate_ranker import _page_element_from_screen_inventory_action
+
+    try:
+        resolved, reason = resolve_composite_field_target(fast_inventory, image_path=image_path,
+            image_size=image_size.to_dict(), point=point)
+    except TextFieldReadError as error:
+        source_candidate.element.evidence["text_field_diagnostic"] = error.to_reference()
+        return None, None, error.reason_code
+    except ValueError as error:
+        return None, None, str(error)
+    if resolved is None:
+        return None, None, reason
+    control = resolved.pop("control")
+    action = _action_from_uia(control, source_index=0)
+    action["click_point"] = dict(resolved["point"])
+    element = _page_element_from_screen_inventory_action(action, index=0, goal=goal)
+    element.evidence[EVIDENCE_KEY] = resolved
+    ranked = rank_candidates(CandidateRankRequest(goal=goal, page_structure=PageStructure(
+        image_size=image_size, screen_summary="current composite field child", state_guess=None,
+        elements=[element], texts=[]), top_k=1)).candidates
+    if len(ranked) != 1 or not ranked[0].eligible or not ranked[0].element.interaction_policy.allowed:
+        return None, None, "composite_field_current_candidate_not_eligible"
+    candidate = ranked[0]
+    candidate.refined_bbox = dict(control["bbox"])
+    candidate.bbox_refine_reason = "current_composite_field_child_bbox"
+    local = LocalGroundingCandidateResult(candidate_id=candidate.candidate_id, element_id=candidate.element_id,
+        status="grounded", crop_path=None, crop_bbox=dict(control["bbox"]),
+        refined_click_point=dict(resolved["point"]), coordinate_source="current_composite_field_child_center",
+        confidence=0.9, matched_text=None, matched_text_bbox=None,
+        reasons=["current_composite_field_child_geometry", "live_focus_and_readback_required"])
+    return candidate, local, None
 
 
 def _vista_direct_editable_candidate(*, image_path, image_size, goal, point, source_candidate,
@@ -2794,8 +2875,12 @@ def _execute_fast_inventory_from_uia(
             max_controls = max(1, min(int(options.get("max_controls")), HARD_UIA_MAX_CONTROLS))
         except (TypeError, ValueError):
             max_controls = HARD_UIA_MAX_CONTROLS
+    from app.operation.recognition.control_target import explicit_menu_item_goal, explicit_browser_navigation_goal
+    chrome_goal = (explicit_browser_navigation_goal(goal)
+        and all((metadata or {}).get(key) is None for key in ("task_plan_target", "control_target")))
     try:
-        uia_snapshot = uia_provider.snapshot_bound_window(max_controls=max_controls)
+        uia_snapshot = uia_provider.snapshot_bound_window(max_controls=max_controls,
+            **({"browser_chrome_only": True} if chrome_goal else {}))
     except Exception as exc:
         return {
             "contract_version": "execute_fast_inventory_v1",
@@ -2805,9 +2890,8 @@ def _execute_fast_inventory_from_uia(
             "error": str(exc),
         }
     # 明确菜单动作只使用同一窗口中完整采集的唯一菜单；整页截断事实仍保留。
-    from app.operation.recognition.control_target import explicit_menu_item_goal, explicit_browser_navigation_goal
     chrome = uia_snapshot.get("browser_chrome_scope") or {}
-    if (not (metadata or {}).get("task_plan_target") and explicit_browser_navigation_goal(goal) and chrome.get("status") == "ok"
+    if (chrome_goal and chrome.get("status") == "ok"
             and chrome.get("scan_scope") == "browser_chrome" and chrome.get("scan_complete") is True
             and chrome.get("truncated") is False
             and chrome.get("window", {}).get("handle") == uia_snapshot.get("window", {}).get("handle")
@@ -3747,7 +3831,15 @@ def _recognition_plan_from_vista_point(
         from app.operation.recognition.control_target import generic_field_target
         field_direct = generic_field_target(goal, control_target=control_target,
             target_text=request.metadata.get("target_text") or request.metadata.get("observed_text"))
-        if word_direct:
+        composite_candidate, composite_local, composite_rejection = _vista_direct_composite_field_candidate(
+            image_path=image_path, image_size=input_image_size, goal=goal, point=vista_payload["point"],
+            source_candidate=selected_candidate, fast_inventory=fast_inventory)
+        if composite_candidate is not None or composite_rejection is not None:
+            field_direct = True
+            identity_candidate = composite_candidate
+            editable_direct_local = composite_local
+            vista_direct_identity_rejection = composite_rejection
+        elif word_direct:
             # 单词不是包含它的整块控件；保留文字点给本帧 OCR 定位，不换成输入框中心。
             candidates = [selected_candidate]
             identity_candidate = None
@@ -3765,7 +3857,7 @@ def _recognition_plan_from_vista_point(
                 point=vista_payload["point"], fast_inventory=fast_inventory,
                 candidates=current_uia_candidates,
             )
-        vista_direct_uia_conflict_ids = [] if fill_direct or word_direct else _vista_direct_uia_conflicts(
+        vista_direct_uia_conflict_ids = [] if fill_direct or word_direct or composite_candidate is not None else _vista_direct_uia_conflicts(
             goal=goal,
             target_text=(
                 request.metadata.get("target_text") or request.metadata.get("observed_text")
@@ -8661,6 +8753,175 @@ def _path_bbox_conflicts(observed: dict[str, Any], ai_candidate: dict[str, Any])
 
 
 
+def _recognition_plan_direct_visual(*, request, timer, config, provider, image_path,
+                                    input_image_size, goal, operation_context):
+    """普通执行的视觉分支先于任何学习复用；仍只返回既有识别计划。"""
+    from app.operation.recognition.direct_visual import (
+        MIN_VISUAL_CONFIDENCE, decide_direct_visual, validate_direct_point_payload,
+    )
+    metadata = request.metadata or {}
+    if any(metadata.get(key) is not None for key in ("control_target", "task_plan_target")):
+        raise ValueError("direct_visual_requires_visual_target_instead_of_control_target")
+    model_goal = goal
+    if metadata.get("visual_target") is not None:
+        from app.execution.task_plan_target import validate_task_plan_control_target
+        visual_target = validate_task_plan_control_target(metadata["visual_target"])
+        model_goal += "\nVisible target constraints: " + json.dumps(visual_target, ensure_ascii=False)
+    identity = _capture_identity(image_path, image_size=input_image_size,
+        capture_id=_capture_id_from_request_metadata(metadata))
+    if identity is None:
+        raise ValueError("direct_visual_capture_identity_unavailable")
+    mode = str(request.provider_mode or (config.get("vision") or {}).get("mode") or "local").lower()
+    local_config = _selected_local_vision_config(config, mode)
+    point_payload = None
+    model_io = None
+    if mode in {"local", "local_grounding", "local_understanding"} and _uses_vista_point_grounding(local_config):
+        direct_options = metadata.get("vista_direct_grounding")
+        direct_options = direct_options if isinstance(direct_options, dict) else {}
+        point_timeout = float(direct_options.get("timeout_seconds") or (config.get("vision") or {}).get("timeout_seconds") or 15)
+        max_edge = direct_options.get("max_edge", 0)
+        if type(max_edge) is not int or max_edge < 0:
+            raise ValueError("direct_visual_max_edge_invalid")
+        preprocess = _prepare_vista_direct_image(image_path, input_image_size, max_edge=max_edge)
+        inference_image_size = ImageSize(**preprocess["processed_size"])
+        with timer.step("direct_visual_point_model", provider_mode=mode):
+            point_payload = _call_vista_point_prompt(local_config=local_config,
+                image_path=Path(preprocess["processed_image_path"]),
+                goal=model_goal, prompt=_vista_direct_prompt(model_goal, semantic_action=metadata.get("semantic_action")),
+                image_size=inference_image_size, original_image_size=input_image_size,
+                coordinate_transform=preprocess["transform"], image_preprocess=preprocess,
+                timeout_seconds=point_timeout,
+                max_tokens=int(local_config.get("max_new_tokens") or 64), provider_name="direct_visual_model",
+                vista_stage="direct_visual", strict_direct_visual=True)
+        if direct_options.get("refine") is True:
+            coarse_payload = point_payload
+            roi = _prepare_vista_roi_image(image_path, input_image_size, center_point=point_payload["point"],
+                roi_size=int(direct_options.get("refine_roi_size") or 512),
+                max_edge=int(direct_options.get("refine_max_edge") or 640))
+            roi_size = ImageSize(**roi["processed_size"])
+            with timer.step("direct_visual_point_refine", provider_mode=mode):
+                point_payload = _call_vista_point_prompt(local_config=local_config,
+                    image_path=Path(roi["processed_image_path"]), goal=model_goal,
+                    prompt=_vista_direct_prompt(model_goal, semantic_action=metadata.get("semantic_action")),
+                    image_size=roi_size, original_image_size=input_image_size,
+                    coordinate_transform=roi["transform"], image_preprocess=roi,
+                    timeout_seconds=point_timeout, max_tokens=int(local_config.get("max_new_tokens") or 64),
+                    provider_name="direct_visual_model",vista_stage="direct_visual_refine",strict_direct_visual=True)
+            point_payload["model_io_attempts"] = [coarse_payload["model_io_attempt"], point_payload["model_io_attempt"]]
+            point_payload["coarse_vista_point_grounding"] = coarse_payload
+        confidence = validate_direct_point_payload(point_payload["parsed"],
+            image_size=ImageSize(**point_payload["inference_image_size"]))
+        candidate = _recognition_candidate_from_vista_direct(goal=goal, point=point_payload["point"],
+            image_size=input_image_size, bbox_size=48, semantic_action=metadata.get("semantic_action"))
+        candidate.element.fusion_confidence = confidence
+        candidate.element.evidence["direct_visual"] = {"screenshot_sha256":identity["sha256"],
+            "capture_id":str(image_path), "model_bbox":False,
+            "confidence_source":"model" if "confidence" in point_payload["parsed"] else "point_protocol_baseline"}
+        candidate.element.sources = ["direct_visual_model"]
+        candidate.reasons = ["direct_visual_model_point", "requires_post_click_verification"]
+        candidates = CandidateRankResult(goal=goal, top_k=request.top_k, candidates=[candidate],
+            recommended_candidate_id=candidate.candidate_id, summary={"execution_grounding":"direct_visual"})
+        model_io = _vista_model_io_trace(point_payload)
+        response_provider = "direct_visual_model"
+        vision_regions = {"contract_version":"vision_regions_v1", "provider":response_provider,
+            "image_size":input_image_size.to_dict(), "regions":[], "targets":[], "observers":[]}
+    else:
+        with timer.step("direct_visual_provider_analyze", provider_mode=mode):
+            response = provider.analyze(VisionAnalyzeRequest(image_path=str(image_path), task=request.task,
+                app_name=request.app_name, goal=model_goal, state_hint=request.state_hint,
+                provider_mode=mode, metadata={"execution_grounding":"direct_visual"}))
+        if (response.raw_response or {}).get("mode") == "stub":
+            raise ValueError("direct_visual_provider_not_implemented")
+        if response.image_size is None or response.image_size.to_dict() != input_image_size.to_dict():
+            raise ValueError("direct_visual_model_image_size_mismatch")
+        elements = []
+        for index, target in enumerate(response.targets or response.regions):
+            bbox = target.bbox.to_dict()
+            if (any(type(getattr(target.bbox, key)) is not int for key in ("x", "y", "w", "h"))
+                    or min(bbox["x"], bbox["y"]) < 0 or min(bbox["w"], bbox["h"]) <= 0
+                    or bbox["x"] + bbox["w"] > input_image_size.width
+                    or bbox["y"] + bbox["h"] > input_image_size.height):
+                raise ValueError("direct_visual_model_bbox_invalid")
+            raw_confidence = getattr(target, "clickable_confidence", getattr(target, "confidence", None))
+            from math import isfinite
+            if (type(raw_confidence) not in {int, float} or not isfinite(raw_confidence)
+                    or raw_confidence < MIN_VISUAL_CONFIDENCE or raw_confidence > 1):
+                raise ValueError("direct_visual_model_confidence_too_low_or_invalid")
+            role = getattr(target, "kind", getattr(target, "role", "button"))
+            elements.append(PageElement(element_id=f"direct_visual_{index}", label=target.label, role=role,
+                interaction_type="focus" if role in {"input", "textbox"} else "click",
+                description=getattr(target, "description", None) or target.label, text=target.label,
+                bbox=target.bbox, click_point={"x":bbox["x"] + bbox["w"] // 2,
+                                             "y":bbox["y"] + bbox["h"] // 2},
+                semantic_bbox=None, possible_destinations=[], verification_hints=VerificationHints(),
+                interaction_policy=InteractionPolicy(allowed=True), memory_key="",
+                click_strategy="direct_visual_model", fusion_confidence=float(raw_confidence),
+                coordinate_confidence="high", sources=["direct_visual_model"],
+                evidence={"direct_visual":{"screenshot_sha256":identity["sha256"],
+                    "capture_id":str(image_path), "model_bbox":True,"confidence_source":"model"}}))
+        if not elements:
+            raise ValueError("direct_visual_model_target_not_found")
+        candidates = rank_candidates(CandidateRankRequest(goal=goal, top_k=request.top_k,
+            page_structure=PageStructure(image_size=input_image_size, screen_summary=response.screen_summary,
+                state_guess=request.state_hint, elements=elements, texts=[])))
+        model_io = _model_io_trace(response)
+        response_provider = response.provider
+        vision_regions = response.to_dict()
+    identity_after = _capture_identity(image_path, image_size=input_image_size,
+        capture_id=_capture_id_from_request_metadata(metadata))
+    if not _same_capture_identity(identity, identity_after):
+        raise ValueError("direct_visual_capture_changed_during_model_call")
+    locals_ = []
+    for candidate in candidates.candidates:
+        if _looks_like_high_risk_action_text(model_goal) or _looks_like_high_risk_action_text(candidate.label):
+            candidate.eligible = False
+            candidate.element.interaction_policy.allowed = False
+            candidate.reasons.append("high_risk_action_requires_confirmation")
+        bbox = candidate.refined_bbox or candidate.element.bbox.to_dict()
+        locals_.append(LocalGroundingCandidateResult(candidate_id=candidate.candidate_id,
+            element_id=candidate.element_id, status="grounded", crop_path=None, crop_bbox=bbox,
+            refined_click_point=candidate.element.click_point, coordinate_source="direct_visual_model",
+            confidence=candidate.element.fusion_confidence, matched_text=None, matched_text_bbox=None,
+            reasons=["current_screenshot_model_geometry", "requires_post_click_verification"]))
+    grounding = LocalGroundingResult(goal=goal, results=locals_,
+        recommended_candidate_id=candidates.recommended_candidate_id,
+        summary={"provider":response_provider,"execution_grounding":"direct_visual"})
+    decision = decide_direct_visual(candidates=candidates, grounding=grounding,
+        image_size=input_image_size, screenshot_sha256=identity["sha256"])
+    selected = next((c for c in candidates.candidates if c.candidate_id == decision.selected_candidate_id), None)
+    candidates.recommended_candidate_id = selected.candidate_id if selected else None
+    result = {"contract_version":"recognition_plan_v1", **_mode_payload(request, fallback_contract="recognition_plan_v1"),
+        "image_path":str(image_path), "goal":goal, "top_k":request.top_k,
+        "operation_context":operation_context,
+        "operation_trace_link":operation_trace_link(operation_context,result_status="success",evidence_refs=[str(image_path)]),
+        "capture_identity":identity,"observe_trace_reuse":{"status":"not_requested"},
+        "path_graph_recall":{"status":"not_requested","candidates":[]},
+        "visual_asset_recall":{"status":"not_requested","matches":[]}, "seeded_candidate":None,
+        "candidate_freshness_decision":_candidate_freshness_decision_for_trace(None,
+            image_path=image_path,image_size=input_image_size,grounding=grounding,
+            selected_candidate=selected,current_candidate_source="direct_visual_model"),
+        "parse_result":{"vision_regions":vision_regions,"ocr_result":None,"ocr_anchors":None,
+            "page_structure":None,"screen_reading":None,"vista_point_grounding":point_payload},
+        "screen_inventory":None,"candidate_result":candidates.to_dict(),
+        "narrow_search_result":grounding.to_dict(),"pre_click_decision":decision.to_dict(),
+        "recommended_target":selected.to_dict() if selected else None,"model_io":model_io,
+        "verification_plan":{"status":"planned_not_executed",
+            "pre_click_checks":["current_capture_identity","model_confidence","model_point_inside_capture"],
+            "post_click_checks":["content_change","focus_or_state_change"]},
+        "execution_path":{"requested_mode":mode,"effective_mode":mode,"provider":response_provider,
+            "execution_grounding":"direct_visual","coordinate_source":"direct_visual_model",
+            "vision_model_called":True,"screen_inventory_used":False,"screen_reading_used":False,
+            "path_graph_recall_used":False,"visual_asset_recall_used":False,"seeded_candidate_used":False,
+            "ocr_anchor_grounding_used":False,"vista_direct_point_grounding_used":point_payload is not None,
+            "pre_click_decision_used":True,"action_executed":False},"timings":timer.to_dict()}
+    for candidate in result["candidate_result"]["candidates"]:
+        candidate["candidate_freshness"] = build_candidate_freshness(capture_id=str(image_path),
+            viewport_size=input_image_size.to_dict(), source="direct_visual_model")
+    result["trace_path"] = _write_trace_if_enabled(request,category="vision",operation="recognition_plan",
+        payload={"success":True,"request":request.model_dump(),"result":result},name_hint=request.app_name or image_path.stem)
+    return APIResponse(success=True,message="Recognition plan completed",data=VisionResultData(result=result).model_dump())
+
+
 @router.post("/recognition_plan", response_model=APIResponse)
 def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
     timer = RuntimeTimer()
@@ -8692,6 +8953,10 @@ def recognition_plan(request: VisionRecognitionPlanRequestModel) -> APIResponse:
             viewport_size={"width": int(input_image_size.width), "height": int(input_image_size.height)},
             evidence_refs=[str(image_path), *([request.observe_trace_path] if request.observe_trace_path else [])],
         )
+        if request.agent_mode == "execute" and request.metadata.get("execution_grounding") == "direct_visual":
+            return _recognition_plan_direct_visual(request=request, timer=timer, config=config,
+                provider=provider, image_path=image_path, input_image_size=input_image_size,
+                goal=goal, operation_context=operation_context)
         with timer.step("load_observe_trace_reuse", has_observe_trace=bool(request.observe_trace_path)):
             observe_reuse = _load_observe_trace_reuse(request.observe_trace_path, image_path=str(image_path), goal=goal)
         with timer.step("path_graph_recall", observe_reuse_status=observe_reuse.get("status")):

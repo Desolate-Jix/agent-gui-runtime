@@ -31,6 +31,7 @@ class AgentGroundingTarget:
         self._source = self._candidate.evidence_source
         self._planned = False
         self._claimed = False
+        self._pending_review = None
 
     @property
     def goal(self):
@@ -49,6 +50,74 @@ class AgentGroundingTarget:
         if time.time() >= self._state["expires_at"]:
             raise ValueError("agent_grounding_request_expired")
 
+    def _eligible_review(self):
+        from app.execution.action_review import (current_action_review, normalize_action_review_context,
+            review_preflight)
+        from app.judgment.service import DecisionService
+        try:
+            scope = current_action_review()
+            if scope is None or current_agent_grounding() is not self:
+                return None
+            service = scope["service"]
+            if (not isinstance(service, DecisionService) or service.profile.decision_format != "choice"
+                    or time.perf_counter_ns() >= scope["deadline_ns"]
+                    or scope["cancelled"] and scope["cancelled"]()):
+                return None
+            context = normalize_action_review_context(scope["context"])
+            step = next(row for row in context["plan"]["steps"] if row["step_id"] == context["step_id"])
+            if (step["action"].get("field_goal", step["action"].get("goal")) != self.goal
+                    or review_preflight(service)["ready"] is not True):
+                return None
+            return scope
+        except (KeyError, TypeError, ValueError, OSError, RuntimeError):
+            return None
+
+    def _validate_pending_review(self, identity):
+        from app.execution.action_review import (build_action_review, current_action_review,
+            validate_assessment)
+        from app.judgment.service import decision_profile_sha256
+        pending = self._pending_review
+        scope = current_action_review()
+        if (current_agent_grounding() is not self or scope is not pending["scope"]
+                or scope["service"] is not pending["service"]
+                or scope["context"] != pending["context"] or scope["deadline_ns"] != pending["deadline_ns"]
+                or scope["cancelled"] is not pending["cancelled"]
+                or self._state != pending["state"] or self._candidate.model_dump() != pending["original_candidate"]
+                or self._source != pending["candidate"]["source"]):
+            raise ValueError("agent_grounding_candidate_review_binding_invalid")
+        envelope = scope["envelope"]
+        if not isinstance(envelope, dict):
+            raise ValueError("agent_grounding_candidate_review_required")
+        frame, action = envelope["frame"], envelope["action"]
+        context, service = pending["context"], pending["service"]
+        step = next(row for row in context["plan"]["steps"] if row["step_id"] == context["step_id"])
+        original = Path(self._state["capture"]["image_path"]).read_bytes()
+        if sha256(original).hexdigest() != self._state["capture"]["sha256"]:
+            raise ValueError("agent_grounding_source_hash_mismatch")
+        if (Path(frame["image_path"]).resolve() != pending["image_path"] or frame["sha256"] != pending["sha256"]
+                or action.get("operation") != "execute_recognition_plan" or action.get("goal") != self.goal
+                or action.get("source_candidate") != pending["candidate"]
+                or action.get("permitted_action") != step["action"]
+                or action.get("click_kind") != step["action"].get("click_kind", "single")
+                or decision_profile_sha256(service.profile) != pending["profile_sha256"]):
+            raise ValueError("agent_grounding_candidate_review_binding_invalid")
+        with Image.open(frame["image_path"]) as image:
+            if image.size != pending["dimensions"]:
+                raise ValueError("agent_grounding_viewport_changed")
+        selected = {**deepcopy(pending["candidate"]), "capture_id": frame["capture_id"]}
+        expected = build_action_review(scope="candidate", plan=context["plan"], step=step,
+            run_id=context["run_id"], attempt_id=context["attempt_id"], capture=frame, identity=identity,
+            candidate=selected, action=action, profile_sha256=pending["profile_sha256"],
+            deadline_ns=pending["deadline_ns"])
+        if (envelope != expected or not validate_assessment(service, scope["assessment"],
+                envelope=envelope, cancelled=scope["cancelled"])
+                or current_action_review() is not scope or current_agent_grounding() is not self):
+            raise ValueError("agent_grounding_candidate_review_required")
+        if (time.perf_counter_ns() >= pending["deadline_ns"]
+                or pending["cancelled"] and pending["cancelled"]()):
+            raise ValueError("agent_grounding_candidate_review_required")
+        self._identity(identity)
+
     def plan(self, *, image_path, goal, identity):
         self._identity(identity)
         if goal != self.goal:
@@ -57,7 +126,9 @@ class AgentGroundingTarget:
         original = Path(capture["image_path"]).read_bytes()
         if sha256(original).hexdigest() != capture["sha256"]:
             raise ValueError("agent_grounding_source_hash_mismatch")
-        with Image.open(BytesIO(original)) as source, Image.open(image_path) as current:
+        current_bytes = Path(image_path).read_bytes()
+        review_scope = None
+        with Image.open(BytesIO(original)) as source, Image.open(BytesIO(current_bytes)) as current:
             expected_size = (self._result.image_size.width, self._result.image_size.height)
             if source.size != expected_size or current.size != expected_size:
                 raise ValueError("agent_grounding_viewport_changed")
@@ -72,7 +143,9 @@ class AgentGroundingTarget:
             changed = sum(histogram[13:]) / (before.width * before.height)
             # 只容忍局部少量光标/抗锯齿变化；这是新鲜度启发式，不是语义命中证明。
             if changed > .02:
-                raise ValueError("agent_grounding_target_region_changed")
+                review_scope = self._eligible_review()
+                if review_scope is None:
+                    raise ValueError("agent_grounding_target_region_changed")
         point = self._candidate.click_point.model_dump()
         bbox = {"x": box.x, "y": box.y, "w": box.width, "h": box.height}
         element_id = "agent-" + self._candidate.id
@@ -80,15 +153,27 @@ class AgentGroundingTarget:
             "text": self._candidate.label, "score": self._candidate.confidence,
             "capture_id": capture["capture_id"], "viewport_size": self._result.image_size.model_dump(),
             "source": self._source, "bbox": bbox, "click_point": point,
-            "freshness": {"status": "revalidated", "source_sha256": capture["sha256"],
-                "current_sha256": sha256(Path(image_path).read_bytes()).hexdigest(),
+            "freshness": {"status": "pending_semantic_review" if review_scope is not None else "revalidated",
+                "source_sha256": capture["sha256"], "current_sha256": sha256(current_bytes).hexdigest(),
                 "expires_at": self._state["expires_at"], "region_changed_fraction": changed},
             "bbox_refine_reason": self._source + "_bbox", "refined_bbox": bbox,
             "element": {"element_id": element_id, "text": self._candidate.label, "bbox": bbox}}
         pre_click = {"allowed": True, "selected_candidate_id": self._candidate.id,
             "selected_element_id": element_id, "selected_click_point": point,
-            "reasons": ["agent_selected_target", "current_region_consistent"],
-            "validation_scope": "identity_geometry_and_region_consistency_not_semantic_hit"}
+            "reasons": ["agent_selected_target", "candidate_semantic_review_pending" if review_scope is not None else "current_region_consistent"],
+            "validation_scope": "identity_geometry_pending_semantic_review" if review_scope is not None else
+                "identity_geometry_and_region_consistency_not_semantic_hit"}
+        self._pending_review = None
+        if review_scope is not None:
+            from app.execution.decision_check import _candidate
+            from app.judgment.service import decision_profile_sha256
+            self._pending_review = {"scope": review_scope, "service": review_scope["service"],
+                "context": deepcopy(review_scope["context"]), "deadline_ns": review_scope["deadline_ns"],
+                "cancelled": review_scope["cancelled"],
+                "profile_sha256": decision_profile_sha256(review_scope["service"].profile),
+                "state": deepcopy(self._state), "original_candidate": self._candidate.model_dump(),
+                "candidate": _candidate(candidate, point), "image_path": Path(image_path).resolve(),
+                "sha256": sha256(current_bytes).hexdigest(), "dimensions": expected_size}
         self._planned = True
         return {"image_path": str(image_path), "goal": goal, "target_text": self._candidate.label,
             "parse_result": {"vision_regions": {"image_size": self._result.image_size.model_dump()}},
@@ -113,6 +198,8 @@ class AgentGroundingTarget:
             raise ValueError("agent_grounding_already_claimed")
         if point != self._candidate.click_point.model_dump():
             raise ValueError("agent_grounding_point_mismatch")
+        if self._pending_review is not None:
+            self._validate_pending_review(identity)
         self._claimed = True
 
 
@@ -130,7 +217,8 @@ def agent_grounding_scope(target):
     if target is None:
         yield
         return
-    if type(target) is not AgentGroundingTarget or _SCOPE.get() is not None:
+    from .visual_submit_target import VisualSubmitTarget
+    if type(target) not in {AgentGroundingTarget, VisualSubmitTarget} or _SCOPE.get() is not None:
         raise ValueError("agent_grounding_scope_invalid")
     scope = {"target": target, "owner": get_ident(), "active": True}
     token = _SCOPE.set(scope)

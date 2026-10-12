@@ -3,9 +3,11 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
 from hashlib import sha256
+from os.path import normcase
 from pathlib import Path
 import re
 from threading import get_ident
+from time import perf_counter_ns
 
 
 _SCOPE = ContextVar("execution_decision_check", default=None)
@@ -37,6 +39,19 @@ def validate_execution_request_id(value):
 
 def service_enabled(service):
     return service is not None and getattr(service, "enabled", False) is True
+
+
+def adaptive_decision_enabled(service):
+    return getattr(getattr(service, "profile", None), "contract_version", None) == "decision_profile.v2"
+
+
+def _standalone_review_context(service, *, condition, execution_request_id, goal=None):
+    if not adaptive_decision_enabled(service):
+        return None
+    # 单步调用只声明当次目标，不补造调用方没有提供的剩余计划。
+    return {"goal": goal if isinstance(goal, str) and goal.strip() else condition,
+        "step_goal": condition, "remaining_plan": [], "allowed_states": [],
+        "source_id": execution_request_id}
 
 
 @contextmanager
@@ -87,10 +102,14 @@ def decision_frame(capture, identity, *, role):
     declared = capture.get("window_identity")
     if declared is not None and _identity(declared) != bound:
         raise ValueError("decision_check capture window identity mismatch")
-    digest = sha256(Path(capture["image_path"]).read_bytes()).hexdigest()
+    image_path = Path(capture["image_path"]).resolve()
+    digest = sha256(image_path.read_bytes()).hexdigest()
     if capture.get("sha256") is not None and capture["sha256"] != digest:
         raise ValueError("decision_check capture hash mismatch")
-    return {"capture_id": capture.get("capture_id") or "capture-" + digest[:32],
+    # 相同像素可来自不同采集；缺省身份绑定规范文件路径及内容，同一文件重复读取保持稳定。
+    capture_id = capture.get("capture_id") or "capture-" + sha256(
+        (normcase(str(image_path)) + "\0" + digest).encode("utf-8")).hexdigest()[:32]
+    return {"capture_id": capture_id,
         "sha256": digest, "image_path": capture["image_path"], "window_identity": bound, "role": role}
 
 
@@ -120,9 +139,19 @@ def _advice(reason, *, phase, input_status=None):
         "authorizes_action": False, "automatic_retry_allowed": False, "gate_applied": False}
 
 
-def _evaluate(service, *, request_id, execution_request_id, condition, frames, phase, step_id=None, action=None):
+def _evaluate(service, *, request_id, execution_request_id, condition, frames, phase, step_id=None, action=None,
+              review_context=None, deadline_ns=None):
     request = dict(request_id=request_id, execution_request_id=execution_request_id,
         condition=condition, frames=frames, mode="execution", phase=phase, step_id=step_id, action=action)
+    if review_context is not None:
+        request["review_context"] = review_context
+    if deadline_ns is not None:
+        if type(deadline_ns) is not int or deadline_ns <= 0:
+            raise ValueError("decision_deadline_invalid")
+        remaining = (deadline_ns - perf_counter_ns()) / 1_000_000_000
+        if remaining <= 0:
+            return {**_advice("decision_deadline_expired", phase=phase), "status": "timeout"}
+        request["request_budget_seconds"] = min(60.0, remaining)
     try:
         result = service.evaluate(**request)
     except Exception as error:
@@ -130,24 +159,39 @@ def _evaluate(service, *, request_id, execution_request_id, condition, frames, p
             "error_type": type(error).__name__}
     if (not isinstance(result, dict) or result.get("request_id") != request_id
             or result.get("execution_request_id") != execution_request_id or result.get("phase") != phase
+            or not isinstance(result.get("verdict"), str)
             or result.get("verdict") not in {"success", "failure", "uncertain"}
             or result.get("authorizes_action") is not False):
         return {**_advice("decision_result_binding_invalid", phase=phase), "status": "invalid"}
-    if result.get("adopted") is True:
+    adaptive = adaptive_decision_enabled(service)
+    if adaptive and (not isinstance(result.get("status"), str) or
+            (result.get("status") in {"completed", "skipped"} and (
+                result.get("schema_version") != "decision_assessment.v2"
+                or not isinstance(result.get("disposition"), str)
+                or result.get("disposition") not in {"continue", "observe", "review_required", "stop"}))
+            or (result.get("adopted") is True and (
+                result.get("status") != "completed" or result.get("disposition") != "continue"
+                or result.get("verdict") != "success"))):
+        return {**_advice("decision_result_disposition_invalid", phase=phase), "status": "invalid"}
+    if result.get("adopted") is True or (adaptive and result.get("status") in {"completed", "skipped"}):
         try:
             authenticated = service.validate_result(result, **request)
         except Exception:
             authenticated = False
         if authenticated is not True:
             return {**_advice("decision_result_authentication_invalid", phase=phase), "status": "invalid"}
+    if deadline_ns is not None and perf_counter_ns() >= deadline_ns:
+        return {**_advice("decision_deadline_expired", phase=phase), "status": "timeout",
+            "judgment_result": deepcopy(result), "evaluation_request": deepcopy(request)}
     return {**deepcopy(result), "judgment_result": deepcopy(result),
+        **({"evaluation_request": deepcopy(request)} if deadline_ns is not None else {}),
         "authorizes_action": False, "automatic_retry_allowed": False}
 
 
 def _automatic_gate(scope):
     service = scope["service"]
     return (service_enabled(service) and getattr(service, "adoption_mode", None) == "auto"
-        and service.auto_condition_allowed(scope["check"]["condition"]))
+        and (adaptive_decision_enabled(service) or service.auto_condition_allowed(scope["check"]["condition"])))
 
 
 def before_action_unavailable(scope):
@@ -190,7 +234,7 @@ def _before_evidence(scope, capture, identity, candidate, point):
     return frame, selected
 
 
-def evaluate_before_action(scope, *, capture, identity, candidate, point, goal, click_kind, revalidate):
+def evaluate_before_action(scope, *, capture, identity, candidate, point, goal, click_kind, revalidate, validate_binding):
     check, service = scope["check"], scope["service"]
     if check["phase"] != "before_action" or not service_enabled(service):
         result = _advice("decision_service_disabled", phase=check["phase"])
@@ -206,17 +250,27 @@ def evaluate_before_action(scope, *, capture, identity, candidate, point, goal, 
     action = {"operation": "execute_recognition_plan", "goal": goal, "click_kind": click_kind,
         "target_window_identity": frame["window_identity"], "candidate": selected}
     result = _evaluate(service, request_id=scope["request_id"], execution_request_id=scope["execution_request_id"],
-        condition=check["condition"], frames=[frame], phase="before_action", step_id=scope["step_id"], action=action)
+        condition=check["condition"], frames=[frame], phase="before_action", step_id=scope["step_id"], action=action,
+        review_context=_standalone_review_context(service, condition=check["condition"],
+            execution_request_id=scope["execution_request_id"], goal=goal))
     gate = _automatic_gate(scope)
     result.update(gate_applied=gate, authorizes_action=False, automatic_retry_allowed=False)
-    # 网络等待期间的变化必须在原输入 claim 之前发现，影子模式也不能沿用过时坐标。
+    # 已采纳的语义审核只续验绑定；影子模式保留原执行规则。
     try:
-        current_capture, current_identity, current_candidate = revalidate()
-        current_frame = decision_frame(current_capture, current_identity, role="before")
-        current_selected = _candidate(current_candidate, point)
-        if (current_frame["sha256"] != frame["sha256"]
-                or current_frame["window_identity"] != frame["window_identity"] or current_selected != selected):
-            raise ValueError("decision_check evidence changed while waiting")
+        adopted = gate and result.get("adopted") is True and result.get("verdict") == "success"
+        if adopted:
+            if sha256(Path(frame["image_path"]).read_bytes()).hexdigest() != frame["sha256"]:
+                raise ValueError("decision_check reviewed source changed")
+            current_identity, current_candidate = validate_binding()
+            if _identity(current_identity) != frame["window_identity"] or _candidate(current_candidate, point) != selected:
+                raise ValueError("decision_check binding changed while waiting")
+        else:
+            current_capture, current_identity, current_candidate = revalidate()
+            current_frame = decision_frame(current_capture, current_identity, role="before")
+            current_selected = _candidate(current_candidate, point)
+            if (current_frame["sha256"] != frame["sha256"]
+                    or current_frame["window_identity"] != frame["window_identity"] or current_selected != selected):
+                raise ValueError("decision_check evidence changed while waiting")
     except Exception as error:
         result.update(status="invalidated", adopted=False, reason="evidence_changed_after_wait",
             revalidation_error_type=type(error).__name__)
@@ -260,7 +314,9 @@ def evaluate_post_action(service, *, request_id, execution_request_id, decision_
     except (ValueError, OSError) as error:
         return {**advice, "reason": "original_evidence_invalid", "error_type": type(error).__name__}
     result = _evaluate(service, request_id=request_id, execution_request_id=execution_request_id,
-        condition=check["condition"], frames=frames, phase="after_action", step_id=original.get("step_id"))
+        condition=check["condition"], frames=frames, phase="after_action", step_id=original.get("step_id"),
+        review_context=_standalone_review_context(service, condition=check["condition"],
+            execution_request_id=execution_request_id, goal=original.get("goal")))
     adopted = result.get("adopted") is True
     verdict = result.get("verdict")
     return {**result, "input_status": status, "effect_verified": verdict == "success" if adopted else None,

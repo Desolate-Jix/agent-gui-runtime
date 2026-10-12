@@ -59,10 +59,27 @@ def uia_control_is_action_identity(control: Mapping[str, object]) -> bool:
 
 def explicit_browser_navigation_goal(goal: str) -> bool:
     """只识别明确点浏览器导航按钮的单步目标，不把正文提及当目标。"""
-    return bool(re.match(
+    navigation_label = r"(?:back|forward|refresh|reload|返回|后退|前进|刷新)"
+    target = re.match(
         r"\s*(?:(?:left|single)[ -]?)?click\s+(?:the\s+)?browser(?:'s)?\s+"
-        r"(?:back|forward|refresh|reload)\s+button\b", goal, re.I)
-        or re.match(r"\s*点击浏览器(?:工具栏(?:的)?)?(?:返回|后退|前进|刷新)按钮", goal))
+        r"(?:(?:back|forward|refresh|reload)\s+button\b|"
+        r"toolbar\s+button\s+(?:labelled|labeled|named)\s+(?P<quote>[\"'])"
+        + navigation_label + r"(?P=quote))", goal, re.I)
+    target = target or re.match(r"\s*点击浏览器(?:工具栏(?:的)?)?(?:返回|后退|前进|刷新)按钮", goal)
+    if target is None:
+        return False
+    suffix = goal[target.end():]
+    # 后缀只允许方位和导航目的；否定、正文引用及第二个动作不能更换证据范围。
+    if re.search(r"\b(?:and|or|then|not|never|avoid|instead|while|before|after|also|"
+            r"text|word|mentioned|described|click|press|select|type|fill|open)\b|"
+            r"\b(?:in|on|inside|within)\s+(?:the\s+)?(?:page|body|document|article|content)\b|"
+            r"不要|勿|然后|点击|并|或", suffix, re.I):
+        return False
+    return bool(re.fullmatch(
+        r"\s*(?:\([^()\r\n]*\)\s*)?"
+        r"(?:at\s+(?:the\s+)?(?:top[- ]left|top[- ]right|top|left|right)(?:\s+corner)?\s*)?"
+        r"(?:to\s+(?:return|go\s+back|go\s+forward|refresh|reload)\b[^.,;!?\r\n]*)?"
+        r"\s*[.!?。！？]?\s*", suffix, re.I))
 
 
 def explicit_menu_item_goal(goal: str) -> bool:

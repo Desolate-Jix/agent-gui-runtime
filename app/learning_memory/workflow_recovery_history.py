@@ -66,6 +66,7 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
     loaded = WorkflowProgramService(library).load(state["workflow_id"], state["program_id"])
     _require(loaded == program and program["program_id"] == state["program_id"]
              and program["project_snapshot_id"] == state["project_snapshot_id"], "program_mismatch")
+    from .workflow_condition_templates import validate_frozen_conditions
     history = state.get("history")
     _require(isinstance(history, list) and len(history) <= 256, "history_invalid")
     steps = {step["step_id"]: step for step in program["definition"]["steps"]}
@@ -80,6 +81,14 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
         consumed = list(imported["recovery_import"]["consumed_step_ids"])
         earlier = deepcopy(imported["outputs"])
         expected_step = imported["current_step_id"]
+    def template_read(path):
+        path = Path(path).resolve()
+        if path.is_relative_to(session):
+            return read(path)
+        # 接管声明由祖先校验器固定字节，不能绕过来源快照另读磁盘。
+        _require(path in external_snapshots, "ancestor_unavailable")
+        return json.loads(external_snapshots[path].decode("utf-8"))
+    validate_frozen_conditions(state, program, session, read=template_read)
     execution_ids = set()
     requests = state.get("requests")
     _require(isinstance(requests, dict), "requests_invalid")
@@ -239,7 +248,7 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
             result_outputs = {key: {"run_id": run_id, "value": value} for key, value in earlier.items()}
             if origin == "decision":
                 computed = _verify_decision(library, session, state, step, envelope, effective,
-                    result_outputs, read=read, snapshot=snapshot)
+                    result_outputs, read=read, snapshot=snapshot, program=program)
                 fields = {"step_id", "execution_request_id", "review_request", "execution_strategy", "receipt_sha256",
                     "terminal_receipt", "input_route_succeeded", "verdict", "condition_result", "judged_by",
                     "observations", "outputs", "verification", "decision_verdict"}
@@ -249,6 +258,8 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
                         fields.add("selection_proof_sha256")
                 _require(set(entry) == fields, "decision_entry_mismatch")
             else:
+                from .decision_verification import main_review_required
+                _require(not main_review_required(step, None), "main_review_required")
                 computed = verify_step(step, inputs=state["inputs"], outputs=result_outputs,
                                        receipt=normalized, observation=observation)
             _require(computed == result, "verification_mismatch")
@@ -289,7 +300,7 @@ def _verify_history(library, session_dir, state, program, *, file_hashes, visite
     return {**result, "content_sha256": _digest(result)}
 
 
-def _verify_decision(library, session, state, step, envelope, effective, outputs, *, read, snapshot):
+def _verify_decision(library, session, state, step, envelope, effective, outputs, *, read, snapshot, program):
     from app.core.decision_configuration import PROFILE_SNAPSHOT
     from app.judgment import DecisionService
     from .decision_verification import adopted_verification, decision_binding, decision_result_path
@@ -298,7 +309,7 @@ def _verify_decision(library, session, state, step, envelope, effective, outputs
     before = (effective.get("result") or {}).get("capture") or {}
     _require(not before.get("capture_id") or normalized.get("pre_capture_id") == before["capture_id"],
              "decision_pre_capture_mismatch")
-    binding = decision_binding(step, envelope)
+    binding = decision_binding(step, envelope, program=program, inputs=state["inputs"])
     pointer = read("workflow-decisions/" + normalized["execution_request_id"] + ".request.json")
     _require(pointer == {"run_id": state["run_id"], "step_id": step["step_id"],
         "execution_request_id": normalized["execution_request_id"], "request_id": request_id}, "decision_request_mismatch")
@@ -320,7 +331,7 @@ def _verify_decision(library, session, state, step, envelope, effective, outputs
     service = DecisionService.from_environment(session, profile_path=session / PROFILE_SNAPSHOT)
     try:
         result = adopted_verification(step, inputs=state["inputs"], outputs=outputs,
-            envelope=envelope, decision=saved["result"], service=service)
+            envelope=envelope, decision=saved["result"], service=service, program=program)
     finally:
         service.close()
     return result

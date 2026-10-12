@@ -1,10 +1,18 @@
 {
-  "contract_version": "decision_profile.v1",
-  "mode": "shadow",
+  "contract_version": "decision_profile.v2",
+  "mode": "auto",
+  "decision_format": "choice",
   "api_key_env": "OPENAI_API_KEY",
   "timeout_seconds": 8,
   "pass_threshold": 0.9,
   "fail_threshold": 0.1,
+  "before_action_pass_threshold": 0.8,
+  "after_action_pass_threshold": 0.8,
+  "after_action_review_threshold": 0.7,
   "request_cap": 20,
-  "auto_conditions": []
+  "auto_conditions": [
+    "The current task can continue by performing the specified original action without interacting with or dismissing the visible popup. The popup does not require a choice, consent, authentication, or any other intervention before that action."
+  ],
+  "proactive_review": true,
+  "review_policy": "adaptive"
 }

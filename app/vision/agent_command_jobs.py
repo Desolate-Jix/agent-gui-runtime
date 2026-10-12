@@ -47,17 +47,39 @@ class _CoordinatorProxy:
     def execute_local_step(self, **kwargs):
         job = self._job
         manager = job.manager
+        kwargs["input_cancelled"] = lambda: job.cancelled
+        if job.action_review is not None:
+            manager._remaining_action_review(job)
+            if kwargs.get("operation") == "execute_recognition_plan":
+                from app.execution.action_review import review_preflight
+                preflight = review_preflight(getattr(manager.coordinator, "_decision_service", None))
+                with manager._condition:
+                    manager._update(job, action_review_preflight=preflight)
+                if not preflight["ready"]:
+                    raise AgentCommandError(preflight["reason"])
+                kwargs["action_review"] = deepcopy(job.action_review)
+                kwargs["action_review_deadline_ns"] = job.action_review_deadline_ns
+        prepared_target = kwargs.get("grounding_target")
+        if prepared_target is not None:
+            from app.core.visual_submit_target import VisualSubmitTarget
+            if (type(prepared_target) is not VisualSubmitTarget
+                    or kwargs.get("operation") != "execute_recognition_plan"
+                    or (kwargs.get("request") or {}).get("goal") != prepared_target.goal
+                    or job.action_review is None or prepared_target._context != job.action_review):
+                raise AgentCommandError("prepared_visual_submit_target_invalid")
+        # 已认证的提交目标仍走原动作门禁，不重复定位或覆盖内部能力。
+        direct_dispatch = kwargs.get("operation") != "execute_recognition_plan" or prepared_target is not None
         kwargs.pop("learning_context", None)
         if job.learning_context is not None:
             kwargs["learning_context"] = deepcopy(job.learning_context)
         with manager._condition:
             if job.cancelled:
                 raise _Cancelled("agent_command_cancelled")
-            if kwargs.get("operation") != "execute_recognition_plan":
+            if direct_dispatch:
                 attempt_index = manager._begin_dispatch(job, kwargs["operation"])
             else:
                 manager._update(job, observation={"status": "unavailable", "reason": "action_in_progress"})
-        if kwargs.get("operation") != "execute_recognition_plan":
+        if direct_dispatch:
             try:
                 receipt = manager.coordinator.execute_local_step(**kwargs)
             except Exception:
@@ -93,7 +115,14 @@ class _CoordinatorProxy:
         route = resolve_recognition_route(manager.configuration, job.capabilities)
         if route.status != "eligible":
             raise AgentCommandError(route.code)
-        capture = manager.coordinator._owner.call(manager.capture_current)
+        capture = manager.coordinator._owner.call(lambda: self._capture_before_grounding(request))
+        from app.core.local_step_no_dispatch import pre_capture_failure_verified
+        if pre_capture_failure_verified(capture, kwargs["operation"]):
+            with manager._condition:
+                manager._update(job, last_execution={"attempt_index": None,
+                    "operation": kwargs["operation"], "receipt": deepcopy(capture)},
+                    observation=deepcopy(capture["observation"]))
+            return capture
         if not isinstance(capture, dict):
             raise AgentCommandError("capture_invalid")
         # 每次交接以新 ID 绑定不可复用的截图，旧定位不能用于下一步。
@@ -125,7 +154,12 @@ class _CoordinatorProxy:
             manager._condition.notify_all()
             try:
                 while job.resume_state is None and not job.cancelled:
-                    manager._condition.wait(timeout=.1)
+                    try:
+                        remaining = manager._remaining_action_review(job)
+                    except AgentCommandError:
+                        manager.store.cancel(request_id)
+                        raise
+                    manager._condition.wait(timeout=.1 if remaining is None else min(.1, remaining))
                     if job.resume_state is None and not job.cancelled:
                         phase = manager.store.get(request_id)["phase"]
                         if phase in {"expired", "cancelled", "absent", "ambiguous", "unsupported", "error"}:
@@ -157,6 +191,7 @@ class _CoordinatorProxy:
                         {"phase": "cancelled_before_dispatch"}, input_attempted=False)
                     raise _Cancelled("agent_command_cancelled")
             grounding_target = AgentGroundingTarget(claimed)
+            manager._remaining_action_review(job)
             # 此锁内标志是派发线性化点；之后取消只能请求停止，不能撤回已开始的原生调用。
             with manager._condition:
                 if job.cancelled:
@@ -182,6 +217,35 @@ class _CoordinatorProxy:
         manager.store.finish_execution(request_id, execution_id, receipt,
             input_attempted=grounding_target.input_claimed)
         return receipt
+
+    def _capture_before_grounding(self, request):
+        from app.core.screenshot import CaptureVisibilityError
+        from app.core.local_step_no_dispatch import CONTRACT, _digest
+        from app.execution.local_direct_step import WindowsNativeIdentityReader, validate_native_identity_fact, _window_rect, _now, _audit_request
+        from app.execution.local_action_contract import _validated_request
+        job, manager = self._job, self._job.manager
+        try:
+            return manager.capture_current()
+        except CaptureVisibilityError as error:
+            windows = manager.coordinator._windows()
+            bound = windows.bind_window_by_handle(job.target["handle"])
+            identity = validate_native_identity_fact(WindowsNativeIdentityReader(window_manager=windows).read_identity(
+                job.target["handle"]), target_window_handle=job.target["handle"], expected_process_id=job.target["process_id"])
+            if identity is None or bound is None or bound.handle != job.target["handle"] or bound.process_id != job.target["process_id"]:
+                raise
+            report = {"contract_version": CONTRACT, "step_id": "pre-grounding-" + uuid4().hex,
+                "operation": "execute_recognition_plan", "phase": "not_dispatched", "status": "failed",
+                "target_identity": identity, "target_window_geometry": {"coordinate_space": "screen_pixels",
+                    "rect_format": "ltrb", "rect": list(_window_rect(bound))},
+                "request": _audit_request(_validated_request("execute_recognition_plan", request)),
+                "capture": None, "action_executed": False, "local_input_scope_closed": True,
+                "finished_at": _now(), "automatic_retry_allowed": False,
+                "error": {"code": error.reason, "type": type(error).__name__},
+                "observation": {"status": "unavailable", "reason": error.reason, "authorizes_action": False}}
+            report["pre_dispatch_failure"] = {"schema": CONTRACT, "stage": "before_grounding_capture",
+                "command_id": job.command_id, "grounding_request_created": False, "input_dispatch_started": False,
+                "receipt_sha256": _digest(report)}
+            return report
 
     def _execute_memory(self, kwargs, target):
         job = self._job
@@ -237,6 +301,9 @@ class _Job:
         self.capabilities = capabilities
         self.workflow_bindings = deepcopy(workflow_bindings)
         self.learning_context = deepcopy(learning_context)
+        self.action_review = deepcopy(command.get("action_review"))
+        self.action_review_deadline_ns = (perf_counter_ns() + self.action_review["budget_ms"] * 1_000_000
+            if self.action_review is not None else None)
         self.pending_id = None
         self.resume_state = None
         self.execution_id = None
@@ -277,17 +344,17 @@ class AgentCommandJobs:
                 observation={"status": "captured", "capture": pending["capture"]},
                 api_request={"request_id": request_id, "phase": "requesting"})
         # 网络等待不持有命令锁，取消和状态查询仍可处理；只发送此步冻结原图。
-        response_received = False
         try:
-            response = self.api_grounder.ground(request_id=request_id,
-                capture=pending["capture"], goal=pending["goal"])
-            response_received = True
-            provider = response.get("provider")
-            self._record_recognition_call(job, request_id, pending["capture"]["capture_id"],
-                provider=provider, attempt=provider.get("attempt") if isinstance(provider, dict) else None)
+            service = getattr(self.coordinator, "_decision_service", None)
+            if (job.action_review is not None
+                    and getattr(getattr(service, "profile", None), "scene_precheck", "off") == "parallel"):
+                response = self._parallel_api_scene(job, pending, service)
+            else:
+                response = self._ground_api(job, pending)
             with self._condition:
                 if job.cancelled:
                     raise _Cancelled("agent_command_cancelled")
+                self._remaining_action_review(job)
                 state = self.store.resolve(request_id, response["result"])
                 self._update(job, api_request={"request_id": request_id, "phase": state["phase"]})
                 if state["phase"] != "grounding_ready":
@@ -296,11 +363,6 @@ class AgentCommandJobs:
                 job.resume_state = self.store.claim_execution(request_id, job.execution_id)
         except Exception as error:
             with self._condition:
-                if not response_received:
-                    attempt = getattr(error, "attempt", None)
-                    if attempt is not None:
-                        self._record_recognition_call(job, request_id,
-                            pending["capture"]["capture_id"], attempt=attempt)
                 self.store.cancel(request_id)
                 self._update(job, api_request={"request_id": request_id,
                     "phase": "cancelled" if job.cancelled else "failed"})
@@ -308,6 +370,84 @@ class AgentCommandJobs:
                     raise _Cancelled("agent_command_cancelled") from None
                 job.failure_code = getattr(error, "code", None) or str(error)
             raise
+
+    def _remaining_action_review(self, job):
+        if job.action_review_deadline_ns is None:
+            return None
+        remaining = (job.action_review_deadline_ns - perf_counter_ns()) / 1_000_000_000
+        if remaining <= 0:
+            raise AgentCommandError("action_review_deadline_expired")
+        return remaining
+
+    def _ground_api(self, job, pending, *, cancelled=None):
+        if job.cancelled or cancelled is not None and cancelled():
+            raise _Cancelled("agent_command_cancelled")
+        remaining = self._remaining_action_review(job)
+        options = {} if remaining is None else {"timeout_seconds": remaining}
+        try:
+            response = self.api_grounder.ground(request_id=pending["request_id"],
+                capture=deepcopy(pending["capture"]), goal=pending["goal"], **options)
+        except Exception as error:
+            attempt = getattr(error, "attempt", None)
+            if attempt is not None:
+                self._record_recognition_call(job, pending["request_id"],
+                    pending["capture"]["capture_id"], provider=getattr(error, "provider", None), attempt=attempt)
+            raise
+        provider = response.get("provider")
+        # 早停无法撤销已发出的 HTTP；迟返只记调用事实，不采用坐标或派发输入。
+        self._record_recognition_call(job, pending["request_id"], pending["capture"]["capture_id"],
+            provider=provider, attempt=provider.get("attempt") if isinstance(provider, dict) else None)
+        return response
+
+    def _parallel_api_scene(self, job, pending, service):
+        from app.execution.action_review import build_action_review, assess_scene, validate_scene_assessment
+        from app.execution.parallel_scene_probe import run_parallel_scene_probe
+        from app.judgment.service import decision_profile_sha256
+
+        context = job.action_review
+        step = next(row for row in context["plan"]["steps"] if row["step_id"] == context["step_id"])
+        capture = pending["capture"]
+        binding = {"capture_id": capture["capture_id"], "attempt_id": context["attempt_id"],
+            "window_identity": deepcopy(capture["window_identity"])}
+        envelope = build_action_review(scope="scene", plan=context["plan"], step=step,
+            run_id=context["run_id"], attempt_id=context["attempt_id"], capture=capture,
+            identity=capture["window_identity"], candidate=None, action={
+                "operation": "execute_recognition_plan", "goal": pending["goal"]},
+            profile_sha256=decision_profile_sha256(service.profile), deadline_ns=job.action_review_deadline_ns)
+
+        def ground(*, deadline_ns, cancelled):
+            response = self._ground_api(job, pending, cancelled=cancelled)
+            return {**deepcopy(binding), "candidate": deepcopy(response["result"]), "response": response}
+
+        def probe(*, deadline_ns, cancelled):
+            if cancelled():
+                return {**deepcopy(binding), "disposition": "unavailable", "authenticated": False}
+            result = assess_scene(service, envelope=envelope)
+            authenticated = validate_scene_assessment(service, result, envelope=envelope, cancelled=cancelled)
+            disposition = "unavailable" if result.get("disposition") == "unavailable" else "unknown"
+            if authenticated:
+                raw = result["judgment"]["judgment_result"]
+                review = raw.get("probabilities", {}).get("needs_agent_review")
+                if (raw.get("verdict") == "failure" or type(review) in (int, float)
+                        and review >= service.profile.pass_threshold):
+                    disposition = "block"
+                else:
+                    disposition = "pass" if result.get("disposition") == "pass" else "unknown"
+            return {**deepcopy(binding), "disposition": disposition, "authenticated": authenticated,
+                "assessment": result}
+
+        result = run_parallel_scene_probe(ground=ground, probe=probe,
+            deadline_ns=job.action_review_deadline_ns, cancelled=lambda: job.cancelled)
+        with self._condition:
+            self._update(job, scene_precheck=result)
+        if result["status"] == "blocked":
+            raise AgentCommandError("scene_precheck_blocked")
+        if result["status"] == "cancelled":
+            raise _Cancelled("agent_command_cancelled")
+        if result["status"] != "joined":
+            raise AgentCommandError("action_review_deadline_expired" if result["status"] == "timeout"
+                else "scene_precheck_result_unavailable")
+        return result["grounding"]["response"]
 
     def _record_recognition_call(self, job, request_id, capture_id, *, provider=None, attempt=None):
         call = {"request_id": request_id, "capture_id": capture_id}
@@ -432,6 +572,9 @@ class AgentCommandJobs:
             raise AgentCommandError("command_request_invalid")
         # 在副本上验证，避免线程启动后才发现请求合同无效。
         frozen = deepcopy(command)
+        if "action_review" in frozen:
+            from app.execution.action_review import normalize_action_review_context
+            frozen["action_review"] = normalize_action_review_context(frozen["action_review"])
         from app.execution.form_fill import FormFillRequest
         from app.execution.input_sequence import InputSequenceRequest
         if frozen["kind"] == "form_fill":
@@ -476,10 +619,13 @@ class AgentCommandJobs:
                 result = run_form_fill(proxy, job.target, command["request"],
                     persist=lambda progress: self._progress(job, progress))
             elif command["kind"] == "input_sequence":
+                from app.execution.input_review_options import build_input_review_options
                 result = run_input_sequence(proxy, job.target, command["request"],
                     observation_wait_ms=command.get("observation_wait_ms"),
                     observation_condition=command.get("observation_condition"),
                     persist=lambda progress: self._progress(job, progress),
+                    **build_input_review_options(self.coordinator, command, job.command_id,
+                        deadline_ns=job.action_review_deadline_ns, cancelled=lambda: job.cancelled),
                     **({"memory_bindings": job.workflow_bindings}
                        if job.workflow_bindings is not None and command["request"].get("target_memory") is not None else {}))
             else:

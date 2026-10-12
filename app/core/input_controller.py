@@ -7,11 +7,13 @@ from io import BytesIO
 from pathlib import Path
 import time
 from threading import get_ident
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from loguru import logger
 
 from app.core.runtime_input_authority import runtime_backend_input_is_active
+from app.core.keyboard_dispatch_diagnostics import (capture_keyboard_dispatch_state,
+    emit_keyboard_dispatch_event, keyboard_dispatch_reference)
 from app.core.editing_keys import EDITING_KEY_CHORDS, EXTENDED_EDITING_KEYS
 from app.core.window_manager import window_manager
 from modules.click.geometry import resolve_window_and_screen_point
@@ -100,8 +102,9 @@ class KeyboardForegroundMismatchError(RuntimeError):
 class TargetPointOccludedError(RuntimeError):
     """点击点被外部窗口遮挡或无法验证时，阻止输入下发。"""
 
-    def __init__(self, evidence: dict[str, Any]) -> None:
+    def __init__(self, evidence: dict[str, Any], *, button_down_attempted: bool | None = None) -> None:
         self.evidence = evidence
+        self.button_down_attempted = button_down_attempted
         super().__init__(str(evidence.get("reason") or "target_point_occluded"))
 
 
@@ -192,12 +195,23 @@ class InputController:
         target_bbox: tuple[float, float, float, float] | None = None,
         click_count: int = 1,
         expected_owned_popup_handle: int | None = None,
+        pre_input_validator: Callable[[], Any] | None = None,
+        popup_continuation_guard: Any | None = None,
     ) -> dict[str, Any]:
         """Click a point relative to the bound window using a realistic pointer sequence."""
         if type(click_count) is not int or click_count not in (1, 2):
             raise ValueError("click_count must be an integer of 1 or 2")
+        if pre_input_validator is not None and not callable(pre_input_validator):
+            raise ValueError("pre_input_validator must be callable")
         self._ensure_windows_input()
         bound = self._require_bound_window()
+        if popup_continuation_guard is not None:
+            from app.execution.popup_decision import PopupContinuationGuard
+
+            if type(popup_continuation_guard) is not PopupContinuationGuard:
+                raise ValueError("popup_continuation_guard must be a PopupContinuationGuard")
+            if popup_guard is not None or expected_owned_popup_handle is not None:
+                raise ValueError("popup continuation cannot override an explicit popup target")
         if popup_guard is not None:
             from app.agent.popup_click_guard import PopupClickGuard
 
@@ -214,6 +228,22 @@ class InputController:
                 raise ValueError("popup guard does not match bound popup")
         point = self._resolve_window_and_screen_point(bound=bound, x=x, y=y)
 
+        def parent_rejection(evidence, *, attempted=False):
+            # 只在本次首次按下前生成证明，绑定输入层实际解析的坐标和窗口。
+            details = dict(evidence)
+            if attempted is False:
+                details["input_dispatch_boundary"] = {
+                    "contract_version": "click_input_boundary.v1", "stage": "before_first_mouse_down",
+                    "button_down_attempted": False,
+                    "window_point": {"x": point["window_x"], "y": point["window_y"]},
+                    "screen_point": {"x": point["screen_x"], "y": point["screen_y"]},
+                    "bound_window": {"handle": bound.handle, "process_id": bound.process_id,
+                        "rect": [bound.rect.left, bound.rect.top, bound.rect.right, bound.rect.bottom]},
+                    "button": button, "requested_click_count": click_count, "reason_code": details.get("reason")}
+            else:
+                details.pop("input_dispatch_boundary", None)
+            return TargetPointOccludedError(details, button_down_attempted=attempted)
+
         logger.info(
             "Clicking bound window point via SendInput: handle={}, button={}, window_point=({}, {}), screen_point=({}, {}), move_first={}, settle_ms={}, hold_ms={}",
             bound.handle,
@@ -229,12 +259,26 @@ class InputController:
 
         foreground_before = int(win32gui.GetForegroundWindow())  # type: ignore[union-attr]
         foreground_popup_handle = None
+        nonmodal_parent_popup = None
         point_popup_handle = expected_owned_popup_handle
         if popup_guard is not None:
             popup_guard.verify_current()
             set_foreground_ok = None
         else:
             foreground_popup_handle = window_manager.get_owned_foreground_popup_handle(bound)
+            if popup_continuation_guard is not None:
+                try:
+                    if foreground_popup_handle is None:
+                        raise ValueError("popup_continuation_popup_absent")
+                    verdict = popup_continuation_guard.validate_command(
+                        bound=bound, point=(x, y), bbox=target_bbox,
+                        popup_handle=foreground_popup_handle, click_count=click_count)
+                    if verdict is not None:
+                        raise ValueError("popup_continuation_guard_rejected")
+                except Exception as error:
+                    raise parent_rejection({"allowed": False,
+                        "reason": "popup_continuation_guard_invalid", "stage": "command",
+                        "error_type": type(error).__name__}) from error
             if foreground_popup_handle is not None:
                 if point_popup_handle is None:
                     point_popup_handle = foreground_popup_handle
@@ -242,10 +286,18 @@ class InputController:
                 popup_visibility = window_manager.validate_bound_point_visibility(
                     bound=bound, x=point["window_x"], y=point["window_y"],
                     expected_owned_popup_handle=point_popup_handle)
-                if (not popup_visibility.get("allowed")
+                if (popup_continuation_guard is not None or not popup_visibility.get("allowed")
                         or popup_visibility.get("hit_window", {}).get("root_handle") != foreground_popup_handle):
-                    raise TargetPointOccludedError({**popup_visibility, "allowed": False,
-                        "reason": "target_point_not_owned_by_foreground_popup"})
+                    if expected_owned_popup_handle is not None or popup_continuation_guard is None:
+                        raise TargetPointOccludedError({**popup_visibility, "allowed": False,
+                            "reason": "target_point_not_owned_by_foreground_popup"}, button_down_attempted=False)
+                    parent_visibility = window_manager.validate_nonmodal_parent_click(
+                        bound=bound, x=point["window_x"], y=point["window_y"],
+                        bbox=target_bbox, popup_handle=foreground_popup_handle)
+                    if parent_visibility.get("allowed") is not True:
+                        raise parent_rejection(parent_visibility)
+                    nonmodal_parent_popup = foreground_popup_handle
+                    point_popup_handle = None
                 set_foreground_ok = None
             else:
                 set_foreground_ok = self._focus_window(bound.handle)
@@ -270,13 +322,13 @@ class InputController:
             **({"expected_owned_popup_handle": point_popup_handle} if point_popup_handle is not None else {}),
         )
         if not point_visibility.get("allowed"):
-            raise TargetPointOccludedError(point_visibility)
+            raise TargetPointOccludedError(point_visibility, button_down_attempted=False)
         if target_bbox is not None:
             region_visibility = window_manager.validate_bound_region_visibility(bound=bound, bbox=target_bbox)
             if region_visibility.get("allowed") is not True:
                 raise TargetPointOccludedError({**region_visibility,
                     "point_visibility": point_visibility,
-                    "region_visibility": region_visibility})
+                    "region_visibility": region_visibility}, button_down_attempted=False)
         if popup_guard is not None:
             hit_window = point_visibility.get("hit_window")
             if not isinstance(hit_window, dict) or hit_window.get("root_handle") != popup_guard.expectation.popup_handle:
@@ -284,7 +336,7 @@ class InputController:
                     **point_visibility,
                     "allowed": False,
                     "reason": "target_point_not_owned_by_exact_popup_root",
-                })
+                }, button_down_attempted=False)
 
         # 按下前最后核对窗口与鼠标，拒绝等待期间发生的漂移。
         current_bound = window_manager.get_bound_window()
@@ -299,8 +351,8 @@ class InputController:
             or current_bound.handle != bound.handle
             or current_bound.process_id != bound.process_id
             or current_bound.rect != bound.rect
-            or int(win32gui.GetForegroundWindow()) != expected_foreground_handle
-            or (foreground_popup_handle is not None
+            or (nonmodal_parent_popup is None and int(win32gui.GetForegroundWindow()) != expected_foreground_handle)
+            or (nonmodal_parent_popup is None and foreground_popup_handle is not None
                 and window_manager.get_owned_foreground_popup_handle(current_bound) != foreground_popup_handle)
         ):
             raise RuntimeError("Bound window changed immediately before mouse down")
@@ -334,8 +386,8 @@ class InputController:
                         or current.handle != bound.handle
                         or current.process_id != bound.process_id
                         or current.rect != bound.rect
-                        or int(win32gui.GetForegroundWindow()) != expected_foreground_handle
-                        or (foreground_popup_handle is not None
+                        or (nonmodal_parent_popup is None and int(win32gui.GetForegroundWindow()) != expected_foreground_handle)
+                        or (nonmodal_parent_popup is None and foreground_popup_handle is not None
                             and window_manager.get_owned_foreground_popup_handle(current) != foreground_popup_handle)
                     ):
                         raise RuntimeError("Bound window changed before second click")
@@ -345,8 +397,46 @@ class InputController:
                         bound=current, x=point["window_x"], y=point["window_y"],
                         **({"expected_owned_popup_handle": point_popup_handle} if point_popup_handle is not None else {}))
                     if not second_visibility.get("allowed"):
-                        raise TargetPointOccludedError(second_visibility)
+                        raise TargetPointOccludedError(second_visibility, button_down_attempted=True)
 
+                if pre_input_validator is not None:
+                    # 每次按下前校验；失败时不进入按键释放作用域。
+                    verdict = pre_input_validator()
+                    if verdict is not None and verdict is not True:
+                        raise ValueError("pre_input_validator_rejected")
+                    current = window_manager.get_bound_window()
+                    if popup_guard is not None:
+                        popup_guard.verify_current()
+                    if (
+                        current is None
+                        or current.handle != bound.handle
+                        or current.process_id != bound.process_id
+                        or current.rect != bound.rect
+                        or (nonmodal_parent_popup is None and int(win32gui.GetForegroundWindow()) != expected_foreground_handle)
+                        or (nonmodal_parent_popup is None and foreground_popup_handle is not None
+                            and window_manager.get_owned_foreground_popup_handle(current) != foreground_popup_handle)
+                    ):
+                        raise RuntimeError("Bound window changed during pre-input validation")
+                    if tuple(win32api.GetCursorPos()) != (point["screen_x"], point["screen_y"]):
+                        raise RuntimeError("Mouse cursor position changed during pre-input validation")
+
+                if nonmodal_parent_popup is not None:
+                    # 每次按下前重验；首击后的自然收起只允许回到原父窗。
+                    try:
+                        if popup_continuation_guard.verify_current() is not None:
+                            raise ValueError("popup_continuation_guard_rejected")
+                    except Exception as error:
+                        raise parent_rejection({"allowed": False,
+                            "reason": "popup_continuation_guard_invalid", "stage": "before_mouse_down",
+                            "error_type": type(error).__name__}, attempted=input_attempted) from error
+                    parent_visibility = window_manager.validate_nonmodal_parent_click(
+                        bound=bound, x=point["window_x"], y=point["window_y"],
+                        bbox=target_bbox, popup_handle=nonmodal_parent_popup,
+                        allow_popup_dismissed=bool(completed_clicks))
+                    if parent_visibility.get("allowed") is not True:
+                        raise parent_rejection(parent_visibility, attempted=input_attempted)
+                    if tuple(win32api.GetCursorPos()) != (point["screen_x"], point["screen_y"]):
+                        raise RuntimeError("Mouse cursor position changed during popup continuation validation")
                 primary_error = None
                 down_result = None
                 up_result = None
@@ -377,6 +467,10 @@ class InputController:
                     "gap_before_ms": inter_click_gap_ms if index else 0,
                 })
         except BaseException as error:
+            if isinstance(error, TargetPointOccludedError) and input_attempted:
+                # 先前任何一次按下尝试，都使旧的零输入证明失效。
+                error.button_down_attempted = True
+                error.evidence.pop("input_dispatch_boundary", None)
             sequence = {
                 "requested_click_count": click_count,
                 "completed_clicks": completed_clicks,
@@ -532,6 +626,8 @@ class InputController:
         snapshot = self._text_target_snapshot(bound)
         click_result = None
         from app.core.local_keyboard_target import claim_keyboard_target
+        from app.core.typing_dispatch import create_typing_dispatch
+        dispatch = create_typing_dispatch()
         keyboard_target = claim_keyboard_target("type_text", {"text": text, "x": x, "y": y,
             "click_before_typing": click_before_typing, "clear_existing": clear_existing, "submit": submit})
         if keyboard_target is not None and field_guard is not None:
@@ -551,11 +647,13 @@ class InputController:
                 window_handle=int(bound.handle),
                 click_point=(x, y),
             )
-        with self._clipboard_text_transaction(text, restore=restore_clipboard) as clipboard:
+        with dispatch, self._clipboard_text_transaction(text, restore=restore_clipboard) as clipboard:
             if self._text_target_snapshot(self._require_bound_window()) != snapshot:
                 raise RuntimeError("Text target window changed before focus/click")
             if click_before_typing:
+                dispatch.record("focus", "started")
                 click_result = self.click_point(x, y, move_before_click=True, settle_ms=100, hold_ms=50)
+                dispatch.record("focus", "completed")
             elif keyboard_target is None:
                 self._focus_window(bound.handle)
             if keyboard_target is None:
@@ -568,7 +666,12 @@ class InputController:
             if clear_existing:
                 if keyboard_target is not None:
                     self._verify_text_target(snapshot, x=x, y=y, keyboard_target=keyboard_target)
+                dispatch.record("selection", "started")
                 self._press_chord([VK_CONTROL, VK_A])
+                dispatch.record("selection", "completed")
+                from app.core.local_keyboard_target import VisualKeyboardTarget
+                if type(keyboard_target) is VisualKeyboardTarget:
+                    keyboard_target.record_selection(dispatch)
                 time.sleep(0.03)
             # 选择文字与粘贴之间窗口或剪贴板都可能变化，不能复用前一次检查。
             if keyboard_target is None:
@@ -580,17 +683,22 @@ class InputController:
                 field_guard.verify_before_paste()
             if keyboard_target is not None:
                 self._verify_text_target(snapshot, x=x, y=y, keyboard_target=keyboard_target)
+            dispatch.record("text", "started")
             self._press_chord([VK_CONTROL, VK_V])
+            dispatch.record("text", "completed")
             time.sleep(CLIPBOARD_PASTE_SETTLE_SECONDS)
             if submit:
                 time.sleep(0.03)
                 self._verify_text_target(snapshot, x=x, y=y)
                 if field_guard is not None:
                     self._verify_text_region(bound, field_guard)
+                dispatch.record("submit", "started")
                 self._press_key(VK_RETURN)
+                dispatch.record("submit", "completed")
 
         return {
             "typed": True,
+            "typing_dispatch": dispatch.reference(),
             "input_backend": "SendInput+clipboard",
             "window_handle": int(bound.handle),
             "window_title": bound.title,
@@ -613,14 +721,21 @@ class InputController:
             raise ValueError(f"Unsupported editing key; supported keys: {', '.join(EDITING_KEY_CHORDS)}")
         if type(x) is not int or type(y) is not int:
             raise ValueError("press_key requires an observed window point")
-        self._ensure_windows_input()
-        bound = self._require_bound_window()
-        from app.core.local_keyboard_target import claim_keyboard_target
-        keyboard_target = claim_keyboard_target("press_key", {"key": key, "x": x, "y": y})
-        self._verify_text_target(self._text_target_snapshot(bound), x=x, y=y, keyboard_target=keyboard_target)
-        self._press_chord(list(EDITING_KEY_CHORDS[key]))
+        from app.core.key_dispatch import create_key_dispatch
+        with create_key_dispatch(key, x, y) as dispatch:
+            self._ensure_windows_input()
+            bound = self._require_bound_window()
+            from app.core.local_keyboard_target import claim_keyboard_target
+            keyboard_target = claim_keyboard_target("press_key", {"key": key, "x": x, "y": y})
+            self._verify_text_target(self._text_target_snapshot(bound), x=x, y=y, keyboard_target=keyboard_target)
+            # 进入组合按键前先记尝试；任何按下或释放异常都不能降级为零输入。
+            dispatch.record('started')
+            diagnostics = self._press_chord(list(EDITING_KEY_CHORDS[key]))
+            dispatch.record('completed')
         return {"pressed": True, "key": key, "window_handle": bound.handle,
-            "input_backend": "SendInput", "text_retyped": False}
+            "input_backend": "SendInput", "text_retyped": False,
+            "key_dispatch": dispatch.reference(),
+            "keyboard_dispatch_diagnostics": keyboard_dispatch_reference(diagnostics)}
 
     @staticmethod
     def _verify_text_region(bound, field_guard) -> None:
@@ -648,8 +763,8 @@ class InputController:
         if foreground != snapshot[0]:
             raise KeyboardForegroundMismatchError(snapshot[0], foreground)
         if keyboard_target is not None:
-            from app.core.local_keyboard_target import LocalKeyboardTarget
-            if type(keyboard_target) is not LocalKeyboardTarget:
+            from app.core.local_keyboard_target import LocalKeyboardTarget, VisualKeyboardTarget, VisualCompoundKeyboardTarget
+            if type(keyboard_target) not in {LocalKeyboardTarget, VisualKeyboardTarget, VisualCompoundKeyboardTarget}:
                 raise ValueError("invalid internal keyboard field target")
             keyboard_target.verify(window_manager)
             # COM 复读可能耗时；真正按键前仍重新确认窗口与前台。
@@ -854,16 +969,17 @@ class InputController:
             raise RuntimeError(f"SendInput failed, sent={sent}, flags={flags}")
         return dispatched
 
-    def _press_chord(self, keys: list[int]) -> None:
+    def _press_chord(self, keys: list[int]) -> list[dict[str, Any]]:
         # 释放本次已尝试按下的键属于收尾；目标关闭不应把键留在按下状态。
         state = {"controller": self, "thread": get_ident(), "pending": set(),
-                 "active": True, "releasing": False}
+                 "active": True, "releasing": False, "diagnostic_events": []}
         token = _KEY_RELEASE.set(state)
         try:
             self._press_chord_in_scope(keys, state)
         finally:
             state["active"] = False
             _KEY_RELEASE.reset(token)
+        return state["diagnostic_events"]
 
     def _press_chord_in_scope(self, keys: list[int], state: dict) -> None:
         attempted: list[int] = []
@@ -916,7 +1032,18 @@ class InputController:
         )
         if own_scope and not key_up:
             state["pending"].add(key)
-        sent = ctypes.windll.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
+        before = capture_keyboard_dispatch_state()
+        sent = None
+        try:
+            sent = ctypes.windll.user32.SendInput(1, ctypes.byref(input_struct), ctypes.sizeof(INPUT))
+        finally:
+            after = capture_keyboard_dispatch_state()
+            event = {"vk": int(key), "flags": int(input_struct.union.ki.dwFlags), "sent": sent,
+                "before": before, "after": after,
+                "diagnostic_elapsed_ms": round(before["elapsed_ms"] + after["elapsed_ms"], 6)}
+            if own_scope:
+                state["diagnostic_events"].append(event)
+            emit_keyboard_dispatch_event(event)
         if sent != 1:
             raise RuntimeError(f"SendInput keyboard failed, sent={sent}, key={key}, key_up={key_up}")
 

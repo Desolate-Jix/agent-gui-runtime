@@ -1,3 +1,9 @@
+# Execution 0.1.2 / 执行 0.1.2
+
+本次只发布执行正式版，学习0.1.0-preview.3安装器不变。Choice直接判断本步，默认视觉执行；目标审核采用概览＋细节标注图，输入核验完整裁剪加外沿刻度，单问题比较规定文字。组合点击、全选替换和点击后Enter减少动作之间的焦点漂移；不恢复空框或焦点外观检查。支持外部视觉API、兼容Agent及本地模型，本地权重不是必需品。 / Execution-only stable release: current-step Choice, visual execution, focused marked images, complete field crops with margin ticks, and bound click/replace/Enter actions. Local weights remain optional; learning is unchanged.
+
+全新NumPy文档流程的Main源码、Main安装及Sol同安装候选独立验收全部首次通过：各两轮、认证零输入取消和正常收尾，无自动重试，浏览器缓存保留。最终执行版范围回归 4046 项通过。安装版Main两轮20次Decision、22,930输入tokens；字段HTTP中位153毫秒（142–184），不是整任务速度或通用准确率。历史失败与限度见[发布记录](docs/verification/EXECUTION_STABLE_012_20261012.md)。 / Fresh NumPy acceptance passed first attempt at source, Main installed and independent installed stages, each with two rounds, cancellation and cleanup. 4046 release-scope checks passed. Request-only measurements and all historical failures remain in the release record.
+
 # 2026-10-09 preview.3 有界连续执行 / Bounded continuous execution preview.3
 
 执行 `0.1.2-preview.3`、可选学习 `0.1.0-preview.3` 使用独立安装器，发行标签 `learning-v0.1.0-preview.3`：[发行页与下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3)。源码限定验收及 Main 新安装版执行/学习流程通过；安装独立验收与发布核对的最终状态见[本轮发布记录](docs/verification/CONTINUOUS_EXECUTION_RELEASE_20261009.md)。preview.2/preview.1 与稳定 `instant-v0.1.1` 保持历史发布。 / Scoped source and Main installed acceptance passed; the release record tracks final installed-independent/publication status. Earlier releases remain separate.

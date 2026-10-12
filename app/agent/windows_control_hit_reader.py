@@ -79,7 +79,7 @@ class WindowsControlHitReader:
 
     def observe_target_hit(self, *, window_handle, process_id, process_create_time, window_rect,
             capture_id, control_id, point, expected_runtime_id, expected_control_type, expected_bbox,
-            expected_name, expected_container=None):
+            expected_name, expected_container=None, expected_owned_popup_handle=None):
         """执行前两次直接命中原语义目标；不替代目标、不扫描树、不读取字段值。"""
         try:
             runtime, kind = _request(window_handle, process_id, process_create_time, window_rect,
@@ -88,12 +88,18 @@ class WindowsControlHitReader:
             if not isinstance(expected_name, str) or not expected_name.strip() or len(expected_name) > 512:
                 raise NativeControlHitError("native_control_hit_request_invalid")
             container = _container_request(expected_container, window_rect, expected_bbox)
+            popup = expected_owned_popup_handle
+            if popup is not None and (kind != "MenuItem" or type(popup) is not int
+                    or popup <= 0 or popup == window_handle):
+                raise NativeControlHitError("native_control_hit_request_invalid")
             self._verify_binding(window_handle, process_id, process_create_time, window_rect)
             desktop = self._desktop_factory(backend="uia")
             descriptions = []
             for _ in range(2):
+                if popup is not None:
+                    self._verify_owned_popup(window_handle, process_id, process_create_time, window_rect, point, popup)
                 raw = desktop.from_point(window_rect[0] + point[0], window_rect[1] + point[1])
-                description = _describe(raw, window_handle, process_id, window_rect,
+                description = _describe(raw, popup if popup is not None else window_handle, process_id, window_rect,
                     point, expected_bbox, runtime, kind, require_invoke=False)
                 if _name(description["accessible_name"]) != _name(expected_name):
                     raise NativeControlHitError("native_control_hit_target_name_changed")
@@ -101,7 +107,11 @@ class WindowsControlHitReader:
                 if kind in {"Edit", "ComboBox"}:
                     _require_writable_hit_patterns(raw, kind)
                 if container is not None:
-                    description["container"] = _confirmed_container(raw, window_handle, process_id, window_rect, container)
+                    description["container"] = _confirmed_container(raw,
+                        popup if popup is not None else window_handle, process_id, window_rect, container)
+                if popup is not None:
+                    self._verify_owned_popup(window_handle, process_id, process_create_time, window_rect, point, popup)
+                    description["expected_owned_popup_handle"] = popup
                 descriptions.append(description)
                 self._verify_binding(window_handle, process_id, process_create_time, window_rect)
             if descriptions[0] != descriptions[1]:
@@ -122,6 +132,20 @@ class WindowsControlHitReader:
             raise NativeControlHitError(error.reason_code) from None
         except Exception:
             raise NativeControlHitError("native_control_hit_provider_unavailable") from None
+
+    def _verify_owned_popup(self, handle, pid, created, rect, point, popup):
+        self._verify_binding(handle, pid, created, rect)
+        bound = self._window_manager.get_bound_window()
+        if not _bound_matches(bound, handle, pid, rect):
+            raise NativeControlHitError("native_control_hit_window_binding_changed")
+        visibility = self._window_manager.validate_bound_point_visibility(bound=bound,
+            x=point[0], y=point[1], expected_owned_popup_handle=popup)
+        hit = visibility.get("hit_window") if isinstance(visibility, dict) else None
+        if (not isinstance(visibility, dict) or visibility.get("allowed") is not True
+                or not isinstance(hit, dict) or hit.get("root_handle") != popup or hit.get("process_id") != pid):
+            raise NativeControlHitError("native_control_hit_popup_visibility_changed")
+        # birth 属于进程；精确 owned popup 的 Win32 PID 关联前后均验证的绑定主窗身份。
+        self._verify_binding(handle, pid, created, rect)
 
 
 def _request(handle, pid, created, window, capture_id, control_id, point, runtime, kind, bbox,

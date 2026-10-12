@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.instant_attachment_transport import InstantAttachmentTransport, InstantAdmissionError, _validate_request_id
 
-INSTANT_VERSION = "0.1.2-preview.3"
+INSTANT_VERSION = "0.1.2"
 
 
 def _run_wait_budget(kind, requested):
@@ -69,6 +69,8 @@ class InstantCommand(BaseModel):
     max_chars: int | None = Field(default=None, ge=1, le=20000)
     vision_capabilities: dict | None = None
     decision_check: dict | None = None
+    action_review: dict | None = None
+    field_evidence_mode: Literal["legacy", "visual"] | None = None
 
     def command(self):
         from app.vision.grounding_commands import GROUNDING_COMMANDS, validate_grounding_command
@@ -78,8 +80,8 @@ class InstantCommand(BaseModel):
             "launch": (set(), {"app_id", "name", "path", "url", "prefer_existing"}),
             "select": ({"handle", "process_id"}, {"handle", "process_id"}),
             "close_launched_window": ({"handle", "process_id"}, {"handle", "process_id", "request"}),
-            "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition", "vision_capabilities", "decision_check"}),
-            "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition", "vision_capabilities"}),
+            "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition", "vision_capabilities", "decision_check", "action_review"}),
+            "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition", "vision_capabilities", "action_review", "field_evidence_mode"}),
             "form_fill": ({"request"}, {"request", "vision_capabilities"}),
             "read_text": (set(), {"max_chars"}),
             "task_plan": ({"request"}, {"request"}),
@@ -98,6 +100,26 @@ class InstantCommand(BaseModel):
             check = validate_decision_check(self.decision_check)
             if check["phase"] == "before_action" and self.operation != "execute_recognition_plan":
                 raise ValueError("decision_before_action_route_unsupported")
+        if self.action_review is not None:
+            from app.execution.action_review import normalize_action_review_context
+            from app.execution.task_plan_contract import resolve_action_text
+            context = normalize_action_review_context(self.action_review)
+            action = next(row["action"] for row in context["plan"]["steps"] if row["step_id"] == context["step_id"])
+            if self.kind == "step":
+                if (self.operation != "execute_recognition_plan" or action["kind"] != "click"
+                        or action["goal"] != self.request.get("goal")
+                        or action.get("click_kind", "single") != self.request.get("click_kind", "single")):
+                    raise ValueError("action_review_command_mismatch")
+            elif self.kind == "input_sequence":
+                if action["kind"] != "input_sequence":
+                    raise ValueError("action_review_command_mismatch")
+                expected = {key: action[key] for key in ("field_goal", "clear_existing", "submit_search")}
+                expected["text"] = resolve_action_text(action["text"], context["plan"]["inputs"])
+                if any(self.request.get(key) != val for key, val in expected.items()):
+                    raise ValueError("action_review_command_mismatch")
+            value["action_review"] = context
+        if self.field_evidence_mode == "visual" and self.action_review is None:
+            raise ValueError("visual_field_requires_action_review_context")
         if self.kind in GROUNDING_COMMANDS:
             validate_grounding_command(self.kind, self.request)
         if self.kind in AGENT_COMMANDS:
@@ -326,6 +348,8 @@ class InstantSession(InstantAttachmentTransport):
 
     def submit(self, request_id, command):
         with self.guard:
+            from app.execution.public_input_defaults import adopt_session_input_command
+            command = adopt_session_input_command(self, request_id, command)
             path = self._path(request_id, "commands")
             if path.exists():
                 if read_json(path) != command:
@@ -385,15 +409,39 @@ class InstantSession(InstantAttachmentTransport):
             except (OSError, ValueError, KeyError, RuntimeError) as error:
                 raise InstantImageError("feedback_image_unavailable", str(error),
                                         "Inspect the original feedback receipt and library storage; do not substitute a new screenshot.") from error
+        result = response.get("result") or {}
+        if result.get("contract_version") == "agent_command.v1":
+            if result.get("command_id") == request_id:
+                # 原接收快照不含最终图；复用同命令终态回执解析，不重派或补截图。
+                from app.learning_memory.receipt_adapter import ExecutionReceiptPending, resolve_execution_receipt
+                try:
+                    response, _ = resolve_execution_receipt(response, self._path(request_id, "responses"), request_id)
+                except ExecutionReceiptPending as error:
+                    raise InstantImageError("image_request_pending", "the agent command has no terminal evidence yet",
+                                            "Poll the original command status; do not resubmit its input.") from error
+                except (OSError, ValueError) as error:
+                    raise InstantImageError("image_frame_unavailable", "the recorded agent evidence is unavailable or mismatched",
+                                            "Inspect the original receipt and worker evidence; do not replay or substitute a new capture.") from error
+                result = response.get("result") or {}
+            else:
+                try:
+                    command = read_json(self._path(request_id, "commands"))
+                    if (not isinstance(command, dict)
+                            or command.get("kind") not in {"agent_command_status", "agent_command_continue", "agent_command_cancel"}
+                            or (command.get("request") or {}).get("command_id") != result.get("command_id")):
+                        raise ValueError("agent image command identity mismatch")
+                except (OSError, ValueError) as error:
+                    raise InstantImageError("image_frame_unavailable", "the recorded agent command identity is mismatched",
+                                            "Inspect the original command and receipt; do not read another command's image or replay input.") from error
+                result = result.get("result") or {}
         if view == "before":
-            result = response.get('result') or {}
-            if result.get('contract_version') == 'agent_command.v1':
-                result = result.get('result') or {}
             capture = result.get("capture") or {}
         else:
             capture = response.get("observation") or {}
+            if not capture.get("image_path"):
+                capture = capture.get("capture") or {}
             if not capture:
-                capture = ((response.get("result") or {}).get("observation") or {}).get("capture") or {}
+                capture = (result.get("observation") or {}).get("capture") or {}
         path = Path(capture.get("image_path", "")).resolve()
         if self.session is None or not path.is_relative_to(self.session.resolve()) or not path.is_file():
             raise InstantImageError("image_frame_unavailable", "no recorded image for this response",
@@ -446,7 +494,7 @@ class InstantSession(InstantAttachmentTransport):
 def build_server(session):
     from mcp.server import MCPServer
     from mcp.types import CallToolResult, ImageContent, TextContent
-    server = MCPServer(name="agent-review-instant", version=INSTANT_VERSION, description="Windows instant-mode preview. Local operator input; optional experimental receipt recording, disabled by default. No legacy learning executor or automatic graph/replay. Start explicitly, submit ONE command, inspect image before next action. No automatic retries.")
+    server = MCPServer(name="agent-review-instant", version=INSTANT_VERSION, description="Windows instant runtime. Default bounded v2 plans use local verification, optional adaptive Decision and review by the existing Main; standalone input remains available. Start explicitly and keep one input owner. Advance only on declared verified outcomes; inspect original evidence when review is returned. Optional receipt recording starts disabled. No input replay, implicit authority or automatic retries.")
 
     def instant_start(new_session: bool = False) -> CallToolResult:
         try:
@@ -501,6 +549,10 @@ def build_server(session):
             _validate_request_id(request_id)
             validation_code = "invalid_command"
             validated = command.command()
+            if validated["kind"] == "input_sequence":
+                from app.execution.public_input_defaults import adopt_session_input_command
+                with session.guard:
+                    validated = adopt_session_input_command(session, request_id, validated)
         except ValueError as error:
             # 只捕获入队前校验，日志不写输入值，执行异常不能伪装成未执行。
             detail = {"code": validation_code, "message": str(error)}
@@ -546,6 +598,43 @@ def build_server(session):
         feedback_image = (receipt.get("learning_control") == "learning_feedback"
                           and (receipt.get("result") or {}).get("image_role") == "feedback_baseline_not_live_observation")
         plan_control = receipt.get("operation_success_scope") == "task_plan_control"
+        manual = (receipt.get("result") or {}).get("manual_observation") if plan_control else None
+        video_packet = ((receipt.get("result") or {}).get("review_packet") or {}) if plan_control else {}
+        if images != "none" and video_packet.get("schema") == "review_packet.v4":
+            from app.execution.task_plan_observation_delivery import video_playback_images
+            from PIL import Image
+            try:
+                samples = video_playback_images(session.session, receipt["result"])
+            except (OSError, ValueError, TypeError, KeyError, Image.DecompressionBombError) as error:
+                value["image_delivery"] = [{"view": "video_playback", "status": "unavailable",
+                    "error": {"code": "video_playback_images_unavailable", "error_type": type(error).__name__},
+                    "automatic_retry_allowed": False}]
+            else:
+                value["image_delivery"] = []
+                for data, frame, elapsed_ms in samples:
+                    value["image_delivery"].append({"view": "observation", "status": "included",
+                        "sha256": frame["sha256"], "capture_id": frame["capture_id"],
+                        "elapsed_ms": elapsed_ms, "packet_sha256": video_packet["packet_sha256"],
+                        "content_index": len(image_blocks) + 1, "original_pixels": True,
+                        "original_action_after": False})
+                    image_blocks.append(ImageContent(type="image", data=base64.b64encode(data).decode("ascii"),
+                        mimeType="image/png"))
+        if images != "none" and isinstance(manual, dict) and manual.get("status") == "captured":
+            from app.execution.task_plan_observation_delivery import manual_observation_image
+            from PIL import Image
+            try:
+                data, frame = manual_observation_image(session.session, receipt["result"])
+            except (OSError, ValueError, TypeError, KeyError, Image.DecompressionBombError) as error:
+                value["image_delivery"] = [{"view": "observation", "status": "unavailable",
+                    "error": {"code": "task_plan_observation_image_unavailable", "error_type": type(error).__name__},
+                    "automatic_retry_allowed": False,
+                    "next": "Read the current plan status and inspect its evidence; do not repeat input or observation automatically."}]
+            else:
+                value["image_delivery"] = [{"view": "observation", "status": "included", "sha256": frame["sha256"],
+                    "capture_id": frame["capture_id"], "packet_sha256": manual["packet_sha256"],
+                    "content_index": 1, "original_pixels": True, "original_action_after": False}]
+                image_blocks.append(ImageContent(type="image", data=base64.b64encode(data).decode("ascii"),
+                    mimeType="image/png"))
         if images != "none" and not plan_control and (not receipt.get("learning_control") or feedback_image) and receipt.get("status") not in {"pending", "not_found", "result_unknown"}:
             delivery = []
             views = ("before",) if feedback_image else (("before", "after") if images == "both" else ("after",))
@@ -621,9 +710,14 @@ def build_server(session):
         "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Missing/pending/corrupt evidence returns isError=true with status=image_unavailable, error.code and next guidance; it says nothing about whether the original input happened. Do not replay automatically. Compare both frames against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
         "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. If phase=cleanup_pending, inspect cleanup diagnostics and resolve the blocker before calling stop again: it explicitly retries cleanup only, never input. The owner may remain alive while cleanup is unresolved; do not delete session records. Does not close user apps itself; a Windows MCP client may terminate its launched descendants on disconnect. Explicitly close test-created windows first using close_launched_window and verify window_closed.",
     }
+    descriptions["instant_submit"] += " Source v3 plans add goal and completion={step_id:final_step_id,verification:existing_v2_verification}. They default to recovery_policy=intervention_v1 and inject a 60s shared action-review budget. All click/input focus actions use one combined candidate Decision; allowlist and profile caps remain explicit. Optional scene_precheck=parallel remains off by default. start accepts recovery_policy=legacy|intervention_v1. A proven zero-input wait offers recover (packet bindings, recovery_request_id and a fresh gated step command) or resume_pre_dispatch (same bindings plus reason); the old failed attempt is retained and a new execution ID is created. Partial/unknown input never uses zero-input resume. A final different completion condition returns to the existing Main for read-only review, without another action. Standalone step/input_sequence may carry action_review={schema:action_review_context.v1,plan,step_id,run_id,attempt_id,budget_ms}; only input_sequence accepts field_evidence_mode=visual. Visual field proof can add focus/value and one selection assessment; it does not make every keyboard verification a model call."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Target wording contract: action.goal and field_goal describe only the current visible target, with every required qualifier preserved. State filtering and ordering explicitly: first matching result with domain X means filter by X then take the first; first result overall is a different requirement. Keep task-wide objectives in plan.goal, expected outcomes in verification, and retry/recovery policy out of the target description. Use one concise target description for both visual grounding and candidate Decision; never replace it with the model candidate label or silently drop a required constraint."
     descriptions["instant_submit"] += " Also supports kind=input_sequence, request={field_goal,text,clear_existing:true,submit_search:true|false}; observation_wait_ms applies to the final Enter observation. Use instant_run for bounded waiting and inline final image without separate polling/image calls."
     for name in ("instant_submit", "instant_run"):
-        descriptions[name] += " Bounded task_plan control: request={action:'start',plan:{schema_version:'task_plan.v1',title,inputs,steps},vision_capabilities?}. One to eight linear steps use explicit step_id/action/verification. Actions are click(goal,click_kind?,target?), input_sequence(field_goal,text,clear_existing,submit_search,target?), or read_text(goal); target={name,control_type,container?:{name,control_type}} is a current semantic selector, not stored coordinates. No learned target_memory, branches or dynamic output references. Verification is native_condition(condition:{text,control_type}) for click/search transitions, or agent_judgment(decision_condition?). The host queues the original gated commands and advances only on verified success. Read instant_status.task_plan_run while execution is pending; status polling must not compete with input or resubmit start. Wait reason grounding_required still needs the existing client grounding protocol on active_command_id. Decision is optional and auto requires the frozen exact allowlist. For verification_required, review requires run_id/execution_request_id/step_id/verdict/reason/evidence_sha256 of the original after image, followed by explicit continue with the original wait_id. cancel preserves partial/unknown input; cancel_requested is not completion. No automatic cross-host resume. Plan status is not task success. See docs/development/TASK_PLAN.md and docs/verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md for the tested scope and remaining limits."
+        descriptions[name] += " For the configured combined visual/Decision route use task_plan.v3 with explicit goal and completion; v1/v2 retain their original semantics and remain the no-Decision compatibility route. It retains v1 action limits and permits agent_judgment allowed_states and review_policy='always_main' (tightening only). V2 semantic adoption requires decision_profile.v2; new v2 profiles default to auto with proactive_review=true and adaptive review. Exact conditions or template identities still need approval. With no configured profile or explicit off, complete local proof continues without Decision; otherwise return the original wait to the existing Main. Preserve explicit shadow/always_main, v1 profiles and frozen sessions. Success with review_required cannot advance the suffix. With decision_condition, optional wait_policy={loading_condition:explicit_visible_loading_condition,completion_excludes_loading:boolean} allows bounded read-only follow-up in auto mode when the authenticated judgment says observe. Poll task_plan_run while observation_pending=true; do not review, resend input or create a Main session during this wait. The original after image stays unchanged. At most two extra captures and two total assessments per step use a 12-second scheduling/adoption budget, not hard interruption of synchronous calls. At review waits, read the current review_packet.v1 or v2 from task_plan_run; review additionally requires its current review_packet_sha256=packet_sha256, evidence_set_sha256 and assessment_round (copy it, do not assume zero). Review returns to the existing caller; continue remains explicit with the original wait_id. To replan, close the parent and prove terminal/quiescent input, then start a new v2 plan with request.successor={successor_request_id,successor_of,parent_plan_sha256,prefix_sha256,lineage_generation,reason}. Copy hashes/generation from parent status. Keep this logical successor ID across transport retries; matching retries only read the original successor, never switch another active run. Partial/unknown input and identical completed-parent commands block admission, including intentional repeated navigation. Same host/target only. At an existing v2 review wait, action='observe' takes run_id, step_id, execution_request_id, wait_id, observation_request_id and the current review_packet_sha256/evidence_set_sha256/assessment_round. Keep the logical observation_request_id across transport retries. Observe captures read-only evidence, never input, inference, settlement or continuation. It shares the two-capture attempt cap with automatic observation, has a separate 12-second adoption deadline after Main intervention, and never resets the original automatic deadline. Unknown capture is not retried. New review_packet.v3 preserves original after, adds latest_observation and packet revision/ancestry; prior model advice still belongs to assessment_basis. Review must bind the new packet; old reviews are rejected. Use images='after' on the observe receipt to view the explicitly labeled observation. Native_condition may explicitly declare the same v2 semantic options: complete native proof remains local; only a valid maintained native timeout can continue to Decision. Versioned condition_binding templates are connected to execution and learning. Auto adoption requires the exact approved template ID/revision/SHA; edits create a new reviewable revision."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Bounded task_plan control: request={action:'start',plan:{schema_version:'task_plan.v2',title,inputs,steps},vision_capabilities?}. One to eight linear steps use explicit step_id/action/verification. Actions are click(goal,click_kind?,target?), input_sequence(field_goal,text,clear_existing,submit_search,target?), or read_text(goal); target={name,control_type,container?:{name,control_type}} is a current semantic selector, not stored coordinates. No learned target_memory, branches or dynamic output references. Verification is native_condition(condition:{text,control_type}) for click/search transitions, or agent_judgment(decision_condition?). The host queues the original gated commands and advances only on verified success. Read instant_status.task_plan_run while execution is pending; status polling must not compete with input or resubmit start. Wait reason grounding_required still needs the existing client grounding protocol on active_command_id. Decision is optional and auto requires the frozen exact allowlist. For verification_required, review requires run_id/execution_request_id/step_id/verdict/reason/evidence_sha256 of the original after image, followed by explicit continue with the original wait_id. cancel preserves partial/unknown input; cancel_requested is not completion. No automatic cross-host resume. Plan status is not task success. See docs/development/TASK_PLAN.md and docs/verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md for the tested scope and remaining limits."
     for name in ("instant_submit", "instant_run"):
         descriptions[name] += " Experimental source-only receipt recording: learning_start request={scope:'interface',title:'...'} records standalone observations; scope:'workflow' also requires project_id (1-80 lowercase ASCII letters/digits/dashes/underscores). learning_status, learning_stop and learning_recover accept optional request={learning_id:'...'}, otherwise use current/last segment. These controls issue no GUI input. Recording is OFF initially; learning_stop stops recording, not the execution host. learning_event request={event_id:...} returns the exact event and its digest. learning_review request={review:...} stores Agent verdict and explicit before/after interface identities against event/frame hashes. learning_projection accepts optional event_ids (max 128) and returns an on-demand semantic projection, not a persisted graph. These three also accept learning_id. learning_import request={event_id,view,regions?,recognition_text?,application_binding?} imports an explicitly identified observation into the existing versioned interface library. learning_library supports query/offset/limit; learning_memory requires interface_id and optional exact version_id and returns semantic hints without historical coordinates. learning_save_interface uses interface_id/expected_revision/expected_sha256/changes, with no mandatory approval. learning_stop persists a workflow-scope graph when receipt recording is complete; standalone scope never creates a graph. learning_commit optionally names expected_sha256 to persist amended reviews or explicitly replace existing project sources. learning_project action=list|read|save|memory|adopt_interface accesses native projects; memory returns a pinned snapshot_id, optionally bounded by node_id. learning_reuse requires workflow_id/snapshot_id/edge_id and explicit variables; it returns advice or a suggested EXISTING instant command, never executes or automatically follows edges. New source-only native editor is separate from the executor. learning_recover only imports already persisted receipts and never replays input. Keep original session evidence; recording_complete is bookkeeping completeness, not learned task success."
     for name in ("instant_submit", "instant_run"):
@@ -641,9 +735,11 @@ def build_server(session):
         descriptions[name] += " With an agent_current/agent_delegate session, step recognition, desktop_click, input_sequence and form_fill require top-level vision_capabilities (same fields as grounding capabilities). They return agent_command.v1 rather than blocking for vision. Poll agent_command_status request={command_id} using a NEW outer request_id. At awaiting_grounding read the returned original image and pending_grounding.output_schema; submit grounding_resolve for pending_grounding.request_id, then agent_command_continue request={command_id,grounding_request_id} with another new outer request_id. Never resubmit the original batch or use grounding_execute for a suspended batch. It resumes the original worker and may request further grounding. agent_command_cancel request={command_id} requests cooperative cancellation; wait for terminal status, since input may already have occurred. Active jobs reject competing input or target changes. Read_text on Agent sources returns agent_read_required plus original PNG, text=null, with no local OCR; the agent must read it. Agent routes do not automatically invoke another model or assume image capability."
         descriptions[name] += " Experimental grounding handoff: grounding_prepare request={goal,configuration:{source:'agent_current'|'agent_delegate',delegate_profile?:name},capabilities:{image_transport:'supported'|'unsupported'|'unknown',current_vision?:state,delegation?:state,model_selection?:state,delegate_vision?:state}} captures selected window and returns awaiting_grounding plus immutable image. grounding_resolve request={grounding_request_id:original_prepare_id,result:grounding.v1_object}; grounding_status/grounding_cancel request={grounding_request_id}. These four commands never click. Explicit grounding_execute request={grounding_request_id} dispatches one click through the existing action route only when the candidate is ready and live identity, viewport and target-region consistency checks pass. It does not load a local vision model or prove semantic hit. Execution is claimed durably before input and cannot be replayed: poll the original execution request ID and inspect its before/after images. Never turn coordinates into unchecked input."
         descriptions[name] += " form_fill accepts request={fields:[...],text_navigation:'recognize_each'|'tab_sequence'|'tab_groups'}, 1..32 declared fields: text {kind,field_goal,text,clear_existing,label?,tab_group?}, date {kind,field_goal,value,format}, dropdown {kind,label,option}, checkbox {kind,label,checked}, radio {kind,label}. Prefer one grouped call for all currently known fields, not one tool call per field; missing facts need not block independent known fields. Optional tab_sequence requires ONLY consecutive text fields with distinct exact accessible labels. tab_groups accepts mixed fields: assign identical tab_group strings only to adjacent text fields whose actual Tab order is known; labels must be exact and distinct within each run. New group, non-text or omitted tab_group always starts fresh recognition; tab_group is invalid outside tab_groups mode. Recognize each group head, then Tab, verify focused field label/identity, fill and read back locally; return one batch receipt and final image. Wrong focus interrupts BEFORE typing; never guesses/skips fields or auto-replays. Default recognize_each preserves mixed control handling. Compact fields include aggregate timings; full diagnostics remain available by ID. Date value must be a real ISO YYYY-MM-DD date; format is explicitly YYYY-MM-DD, DD/MM/YYYY or MM/DD/YYYY. Date fills an editable text field and checks exact displayed text; it does NOT navigate calendars, guess locale or verify server acceptance. Exact current accessible labels are required for choices; read current screenshots first. It never submits a form; already-satisfied choices are not toggled. Unknown/ambiguous/unreadable states interrupt with partial receipts. Dropdown options must belong to the opened control. Inspect original images; completion is not task success."
-    descriptions["instant_result"] += " Optional detail=compact omits verbose traces; full (default) keeps the old receipt fields. images=after|both includes original PNGs in this same call; default none preserves JSON-only delivery."
+    descriptions["instant_result"] += " Optional detail=compact omits verbose traces; full (default) keeps the old receipt fields. images=after|both includes original PNGs in this same call; default none preserves JSON-only delivery. A review_packet.v4 video-playback wait delivers its complete ordered observation sequence, labeled by capture_id and elapsed_ms, without recapturing or replacing the original after."
     for name in ("instant_submit", "instant_run"):
-        descriptions[name] += " Optional step.decision_check={phase:'after_action'|'before_action',condition:explicit_observable_condition} uses the host's configured Decision service. Absent/off remains inactive; configured default shadow only records advice. Automatic adoption requires auto mode and an exact allowlisted condition. After-action checks reuse original evidence and preserve input status; uncertainty never retries input. Before-action is supported only by step/execute_recognition_plan at the fresh candidate boundary, never by input_sequence/form_fill/grounding_execute. API judgment cannot authorize input. Poll the original execution result; asynchronous status uses its command_id. Learning agent_judgment verification may include a reviewed decision_condition alongside image_check; local image success remains zero API, dynamic output extraction still requires the existing reader/Agent."
+        descriptions[name] += " Explicit task_plan.v2 video verification uses verification={kind:'video_playback',decision_condition:exact_playback_condition,review_policy?:'always_main',render_grace_ms?:500}. After settled input and render grace, it waits at least1s then captures exactly3 fresh images at least500ms apart and sends all3 once to Decision within a shared8s budget. A visible change in the target video picture confirms playback; controls, OCR and separate player localization are not required. Generic verification={kind:'dynamic_content',target_description:explicit_content_target,decision_condition:exact_change_condition} reuses this path to judge change in the named content only, not overall task completion. No API or always_main delivers the3 images to the existing Main via review_packet.v4; uncertainty never repeats input. No wait_policy, hover or repeated assessment. Source-level limited live evidence is documented; general accuracy and installed acceptance are not established."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Optional step.decision_check={phase:'after_action'|'before_action',condition:explicit_observable_condition} uses the host's configured Decision service. Absent/off remains inactive; configured default shadow only records advice. Automatic adoption requires auto mode and an exact allowlisted condition. After-action checks reuse original evidence and preserve input status; uncertainty never retries input. Before-action is supported only by step/execute_recognition_plan at the fresh candidate boundary, never by input_sequence/form_fill/grounding_execute. API judgment cannot authorize input. Poll the original execution result; asynchronous status uses its command_id. Learning agent_judgment verification may include a reviewed decision_condition alongside image_check; local image success remains zero API in adaptive mode, dynamic output extraction still requires the existing reader/Agent. Explicit decision_profile.v2 separates verdict from disposition: a successful outcome with review_required still needs the existing Main Agent and cannot advance input. proactive_review adds an independent needs_agent_review question; always_main skips the paid pre-check and preserves review. In v2 auto mode an unallowlisted explicit pre-action condition also stops for Main; it cannot silently bypass the check. Always use the active host's reported contract; v1 snapshots retain their semantics."
     for name in ("instant_submit", "instant_run"):
         descriptions[name] += " Optional command.observation_condition={text:exact_accessible_name,control_type:Text|Hyperlink|Button|Document} enables read-only early observation for step or submit_search sequences. Requires a positive observation_wait_ms budget (navigation defaults to 2000). Only a newly appearing unique visible match, repeated and rechecked after capture, ends early. Accessible names can differ from screenshot captions. Missing/ambiguous/old matches time out and still return an image; inspect observation.condition, not operation_succeeded, for this outcome. This is not full-page readiness or task verification. Synchronous UIA and capture I/O are outside a hard timeout; no input replay. Omit the condition when no reliable marker is known."
     for fn in (instant_start, instant_status, instant_submit, instant_result, instant_image, instant_stop, instant_run,

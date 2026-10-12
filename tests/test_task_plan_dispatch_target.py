@@ -1,4 +1,4 @@
-"""结构化目标定位后被替换的真实门控调用回归；只隔离 UIA、原生身份与输入设备。"""
+"""显式学习路线的结构化原生门禁回归；只隔离 UIA、原生身份与输入设备。"""
 from copy import deepcopy
 from types import SimpleNamespace as NS
 
@@ -39,7 +39,7 @@ def wrapper(raw, *, parent=None):
     return result
 
 
-def run_scene(current_frame, monkeypatch, defect=None, *, structured=True, kind="Button"):
+def run_scene(current_frame, monkeypatch, defect=None, *, structured=True, kind="Button", owned_popup=False):
     from app.api import action, vision
     from app.api.models.request import ExecuteRecognitionPlanRequest
     from app.agent import windows_control_hit_reader as hits, windows_text_field_reader as text
@@ -61,6 +61,14 @@ def run_scene(current_frame, monkeypatch, defect=None, *, structured=True, kind=
     bound = NS(handle=11, process_id=22, title="Fixture", process_name="editor.exe",
         rect=NS(left=100, top=200, right=1000, bottom=800))
     manager = NS(get_bound_window=lambda: bound)
+    popup_from_point = None
+    read_identity = lambda _: deepcopy(identity)
+    if owned_popup:
+        from tests.test_structured_menu_popup_hit import popup_native_scene
+        target, root, parent, current, manager, identity, read_identity, popup_from_point, _ = popup_native_scene(
+            current_frame, monkeypatch, kind=kind, defect=defect)
+        state["raw"] = current
+        if defect == "missing_scope": snapshot.pop("menu_scopes")
     monkeypatch.setattr(action, "window_manager", manager)
     monkeypatch.setattr(action.screenshot_service, "capture_window", lambda **kw:
         {"image_path": capture["image_path"], "window_size": capture["image_size"], "roi": None})
@@ -76,12 +84,12 @@ def run_scene(current_frame, monkeypatch, defect=None, *, structured=True, kind=
         native_reads.append((x, y))
         if defect == "second_hit_runtime" and len(native_reads) == 2:
             current.element_info.runtime_id = [42, 999]
-        return state["raw"]
+        return popup_from_point(x, y) if popup_from_point else state["raw"]
     monkeypatch.setattr(hits, "_desktop_factory", lambda **kw: NS(from_point=from_point))
-    monkeypatch.setattr(text, "_native_root_handle", lambda handle: handle if handle == 11 else None)
+    monkeypatch.setattr(text, "_native_root_handle", lambda handle: handle if handle in {11, 77, 78} else None)
     monkeypatch.setattr(text, "_no_pattern_exception", lambda: NoPattern)
     monkeypatch.setattr(hits, "WindowsNativeIdentityReader", lambda **kw:
-        NS(read_identity=lambda _: deepcopy(identity)))
+        read_identity.__self__ if owned_popup else NS(read_identity=read_identity))
     def recognize(request):
         result = vision.recognition_plan(request)
         if defect == "runtime": current.element_info.runtime_id = [42, 999]
@@ -110,7 +118,8 @@ def run_scene(current_frame, monkeypatch, defect=None, *, structured=True, kind=
     monkeypatch.setattr(action.input_controller, "click_point", lambda x, y, **kw:
         clicks.append((x, y)) or {"clicked": True, "window_point": {"x": x, "y": y}})
     monkeypatch.setattr(action, "_render_recognition_plan_overlay_for_execution", lambda plan: None)
-    request = ExecuteRecognitionPlanRequest(goal="Click the Find button", enable_post_click_verification=False,
+    # 公开学习入口保留原生门禁；普通执行目标仅作视觉约束，由独立回归覆盖。
+    request = ExecuteRecognitionPlanRequest(agent_mode="learn", goal="Click the Find button", enable_post_click_verification=False,
         max_execution_attempts=1, auto_observe_learning_artifacts=False,
         metadata={"task_plan_target": target} if structured else {},
         write_policy={"path_graph": False, "element_memory": False, "trace": False})

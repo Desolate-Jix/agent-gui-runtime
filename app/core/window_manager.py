@@ -13,6 +13,9 @@ from app.core.runtime_input_authority import runtime_backend_input_is_active
 WINDOWS_BACKEND_AVAILABLE = False
 WINDOWS_BACKEND_IMPORT_ERROR: Optional[str] = None
 
+# 仅豁免已知录屏宿主的截图矩形遮挡，不豁免实际点位和原生区域门禁。
+_CAPTURE_OVERLAY_ALLOWLIST = frozenset({("nvidia overlay.exe", "CEF-OSC-WIDGET")})
+
 try:
     from pywinauto import Desktop
     from pywinauto.controls.hwndwrapper import HwndWrapper
@@ -138,6 +141,9 @@ class WindowManager:
         # 保留同进程且确切归属当前父窗口的前台弹窗，避免准备阶段自己改变截图。
         if self.get_owned_foreground_popup_handle(bound) is not None:
             return bound
+        # 已在前台的同一绑定窗口不重复激活，避免改变当前输入状态。
+        if int(win32gui.GetForegroundWindow() or 0) == bound.handle:  # type: ignore[union-attr]
+            return bound
         logger.info("Focusing bound window: handle={}, title={}", bound.handle, bound.title)
         activation_error = self._activate_window(bound.handle)
 
@@ -185,6 +191,25 @@ class WindowManager:
             return active
         except Exception as exc:
             raise RuntimeError("foreground_popup_ownership_unavailable") from exc
+
+    def read_owned_foreground_popup(self, bound: BoundWindow) -> dict[str, object] | None:
+        """读取弹窗事实供 Decision 判断；不按是否启用替上层作语义决定。"""
+        popup = self.get_owned_foreground_popup_handle(bound)
+        if popup is None:
+            return None
+        try:
+            rect = win32gui.GetWindowRect(popup)
+            enabled = win32gui.IsWindowEnabled(bound.handle)
+            if (not isinstance(rect, (tuple, list)) or len(rect) != 4
+                    or any(type(value) is not int for value in rect)
+                    or rect[0] >= rect[2] or rect[1] >= rect[3]
+                    or type(enabled) not in (bool, int) or enabled not in (0, 1)
+                    or self.get_owned_foreground_popup_handle(bound) != popup):
+                raise ValueError("popup_native_snapshot_changed_or_unknown")
+            return {"handle": popup, "parent_handle": bound.handle, "process_id": bound.process_id,
+                    "rect": list(rect), "parent_enabled": bool(enabled)}
+        except Exception as error:
+            raise RuntimeError("foreground_popup_snapshot_unavailable") from error
 
     def prepare_bound_window(self, permit: object) -> BoundWindow:
         """消费本地人工确认许可，只恢复和聚焦同一进程窗口。"""
@@ -252,6 +277,11 @@ class WindowManager:
                     other_left, other_top, other_right, other_bottom = win32gui.GetWindowRect(current)
                     if (max(left, other_left) < min(right, other_right)
                             and max(top, other_top) < min(bottom, other_bottom)):
+                        exemption = self._capture_overlay_allowlist_match(current) if allow_partial else None
+                        if exemption is not None:
+                            base.setdefault("capture_overlay_exemptions", []).append(exemption)
+                            current = int(win32gui.GetWindow(current, win32con.GW_HWNDNEXT) or 0)
+                            continue
                         if not allow_partial:
                             return {**base, "reason": "capture_window_occluded", "occluding_window_handle": current}
                         regions.add((max(left, other_left), max(top, other_top),
@@ -262,6 +292,31 @@ class WindowManager:
             return base
         except Exception as error:
             return {**base, "error_type": type(error).__name__}
+
+    def _capture_overlay_allowlist_match(self, handle: int) -> dict[str, object] | None:
+        """只读识别录屏白名单；保留真实合成像素供模型判断目标遮挡。"""
+        try:
+            window_class = win32gui.GetClassName(handle)
+            if not any(window_class == entry[1] for entry in _CAPTURE_OVERLAY_ALLOWLIST):
+                return None
+            style = win32gui.GetWindowLong(handle, win32con.GWL_EXSTYLE)
+            required = win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_TOPMOST
+            if style & required != required:
+                return None
+            process_id = self._get_process_id(handle)
+            if type(process_id) is not int or process_id <= 0:
+                return None
+            process_name = self._get_process_name(process_id)
+            if (not isinstance(process_name, str)
+                    or (process_name.casefold(), window_class) not in _CAPTURE_OVERLAY_ALLOWLIST
+                    or self._get_process_id(handle) != process_id):
+                return None
+            return {"handle": handle, "process_id": process_id, "process_name": process_name,
+                    "window_class": window_class, "exstyle": style,
+                    "reason": "recording_overlay_capture_rectangle_allowlisted"}
+        except Exception:
+            # 身份或样式无法核实时不获得豁免，仍按普通遮挡处理。
+            return None
 
     @staticmethod
     def _is_dwm_cloaked(handle: int) -> bool:
@@ -433,6 +488,60 @@ class WindowManager:
             "hit_window": hit_window,
         }
 
+    def validate_nonmodal_parent_click(self, *, bound: BoundWindow, x: int, y: int,
+                                      bbox, popup_handle: int,
+                                      allow_popup_dismissed: bool = False) -> dict[str, object]:
+        """只读证明非模态提示之外的父窗目标仍可点击；未知状态拒绝。"""
+        base = {"contract_version": "nonmodal_parent_click_v1", "allowed": False,
+                "popup_handle": popup_handle, "reason": "nonmodal_parent_click_unavailable"}
+        if bbox is None:
+            return {**base, "reason": "nonmodal_parent_target_bbox_required"}
+        try:
+            self._ensure_windows_backend()
+            current = self.get_bound_window()
+            if (current is None or current.handle != bound.handle
+                    or current.process_id != bound.process_id or current.rect != bound.rect):
+                return {**base, "reason": "nonmodal_parent_identity_changed"}
+            if (not isinstance(bbox, (tuple, list)) or len(bbox) != 4
+                    or any(type(value) not in (int, float) or not math.isfinite(value) for value in bbox)
+                    or not (bbox[0] <= x < bbox[0] + bbox[2] and bbox[1] <= y < bbox[1] + bbox[3])):
+                return {**base, "reason": "nonmodal_parent_point_outside_target"}
+            enabled = win32gui.IsWindowEnabled(int(bound.handle))
+            if (type(enabled) not in (bool, int) or enabled != 1
+                    or not win32gui.IsWindow(int(bound.handle))
+                    or not win32gui.IsWindowVisible(int(bound.handle))
+                    or win32gui.IsIconic(int(bound.handle))
+                    or self._get_process_id(int(bound.handle)) != bound.process_id):
+                return {**base, "reason": "nonmodal_parent_not_enabled"}
+            foreground = int(win32gui.GetForegroundWindow() or 0)
+            if foreground == popup_handle:
+                if self.get_owned_foreground_popup_handle(bound) != popup_handle:
+                    return {**base, "reason": "nonmodal_parent_popup_changed"}
+            elif not (allow_popup_dismissed and foreground == int(bound.handle)):
+                return {**base, "reason": "nonmodal_parent_foreground_changed"}
+            if win32gui.IsWindow(popup_handle) and win32gui.IsWindowVisible(popup_handle):
+                popup_rect = win32gui.GetWindowRect(popup_handle)
+                if (not isinstance(popup_rect, (tuple, list)) or len(popup_rect) != 4
+                        or any(type(value) is not int for value in popup_rect)
+                        or popup_rect[0] >= popup_rect[2] or popup_rect[1] >= popup_rect[3]):
+                    return {**base, "reason": "nonmodal_parent_popup_geometry_unavailable"}
+                left, top = bound.rect.left + bbox[0], bound.rect.top + bbox[1]
+                if (max(left, popup_rect[0]) < min(left + bbox[2], popup_rect[2])
+                        and max(top, popup_rect[1]) < min(top + bbox[3], popup_rect[3])):
+                    return {**base, "reason": "nonmodal_parent_popup_overlaps_target"}
+            point = self.validate_bound_point_visibility(bound=bound, x=x, y=y)
+            hit = point.get("hit_window") or {}
+            if (point.get("allowed") is not True or hit.get("root_handle") != int(bound.handle)
+                    or hit.get("process_id") != bound.process_id):
+                return {**base, "reason": "nonmodal_parent_point_occluded", "point_visibility": point}
+            region = self.validate_bound_region_visibility(bound=bound, bbox=bbox)
+            if region.get("allowed") is not True:
+                return {**base, "reason": "nonmodal_parent_region_occluded", "region_visibility": region}
+            return {**base, "allowed": True, "reason": "nonmodal_parent_target_visible",
+                    "foreground_handle": foreground, "point_visibility": point, "region_visibility": region}
+        except Exception:
+            return base
+
     def validate_bound_region_visibility(self, *, bound: BoundWindow,
                                          bbox: tuple[float, float, float, float]) -> dict[str, object]:
         """目标框按窗口坐标向外取整，不能用未遮挡的中心点替代完整目标。"""
@@ -446,9 +555,12 @@ class WindowManager:
                 or y + height > bound.rect.bottom - bound.rect.top):
             return invalid
         left, top = math.floor(x), math.floor(y)
+        pixel_width, pixel_height = math.ceil(x + width) - left, math.ceil(y + height) - top
+        # 已收窄的点击像素继承截图白名单；普通遮挡仍覆盖整个像素，完整原生区域仍严格核验。
         evidence = self.validate_bound_capture_visibility(bound=bound, rect={
             "left": bound.rect.left + left, "top": bound.rect.top + top,
-            "width": math.ceil(x + width) - left, "height": math.ceil(y + height) - top})
+            "width": pixel_width, "height": pixel_height},
+            allow_partial=pixel_width == 1 and pixel_height == 1)
         return {**evidence, "reason": "target_region_visible" if evidence.get("allowed") is True
                 else "target_region_occluded" if evidence.get("reason") == "capture_window_occluded"
                 else evidence.get("reason", "capture_visibility_unavailable")}

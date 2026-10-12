@@ -1,3 +1,5 @@
+> **执行 0.1.2 / Execution 0.1.2:** 当前正式版配置步骤以[首页](README.md#安装与配置--install-and-configure)为准。下方保留学习预览及早期执行包的安装说明，不代表本次更新学习工作台。默认视觉组合输入需要 Decision auto；无 Decision 使用显式原生组合输入或基础单步。 / Follow the current README for execution setup; historical learning/source-package sections remain for reference. Default visual sequences require Decision auto; explicit native sequences and basic actions remain available without it.
+
 ## 独立组件安装说明 / Independent component setup
 
 学习 `0.1.0-preview.2` 与兼容执行 `0.1.2-preview.2` 使用独立测试版安装器：[preview.2 下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.2)。执行可单独安装使用，学习工作台可选，可离线打开、审核、修改、保存和重开库，无需执行宿主或模型。本轮安装验证范围见[验收报告](docs/verification/DECISION_API_RELEASE_ACCEPTANCE_20261008.md)。 / Learning and compatible execution preview.2 use separate installers. Execution works independently; optional learning supports offline library management without a host or model. See the current report for installed validation scope.
@@ -46,9 +48,9 @@ This guide is for the Windows x64 instant-mode source preview, not a standalone 
 
 ## test.8：不装本地模型 / Model-free Agent setup
 
-**以下适用于 test.8 或更新；test.7 不含这些新路由。** `agent_current` 将视觉任务交给当前确实支持图像的 Agent；`agent_delegate` 仅由客户端按显式 profile 选择视觉子 Agent（例如 Astra 主 Agent 显式委派给 Luna）。委派名只是客户端配置标识，不会让宿主继承 API/key、自动创建子 Agent 或切换模型。unknown/unsupported 会停止所选视觉路径，不会偷偷回退到本地 VISTA/OCR 或外部 API。Agent 路线 `read_text` 回传当前原图供 Agent 阅读，不加载本地 OCR。独立 API 仅保留 adapter/config/mock 协议检查，宿主执行路由禁用，不读取或要求 key，也不要求 live-provider 验收；详见[预留接口](docs/development/EXTERNAL_VISION_API.md)。
+**以下适用于 test.8 或更新；test.7 不含这些新路由。** `agent_current` 将视觉任务交给当前确实支持图像的 Agent；`agent_delegate` 仅由客户端按显式 profile 选择视觉子 Agent（例如 Astra 主 Agent 显式委派给 Luna）。委派名只是客户端配置标识，不会让宿主继承 API/key、自动创建子 Agent 或切换模型。unknown/unsupported 会停止所选视觉路径，不会偷偷回退到本地 VISTA/OCR 或外部 API。Agent 路线 `read_text` 回传当前原图供 Agent 阅读，不加载本地 OCR。当前执行 0.1.2 的 external_api 已接入真实执行链；需配置服务端点、模型及密钥环境变量，详见[视觉 API 接入](docs/development/EXTERNAL_VISION_API.md)。仅历史 test.8 是预留接口。
 
-**Requires test.8 or later; test.7 does not include these routes.** `agent_current` uses the current agent only when it actually supports images. `agent_delegate` asks the client to select a vision delegate by an explicit profile (for example, an Astra planner explicitly delegates to Luna). A profile is just client configuration: it grants no host API/key access and creates or switches no model automatically. Unknown/unsupported capability stops the selected route; there is no silent fallback to local VISTA/OCR or external API. Agent-route `read_text` returns the current original image for the Agent and does not load local OCR. The external API is limited to reserved adapter/config/mock-protocol checks; host execution is disabled, no key is read or required, and no live-provider acceptance is required. See the [reserved adapter](docs/development/EXTERNAL_VISION_API.md).
+**Requires test.8 or later; test.7 does not include these routes.** `agent_current` uses the current agent only when it actually supports images. `agent_delegate` asks the client to select a vision delegate by an explicit profile (for example, an Astra planner explicitly delegates to Luna). A profile is just client configuration: it grants no host API/key access and creates or switches no model automatically. Unknown/unsupported capability stops the selected route; there is no silent fallback to local VISTA/OCR or external API. Agent-route `read_text` returns the current original image for the Agent and does not load local OCR. Execution 0.1.2 supports live external_api grounding using a configured endpoint, model and key environment variable. The adapter-only limitation belongs to historical test.8. See [external API integration](docs/development/EXTERNAL_VISION_API.md).
 
 ```powershell
 # 当前 Agent 读图，不安装 VISTA 或本地 OCR。
@@ -181,7 +183,7 @@ Generate local JSON/TOML snippets without input permission first. The generator 
 2. JSON 客户端：将 `mcpServers` 内的 **`agent-review-instant` 单个条目**合并进现有配置，保留其他服务器；已经有同名条目就更新，**不要新增重复项或覆盖整个配置文件**。
 3. TOML 客户端：使用生成的 `mcp-config.local.toml` 对应段落；不要把 JSON 粘进 TOML。
 4. 如果设置界面要求分别填写命令、参数、环境变量，分别使用生成配置中的 `command`、`args`、`env`；不要把全部参数拼进 executable 字段。
-5. 保存并重新连接服务器。若当前对话没有工具，按该 Agent 软件的机制新开对话。应出现 `instant_start / instant_status / instant_submit / instant_result / instant_image / instant_stop / instant_run` 七个工具。
+5. 保存并重新连接服务器。若当前对话没有工具，按该 Agent 软件的机制新开对话。应出现 `instant_start / instant_status / instant_submit / instant_result / instant_image / instant_stop / instant_run` 七个核心工具及两个恢复工具。
 
 Merge only the named server into the existing configuration, or update it in place. Preserve other servers. Use the generated TOML section only for TOML clients. Reconnect; some clients need a new conversation to expose tools. If the folder is moved later, regenerate the snippets because paths are absolute.
 
@@ -193,7 +195,7 @@ Merge only the named server into the existing configuration, or update it in pla
 .\.venv\Scripts\python.exe scripts\smoke_instant_mcp.py --model-directory "D:\AgentReviewModels\VISTA-4B" --data-dir "D:\AgentReviewInstantSmoke" --report "D:\AgentReviewInstant\smoke-report.json"
 ```
 
-该脚本只验证 MCP 握手、七个工具、宿主启动、窗口发现、同 ID 回执及清理，**不发送键鼠、不截图、不进行模型推理**。注意：脚本为了覆盖实际配置通道，会在它自己隔离的宿主中启用本地输入能力，但脚本不提交输入命令；它不会修改你给 Agent 的配置。完成后应看到 `cleanup_verified=true`。
+该脚本只验证 MCP 握手、七个核心工具及两个恢复工具、宿主启动、窗口发现、同 ID 回执及清理，**不发送键鼠、不截图、不进行模型推理**。注意：脚本为了覆盖实际配置通道，会在它自己隔离的宿主中启用本地输入能力，但脚本不提交输入命令；它不会修改你给 Agent 的配置。完成后应看到 `cleanup_verified=true`。
 
 这个结果只代表连接正常。入口依赖检查可另执行：
 

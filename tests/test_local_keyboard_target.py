@@ -51,6 +51,87 @@ def test_exact_focused_keyboard_target_replaces_pointer_visibility_only_in_scope
         if isinstance(event,tuple): assert events[index-1] == "field-read"
 
 
+def rounding_scene(monkeypatch, *, operation="press_key", point=(680,112), focus_reflow=True):
+    module,controller,bound,events,before,_,_=scene(monkeypatch,operation)
+    bound.rect.right,bound.rect.bottom=1410,1032
+    before=replace(before,identity=replace(before.identity,window_rect=(0,0,1410,1032),
+        control_bbox=(520,102,300,20)),value="next",selection=(4,4))
+    target=module.LocalKeyboardTarget(before,"Edit",point,operation,focus_reflow=focus_reflow,
+        text_sha256=sha256(b"next").hexdigest() if operation=="type_text" else None)
+    current=[replace(before,identity=replace(before.identity,control_bbox=(520,102,300,21)))]
+    samples=[]
+    def read(**kwargs):
+        samples.append(kwargs)
+        events.append("field-read")
+        return current[0]
+    monkeypatch.setattr(module,"WindowsTextFieldReader",lambda **kw:NS(read_bound_focus=read,read_field=read))
+    return module,controller,events,before,target,current,samples
+
+
+@pytest.mark.parametrize("bbox", [(520,102,300,21),(519,101,302,22)],
+                         ids=["live_height_20_to_21","each_edge_one_pixel"])
+def test_focus_reflow_enter_accepts_only_bound_field_edge_rounding(monkeypatch,bbox):
+    module,controller,events,before,target,current,samples=rounding_scene(monkeypatch)
+    current[0]=replace(before,identity=replace(before.identity,control_bbox=bbox))
+    with module.local_keyboard_target_scope(target):
+        assert controller.press_key("Enter",x=680,y=112)["pressed"]
+    assert events.count((inputs.VK_RETURN,))==1
+    assert "focus" not in events and "point-check" not in events and "click" not in events
+    assert len(samples)==1 and "target_bbox" not in samples[0]
+    assert current[0].identity.control_bbox==bbox and target.point==(680,112)
+
+
+@pytest.mark.parametrize("bbox", [(518,102,300,20),(520,100,300,20),
+                                  (520,102,302,20),(520,102,300,22),(521,102,301,20)])
+def test_focus_reflow_enter_rejects_any_edge_beyond_one_pixel(monkeypatch,bbox):
+    module,controller,events,before,target,current,_=rounding_scene(monkeypatch)
+    current[0]=replace(before,identity=replace(before.identity,control_bbox=bbox))
+    with module.local_keyboard_target_scope(target),pytest.raises(ValueError,match="field changed"):
+        controller.press_key("Enter",x=680,y=112)
+    assert not any(isinstance(event,tuple) for event in events)
+
+
+def test_focus_reflow_rounding_does_not_allow_original_anchor_outside_current_field(monkeypatch):
+    module,controller,events,before,target,current,_=rounding_scene(monkeypatch,point=(680,121))
+    current[0]=replace(before,identity=replace(before.identity,control_bbox=(520,102,300,19)))
+    with module.local_keyboard_target_scope(target),pytest.raises(ValueError,match="field changed"):
+        controller.press_key("Enter",x=680,y=121)
+    assert not any(isinstance(event,tuple) for event in events)
+
+
+def test_non_reflow_keyboard_target_keeps_exact_bbox_comparison(monkeypatch):
+    module,controller,events,_,target,_,samples=rounding_scene(monkeypatch,focus_reflow=False)
+    with module.local_keyboard_target_scope(target),pytest.raises(ValueError,match="field changed"):
+        controller.press_key("Enter",x=680,y=112)
+    assert len(samples)==1 and samples[0]["target_bbox"]==(520,102,300,20)
+    assert not any(isinstance(event,tuple) for event in events)
+
+
+@pytest.mark.parametrize("fault", ["field","window","process","birth","runtime","window_rect","value","source"])
+def test_focus_reflow_rounding_preserves_all_other_identity_and_content_guards(monkeypatch,fault):
+    module,controller,events,_,target,current,_=rounding_scene(monkeypatch)
+    identity_changes={"field":{"target_field_id":"other"},"window":{"window_handle":8},
+        "process":{"process_id":10},"birth":{"process_create_time":124.0},
+        "runtime":{"runtime_id":(42,2)},"window_rect":{"window_rect":(1,0,1410,1032)}}
+    if fault in identity_changes:
+        current[0]=replace(current[0],identity=replace(current[0].identity,**identity_changes[fault]))
+    elif fault=="value":
+        current[0]=replace(current[0],value="other")
+    else:
+        current[0]=replace(current[0],source="uia_text")
+    with module.local_keyboard_target_scope(target),pytest.raises(ValueError,match="field changed"):
+        controller.press_key("Enter",x=680,y=112)
+    assert not any(isinstance(event,tuple) for event in events)
+
+
+def test_focus_reflow_rounding_does_not_allow_append_selection_change(monkeypatch):
+    module,controller,events,_,target,current,_=rounding_scene(monkeypatch,operation="type_text")
+    current[0]=replace(current[0],selection=(0,0))
+    with module.local_keyboard_target_scope(target),pytest.raises(ValueError,match="field changed"):
+        controller.type_text("next",x=680,y=112)
+    assert not any(isinstance(event,tuple) for event in events)
+
+
 @pytest.mark.parametrize("fault", ["runtime", "bbox", "value", "source", "focus_failure"])
 @pytest.mark.parametrize("after_selection", [False, True])
 def test_field_change_blocks_paste_without_replaying_input(monkeypatch, fault, after_selection):

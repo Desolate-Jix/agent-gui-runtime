@@ -6,6 +6,7 @@ import time
 from app.core.local_input_policy import require_local_operator_input
 from app.operation.recognition.control_target import _field_target_label
 from app.operation.recognition.text_match import explicit_target_label
+from app.operation.screen_reading.uia_graph import is_complete_canonical_uia_snapshot
 from app.operation.screen_reading.uia_provider import HARD_UIA_MAX_CONTROLS, browser_document_observation, uia_provider
 
 _clock = time.monotonic
@@ -68,20 +69,14 @@ class BrowserContentPreparation:
         if "initial_snapshot" not in self.report:
             self.report["initial_snapshot"] = deepcopy(snapshot)
         observation = browser_document_observation(snapshot)
+        scan_facts = {key: snapshot[key] for key in ("truncated", "graph_scan_complete", "provider_tree_valid")
+                      if type(snapshot.get(key)) is bool}
+        scan_facts.update({key: snapshot[key] for key in ("alias_count", "cycle_count")
+            if type(snapshot.get(key)) is int and 0 <= snapshot[key] <= HARD_UIA_MAX_CONTROLS})
         self.report["samples"].append({"stage": stage, **observation,
             "elapsed_ms": round((_clock() - self.started) * 1000, 3),
-            "scan_visited_count": snapshot.get("scan_visited_count")})
-        alias_count, cycle_count = snapshot.get("alias_count"), snapshot.get("cycle_count")
-        # 经 COM 身份与规范父边验证的别名不是完整树，但仍可构成完整规范图。
-        normalized_graph = (snapshot.get("provider_tree_valid") is False
-            and snapshot.get("graph_scan_complete") is True
-            and type(alias_count) is int and alias_count > 0
-            and type(cycle_count) is int and 0 <= cycle_count <= alias_count
-            and snapshot.get("traversal_errors") == [])
-        if (snapshot.get("status") != "ok" or snapshot.get("scan_complete") is not True
-                or snapshot.get("truncated") is not False or snapshot.get("traversal_errors")
-                or not (snapshot.get("provider_tree_valid") is True or normalized_graph)
-                or snapshot.get("scan_scope", "bound_window") != "bound_window"):
+            "scan_visited_count": snapshot.get("scan_visited_count"), **scan_facts})
+        if not is_complete_canonical_uia_snapshot(snapshot):
             self.fail("browser_content_scan_incomplete")
         window = snapshot.get("window") or {}
         handle, pid, process, left, top, right, bottom = self.window_key

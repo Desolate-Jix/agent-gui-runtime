@@ -70,20 +70,83 @@ def _action(value, inputs):
         validate_task_plan_control_target(value["target"], for_input=kind == "input_sequence")
 
 
-def _verification(value, action):
+def _verification(value, action, *, version="task_plan.v1", inputs=None):
     if not isinstance(value, dict):
         raise ValueError("task_plan_verification_invalid")
     kind = value.get("kind")
     if kind == "agent_judgment":
-        if "kind" not in value or set(value) - {"kind", "decision_condition"}:
+        allowed = {"kind", "decision_condition"}
+        if version in {"task_plan.v2", "task_plan.v3"}:
+            allowed.update({"allowed_states", "review_policy", "wait_policy", "condition_binding", "render_grace_ms"})
+        if "kind" not in value or set(value) - allowed:
             raise ValueError("task_plan_verification_fields_invalid")
+        if {"decision_condition", "condition_binding"} <= set(value):
+            raise ValueError("task_plan_condition_sources_conflict")
+        if "condition_binding" in value:
+            if action["kind"] == "read_text":
+                raise ValueError("task_plan_decision_dynamic_read_forbidden")
+            from .task_plan_conditions import resolve_plan_condition
+            resolve_plan_condition(value, {} if inputs is None else inputs)
+        if "allowed_states" in value:
+            states = value["allowed_states"]
+            if not isinstance(states, list) or len(states) > 32:
+                raise ValueError("task_plan_allowed_states_invalid")
+            for item in states:
+                _text(item, "allowed_state", 1000)
+        if "review_policy" in value and value["review_policy"] != "always_main":
+            raise ValueError("task_plan_review_policy_cannot_expand_authority")
+        if "wait_policy" in value:
+            wait = value["wait_policy"]
+            if (not {"decision_condition", "condition_binding"}.intersection(value) or not isinstance(wait, dict)
+                    or set(wait) != {"loading_condition", "completion_excludes_loading"}
+                    or type(wait["completion_excludes_loading"]) is not bool):
+                raise ValueError("task_plan_wait_policy_invalid")
+            _text(wait["loading_condition"], "loading_condition")
+        if "render_grace_ms" in value:
+            from app.core.observation_policy import resolve_render_grace_ms
+            resolve_render_grace_ms("", value["render_grace_ms"])
+            if (type(value["render_grace_ms"]) is not int
+                    or not value.get("wait_policy", {}).get("completion_excludes_loading")
+                    or not (action["kind"] == "click"
+                            or action["kind"] == "input_sequence" and action["submit_search"])):
+                raise ValueError("task_plan_render_grace_requires_loading_contract")
         if "decision_condition" in value:
             if action["kind"] == "read_text":
                 raise ValueError("task_plan_decision_dynamic_read_forbidden")
             _text(value["decision_condition"], "decision_condition")
+    elif kind in {"video_playback", "dynamic_content"}:
+        allowed = {"kind", "decision_condition", "allowed_states", "review_policy", "render_grace_ms"}
+        required = {"kind", "decision_condition"}
+        if kind == "dynamic_content":
+            allowed.add("target_description")
+            required.add("target_description")
+        if (version not in {"task_plan.v2", "task_plan.v3"} or not required <= set(value)
+                or set(value) - allowed):
+            raise ValueError(f"task_plan_{kind}_contract_invalid")
+        if kind == "dynamic_content":
+            _text(value["target_description"], "dynamic_content_target_description", 1000)
+        _verification({"kind": "agent_judgment", **{key: value[key] for key in
+            ("decision_condition", "allowed_states", "review_policy") if key in value}},
+            action, version=version, inputs=inputs)
+        if not (action["kind"] == "click" or action["kind"] == "input_sequence" and action["submit_search"]):
+            raise ValueError(f"task_plan_{kind}_action_unsupported")
+        if "render_grace_ms" in value:
+            from app.core.observation_policy import resolve_render_grace_ms
+            if type(value["render_grace_ms"]) is not int:
+                prefix = "video" if kind == "video_playback" else "dynamic_content"
+                raise ValueError(f"task_plan_{prefix}_render_grace_invalid")
+            resolve_render_grace_ms("", value["render_grace_ms"])
     elif kind == "native_condition":
-        if set(value) != {"kind", "condition"} or not isinstance(value["condition"], dict):
+        options = {"decision_condition", "condition_binding", "allowed_states", "review_policy", "wait_policy"}
+        allowed = {"kind", "condition"} | (options if version in {"task_plan.v2", "task_plan.v3"} else set())
+        if (not {"kind", "condition"} <= set(value) or set(value) - allowed
+                or not isinstance(value["condition"], dict)):
             raise ValueError("task_plan_verification_fields_invalid")
+        if options.intersection(value):
+            if not {"decision_condition", "condition_binding"}.intersection(value):
+                raise ValueError("task_plan_native_decision_condition_required")
+            _verification({"kind": "agent_judgment", **{key: value[key] for key in options if key in value}},
+                action, version=version, inputs=inputs)
         if not (action["kind"] == "click" or action["kind"] == "input_sequence" and action["submit_search"]):
             raise ValueError("task_plan_native_condition_action_unsupported")
         from .conditional_observation import validate_condition
@@ -100,8 +163,14 @@ def validate_task_plan(value: dict) -> dict:
         raise ValueError("task_plan_invalid")
     if {"outputs", "read_spec"}.intersection(value):
         raise ValueError("task_plan_dynamic_output_unsupported")
-    if set(value) != {"schema_version", "title", "inputs", "steps"} or value["schema_version"] != "task_plan.v1":
+    version = value.get("schema_version")
+    fields = {"schema_version", "title", "inputs", "steps"}
+    if version == "task_plan.v3":
+        fields.update({"goal", "completion"})
+    if set(value) != fields or version not in {"task_plan.v1", "task_plan.v2", "task_plan.v3"}:
         raise ValueError("task_plan_fields_invalid")
+    if version == "task_plan.v3":
+        _text(value["goal"], "final_goal")
     _text(value["title"], "title")
     inputs = value["inputs"]
     if not isinstance(inputs, dict) or len(inputs) > 128:
@@ -127,8 +196,44 @@ def validate_task_plan(value: dict) -> dict:
             raise ValueError("task_plan_step_duplicate")
         seen.add(step_id)
         _action(step["action"], inputs)
-        _verification(step["verification"], step["action"])
+        _verification(step["verification"], step["action"], version=value["schema_version"], inputs=inputs)
+    if version == "task_plan.v3":
+        completion = value["completion"]
+        if (not isinstance(completion, dict) or set(completion) != {"step_id", "verification"}
+                or completion.get("step_id") != steps[-1]["step_id"]):
+            raise ValueError("task_plan_completion_final_step_required")
+        _verification(completion["verification"], steps[-1]["action"], version=version, inputs=inputs)
+        if (completion["verification"]["kind"] == "agent_judgment"
+                and not {"decision_condition", "condition_binding"}.intersection(completion["verification"])):
+            raise ValueError("task_plan_completion_observable_condition_required")
+    if version in {"task_plan.v2", "task_plan.v3"}:
+        from .task_plan_review import review_context
+        # 所有步骤先完成结构校验，再以真实来源标识长度核验输入前的摘要边界。
+        for step in steps:
+            review_context(value, step, source_id="task-plan-" + "0" * 64, source_sha256="0" * 64)
     return deepcopy(value)
+
+
+def completion_snapshot(plan):
+    """最终条件与解析结果一起冻结，不能只绑定最后一次点击。"""
+    if plan["schema_version"] != "task_plan.v3":
+        return None
+    from .task_plan_conditions import resolve_plan_condition
+    return {"schema": "task_plan_completion.v1", "goal": plan["goal"],
+        **deepcopy(plan["completion"]),
+        "semantic": resolve_plan_condition(plan["completion"]["verification"], plan["inputs"])}
+
+
+def goal_completion_proof(plan, result):
+    snapshot = completion_snapshot(plan)
+    if snapshot is None or result["step_id"] != snapshot["step_id"]:
+        return None
+    from .task_plan_review import digest
+    same = snapshot["verification"] == plan["steps"][-1]["verification"]
+    proof = ("main_review" if result["judged_by"] == "agent" else "final_step"
+        if result["verdict"] == "success" and same else "not_proven")
+    return {"schema": "task_plan_goal_completion.v1", "completion_snapshot_sha256": digest(snapshot),
+        "step_id": snapshot["step_id"], "execution_request_id": result["execution_request_id"], "proof": proof}
 
 
 def validate_task_plan_target(value: dict) -> dict:
@@ -142,4 +247,4 @@ def validate_task_plan_target(value: dict) -> dict:
     return deepcopy(value)
 
 
-__all__ = ["validate_task_plan", "validate_task_plan_target", "resolve_action_text"]
+__all__ = ["validate_task_plan", "validate_task_plan_target", "resolve_action_text", "completion_snapshot", "goal_completion_proof"]
