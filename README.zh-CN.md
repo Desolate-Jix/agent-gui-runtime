@@ -99,3 +99,7 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 ---
 
 [ISC 许可证](LICENSE)。依赖和模型权重遵循各自许可证。横幅为工作流程示意，不是实机录屏。
+
+## 可选 benchmark 数据
+
+[Benchmark 备份](https://github.com/Desolate-Jix/agent-gui-runtime-benchmarks) 保存在独立的**私有仓库**，访问需要仓库授权。冻结套件包含 **39 张原图、30 个界面族、254 个标注案例**。数据集图片、标注和原始评测记录不随执行安装器分发，安装时也不会自动下载；需要时单独克隆。
