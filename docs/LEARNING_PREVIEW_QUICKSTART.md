@@ -2,7 +2,7 @@
 
 学习 `0.1.0-preview.3` 与兼容执行 `0.1.2-preview.3` 使用两个独立安装器：[preview.3 发行页与下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3)。源码限定验收及 Main 新安装版实机通过；安装器 SHA、最终独立验收和发布核对状态见[发布记录](verification/CONTINUOUS_EXECUTION_RELEASE_20261009.md)。 / The preview.3 pair uses separate installers. Scoped source and Main installed acceptance passed; use the release record for exact hashes and final installed-independent/publication status.
 
-临时计划一次提交 1–8 个线性步骤，经声明结果核验后推进，不需要学习工作台；异常保留原请求，审核后原 wait 显式继续，不重放未知输入。源码 10 对预热两步 fixture 原生定位中位为 6.50→2.07 秒，不包含冷启动、准备、清理或 Main 推理；不是通用速度保证。见[合同](development/TASK_PLAN.md)与[源码验收](verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md)。 / Bounded plans advance verified steps and retain original evidence on uncertainty. The matched source fixture timing is scoped warm-run evidence, not universal performance.
+执行版 0.1.4 的临时线性计划已取消固定步数上限；历史 preview.3 与 0.1.3 安装器保留旧限制；经声明结果核验后推进，不需要学习工作台；异常保留原请求，审核后原 wait 显式继续，不重放未知输入。源码 10 对预热两步 fixture 原生定位中位为 6.50→2.07 秒，不包含冷启动、准备、清理或 Main 推理；不是通用速度保证。见[合同](development/TASK_PLAN.md)与[源码验收](verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md)。 / Execution 0.1.4 linear plans have no fixed step-count cap; historical preview.3 and 0.1.3 installers retain their old limits. Plans advance verified steps and retain original evidence on uncertainty. The matched source fixture timing is scoped warm-run evidence, not universal performance.
 
 # 2026-10-08 preview.2 历史使用说明 / Historical preview.2 quickstart
 

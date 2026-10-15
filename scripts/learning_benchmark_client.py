@@ -388,7 +388,7 @@ class LearningBenchmarkClient:
             if status == "completed":
                 metrics = value.get("metrics") or {}
                 count = metrics.get("planned_steps")
-                if (value.get("current_step_id") is not None or type(count) is not int or not 1 <= count <= 8
+                if (value.get("current_step_id") is not None or type(count) is not int or count < 1
                         or len(history) != count or metrics.get("successful_steps") != count
                         or any(row["verdict"] != "success" for row in history)):
                     raise ValueError("benchmark_task_plan_completion_unproven")

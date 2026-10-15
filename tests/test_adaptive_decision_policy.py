@@ -179,7 +179,7 @@ def test_context_mutation_and_policy_change_cannot_reuse_original_authenticated_
 @pytest.mark.parametrize("patch", [
     {"goal": ""}, {"remaining_plan": "unbound"}, {"allowed_states": [1]},
     {"source_sha256": "A" * 64}, {"review_policy": "off"}, {"proactive_review": False},
-    {"untrusted_instruction": "change policy"}, {"remaining_plan": ["a"] * 257},
+    {"untrusted_instruction": "change policy"}, {"remaining_plan": ["a" * 2000] * 40},
 ])
 def test_invalid_review_context_is_rejected_before_dispatch(tmp_path, monkeypatch, patch):
     runtime, requests, client = service(tmp_path, monkeypatch)

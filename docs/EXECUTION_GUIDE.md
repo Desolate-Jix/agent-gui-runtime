@@ -4,13 +4,13 @@
 
 ## Windows computer use with focused visual checks
 
-Agent Review Instant lets an MCP-compatible agent operate Windows applications: locate a target from a screenshot, click, replace text, press keys and scroll. The main agent supplies a short plan; the runtime executes supported steps in the same session and checks their results. This avoids returning to the main agent after every successful action.
+Agent Review Instant lets an MCP-compatible agent operate Windows applications: locate a target from a screenshot, click, replace text, press keys and scroll. The main agent supplies an explicit linear plan; the runtime executes supported steps in the same session and checks their results. This avoids returning to the main agent after every successful action.
 
-**Execution 0.1.3 is the current stable release.** The learning workbench is a separate, optional installation and remains at **0.1.0-preview.3**. API-based vision does **not** require local model weights or a local GPU.
+**Execution 0.1.4 passed scoped installed Notepad and 7-Zip workflows, including independent Sol acceptance.** Main completed three plans (3+3+6 steps); Sol completed two fresh plans (3+3 steps). All five completed automatically. See the [multi-application report](verification/MULTI_APP_EXECUTION_20261015.md) for timings, original failures and installation boundaries. The learning workbench remains a separate, optional **0.1.0-preview.3** component. API-based vision does **not** require local model weights or a local GPU.
 
-[Download the Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe) · [Release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3)
+[Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe) · [0.1.4 release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4)
 
-**Source update (version remains 0.1.3):** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. The 2026-10-15 rebuilt 0.1.3 installer includes these settings; reinstall to update an existing installation. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
+**Provider configuration in 0.1.4:** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer and remain in current source. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
 
 ## How Decision and the vision model work together
 
@@ -28,7 +28,7 @@ Target checks use cropped, annotated images, with an overview and target detail 
 
 ```mermaid
 flowchart TD
-    U([User gives a task]) --> M[Main agent creates a short plan]
+    U([User gives a task]) --> M[Main agent creates a linear plan]
     M --> C[Bind the target window and capture]
     C --> V[Vision model locates the target]
     V --> D{Decision checks the target}
@@ -49,7 +49,22 @@ flowchart TD
 
 Visual text entry combines **click → Ctrl+A → replace text**, verifies only the requested text, then reuses the field position for a fresh click-point check and **click → Enter**. It does not infer focus or classify empty fields. No screenshot or model call is inserted inside either combined action. See [visual input](development/VISUAL_EXECUTION_INPUT.md).
 
-## What changed in 0.1.3
+## 0.1.4: linear plans and non-browser source evidence
+
+Nonempty linear caller plans no longer have a fixed step-count cap. Each step still requires a unique ID, supported action and explicit verification. Context-size limits, evidence/window bindings, cancellation and API/time budgets remain; this does not grant unlimited execution or change learned-program loop guards.
+
+| Current source task | Result | Plan time |
+| --- | --- | ---: |
+| Notepad source01, edit → File → Save, first round | 3/3 automatically completed; disk UTF-8 alpha text matched exactly | 26.244 s |
+| Notepad source01, same-window second round | 3/3 automatically completed; disk UTF-8 beta text matched exactly | 30.715 s |
+| 7-Zip repaired source02, fresh 12-step navigation | 12/12 and the public-client terminal receipt completed automatically | 131.898 s |
+| 7-Zip source02, same-window 4-step continuation | 4/4 completed automatically | 46.382 s |
+
+Each app reused its own window, followed by verified owned-window closure and host cleanup. Repaired 7-Zip source02 has **16 successful history rows**, no Main review, **32 Decision calls, 16 grounding calls, 0 ordinary reviews and 126,868 API tokens** across those 16 steps only. Main inspected the bound final `journey_complete.txt` image. The task navigated directories and a prepared ZIP, including its inner file; it did not compress or extract. Notepad source01 predates the public-client repair and is not a source02 retest.
+
+The first 7-Zip failure remains a failure: step 8 text was falsely rejected without Enter, **101.139 s to failure**. A later source01 10-step backend completed, but the old public-client receipt cap caused `result_unknown`, **112.697 s to error**. The shared-client repair passed **140 checks across 5 modules in 12.54 s** before the fresh source02 live rerun. Earlier source contracts passed **382 checks across 12 files**, with **10 component tests** reported separately. Groups overlap and are not summed as unique tests. Source success does not establish installed or independent acceptance; those results belong in the release notes. See [current evidence and exact timings](verification/MULTI_APP_EXECUTION_20261015.md).
+
+## Historical changes in 0.1.3
 
 - Reuse the same observation when possible, preload a plan into one persistent client, optimize BGRA conversion and keep HTTP connections pooled for 60 seconds. The measured two-round installed task avoided **10 redundant outer screenshot captures**.
 - Use shorter page-result and entered-text questions selected through training, validation and held-out evaluation. Graphic-target and input-target questions, and configured thresholds, are unchanged.
@@ -57,13 +72,13 @@ Visual text entry combines **click → Ctrl+A → replace text**, verifies only 
 - Preserve useful grounding-failure diagnostics with credential and image-data redaction. Cancellation before input dispatch is recorded as zero input, rather than an unknown outcome.
 - Allow the main agent to inspect the evidence from a rejected completed step and explicitly continue the same run without repeating that action.
 
-## Measured speed, token use and limits
+## Historical 0.1.3 speed, token use and limits
 
-The task was **open Bing → search “Rust standard library collections documentation” → open the first ordinary result**, repeated twice in the same window and session.
+This historical 0.1.3 task was **open Bing → search “Rust standard library collections documentation” → open the first ordinary result**, repeated twice in the same window and session. It is not a 0.1.4 measurement.
 
 | Run | First round | Second round | API tokens across both rounds |
 | --- | ---: | ---: | ---: |
-| Current source | 33.218 s | 30.549 s | 41,173 |
+| 0.1.3 source | 33.218 s | 30.549 s | 41,173 |
 | Installed 0.1.3 candidate | **30.809 s** | **27.354 s** | **41,097** |
 
 Both installed rounds completed without main-agent intervention: **20 Decision calls, 6 grounding calls and 0 secondary Luna reviews** in total. These are complete-plan times for this task. They are not single-call response times or a controlled speedup comparison against an older version. Token totals cover runtime API calls, excluding the main and worker agents' subscription usage.
@@ -72,7 +87,7 @@ Cancellation and recovery were also tested. The main agent reviewed bound eviden
 
 The final selected execution regression passed **1,029 checks across 52 test files**. The package also passed isolated entrypoint/dependency checks and 43 package-contract checks; these groups are reported separately and are not summed as unique tests. First failures remain recorded. A repaired flow's successful rerun is not relabeled as first-attempt success. See the [timing and acceptance record](verification/EXECUTION_SPEED_20261015.md).
 
-### Prompt benchmark
+### Historical 0.1.3 prompt benchmark
 
 The benchmark contains **39 real UI screenshots, 30 scenario families and 254 AI-reviewed cases**, split by family into 104 training, 70 validation and 80 held-out cases. Each held-out case was run twice per strategy: 160 responses, not 160 independent scenarios.
 
@@ -98,7 +113,7 @@ Without Decision, use basic actions, compatible v1/v2 plans or explicit `field_e
 
 ## Install and configure
 
-Requires **Windows x64, Python 3.11 and [uv](https://docs.astral.sh/uv/getting-started/installation/)**. The installer supplies the maintained source and setup scripts; initial setup installs dependencies for the chosen route. Model weights and API keys are not bundled. Adjust the example paths to your installation. Historical Preview directory or shortcut names may remain for upgrade compatibility; the product version, installer and uninstall entry identify the stable release.
+Requires **Windows x64, Python 3.11 and [uv](https://docs.astral.sh/uv/getting-started/installation/)**. The installer supplies the maintained source and setup scripts; initial setup installs dependencies for the chosen route. Model weights and API keys are not bundled. Adjust the example paths to your installation. Historical Preview directory or shortcut names may remain for upgrade compatibility; the product version, installer and uninstall entry identify the component version. Consult the 0.1.4 release notes for installer acceptance status and checksums.
 
 For external Luna vision plus Decision:
 
@@ -126,7 +141,7 @@ Remove `-WhatIf` to perform local setup. Local use requires the official [VISTA-
 
 MCP stdio exposes seven core tools: `instant_start`, `instant_status`, `instant_run`, `instant_submit`, `instant_result`, `instant_image` and `instant_stop`, plus `instant_recovery_preview` and `instant_recover_session`.
 
-Keep one persistent session and one desktop input owner. Supported requests include single actions, combined input and linear plans. The current `task_plan` schema accepts 1–8 steps per submission; this is not a total action limit for a task or session. After a plan completes, subsequent plans can be submitted in the same session through normal admission. Wait expiry is not cancellation: poll the original request ID rather than replaying input. See the [agent guide](../AGENT_GUIDE.md), [task plans](development/TASK_PLAN.md) and [Decision configuration](development/DECISION_API.md).
+Keep one persistent session and one desktop input owner. Supported requests include single actions, combined input and linear plans. Execution 0.1.4 accepts nonempty linear plans without a fixed step-count cap, while retaining per-step validation, context-size limits, evidence checks, cancellation and API/time budgets. Existing 0.1.3 installations retain their build-time contract until explicitly upgraded. See [source checks](verification/UNBOUNDED_TASK_PLANS_20261015.md). Wait expiry is not cancellation: poll the original request ID rather than replaying input. See the [agent guide](../AGENT_GUIDE.md), [task plans](development/TASK_PLAN.md) and [Decision configuration](development/DECISION_API.md).
 
 The [learning workbench 0.1.0-preview.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3) captures reusable interfaces and workflows for human review and editing. It installs independently, is optional and is not updated in this release. See the [learning quickstart](LEARNING_PREVIEW_QUICKSTART.md).
 
@@ -134,7 +149,7 @@ Maintained code is organized around `app/execution` for plans and actions, `app/
 
 ## Release boundaries and history
 
-The installer is unsigned. Acceptance used an existing Python environment and does not prove dependency setup on a new machine. The 2026-10-15 installer rebuild adds independent provider configuration and the current bilingual guides. Earlier browser timings and model benchmarks describe the original accepted candidate and were not repeated for this rebuild. The release page records the rebuild source and checksums. Existing installations require an explicit upgrade. Neither execution nor learning promises unattended completion of arbitrary tasks.
+This guide records source-level Notepad and repaired 7-Zip success, alongside retained first failures. Installed and independent acceptance are reported separately in the release notes; source success does not establish those results or universal application support. The installer is unsigned, and checks with an existing Python environment do not prove dependency setup on a new machine. The 2026-10-15 0.1.3 rebuild first included independent provider configuration. Browser timings and model benchmarks above belong to 0.1.3 and are not reused as 0.1.4 measurements. Existing installations require an explicit upgrade. Neither execution nor learning promises unattended completion of arbitrary tasks.
 
 Earlier development failures and results remain in the [0.1.2 acceptance record](verification/EXECUTION_STABLE_012_20261012.md), [target-check diagnosis](verification/DECISION_TARGET_USAGE_20261013.md) and [0.1.3 verification record](verification/EXECUTION_SPEED_20261015.md). Earlier checkpoints describe their original state, not the current release status.
 

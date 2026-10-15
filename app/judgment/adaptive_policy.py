@@ -12,9 +12,9 @@ def normalize_review_context(value):
     for key, maximum in (("goal", 4000), ("step_goal", 4000), ("source_id", 200)):
         if key in value and (not isinstance(value[key], str) or not value[key].strip() or len(value[key]) > maximum):
             raise ValueError("decision_review_context_text_invalid")
-    for key, count, maximum in (("remaining_plan", 256, 2000), ("allowed_states", 32, 1000)):
+    for key, count, maximum in (("remaining_plan", None, 2000), ("allowed_states", 32, 1000)):
         items = value[key]
-        if (not isinstance(items, list) or len(items) > count
+        if (not isinstance(items, list) or count is not None and len(items) > count
                 or any(not isinstance(item, str) or not item.strip() or len(item) > maximum for item in items)):
             raise ValueError("decision_review_context_list_invalid")
     if "source_sha256" in value and (not isinstance(value["source_sha256"], str)

@@ -66,6 +66,7 @@ class TaskPlanBackend:
         if owner_id is not None and (not isinstance(owner_id, str) or not owner_id.strip() or len(owner_id) > 160):
             raise ValueError("task_plan_owner_invalid")
         self.owner_id = owner_id
+        self._validated_plan_sha256 = None
         with _LOCKS_GUARD:
             self._mutex = _LOCKS.setdefault(str(self.root), RLock())
 
@@ -126,7 +127,12 @@ class TaskPlanBackend:
 
     def _source(self, state):
         source = _read(self._source_path(state["plan_id"]))
-        plan = validate_task_plan(source.get("plan"))
+        plan = source.get("plan")
+        plan_sha256 = _digest(plan)
+        # 只复用相同内容的结构校验；源文件、身份和条件绑定每次仍完整认证。
+        if plan_sha256 != self._validated_plan_sha256:
+            plan = validate_task_plan(plan)
+            self._validated_plan_sha256 = plan_sha256
         target = validate_task_plan_target(source.get("target_identity"))
         identity = [str(self.session), source.get("owner_id"), plan, target]
         if source.get("successor") is not None:
@@ -141,7 +147,7 @@ class TaskPlanBackend:
                 or source.get("source_kind") != self.source_kind
                 or source.get("session_directory") != str(self.session)
                 or source.get("plan_id") != expected_id or state.get("plan_id") != expected_id
-                or source.get("plan_sha256") != _digest(plan)
+                or source.get("plan_sha256") != plan_sha256
                 or state.get("plan_sha256") != source["plan_sha256"]
                 or state.get("owner_id") != source.get("owner_id")
                 or state.get("recovery_policy", "legacy") != policy
@@ -183,7 +189,7 @@ class TaskPlanBackend:
                 raise ValueError("task_plan_pending_ticket_mismatch")
             step = next(item for item in source["plan"]["steps"] if item["step_id"] == pending["step_id"])
             expected_id = self._execution_id(run_id, step["step_id"], state.get("step_attempts", {}).get(step["step_id"], 0))
-            command = self._bound_command(state, step, pending.get("vision_capabilities"))
+            command = self._bound_command(state, step, pending.get("vision_capabilities"), source=source)
             if (pending.get("execution_request_id") != expected_id or pending.get("suggested_command") != command
                     or pending.get("command_sha256") != _digest(command)
                     or pending.get("preview") != self._preview(state, step)):
@@ -211,7 +217,7 @@ class TaskPlanBackend:
             if not isinstance(result, dict) or not tickets:
                 raise ValueError("task_plan_settlement_binding_invalid")
             result_hash = _digest(result)
-            command_hash = _digest(self._bound_command(state, step, tickets[0].get("vision_capabilities")))
+            command_hash = _digest(self._bound_command(state, step, tickets[0].get("vision_capabilities"), source=source))
             expected = {"step_id": step["step_id"], "execution_request_id": execution_id,
                         "judged_by": result.get("judged_by"), "verification_request_id": request_id,
                         "verification_result_sha256": result_hash, "command_sha256": command_hash,
@@ -278,9 +284,9 @@ class TaskPlanBackend:
             command["observation_wait_ms"] = verification["render_grace_ms"]
         return command
 
-    def _bound_command(self, state, step, vision_capabilities=None):
+    def _bound_command(self, state, step, vision_capabilities=None, *, source=None):
         command = self._command(step, state["inputs"], vision_capabilities)
-        plan = self._source(state)["plan"]
+        plan = (self._source(state) if source is None else source)["plan"]
         if plan["schema_version"] == "task_plan.v3" and step["action"]["kind"] in {"click", "input_sequence"}:
             command["action_review"] = {"schema": "action_review_context.v1", "plan": deepcopy(plan),
                 "step_id": step["step_id"], "run_id": state["run_id"],

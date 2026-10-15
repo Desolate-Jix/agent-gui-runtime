@@ -2,7 +2,7 @@
 
 [简体中文](DECISION_PROVIDERS.zh-CN.md) · [Home](../../README.md)
 
-**Included in the 2026-10-15 rebuilt installer; version remains 0.1.3.** Download and reinstall the updated execution installer to use these settings. Earlier 0.1.3 installers do not include them. The release page records the build source and SHA256; the learning component is unchanged.
+**Available in execution 0.1.4.** The installed default OpenAI/Luna route passed scoped Main and independent Sol workflows in Notepad and 7-Zip; this does not certify every replacement provider. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer; earlier 0.1.3 installers do not include them. Existing installations require an explicit upgrade. The learning component remains **0.1.0-preview.3**, unchanged. See the [current execution guide](../EXECUTION_GUIDE.md).
 
 Decision and secondary review now have independent endpoints, model IDs and credential environment variables. Visual grounding still uses its separate [vision API profile](EXTERNAL_VISION_API.md). Replacing one layer does not change the other layers.
 

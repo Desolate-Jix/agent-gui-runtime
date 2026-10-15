@@ -35,10 +35,9 @@ def test_caller_plan_cannot_claim_learning_review(field, value):
         validate_task_plan(value_plan)
 
 
-@pytest.mark.parametrize("count", [0, 9])
-def test_plan_step_count_is_bounded(count):
+def test_plan_requires_at_least_one_step():
     with pytest.raises(ValueError, match="steps_invalid"):
-        validate_task_plan(plan(count=count))
+        validate_task_plan(plan(count=0))
 
 
 @pytest.mark.parametrize("mutation", ["duplicate", "coordinates", "target_memory", "dynamic", "read_spec"])

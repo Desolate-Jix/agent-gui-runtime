@@ -186,7 +186,7 @@ def validate_task_plan(value: dict) -> dict:
                 or type(item) is float and not isfinite(item)):
             raise ValueError("task_plan_input_value_invalid")
     steps = value["steps"]
-    if not isinstance(steps, list) or not 1 <= len(steps) <= 8:
+    if not isinstance(steps, list) or not steps:
         raise ValueError("task_plan_steps_invalid")
     seen = set()
     for step in steps:

@@ -224,7 +224,8 @@ class WorkflowRunner:
         step_id, command_id = prepared.get("step_id"), prepared.get("execution_request_id")
         if not _text(step_id) or not _text(command_id):
             raise ValueError("workflow_runner_ticket_invalid")
-        if step_id in state["seen_steps"] or len(state["seen_steps"]) >= 256:
+        if (step_id in state["seen_steps"]
+                or self.source_kind != "caller_plan" and len(state["seen_steps"]) >= 256):
             self._wait(state, "failed")
             return False
         command = deepcopy(prepared["suggested_command"])
@@ -376,7 +377,8 @@ class WorkflowRunner:
                 self._wait(state, "uncertain" if trial.get("status") == "paused_uncertain" else "failed")
                 return
             step_id = trial.get("current_step_id")
-            if not _text(step_id) or step_id in state["seen_steps"] or len(state["seen_steps"]) >= 256:
+            if (not _text(step_id) or step_id in state["seen_steps"]
+                    or self.source_kind != "caller_plan" and len(state["seen_steps"]) >= 256):
                 self._wait(state, "failed")
                 return
             request_id = "wr-prepare-" + _digest([state["run_id"], step_id, len(state["seen_steps"]) + 1]
@@ -392,6 +394,9 @@ class WorkflowRunner:
                 return
             if not allow_new_dispatch:
                 return
+        if self.source_kind == "caller_plan":
+            # 单次调度批次用尽只让出执行权，后续 tick 继续原计划。
+            return
         self._wait(state, "failed")
 
     def _submit_ticket(self, state):

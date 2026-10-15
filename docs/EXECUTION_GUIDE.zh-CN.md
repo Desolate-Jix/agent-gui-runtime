@@ -4,13 +4,13 @@
 
 ## 通过视觉核验执行 Windows 桌面任务
 
-Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图定位目标，执行点击、替换输入、按键和滚动。主 Agent 提供一个短计划，运行时在同一会话中执行受支持的步骤并核验结果，减少每次成功操作后都返回主 Agent 的等待。
+Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图定位目标，执行点击、替换输入、按键和滚动。主 Agent 提供一份明确的线性计划，运行时在同一会话中执行受支持的步骤并核验结果，减少每次成功操作后都返回主 Agent 的等待。
 
-**当前执行正式版为 0.1.3。** 学习工作台独立安装，是可选组件，版本保持 **0.1.0-preview.3**。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
+**执行版 0.1.4 已通过限定范围的记事本与 7-Zip 安装态流程，包括 Sol 独立验收。** Main 完成三个计划（3+3+6 步），Sol 完成两个全新计划（3+3 步），五个计划均自动完成。耗时、原始失败与安装验收边界见[多应用报告](verification/MULTI_APP_EXECUTION_20261015.md)。学习工作台仍为独立、可选的 **0.1.0-preview.3** 组件。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
 
-[下载 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe) · [发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3)
+[Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe) · [0.1.4 发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4)
 
-**源码更新（版本仍为 0.1.3）：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。2026-10-15 重打包的 0.1.3 安装器已包含这些配置；已有安装需要重新下载安装。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
+**0.1.4 的服务配置：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器，当前源码继续保留。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
 
 ## Decision 和视觉模型如何配合
 
@@ -28,7 +28,7 @@ Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图�
 
 ```mermaid
 flowchart TD
-    U([用户下达任务]) --> M[主 Agent 给出短计划]
+    U([用户下达任务]) --> M[主 Agent 给出线性计划]
     M --> C[绑定目标窗口并截图]
     C --> V[视觉模型定位目标]
     V --> D{Decision 审核目标}
@@ -49,7 +49,22 @@ flowchart TD
 
 视觉输入将 **点击 → Ctrl+A → 替换文字** 绑定为连续动作，只核验规定文字，再复用字段位置重新审核点击点，执行 **点击 → Enter**。不推断焦点，不判断空框，两组连续动作内部均不插入截图或模型调用。详见 [视觉输入说明](development/VISUAL_EXECUTION_INPUT.md)。
 
-## 0.1.3 更新了什么
+## 0.1.4：线性计划与非浏览器源码实测
+
+非空线性调用方计划不再设置固定步数上限。每一步仍须具有唯一 ID、受支持的动作和明确核验；内容大小、证据／窗口绑定、取消及 API／时间预算继续有效，不代表无限执行，也不改变已学习程序的循环保护。
+
+| 当前源码任务 | 结果 | 计划耗时 |
+| --- | --- | ---: |
+| 记事本 source01 第一轮：编辑 → File → Save | 3/3 自动完成，磁盘 UTF-8 alpha 内容完全匹配 | 26.244 秒 |
+| 记事本 source01 同窗口第二轮 | 3/3 自动完成，磁盘 UTF-8 beta 内容完全匹配 | 30.715 秒 |
+| 7-Zip 修复后 source02 全新 12 步导航 | 12/12 及公共客户端终态回执均自动完成 | 131.898 秒 |
+| 7-Zip source02 同窗口后续 4 步 | 4/4 自动完成 | 46.382 秒 |
+
+每个软件均复用各自窗口，随后本轮窗口关闭及宿主收尾通过。修复后 7-Zip source02 的 **16 条历史全部成功**，无需 Main 审核；这 16 步合计 **32 次 Decision、16 次定位、0 次普通复核、126,868 个 API token**。Main 已目视核对绑定的 `journey_complete.txt` 末图。任务只导航目录及预制 ZIP，包含内部文件，没有压缩或解压。记事本 source01 早于公共客户端修复，不冒充 source02 复测。
+
+首次 7-Zip 失败继续保留：第 8 步文字误拒，未按 Enter，**101.139 秒至失败**。之后 source01 的 10 步后端完成，但公共客户端旧回执限制导致 `result_unknown`，**112.697 秒至异常**。共用客户端修复在全新 source02 实机复测前通过 **5 个模块、140 项检查，耗时 12.54 秒**。此前源码合同共 **12 个文件、382 项检查通过**，另行报告 **10 项组件测试**；分组有重叠，不相加为独立用例总数。源码成功不代表安装态或独立验收通过，相关结果见发布说明。详见[本轮证据与精确计时](verification/MULTI_APP_EXECUTION_20261015.md)。
+
+## 0.1.3 历史改进
 
 - 在适用时复用同次观察，将计划预装到同一个持续连接的客户端，优化 BGRA 转换，并让 HTTP 连接池保留连接 60 秒。安装版两轮实测减少了 **10 次外层重复截图**。
 - 通过训练集、验证集和保留集评测，采用更短的页面结果、输入内容问句。图形目标和输入目标问句、配置阈值保持不变。
@@ -57,13 +72,13 @@ flowchart TD
 - 保留有用的定位失败诊断，并对凭证和图片数据脱敏。派发输入前取消会记录为零输入，不再被误记为结果未知。
 - 当已完成步骤被模型误拒时，主 Agent 可以审核原证据，明确继续原运行，避免重复执行已完成动作。
 
-## 实测速度、token 用量与限制
+## 0.1.3 历史速度、token 用量与限制
 
-测试任务为 **打开 Bing → 搜索“Rust standard library collections documentation”→ 打开第一个普通结果**，在同一窗口、同一会话中连续运行两轮。
+以下 0.1.3 历史任务为 **打开 Bing → 搜索“Rust standard library collections documentation”→ 打开第一个普通结果**，在同一窗口、同一会话中连续运行两轮，不是 0.1.4 测量。
 
 | 测试版本 | 第一轮 | 第二轮 | 两轮 API token 合计 |
 | --- | ---: | ---: | ---: |
-| 当前源码 | 33.218 秒 | 30.549 秒 | 41,173 |
+| 0.1.3 源码 | 33.218 秒 | 30.549 秒 | 41,173 |
 | 0.1.3 安装候选 | **30.809 秒** | **27.354 秒** | **41,097** |
 
 安装版两轮均无主 Agent 接管，合计调用 **20 次 Decision、6 次视觉定位、0 次普通 Luna 复核**。这些是该任务的完整计划耗时，不是单次 API 响应时间，也不是与旧版本的受控提速对比。token 合计仅包含运行时 API 调用，不含主 Agent、工作子 Agent 的套餐用量。
@@ -72,7 +87,7 @@ flowchart TD
 
 最终选定的执行回归覆盖 **52 个测试文件，1,029 项检查通过**。交付包还通过了隔离环境中的真实入口及依赖检查、43 项包契约检查；各组分开报告，不相加为独立用例总数。首次失败记录保留；修复后复测成功不会改记为首次通过。详见 [计时与验收记录](verification/EXECUTION_SPEED_20261015.md)。
 
-### 提示词 benchmark
+### 0.1.3 历史提示词 benchmark
 
 评测包含 **39 张真实界面截图、30 个场景族、254 项经过 AI 复核的案例**，按场景族划分为 104 项训练、70 项验证和 80 项保留案例。每个保留案例在每种策略下运行两次，因此是 160 次返回，不是 160 个独立场景。
 
@@ -98,7 +113,7 @@ flowchart TD
 
 ## 安装与配置
 
-要求 **Windows x64、Python 3.11 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)**。安装器提供维护源码与配置脚本；首次配置按所选路线安装依赖，不附带模型权重或 API 密钥。请按实际安装位置调整示例路径。为兼容升级，目录或快捷方式可能保留历史 Preview 名称；产品版本、安装窗口及卸载条目会标明正式版。
+要求 **Windows x64、Python 3.11 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)**。安装器提供维护源码与配置脚本；首次配置按所选路线安装依赖，不附带模型权重或 API 密钥。请按实际安装位置调整示例路径。为兼容升级，目录或快捷方式可能保留历史 Preview 名称；产品版本、安装窗口及卸载条目会标明组件版本。安装器验收状态及校验值见 0.1.4 发布说明。
 
 使用外部 Luna 视觉 API 和 Decision：
 
@@ -126,7 +141,7 @@ flowchart TD
 
 MCP stdio 提供七个核心工具：`instant_start`、`instant_status`、`instant_run`、`instant_submit`、`instant_result`、`instant_image`、`instant_stop`，另有 `instant_recovery_preview` 和 `instant_recover_session` 两个恢复工具。
 
-保持同一会话、同一桌面输入所有者。支持单步动作、组合输入和线性计划。当前 `task_plan` 协议每次提交接收 1–8 步，这不是整个任务或会话的总动作上限；计划完成后，可在同一会话中通过正常准入提交后续计划。等待到期不等于取消；应查询原请求 ID，避免重放输入。详见 [Agent 指南](../AGENT_GUIDE.md)、[任务计划](development/TASK_PLAN.md) 和 [Decision 配置](development/DECISION_API.md)。
+保持同一会话、同一桌面输入所有者。支持单步动作、组合输入和线性计划。执行版 0.1.4 接收非空线性计划，不设固定步数上限；逐步校验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在明确升级前保留构建时协议。见[源码验证](verification/UNBOUNDED_TASK_PLANS_20261015.md)。等待到期不等于取消；应查询原请求 ID，避免重放输入。详见 [Agent 指南](../AGENT_GUIDE.md)、[任务计划](development/TASK_PLAN.md) 和 [Decision 配置](development/DECISION_API.md)。
 
 [学习工作台 0.1.0-preview.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3) 用于采集可复用界面和工作流，供人工审核、修改。它独立安装、可选使用，本次不更新。详见 [学习版快速开始](LEARNING_PREVIEW_QUICKSTART.md)。
 
@@ -134,7 +149,7 @@ MCP stdio 提供七个核心工具：`instant_start`、`instant_status`、`insta
 
 ## 发布边界与历史记录
 
-安装器未签名。本轮验收使用已有 Python 环境，尚未证明全新机器的依赖安装流程。2026-10-15 重打包的安装器加入独立服务配置和当前中英文指南。此前浏览器计时及模型评测描述原验收候选，本次重打包没有重跑这些测量。发布页记录重打包源码与校验值。已有安装需要手动升级。执行模式与学习模式均不承诺任意任务无人干预完成。
+本指南记录记事本与修复后 7-Zip 的源码成功，并保留首次失败；安装态及独立验收分别由发布说明记录，源码成功不代表这些验收通过，也不代表所有应用均受支持。安装器未签名，使用已有 Python 环境的检查不能证明全新机器的依赖安装流程。2026-10-15 的 0.1.3 重打包首次加入独立服务配置；上文浏览器计时及模型评测属于 0.1.3，不套用为 0.1.4 测量。已有安装需要明确升级。执行模式与学习模式均不承诺任意任务无人干预完成。
 
 历史开发失败与结果保留在 [0.1.2 验收记录](verification/EXECUTION_STABLE_012_20261012.md)、[目标审核诊断](verification/DECISION_TARGET_USAGE_20261013.md) 和 [0.1.3 验证记录](verification/EXECUTION_SPEED_20261015.md)。历史检查点描述当时状态，不代表当前发布状态。
 

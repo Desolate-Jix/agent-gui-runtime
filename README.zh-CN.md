@@ -14,13 +14,15 @@
 视觉模型定位目标，Decision 核验当前步骤。<br>
 通过后继续执行；未解决的问题交回原主 Agent。
 
-**[下载 v0.1.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe)** · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
+**[下载 v0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe)** · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
+
+**0.1.4 安装版已通过记事本与 7-Zip 实测。** 独立 Sol 任务也已通过，卸载收尾边界见发布说明。
 
 </div>
 
-Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Agent 给出一个短计划，它就可以在应用中导航、点击目标、替换文字、按键和滚动。受支持的步骤在同一会话中执行并核验结果，减少每次成功操作后都返回主 Agent 的等待。
+Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Agent 给出一份明确的线性计划，它就可以在应用中导航、点击目标、替换文字、按键和滚动。受支持的步骤在同一会话中执行并核验结果，减少每次成功操作后都返回主 Agent 的等待。
 
-**使用外部视觉 API，不需要本地模型权重或 GPU。** 你可以选择外部视觉 API、支持图像的 Agent，或者本地模型。**执行正式版 0.1.3** 可独立安装；**学习工作台 0.1.0-preview.3** 是可选组件。
+**使用外部视觉 API，不需要本地模型权重或 GPU。** 你可以选择外部视觉 API、支持图像的 Agent，或者本地模型。**执行运行时 0.1.4** 为独立组件；**学习工作台 0.1.0-preview.3** 仍为可选组件，本次不更新。
 
 ## 能做什么
 
@@ -35,7 +37,7 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 需要 **Windows x64、Python 3.11、[uv](https://docs.astral.sh/uv/getting-started/installation/)** 和支持 MCP 的 Agent。安装器提供源码及配置脚本，首次配置时安装依赖，不附带密钥或模型权重。
 
-1. **[下载安装执行版 0.1.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3)。** 发布页同时提供校验文件。
+1. **[下载安装执行版 0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4)。** 校验文件及安装态／独立验收状态见发布说明。
 2. **选择视觉来源。** 使用外部 Luna + Decision 时，复制[视觉配置](configs/vision-api-openai-luna.example.json)和 [Decision 配置](configs/decision-profile.visual-execution.example.json)，让 MCP 进程能够读取 `OPENAI_API_KEY`。
 3. **运行配置脚本，接入 Agent。** 按[安装命令](docs/EXECUTION_GUIDE.zh-CN.md#安装与配置)操作，将生成的 `agent-review-instant` MCP 条目合并到客户端后重新连接，保留其他服务器条目。
 
@@ -47,21 +49,28 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 默认视觉组合输入需要 Decision 的 auto 模式可用。不配置 Decision 时，仍可使用基础动作和显式 legacy／原生路线，由主 Agent 核验；运行时不会静默切换路线。所有路线都需要本机 Windows 运行时，API 服务商按实际用量收费。
 
-**源码更新（版本仍为 0.1.3）：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna。替换服务须兼容 Decisions／Responses 协议；2026-10-15 重打包的 0.1.3 安装器已包含这些配置，已有安装需要重新下载安装。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
+**0.1.4 的服务配置：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna；替换服务须兼容 Decisions／Responses 协议。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器，当前源码继续保留。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
 
 <a id="evaluation"></a>
 ## 工程验证与实测
 
-**同一个完整浏览器任务，连续运行两轮：** 打开 Bing → 搜索“Rust standard library collections documentation”→ 打开第一个普通结果。两轮均使用已安装的 0.1.3 候选，沿用同一窗口和会话。
+**0.1.4 安装版，浏览器之外的任务：** 通过维护的视觉执行路线，在记事本和 7-Zip 中使用全新内容。
 
-| 完整计划耗时 · 第一／二轮 | API token · 两轮合计 | 发布前回归 |
-| :---: | :---: | :---: |
-| **30.8 秒／27.4 秒** | **41,097** | **1,029 项检查通过** |
-| 精确值：30.809 秒／27.354 秒 | 20 次 Decision + 6 次定位 | 52 个选定测试文件 |
+| 任务 | 实际结果 | 计划耗时 |
+| --- | --- | ---: |
+| 记事本第一轮：编辑 → File → Save | 3 步全部自动完成，保存的 UTF-8 alpha 内容完全匹配 | 30.621 秒 |
+| 记事本同窗口第二轮 | 3 步全部自动完成，保存的 UTF-8 beta 内容完全匹配 | 22.873 秒 |
+| 7-Zip：A → nested → Up → root → B → bundle.zip | 6 步全部自动完成，压缩包内 package 目录可见 | 69.515 秒 |
 
-两轮均没有主 Agent 接管，也没有调用普通 Luna 复核。这是指定任务的完整计划用时，**不是与旧版进行受控对比得出的提速数据**。API token 不含主 Agent 和工作子 Agent 的套餐用量。检查数量是 0.1.3 发布时的快照，不代表实时 CI 状态。[查看计时、取消与恢复证据 →](docs/verification/EXECUTION_SPEED_20261015.md)
+安装版 12 步全部无 Main 审核完成，一次普通复核自动解决。本轮窗口关闭及宿主收尾通过。独立 Sol 随后完成全新记事本 3 步和 7-Zip 3 步任务，磁盘／原图核对及收尾通过。7-Zip 范围为目录及预制 ZIP 导航，没有测试压缩或解压。
 
-提示词评测包含 **39 张真实界面截图、30 个场景族**。保留集三分类标签一致率由 **92.5% 提升至 95.0%**，Decision 输入 token 减少 **1.64%**。通过／不通过准确率仍为 95%；两级最终结果仍为 149/160，当前提示词下包含 7 次误放和 1 次误拒。标签由 AI 复核，**这些数据不等于通用 GUI 任务成功率**。[查看方法、数据划分与失败案例 →](docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md)
+**实录演示：** [记事本](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)。两段均为 **1× 原速**，仅去除任务间人工检查空档；完整操作和模型等待均保留，无旁白。
+
+另有 source02 的 **12 步计划及后续 4 步**证据。非空线性计划不设固定步数上限，预算及证据检查继续有效。此前源码误拒及公共客户端回执上限导致的失败，继续记为失败。[本轮结果、精确计时及失败历史 →](docs/verification/MULTI_APP_EXECUTION_20261015.md) · [长计划回归 →](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
+
+**0.1.3 历史浏览器任务：** 安装候选在同一窗口／会话中两轮完成 Bing → Rust collections 文档，耗时 **30.809 秒／27.354 秒**，使用 **41,097 个 API token**，无 Main 接管或普通 Luna 复核。这些是历史指定任务耗时，不构成受控提速比较；token 不含 Main／worker 套餐用量。[计时与恢复证据 →](docs/verification/EXECUTION_SPEED_20261015.md) · [逐操作拆分 →](docs/verification/EXECUTION_OPERATION_TIMINGS_20261015.md)
+
+0.1.3 历史提示词评测包含 **39 张真实界面截图、30 个场景族**。保留集三分类标签一致率由 **92.5% 提升至 95.0%**，Decision 输入 token 减少 **1.64%**。通过／不通过准确率仍为 95%；两级最终结果仍为 149/160，当前提示词下包含 7 次误放和 1 次误拒。标签由 AI 复核，**这些数据不等于通用 GUI 任务成功率**。[查看方法、数据划分与失败案例 →](docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md)
 
 <a id="architecture"></a>
 ## 如何运行
@@ -84,6 +93,8 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 ## 当前限制
 
+- **0.1.4 线性计划：** 非空计划不设固定步数上限；唯一步骤 ID、逐步核验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在升级前保留构建时协议。[源码验证](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
+
 - 模型可能误拒，也可能误放。第一层误放会跳过二次复核，这是已知限制；不承诺任意任务都能无人干预完成。
 - 安装器未签名。本轮验收使用已有 Python 环境，尚未验证全新机器的首次依赖安装。[发布范围与历史记录](docs/EXECUTION_GUIDE.zh-CN.md#发布边界与历史记录)
 
@@ -94,7 +105,7 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 | [安装指南](FRIEND_SETUP.md) | [执行详细指南与完整流程图](docs/EXECUTION_GUIDE.zh-CN.md) |
 | [Agent / MCP 指南](AGENT_GUIDE.md) | [Decision API 配置](docs/development/DECISION_API.md) |
 | [外部视觉 API](docs/development/EXTERNAL_VISION_API.md) | [视觉文字输入](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3) | [计时与验收记录](docs/verification/EXECUTION_SPEED_20261015.md) |
+| [0.1.4 发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4) | [本轮多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 

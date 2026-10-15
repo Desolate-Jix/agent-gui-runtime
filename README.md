@@ -14,13 +14,15 @@
 Visual grounding finds the target. Decision checks the current step.<br>
 Successful steps continue; unresolved cases return to your agent.
 
-**[Download v0.1.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe)** · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
+**[Download v0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe)** · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
+
+**0.1.4 installed: Notepad and 7-Zip verified.** Independent Sol tasks also passed; release notes record the cleanup boundary.
 
 </div>
 
-Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents. Give it a short plan to navigate an application, click targets, replace text, press keys or scroll. It executes supported steps in one session and checks their results, reducing the need to return to the main agent after every successful action.
+Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents. Give it an explicit linear plan to navigate an application, click targets, replace text, press keys or scroll. It executes supported steps in one session and checks their results, reducing the need to return to the main agent after every successful action.
 
-**API vision needs no local model weights or GPU.** Use an external vision API, your image-capable agent, or a local model. The **execution runtime 0.1.3** installs independently; the **learning workbench 0.1.0-preview.3** is optional.
+**API vision needs no local model weights or GPU.** Use an external vision API, your image-capable agent, or a local model. The **execution runtime 0.1.4** is a separate component; the **learning workbench 0.1.0-preview.3** remains optional and unchanged.
 
 ## What you can do
 
@@ -35,7 +37,7 @@ Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents
 
 You need **Windows x64, Python 3.11, [uv](https://docs.astral.sh/uv/getting-started/installation/)** and an MCP-compatible agent. The installer includes source and setup scripts; first-time setup installs dependencies. Keys and model weights are not bundled.
 
-1. **[Download and install execution 0.1.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3).** The release page includes checksums.
+1. **[Download and install execution 0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4).** Check the release notes for checksums and installed/independent acceptance status.
 2. **Choose your vision source.** For external Luna + Decision, copy the [vision profile](configs/vision-api-openai-luna.example.json) and [Decision profile](configs/decision-profile.visual-execution.example.json), then make `OPENAI_API_KEY` available to the MCP process.
 3. **Run setup and connect your agent.** Follow the [setup commands](docs/EXECUTION_GUIDE.md#install-and-configure), merge the generated `agent-review-instant` MCP entry into your client, and reconnect. Keep other server entries intact.
 
@@ -47,21 +49,28 @@ You need **Windows x64, Python 3.11, [uv](https://docs.astral.sh/uv/getting-star
 
 Default visual input sequences require Decision in auto mode. Without Decision, basic actions and explicit legacy/native routes remain available with main-agent review; the runtime does not silently switch routes. All routes require the local Windows runtime. API usage is billed by the provider.
 
-**Source update (version remains 0.1.3):** Decision and secondary review each support their own endpoint, model and key environment variable. Defaults remain OpenAI Decisions + ordinary Luna. This requires Decisions/Responses-compatible services; the 2026-10-15 rebuilt 0.1.3 installer includes these settings. Reinstall to update an existing installation. [Configuration and compatibility →](docs/development/DECISION_PROVIDERS.md)
+**Provider configuration in 0.1.4:** Decision and secondary review each support their own endpoint, model and key environment variable. Defaults remain OpenAI Decisions + ordinary Luna; replacements require Decisions/Responses-compatible services. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer and remain in current source. [Configuration and compatibility →](docs/development/DECISION_PROVIDERS.md)
 
 <a id="evaluation"></a>
 ## Engineering evidence
 
-**A complete browser task, measured twice:** open Bing → search “Rust standard library collections documentation” → open the first ordinary result. Both rounds used the installed 0.1.3 candidate in the same window and session.
+**0.1.4 installed, beyond the browser:** fresh Notepad and 7-Zip tasks used the maintained visual execution route.
 
-| Full-plan time · first / second round | API tokens · both rounds | Release regression |
-| :---: | :---: | :---: |
-| **30.8 s / 27.4 s** | **41,097** | **1,029 checks passed** |
-| Exact: 30.809 s / 27.354 s | 20 Decision + 6 grounding calls | 52 selected test files |
+| Task | Observed result | Plan time |
+| --- | --- | ---: |
+| Notepad, first round: edit → File → Save | All 3 steps completed automatically; saved UTF-8 alpha content matched exactly | 30.621 s |
+| Notepad, same-window second round | All 3 steps completed automatically; saved UTF-8 beta content matched exactly | 22.873 s |
+| 7-Zip: A → nested → Up → root → B → bundle.zip | All 6 steps completed automatically; the archive's package folder was visible | 69.515 s |
 
-Both rounds finished without main-agent intervention or secondary Luna review. These are task-specific plan times, **not a controlled speedup against an older release**. API totals exclude the main and worker agents' subscription usage. The test count is the 0.1.3 release snapshot, not a live CI status. [Timing, cancellation and recovery evidence →](docs/verification/EXECUTION_SPEED_20261015.md)
+All 12 installed steps completed without Main review; one ordinary review resolved automatically. Owned-window closure and host cleanup passed. Independent Sol then completed fresh 3-step Notepad and 3-step 7-Zip tasks, with disk/image checks and cleanup. The 7-Zip scope is directory/prepared-ZIP navigation; compression and extraction were not tested.
 
-Prompt evaluation used **39 real UI screenshots across 30 scenario families**. On the held-out set, three-way label agreement rose from **92.5% to 95.0%**, with **1.64% fewer Decision input tokens**. Pass/nonpass accuracy stayed at 95%; the two-stage result stayed at 149/160, including 7 false accepts and 1 false rejection with the adopted prompts. Labels were AI-reviewed: **these are not general GUI success rates**. [Method, split and failure cases →](docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md)
+**Recorded demos:** [Notepad](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4). Both play at **1× speed**, with only manual-inspection gaps between tasks removed. All operations and model waiting remain; there is no narration.
+
+Separate source02 evidence covers a **12-step plan plus 4-step continuation**. Nonempty linear plans have no fixed step-count cap; budgets and evidence checks remain. Earlier source false rejection and public-client receipt-cap failures remain recorded as failures. [Current results, exact timings and failure history →](docs/verification/MULTI_APP_EXECUTION_20261015.md) · [Long-plan regression →](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
+
+**Historical 0.1.3 browser task:** the installed candidate completed Bing → Rust collections documentation twice in the same window/session, in **30.809 s / 27.354 s**, using **41,097 API tokens**, without Main intervention or ordinary Luna review. These are historical task-specific times, not a controlled speed comparison; token totals exclude Main/worker subscription usage. [Timing and recovery evidence →](docs/verification/EXECUTION_SPEED_20261015.md) · [Operation breakdown →](docs/verification/EXECUTION_OPERATION_TIMINGS_20261015.md)
+
+Historical 0.1.3 prompt evaluation used **39 real UI screenshots across 30 scenario families**. On the held-out set, three-way label agreement rose from **92.5% to 95.0%**, with **1.64% fewer Decision input tokens**. Pass/nonpass accuracy stayed at 95%; the two-stage result stayed at 149/160, including 7 false accepts and 1 false rejection with the adopted prompts. Labels were AI-reviewed: **these are not general GUI success rates**. [Method, split and failure cases →](docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md)
 
 <a id="architecture"></a>
 ## How it works
@@ -84,6 +93,8 @@ Capture reusable interfaces and workflows, then review and edit them before reus
 
 ## Current limits
 
+- **0.1.4 linear plans:** nonempty plans have no fixed step-count cap. Unique step IDs, per-step verification, context-size limits, evidence checks, cancellation and API/time budgets remain. Existing 0.1.3 installations retain their build-time contract until upgraded. [Source checks](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
+
 - Models can reject correct evidence or accept incorrect evidence. A primary false pass skips secondary review; this remains a known limitation. Arbitrary unattended tasks are not guaranteed.
 - The installer is unsigned. Acceptance used an existing Python environment; first-time dependency setup on a clean machine is not yet verified. [Release scope and history](docs/EXECUTION_GUIDE.md#release-boundaries-and-history)
 
@@ -94,7 +105,7 @@ Capture reusable interfaces and workflows, then review and edit them before reus
 | [Installation guide](FRIEND_SETUP.md) | [Execution guide and detailed flow](docs/EXECUTION_GUIDE.md) |
 | [Agent / MCP guide](AGENT_GUIDE.md) | [Decision API configuration](docs/development/DECISION_API.md) |
 | [External vision API](docs/development/EXTERNAL_VISION_API.md) | [Visual text input](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [Release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3) | [Timing and acceptance](docs/verification/EXECUTION_SPEED_20261015.md) |
+| [0.1.4 release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4) | [Current multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 
