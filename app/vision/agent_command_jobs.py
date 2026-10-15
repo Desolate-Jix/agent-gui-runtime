@@ -17,6 +17,7 @@ from app.execution.form_fill import run_form_fill
 from app.execution.input_sequence import run_input_sequence
 from app.vision.grounding_contract import GroundingResult
 from app.vision.recognition_source import ClientVisionCapabilities, resolve_recognition_route
+from app.vision.field_review_wait import FieldReviewWait
 
 
 
@@ -311,9 +312,10 @@ class _Job:
         self.failure_code = None
         self.measurement_changes = {}
         self.thread = None
+        self.field_review_state = None
 
 
-class AgentCommandJobs:
+class AgentCommandJobs(FieldReviewWait):
     """单宿主单活动命令；磁盘记录只供诊断，重启绝不恢复输入。"""
 
     def __init__(self, coordinator, store, capture_current, configuration, *, api_grounder=None):
@@ -330,6 +332,7 @@ class AgentCommandJobs:
         self._active_id = None
         self._closed = False
         self._root = Path(store.session_root) / "agent-commands"
+        self.field_review_plan_validator = None
 
     def _resolve_api(self, job, pending):
         request_id = pending["request_id"]
@@ -607,7 +610,7 @@ class AgentCommandJobs:
             job = _Job(self, command_id, frozen, target, capabilities, workflow_bindings,
                        learning_context)
             state = {"contract_version": "agent_command.v1", "command_id": command_id,
-                "status": "running", "pending_grounding": None, "progress": None,
+                "status": "running", "pending_grounding": None, "pending_field_review": None, "progress": None,
                 "result": None, "observation": {"status": "not_requested", "capture": None},
                 "action_executed": False, "cancel_requested": False,
                 "dispatch_in_progress": False,
@@ -635,6 +638,7 @@ class AgentCommandJobs:
                     observation_wait_ms=command.get("observation_wait_ms"),
                     observation_condition=command.get("observation_condition"),
                     persist=lambda progress: self._progress(job, progress),
+                    field_review_handler=lambda error, **options: self._await_field_review(job, error, **options),
                     **build_input_review_options(self.coordinator, command, job.command_id,
                         deadline_ns=job.action_review_deadline_ns, cancelled=lambda: job.cancelled),
                     **({"memory_bindings": job.workflow_bindings}
@@ -671,14 +675,14 @@ class AgentCommandJobs:
                 observation = (current_observation if current_observation.get("reason") ==
                     "execution_result_unknown" else result.get("observation") or current_observation)
                 self._update(job, status="failed" if job.failure_code else "cancelled" if job.cancelled else status,
-                    pending_grounding=None, result=result,
+                    pending_grounding=None, pending_field_review=None, result=result,
                     action_executed=_merge_action(self._snapshots[job.command_id]["action_executed"],
                         action_executed),
                     observation=deepcopy(observation))
         except Exception as error:
             with self._condition:
                 self._update(job, status="failed" if job.failure_code else "cancelled" if job.cancelled else "failed",
-                    pending_grounding=None, error={"code": job.failure_code or str(error),
+                    pending_grounding=None, pending_field_review=None, error={"code": job.failure_code or str(error),
                         "type": type(error).__name__})
         finally:
             with self._condition:

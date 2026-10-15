@@ -111,6 +111,7 @@ class VisualFieldProof:
     _focus_snapshot: object = field(default=None, repr=False)
     _cancelled: object = field(default=None, repr=False)
     _capture_visibility_json: str | None = field(default=None, repr=False)
+    _main_approval: object = field(default=None, repr=False)
 
     def request(self):
         return deepcopy(_checked_proof(self)["request"])
@@ -144,6 +145,9 @@ class VisualFieldProof:
             reference["freshness_review"] = {**deepcopy(action["field_freshness_context"]),
                 "request_sha256": value["assessment"]["request_sha256"],
                 "assessment_sha256": _digest(value["assessment"]), "review_count": 1}
+        if self._main_approval is not None:
+            reference["source"] = "main_agent"
+            reference["main_review"] = self._main_approval.to_reference()
         return reference
 
 
@@ -155,6 +159,16 @@ def _checked_proof(proof):
     value = json.loads(proof._json_value)
     if proof._service.validate_result(value["assessment"], **value["request"]) is not True:
         raise ValueError("visual_field_proof_authentication_invalid")
+    if proof._main_approval is not None:
+        from .main_field_approval import MainFieldApproval, _artifact
+        approval = proof._main_approval
+        if type(approval) is not MainFieldApproval or approval._service is not proof._service:
+            raise ValueError("visual_field_main_approval_invalid")
+        reference = approval.to_reference()
+        record = _artifact(reference)
+        if (record["request"] != value["request"] or record["assessment"] != value["assessment"]
+                or reference["deadline_ns"] != proof._deadline_ns):
+            raise ValueError("visual_field_main_approval_binding_invalid")
     _deadline({"deadline_ns": proof._deadline_ns, "cancelled": proof._cancelled})
     return value
 
@@ -480,6 +494,28 @@ def assess_visual_field(*, phase, focus_receipt, input_receipt, frame, expected_
     call = {key: value for key, value in request.items() if key != "mode"}
     assessment = _evaluate(context["service"], **call, deadline_ns=context["deadline_ns"])
     return build_visual_field_proof(**kwargs, assessment=assessment, focus_snapshot=focus_snapshot)
+
+
+def build_main_approved_visual_field_proof(approval, *, error, focus_receipt, input_receipt,
+                                         frame, expected_field, context):
+    from .main_field_approval import MainFieldApproval, _artifact
+    if type(approval) is not MainFieldApproval or type(error) is not VisualFieldReviewRequired:
+        raise ValueError("visual_field_main_approval_required")
+    reference = approval.to_reference()
+    original = VisualFieldReviewRequired.to_reference(error)
+    record = _artifact(reference)
+    request = _request(phase="value", focus_receipt=focus_receipt, input_receipt=input_receipt,
+        frame=frame, expected_field=expected_field, context=context, value_reading=None)
+    if "request_budget_seconds" in original["request"]:
+        request["request_budget_seconds"] = original["request"]["request_budget_seconds"]
+    if (context.get("native_field_evidence") is not False or approval._service is not context["service"]
+            or record["request"] != request or original["request"] != request
+            or record["assessment"] != original["assessment"] or context["deadline_ns"] != reference["deadline_ns"]):
+        raise ValueError("visual_field_main_approval_binding_invalid")
+    return VisualFieldProof(_json({"request": request, "assessment": record["assessment"]}),
+        context["service"], context["deadline_ns"], get_ident(), _ISSUER,
+        _cancelled=context.get("cancelled"), _main_approval=approval,
+        _capture_visibility_json=_known_visibility_json(frame, expected_field))
 
 
 def _focus_snapshot_reference(snapshot, request):

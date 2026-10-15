@@ -360,6 +360,96 @@ def _compound_search_receipt(row, fact, *, executed, request=None, result=None):
         and (_receipt_action(local, "press_key") is True if executed else local_receipt_zero_input_verified(local, "press_key")))
 
 
+def _compound_main_review_verified(result, request, fact):
+    """重开回执时认证原拒绝、持久审核及原物理前缀；来源标签不能代替证明。"""
+    from pathlib import Path
+    from app.core.json_snapshot import read_json_snapshot
+    from app.execution.main_field_approval import _artifact
+    from app.execution.decision_check import decision_frame
+    from app.execution.visual_field_proof import _field
+    from app.judgment import DecisionProfile, DecisionService
+    from app.judgment.visual_action_conditions import VISUAL_TEXT_VALUE_CONDITION
+    service = None
+    try:
+        if len(result["field_proofs"]) != 1 or len(result["field_review_resolutions"]) != 1:
+            return False
+        proof = result["field_proofs"][0]
+        reference = proof["main_review"]
+        record = _artifact(reference)
+        binding, assessment = record["request"], record["assessment"]
+        action, local = binding["action"], fact["receipt"]
+        frame = decision_frame(local["observation"]["capture"], fact["identity"], role="after")
+        expected_field = _field(action["field"], local)
+        expected_proof = {"schema": "visual_field_proof.v1", "evidence_kind": "visual", "phase": "value",
+            "source": "main_agent", "focus_stage": None, "field": expected_field, "frame": frame, "frames": [frame],
+            "focus_receipt_sha256": _digest(local), "input_receipt_sha256": _digest(local),
+            "selection_dispatch": None, "request_sha256": assessment["request_sha256"], "value_sha256": None,
+            "reading": None, "artifact_is_authorization": False, "value_verification": "visual", "main_review": reference}
+        review = reference["review"]
+        execution = fact["fact"]["execution_request_id"]
+        session = Path(reference["session_directory"]).resolve(strict=True)
+        job_path = (session / "agent-commands" / (execution + ".json")).resolve(strict=True)
+        if not job_path.is_relative_to(session / "agent-commands"):
+            return False
+        job = read_json_snapshot(job_path)
+        stored = job["field_review"]
+        packet = stored["packet"]
+        body = {key: value for key, value in packet.items() if key != "packet_sha256"}
+        progress_ref = packet["progress_snapshot"]
+        progress_path = (session / progress_ref["path"]).resolve(strict=True)
+        if (not progress_path.is_relative_to(session / "agent-commands" / "field-reviews")
+                or sha256(progress_path.read_bytes()).hexdigest() != progress_ref["sha256"]):
+            return False
+        progress = read_json_snapshot(progress_path)
+        original_fact = _compound_input_fact(progress, request, fact["identity"])
+        resolution = result["field_review_resolutions"][0]
+        if (proof != expected_proof or reference["schema"] != "main_field_approval.v1"
+                or reference["source"] != "main_agent" or reference["artifact_is_authorization"] is not False
+                or reference["request_sha256"] != assessment["request_sha256"]
+                or reference["assessment_sha256"] != _digest(assessment)
+                or resolution != {"handoff": progress["main_handoff"], "main_review": reference}
+                or original_fact is None or not original_fact["completed"] or original_fact["receipt"] != local
+                or progress["sequence_id"] != result["sequence_id"] or progress["completed_steps"] != ["focus_type"]
+                or progress["action_executed"] is not True or progress["phase"] != "check_input"
+                or binding["execution_request_id"] != execution or binding["phase"] != "after_action"
+                or binding["mode"] != "execution" or binding["condition"] != VISUAL_TEXT_VALUE_CONDITION
+                or binding["step_id"] != local["step_id"] or binding["frames"] != [frame]
+                or action["operation"] != "visual_field_check" or action["field_phase"] != "value"
+                or action["focus_receipt_sha256"] != _digest(local) or action["input_receipt_sha256"] != _digest(local)
+                or action.get("value_verification") != "visual" or action.get("actual_text") is not None
+                or action.get("value_reading") is not None or action["expected_text"] != request["text"]
+                or expected_field["expected_text"] != request["text"] or expected_field["field_goal"] != request["field_goal"]
+                or expected_field["window_identity"] != fact["identity"]
+                or assessment.get("adopted") is not False or assessment.get("disposition") != "review_required"
+                or stored["review"] != review or stored["continued"] is not True
+                or not isinstance(stored["review_request_id"], str) or not stored["review_request_id"]
+                or not isinstance(stored["continue_request_id"], str) or not stored["continue_request_id"]
+                or packet["schema"] != "field_review_packet.v1" or packet["stage"] != "after_type"
+                or packet["execution_request_id"] != execution or packet["assessment_round"] != 0
+                or packet["run_id"] != binding["review_context"]["source_id"]
+                or packet["plan_sha256"] != binding["review_context"]["source_sha256"]
+                or packet["packet_sha256"] != _digest(body) or packet["request"] != binding
+                or packet["assessment"] != assessment or packet["progress_sha256"] != _digest(progress)
+                or packet["after"] != frame or packet["frames"] != [frame]
+                or packet["evidence_set_sha256"] != _digest(packet["evidence_refs"])
+                or progress_ref not in packet["evidence_refs"] or review["verdict"] != "success"
+                or review["execution_request_id"] != execution or review["evidence_sha256"] != frame["sha256"]
+                or review["review_packet_sha256"] != packet["packet_sha256"]
+                or any(review[key] != packet[key] for key in ("run_id", "step_id", "evidence_set_sha256", "assessment_round"))):
+            return False
+        for ref in packet["evidence_refs"]:
+            path = (session / ref["path"]).resolve(strict=True)
+            if not path.is_relative_to(session) or sha256(path.read_bytes()).hexdigest() != ref["sha256"]:
+                return False
+        service = DecisionService(session, profile=DecisionProfile.model_validate(record["profile"]))
+        return service.validate_result(assessment, **binding) is True
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError):
+        return False
+    finally:
+        if service is not None:
+            service.close()
+
+
 def _compound_input_status(receipt, command, *, succeeded, action_executed, target_identity=None):
     """复合动作失败只在派发前沿明确关闭时结算；未知文字或按键仍持有票据。"""
     from .recognition_dispatch import local_receipt_zero_input_verified
@@ -391,6 +481,13 @@ def _compound_input_status(receipt, command, *, succeeded, action_executed, targ
         phase, completed = result.get("phase"), result.get("completed_steps")
         check = result.get("input_check")
         verified = {"status": "verified", "source": "decision_visual", "evidence_kind": "visual"}
+        manual = ("field_review_resolutions" in result or any("main_review" in row or row.get("source") == "main_agent"
+            for row in result.get("field_proofs", [])) or isinstance(check, dict) and check.get("source") == "main_agent")
+        if manual:
+            if (check != {"status": "verified", "source": "main_agent", "evidence_kind": "visual"}
+                    or not _compound_main_review_verified(result, request, fact)):
+                return "unknown"
+            verified = check
         if succeeded:
             expected_steps = ["focus_type", "check_input"] + (["search"] if request["submit_search"] else [])
             if (not fact["completed"] or result.get("status") != "completed" or completed != expected_steps
@@ -695,6 +792,7 @@ def _enter_preparation_verified(result, request, identity):
                     or _field(field, focus) != field or len(result["field_proofs"]) != 1):
                 return False
         reference = result["field_proofs"][-1]
+        manual = compound and reference.get("source") == "main_agent"
         if (proof["focus_receipt_sha256"] != _digest(focus) or proof["input_receipt_sha256"] != _digest(typed)
                 or value["mode"] != "execution" or value["phase"] != "after_action" or value["step_id"] != typed["step_id"]
                 or value["execution_request_id"] != execution_id
@@ -715,9 +813,17 @@ def _enter_preparation_verified(result, request, identity):
                 or reference["request_sha256"] != proof["value_request_sha256"]
                 or assessment["request_sha256"] != proof["value_request_sha256"]
                 or assessment["decision_format"] != "choice" or assessment["status"] != "completed"
-                or assessment["adopted"] is not True or assessment["verdict"] != "success"
-                or assessment["disposition"] != "continue"):
+                or not manual and (assessment["adopted"] is not True or assessment["verdict"] != "success"
+                    or assessment["disposition"] != "continue")):
             return False
+        if manual:
+            from app.execution.main_field_approval import _artifact
+            approved = reference["main_review"]
+            record = _artifact(approved)
+            return (proof["deadline_ns"] == approved["deadline_ns"]
+                and evidence["session_directory"] == approved["session_directory"]
+                and evidence["profile"] == record["profile"] and value == record["request"]
+                and assessment == record["assessment"] and _compound_main_review_verified(result, request, fact))
         profile = DecisionProfile.model_validate(evidence["profile"])
         service = DecisionService(evidence["session_directory"], profile=profile)
         if not compound and new_click and not _click_before_enter_verified(service, focus_evidence, result, request, identity):

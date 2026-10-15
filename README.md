@@ -9,26 +9,26 @@
   </picture>
 </h1>
 
-**Run multi-step Windows tasks from your AI agent.**
+**Execution 0.1.5 — run multi-step Windows tasks from your AI agent.**
 
 Visual grounding finds the target. Decision checks the current step.<br>
 Successful steps continue; unresolved cases return to your agent.
 
-**[Download v0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
+**[Download execution v0.1.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
 
-**0.1.4 installed: Notepad and 7-Zip verified.** Independent Sol tasks also passed; release notes record the cleanup boundary.
+**Review, then continue the original input.** The original planning agent (Main) can inspect settled typed input and explicitly continue the same command without retyping. [Independent acceptance status and checksums →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 </div>
 
 Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents. Give it an explicit linear plan to navigate an application, click targets, replace text, press keys or scroll. It executes supported steps in one session and checks their results, reducing the need to return to the main agent after every successful action.
 
-**API vision needs no local model weights or GPU.** Use an external vision API, your image-capable agent, or a local model. The **execution runtime 0.1.4** is a separate component; the **learning workbench 0.1.0-preview.3** remains optional and unchanged.
+**API vision needs no local model weights or GPU.** Use an external vision API, your image-capable agent, or a local model. The **execution runtime 0.1.5** is a separate component; the **learning workbench 0.1.0-preview.3** remains optional and unchanged.
 
 <a id="demos"></a>
 
-## Demos
+## Demos (0.1.4)
 
-Compressed previews of the published videos, with lower resolution/frame rate and **no playback acceleration**. Browser and Notepad clips trim the initial wait; GIF length is not a performance measurement. [Full videos and actual plan timings →](#evaluation)
+These **0.1.4** demos are compressed previews of the published videos, with lower resolution/frame rate and **no playback acceleration**. Browser and Notepad clips trim the initial wait; GIF length is not a performance measurement. [Full videos and actual plan timings →](#evaluation)
 
 <p align="center">
   <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4">
@@ -67,7 +67,7 @@ Navigate A → nested → Up → root → B → bundle.zip. [Full MP4](https://g
 
 You need **Windows x64, Python 3.11, [uv](https://docs.astral.sh/uv/getting-started/installation/)** and an MCP-compatible agent. The installer includes source and setup scripts; first-time setup installs dependencies. Keys and model weights are not bundled.
 
-1. **[Download and install execution 0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4).** Check the release notes for checksums and installed/independent acceptance status.
+1. **[Download and install execution 0.1.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5).** Check its release notes for checksums and independent final-package acceptance status.
 2. **Choose your vision source.** For external Luna + Decision, copy the [vision profile](configs/vision-api-openai-luna.example.json) and [Decision profile](configs/decision-profile.visual-execution.example.json), then make `OPENAI_API_KEY` available to the MCP process.
 3. **Run setup and connect your agent.** Follow the [setup commands](docs/EXECUTION_GUIDE.md#install-and-configure), merge the generated `agent-review-instant` MCP entry into your client, and reconnect. Keep other server entries intact.
 
@@ -79,12 +79,16 @@ You need **Windows x64, Python 3.11, [uv](https://docs.astral.sh/uv/getting-star
 
 Default visual input sequences require Decision in auto mode. Without Decision, basic actions and explicit legacy/native routes remain available with main-agent review; the runtime does not silently switch routes. All routes require the local Windows runtime. API usage is billed by the provider.
 
-**Provider configuration in 0.1.4:** Decision and secondary review each support their own endpoint, model and key environment variable. Defaults remain OpenAI Decisions + ordinary Luna; replacements require Decisions/Responses-compatible services. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer and remain in current source. [Configuration and compatibility →](docs/development/DECISION_PROVIDERS.md)
+**Provider configuration in 0.1.5:** Decision and secondary review each support their own endpoint, model and key environment variable. Defaults remain OpenAI Decisions + ordinary Luna; replacements require Decisions/Responses-compatible services. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. [Configuration and compatibility →](docs/development/DECISION_PROVIDERS.md)
+
+**Amadeus/Pi:** install the separate local wheel using the [extension guide](integrations/amadeus/agent-review-instant/README.md). It requires a compatible Host and an existing Runtime installation; it does not depend on a plugin store.
 
 <a id="evaluation"></a>
 ## Engineering evidence
 
-**0.1.4 installed, beyond the browser:** fresh Notepad and 7-Zip tasks used the maintained visual execution route.
+**0.1.5 installed Amadeus/Pi route:** two normal synthetic Notepad tasks completed six steps, with exact disk results, owned-window closure and Runtime cleanup. No Main semantic override was needed; outer self-corrections remain recorded. Final source regression passed **135 checks**. [Scope and limitations →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [Independent final-package status →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+
+**Historical 0.1.4 installed tasks, beyond the browser:** fresh Notepad and 7-Zip tasks used the maintained visual execution route.
 
 | Task | Observed result | Plan time |
 | --- | --- | ---: |
@@ -94,9 +98,9 @@ Default visual input sequences require Decision in auto mode. Without Decision, 
 
 All 12 installed steps completed without Main review; one ordinary review resolved automatically. Owned-window closure and host cleanup passed. Independent Sol then completed fresh 3-step Notepad and 3-step 7-Zip tasks, with disk/image checks and cleanup. The 7-Zip scope is directory/prepared-ZIP navigation; compression and extraction were not tested.
 
-**Recorded demos:** [Notepad, full window](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4) · [Browser](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4). The new Notepad/Browser clips skip the initial wait, retaining about one second before first input; later actions and waits play at **1× speed**, with no narration. Clip lengths are **19.8 s / 27.2 s**; the original complete three-step plans took **28.0 s / 31.4 s**. [Recording scope and edits →](docs/verification/DEMO_RECORDING_20261015.md)
+**Historical 0.1.4 recorded demos:** [Notepad, full window](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4) · [Browser](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4). The new Notepad/Browser clips skip the initial wait, retaining about one second before first input; later actions and waits play at **1× speed**, with no narration. Clip lengths are **19.8 s / 27.2 s**; the original complete three-step plans took **28.0 s / 31.4 s**. [Recording scope and edits →](docs/verification/DEMO_RECORDING_20261015.md)
 
-Separate source02 evidence covers a **12-step plan plus 4-step continuation**. Nonempty linear plans have no fixed step-count cap; budgets and evidence checks remain. Earlier source false rejection and public-client receipt-cap failures remain recorded as failures. [Current results, exact timings and failure history →](docs/verification/MULTI_APP_EXECUTION_20261015.md) · [Long-plan regression →](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
+Separate historical 0.1.4 source02 evidence covers a **12-step plan plus 4-step continuation**. Nonempty linear plans have no fixed step-count cap; budgets and evidence checks remain. Earlier source false rejection and public-client receipt-cap failures remain recorded as failures. [Current results, exact timings and failure history →](docs/verification/MULTI_APP_EXECUTION_20261015.md) · [Long-plan regression →](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
 
 **Historical 0.1.3 browser task:** the installed candidate completed Bing → Rust collections documentation twice in the same window/session, in **30.809 s / 27.354 s**, using **41,097 API tokens**, without Main intervention or ordinary Luna review. These are historical task-specific times, not a controlled speed comparison; token totals exclude Main/worker subscription usage. [Timing and recovery evidence →](docs/verification/EXECUTION_SPEED_20261015.md) · [Operation breakdown →](docs/verification/EXECUTION_OPERATION_TIMINGS_20261015.md)
 
@@ -113,6 +117,8 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 
 **In 0.1.3:** shared observations, preloaded plans and reused HTTP connections reduce repeated preparation. The installed two-round task avoided 10 redundant outer captures. Evidence-bound continuation lets the main agent review a completed step without repeating its action.
 
+**0.1.5 — Main review:** after authenticated dual-model nonpass on settled typed input, inspect the bound image and explicitly continue the same command without retyping. Remaining submit actions retain their fresh-target and verification gates. Earlier live04 recovery used explicit TEST injection on an unreleased payload; it is not a natural-error or performance result. [Contract →](docs/development/MAIN_FIELD_REVIEW_RESUME.md) · [Acceptance and limits →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md)
+
 [Detailed execution flow →](docs/EXECUTION_GUIDE.md#how-decision-and-the-vision-model-work-together) · [Task-plan contract →](docs/development/TASK_PLAN.md) · [Choice contract →](docs/development/DECISION_CHOICE.md)
 
 ## Optional learning workbench
@@ -123,7 +129,7 @@ Capture reusable interfaces and workflows, then review and edit them before reus
 
 ## Current limits
 
-- **0.1.4 linear plans:** nonempty plans have no fixed step-count cap. Unique step IDs, per-step verification, context-size limits, evidence checks, cancellation and API/time budgets remain. Existing 0.1.3 installations retain their build-time contract until upgraded. [Source checks](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
+- **Since 0.1.4, linear plans:** nonempty plans have no fixed step-count cap. Unique step IDs, per-step verification, context-size limits, evidence checks, cancellation and API/time budgets remain. Existing 0.1.3 installations retain their build-time contract until upgraded. [Source checks](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
 
 - Models can reject correct evidence or accept incorrect evidence. A primary false pass skips secondary review; this remains a known limitation. Arbitrary unattended tasks are not guaranteed.
 - The installer is unsigned. Acceptance used an existing Python environment; first-time dependency setup on a clean machine is not yet verified. [Release scope and history](docs/EXECUTION_GUIDE.md#release-boundaries-and-history)
@@ -135,7 +141,7 @@ Capture reusable interfaces and workflows, then review and edit them before reus
 | [Installation guide](FRIEND_SETUP.md) | [Execution guide and detailed flow](docs/EXECUTION_GUIDE.md) |
 | [Agent / MCP guide](AGENT_GUIDE.md) | [Decision API configuration](docs/development/DECISION_API.md) |
 | [External vision API](docs/development/EXTERNAL_VISION_API.md) | [Visual text input](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [0.1.4 release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4) | [Current multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
+| [0.1.5 release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5) | [Historical 0.1.4 multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 

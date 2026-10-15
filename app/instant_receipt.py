@@ -18,6 +18,24 @@ def _compact_steps(steps):
     return summaries
 
 
+def _field_review_packet(packet):
+    if not isinstance(packet, dict) or packet.get("schema") != "field_review_packet.v1":
+        return None
+    # 原包已绑定公开证据；不把 worker 私有状态或未知调试字段扩张到附件。
+    value = {key: deepcopy(packet[key]) for key in (
+        "schema", "run_id", "step_id", "execution_request_id", "command_id", "owner_id", "plan_id", "plan_sha256",
+        "target_identity", "stage", "reason", "request", "assessment", "progress_snapshot",
+        "progress_snapshot_ref", "evidence_refs", "packet_sha256", "evidence_set_sha256",
+        "assessment_round", "original_input_status", "action_executed", "authorizes_action",
+        "automatic_retry_allowed") if key in packet}
+    after = packet.get("after")
+    if isinstance(after, dict):
+        value["after"] = {key: deepcopy(after[key]) for key in (
+            "image_path", "sha256", "capture_id", "frame_id", "window_size", "window_identity",
+            "target_identity", "observation_stage") if key in after}
+    return value
+
+
 def compact_receipt(receipt, *, full_receipt_path=None):
     result = receipt.get("result") or {}
     api = result.get("response") or {}
@@ -38,6 +56,9 @@ def compact_receipt(receipt, *, full_receipt_path=None):
             'contract_version', 'command_id', 'status', 'pending_grounding',
             'action_executed', 'cancel_requested', 'error', 'automatic_retry_allowed',
             'api_request', 'recognition_calls') if key in result}
+        field_review = _field_review_packet(result.get("pending_field_review"))
+        if field_review is not None:
+            value["agent_command"]["pending_field_review"] = field_review
         for key in ('progress', 'result'):
             if isinstance(result.get(key), dict):
                 projected = compact_receipt({'request_id': receipt.get('request_id'), 'result': result[key]})

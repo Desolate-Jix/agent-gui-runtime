@@ -1,4 +1,4 @@
-# Execution guide
+# Execution 0.1.5 guide
 
 [Home](../README.md) · [简体中文](EXECUTION_GUIDE.zh-CN.md)
 
@@ -6,11 +6,13 @@
 
 Agent Review Instant lets an MCP-compatible agent operate Windows applications: locate a target from a screenshot, click, replace text, press keys and scroll. The main agent supplies an explicit linear plan; the runtime executes supported steps in the same session and checks their results. This avoids returning to the main agent after every successful action.
 
-**Execution 0.1.4 passed scoped installed Notepad and 7-Zip workflows, including independent Sol acceptance.** Main completed three plans (3+3+6 steps); Sol completed two fresh plans (3+3 steps). All five completed automatically. See the [multi-application report](verification/MULTI_APP_EXECUTION_20261015.md) for timings, original failures and installation boundaries. The learning workbench remains a separate, optional **0.1.0-preview.3** component. API-based vision does **not** require local model weights or a local GPU.
+**Execution 0.1.5 adds Main review followed by explicit continuation of the original typed-input command.** Installed Amadeus/Pi normal-task evidence is recorded below; independent final-package acceptance status is in the [0.1.5 release notes](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5). The older measurements and demos retain their original versions.
 
-[Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe) · [0.1.4 release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4)
+**Historical 0.1.4 passed scoped installed Notepad and 7-Zip workflows, including independent Sol acceptance.** Main completed three plans (3+3+6 steps); Sol completed two fresh plans (3+3 steps). All five completed automatically. See the [multi-application report](verification/MULTI_APP_EXECUTION_20261015.md) for timings, original failures and installation boundaries. The learning workbench remains a separate, optional **0.1.0-preview.3** component. API-based vision does **not** require local model weights or a local GPU.
 
-**Provider configuration in 0.1.4:** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer and remain in current source. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
+[0.1.5 Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup.exe) · [0.1.5 release notes, checksums and independent acceptance status](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+
+**Provider configuration in 0.1.5:** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
 
 ## How Decision and the vision model work together
 
@@ -49,11 +51,21 @@ flowchart TD
 
 Visual text entry combines **click → Ctrl+A → replace text**, verifies only the requested text, then reuses the field position for a fresh click-point check and **click → Enter**. It does not infer focus or classify empty fields. No screenshot or model call is inserted inside either combined action. See [visual input](development/VISUAL_EXECUTION_INPUT.md).
 
-## 0.1.4: linear plans and non-browser source evidence
+## 0.1.5: review and continue original typed input
+
+When authenticated dual-model nonpass occurs after the original input has settled, the live job can wait at `field_review_packet.v1`. An image-capable Main reads the original bound after image, uses the exact `caller_controls.review.request`, then the separately returned `caller_controls.continue.request`. Review only records a verdict; continue resumes the same run/step/command without selecting or typing again. Any remaining submit suffix still uses the normal fresh-target/input gates and result verification.
+
+While the original command is unfinished, submit `agent_command_status` with `command_id=packet.execution_request_id` under a new outer request ID, then call `instant_image` using that status request ID. Missing controls, unknown input, changed evidence, cancellation or restart do not authorize replay. Close owned windows before stopping and verifying Runtime cleanup.
+
+Installed Runtime 0.1.5 + Amadeus extension 0.0.2 completed two normal synthetic Notepad tasks in the same product/Chat, using separate Work/Runtime sessions: six successful steps, exact disk results and owned-window/host cleanup. There were 21 Runtime model HTTP requests and no Main semantic override; two outer tool errors were self-corrected before Runtime dispatch. Earlier live04 Main recovery used explicit TEST dual-refusal injection on an older payload, not a natural-error rate or speed comparison. [Contract](development/MAIN_FIELD_REVIEW_RESUME.md) · [Evidence and limits](verification/AMADEUS_PI_MAIN_REVIEW_20261015.md)
+
+The separate [Amadeus local-wheel guide](../integrations/amadeus/agent-review-instant/README.md) covers compatible Host requirements and setup. Final source checks passed 135 tests; do not add the overlapping older 115-check group. Independent final-package desktop acceptance status is in the [release notes](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5). The Lively-copy wallpaper diagnosis is separately scoped in the verification record; its patch is not included in Runtime or the wheel.
+
+## Historical 0.1.4: linear plans and non-browser source evidence
 
 Nonempty linear caller plans no longer have a fixed step-count cap. Each step still requires a unique ID, supported action and explicit verification. Context-size limits, evidence/window bindings, cancellation and API/time budgets remain; this does not grant unlimited execution or change learned-program loop guards.
 
-| Current source task | Result | Plan time |
+| Historical 0.1.4 source task | Result | Plan time |
 | --- | --- | ---: |
 | Notepad source01, edit → File → Save, first round | 3/3 automatically completed; disk UTF-8 alpha text matched exactly | 26.244 s |
 | Notepad source01, same-window second round | 3/3 automatically completed; disk UTF-8 beta text matched exactly | 30.715 s |
@@ -141,7 +153,7 @@ Remove `-WhatIf` to perform local setup. Local use requires the official [VISTA-
 
 MCP stdio exposes seven core tools: `instant_start`, `instant_status`, `instant_run`, `instant_submit`, `instant_result`, `instant_image` and `instant_stop`, plus `instant_recovery_preview` and `instant_recover_session`.
 
-Keep one persistent session and one desktop input owner. Supported requests include single actions, combined input and linear plans. Execution 0.1.4 accepts nonempty linear plans without a fixed step-count cap, while retaining per-step validation, context-size limits, evidence checks, cancellation and API/time budgets. Existing 0.1.3 installations retain their build-time contract until explicitly upgraded. See [source checks](verification/UNBOUNDED_TASK_PLANS_20261015.md). Wait expiry is not cancellation: poll the original request ID rather than replaying input. See the [agent guide](../AGENT_GUIDE.md), [task plans](development/TASK_PLAN.md) and [Decision configuration](development/DECISION_API.md).
+Keep one persistent session and one desktop input owner. Supported requests include single actions, combined input and linear plans. The execution 0.1.5 candidate retains 0.1.4 support for nonempty linear plans without a fixed step-count cap, while retaining per-step validation, context-size limits, evidence checks, cancellation and API/time budgets. Existing 0.1.3 installations retain their build-time contract until explicitly upgraded. See [source checks](verification/UNBOUNDED_TASK_PLANS_20261015.md). Wait expiry is not cancellation: poll the original request ID rather than replaying input. See the [agent guide](../AGENT_GUIDE.md), [task plans](development/TASK_PLAN.md) and [Decision configuration](development/DECISION_API.md).
 
 The [learning workbench 0.1.0-preview.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3) captures reusable interfaces and workflows for human review and editing. It installs independently, is optional and is not updated in this release. See the [learning quickstart](LEARNING_PREVIEW_QUICKSTART.md).
 
@@ -149,7 +161,7 @@ Maintained code is organized around `app/execution` for plans and actions, `app/
 
 ## Release boundaries and history
 
-This guide records source-level Notepad and repaired 7-Zip success, alongside retained first failures. Installed and independent acceptance are reported separately in the release notes; source success does not establish those results or universal application support. The installer is unsigned, and checks with an existing Python environment do not prove dependency setup on a new machine. The 2026-10-15 0.1.3 rebuild first included independent provider configuration. Browser timings and model benchmarks above belong to 0.1.3 and are not reused as 0.1.4 measurements. Existing installations require an explicit upgrade. Neither execution nor learning promises unattended completion of arbitrary tasks.
+This guide separates installed 0.1.5 normal-task evidence from historical 0.1.4 source/installed results and retained first failures. Independent final-package acceptance is recorded in the release notes, not inferred from source success. The installer is unsigned; checks using an existing Python environment do not prove clean-machine dependency setup. The 2026-10-15 0.1.3 rebuild first included independent provider configuration. Browser timings and prompt benchmarks above belong to 0.1.3, and the Notepad/7-Zip demos and measurements retain 0.1.4: none are new 0.1.5 performance results. Existing installations need an explicit upgrade. Learning is unchanged; arbitrary unattended completion and full character/wallpaper composition are not promised.
 
 Earlier development failures and results remain in the [0.1.2 acceptance record](verification/EXECUTION_STABLE_012_20261012.md), [target-check diagnosis](verification/DECISION_TARGET_USAGE_20261013.md) and [0.1.3 verification record](verification/EXECUTION_SPEED_20261015.md). Earlier checkpoints describe their original state, not the current release status.
 

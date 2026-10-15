@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.instant_attachment_transport import InstantAttachmentTransport, InstantAdmissionError, _validate_request_id
 
-INSTANT_VERSION = "0.1.4"
+INSTANT_VERSION = "0.1.5"
 
 
 def _run_wait_budget(kind, requested):

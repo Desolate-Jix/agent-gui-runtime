@@ -1,0 +1,44 @@
+{
+  "schema": "amadeus.extension/v0",
+  "id": "io.github.desolate-jix.gui-runtime",
+  "version": "0.0.2",
+  "display_name": {"en": "Windows GUI Runtime", "zh-CN": "Windows GUI 执行运行时"},
+  "description": {"en": "Use an explicitly configured execution Runtime through Pi MCP and a session-lifecycle Skill.", "zh-CN": "通过 Pi MCP 和会话收尾 Skill 使用明确配置的既有执行 Runtime。"},
+  "author": {"name": "Desolate-Jix"},
+  "license": "ISC",
+  "engines": {"amadeus_host_api": ">=0.1,<0.2", "platforms": ["win32"]},
+  "runtime": {"kind": "python", "requires_python": ">=3.12,<3.13"},
+  "config": {
+    "runtime_root": {"type": "string", "title": "Existing execution Runtime 0.1.4/0.1.5 installation / 既有安装目录", "required": true},
+    "runtime_python": {"type": "string", "title": "Existing Runtime Python 3.11 executable / 既有解释器", "required": true},
+    "api_profile": {"type": "string", "title": "Approved vision JSON profile / 已批准的视觉配置路径", "required": true},
+    "decision_profile": {"type": "string", "title": "Approved Decision JSON profile / 已批准的判断配置路径", "required": true},
+    "api_key": {"type": "string", "title": "Shared Runtime API key / 共用服务密钥", "secret": true, "required": true},
+    "allow_local_input": {"type": "boolean", "title": "Explicitly enable local keyboard and mouse input / 明确允许本地输入", "default": false}
+  },
+  "contributes": {
+    "mcp_server": [{
+      "id": "execution",
+      "contract": "amadeus.mcp-server/v0",
+      "transport": "stdio",
+      "command": "${python}",
+      "args": ["-I", "-m", "amadeus_agent_gui"],
+      "env": {
+        "AGENT_GUI_RUNTIME_ROOT": "${config.runtime_root}",
+        "AGENT_GUI_RUNTIME_PYTHON": "${config.runtime_python}",
+        "AGENT_GUI_RUNTIME_API_PROFILE": "${config.api_profile}",
+        "AGENT_GUI_RUNTIME_DECISION_PROFILE": "${config.decision_profile}",
+        "AGENT_GUI_RUNTIME_DATA": "${data}/runtime",
+        "AGENT_GUI_RUNTIME_INPUT_ALLOWED": "${config.allow_local_input}",
+        "OPENAI_API_KEY": "${config.api_key}",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }],
+    "skill": [{"id": "gui-execution", "contract": "amadeus.skill/v0", "path": "skills/gui-execution", "title": {"en": "GUI execution", "zh-CN": "GUI 执行"}}]
+  },
+  "permissions": {
+    "host": [],
+    "os": {"network": ["*"], "process": ["*"], "filesystem": [{"path": "*", "access": "read_write"}]}
+  }
+}

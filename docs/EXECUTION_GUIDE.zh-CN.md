@@ -1,4 +1,4 @@
-# 执行模式详细指南
+# 执行模式 0.1.5 详细指南
 
 [返回首页](../README.zh-CN.md) · [English](EXECUTION_GUIDE.md)
 
@@ -6,11 +6,13 @@
 
 Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图定位目标，执行点击、替换输入、按键和滚动。主 Agent 提供一份明确的线性计划，运行时在同一会话中执行受支持的步骤并核验结果，减少每次成功操作后都返回主 Agent 的等待。
 
-**执行版 0.1.4 已通过限定范围的记事本与 7-Zip 安装态流程，包括 Sol 独立验收。** Main 完成三个计划（3+3+6 步），Sol 完成两个全新计划（3+3 步），五个计划均自动完成。耗时、原始失败与安装验收边界见[多应用报告](verification/MULTI_APP_EXECUTION_20261015.md)。学习工作台仍为独立、可选的 **0.1.0-preview.3** 组件。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
+**执行版 0.1.5 新增 Main 审核后明确继续原文字输入命令。** 下方记录已安装 Amadeus／Pi 的正常任务证据；最终包的独立验收状态见 [0.1.5 发布说明](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)。旧测量与演示保留原版本归属。
 
-[Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe) · [0.1.4 发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4)
+**历史执行版 0.1.4 已通过限定范围的记事本与 7-Zip 安装态流程，包括 Sol 独立验收。** Main 完成三个计划（3+3+6 步），Sol 完成两个全新计划（3+3 步），五个计划均自动完成。耗时、原始失败与安装验收边界见[多应用报告](verification/MULTI_APP_EXECUTION_20261015.md)。学习工作台仍为独立、可选的 **0.1.0-preview.3** 组件。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
 
-**0.1.4 的服务配置：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器，当前源码继续保留。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
+[0.1.5 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup.exe) · [0.1.5 发布说明、校验文件与独立验收状态](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+
+**0.1.5 的服务配置：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
 
 ## Decision 和视觉模型如何配合
 
@@ -49,11 +51,21 @@ flowchart TD
 
 视觉输入将 **点击 → Ctrl+A → 替换文字** 绑定为连续动作，只核验规定文字，再复用字段位置重新审核点击点，执行 **点击 → Enter**。不推断焦点，不判断空框，两组连续动作内部均不插入截图或模型调用。详见 [视觉输入说明](development/VISUAL_EXECUTION_INPUT.md)。
 
-## 0.1.4：线性计划与非浏览器源码实测
+## 0.1.5：审核并继续原文字输入
+
+原输入已结算后发生通过认证的双模型非通过判断时，活跃 job 可停在 `field_review_packet.v1`。支持图像的 Main 读取绑定 after 原图，使用确切 `caller_controls.review.request`，再单独调用返回的 `caller_controls.continue.request`。review 只记录结论；continue 续行同一 run／step／command，不重新全选或输入。剩余 submit 后缀仍经过正常 fresh-target／输入门禁与结果核验。
+
+原命令未结束时，用新的外层 request ID 提交 `agent_command_status`，其中 `command_id=packet.execution_request_id`，再对该 status request ID 调 `instant_image`。缺少 controls、未知输入、证据变化、取消或重启均不能授权重放。先关闭自有窗口，再停止并确认 Runtime 清理。
+
+已安装 Runtime 0.1.5＋Amadeus 扩展 0.0.2 在同一产品／Chat 内完成两项正常合成记事本任务，各用独立 Work／Runtime session：六步成功、磁盘精确匹配、自有窗口与宿主收尾通过。共 21 次 Runtime 模型 HTTP，没有 Main 语义 override；两项外层工具错误均在 Runtime 派发前自行纠正。旧 live04 Main 恢复使用较早载荷上的显式 TEST 双拒绝注入，不是自然误拒率或提速比较。[合同](development/MAIN_FIELD_REVIEW_RESUME.md) · [证据与限制](verification/AMADEUS_PI_MAIN_REVIEW_20261015.md)
+
+独立的 [Amadeus 本地 wheel 指南](../integrations/amadeus/agent-review-instant/README.zh-CN.md) 说明兼容 Host 与安装步骤。最终源码检查 135 项通过，不能与旧 115 项重叠分组相加。最终包的独立实机验收状态见[发布说明](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)。Lively 副本壁纸诊断在验证记录中单列，其补丁不随 Runtime 或 wheel 分发。
+
+## 0.1.4 历史：线性计划与非浏览器源码实测
 
 非空线性调用方计划不再设置固定步数上限。每一步仍须具有唯一 ID、受支持的动作和明确核验；内容大小、证据／窗口绑定、取消及 API／时间预算继续有效，不代表无限执行，也不改变已学习程序的循环保护。
 
-| 当前源码任务 | 结果 | 计划耗时 |
+| 0.1.4 历史源码任务 | 结果 | 计划耗时 |
 | --- | --- | ---: |
 | 记事本 source01 第一轮：编辑 → File → Save | 3/3 自动完成，磁盘 UTF-8 alpha 内容完全匹配 | 26.244 秒 |
 | 记事本 source01 同窗口第二轮 | 3/3 自动完成，磁盘 UTF-8 beta 内容完全匹配 | 30.715 秒 |
@@ -141,7 +153,7 @@ flowchart TD
 
 MCP stdio 提供七个核心工具：`instant_start`、`instant_status`、`instant_run`、`instant_submit`、`instant_result`、`instant_image`、`instant_stop`，另有 `instant_recovery_preview` 和 `instant_recover_session` 两个恢复工具。
 
-保持同一会话、同一桌面输入所有者。支持单步动作、组合输入和线性计划。执行版 0.1.4 接收非空线性计划，不设固定步数上限；逐步校验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在明确升级前保留构建时协议。见[源码验证](verification/UNBOUNDED_TASK_PLANS_20261015.md)。等待到期不等于取消；应查询原请求 ID，避免重放输入。详见 [Agent 指南](../AGENT_GUIDE.md)、[任务计划](development/TASK_PLAN.md) 和 [Decision 配置](development/DECISION_API.md)。
+保持同一会话、同一桌面输入所有者。支持单步动作、组合输入和线性计划。执行版 0.1.5 候选保留 0.1.4 的非空线性计划支持，不设固定步数上限；逐步校验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在明确升级前保留构建时协议。见[源码验证](verification/UNBOUNDED_TASK_PLANS_20261015.md)。等待到期不等于取消；应查询原请求 ID，避免重放输入。详见 [Agent 指南](../AGENT_GUIDE.md)、[任务计划](development/TASK_PLAN.md) 和 [Decision 配置](development/DECISION_API.md)。
 
 [学习工作台 0.1.0-preview.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3) 用于采集可复用界面和工作流，供人工审核、修改。它独立安装、可选使用，本次不更新。详见 [学习版快速开始](LEARNING_PREVIEW_QUICKSTART.md)。
 
@@ -149,7 +161,7 @@ MCP stdio 提供七个核心工具：`instant_start`、`instant_status`、`insta
 
 ## 发布边界与历史记录
 
-本指南记录记事本与修复后 7-Zip 的源码成功，并保留首次失败；安装态及独立验收分别由发布说明记录，源码成功不代表这些验收通过，也不代表所有应用均受支持。安装器未签名，使用已有 Python 环境的检查不能证明全新机器的依赖安装流程。2026-10-15 的 0.1.3 重打包首次加入独立服务配置；上文浏览器计时及模型评测属于 0.1.3，不套用为 0.1.4 测量。已有安装需要明确升级。执行模式与学习模式均不承诺任意任务无人干预完成。
+本指南将安装态 0.1.5 正常任务与历史 0.1.4 源码／安装结果及首次失败分开。最终包的独立验收由发布说明记录，不从源码成功推定。安装器未签名，使用已有 Python 环境的检查不能证明全新机器依赖 setup。2026-10-15 的 0.1.3 重打包首次加入独立服务配置；上文浏览器计时及提示词评测属于 0.1.3，记事本／7-Zip 演示与测量保留 0.1.4 归属，均非新的 0.1.5 性能结果。已有安装须明确升级。学习版不变，不承诺任意任务无人干预完成或完整角色／壁纸合成效果。
 
 历史开发失败与结果保留在 [0.1.2 验收记录](verification/EXECUTION_STABLE_012_20261012.md)、[目标审核诊断](verification/DECISION_TARGET_USAGE_20261013.md) 和 [0.1.3 验证记录](verification/EXECUTION_SPEED_20261015.md)。历史检查点描述当时状态，不代表当前发布状态。
 

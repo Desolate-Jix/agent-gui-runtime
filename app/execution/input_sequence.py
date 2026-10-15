@@ -202,7 +202,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                        _tab_from=None, _expected_label=None, _on_field_complete=None, _prefer_current_uia=False,
                        _declared_label=None, memory_bindings=None, learning_context=None,
                         field_evidence_mode="legacy", visual_field_context=None,
-                        action_review=None, action_review_deadline_ns=None):
+                        action_review=None, action_review_deadline_ns=None, field_review_handler=None):
     """同一宿主串行命令内完成组合；不循环点击、不自动改写目标或重试输入。"""
     learning_context = deepcopy(learning_context) if learning_context is not None else None
     spec = InputSequenceRequest.model_validate(request)
@@ -546,13 +546,53 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                     expected_field=expected_field, context=visual_field_context, value_reading=value_reading)))
             except AgentCommandCancelled:
                 raise
+            except VisualFieldReviewRequired as error:
+                result["input_check"] = {"status": "unavailable", "phase": "check_input", "reason": str(error)}
+                if not compound_visual or not callable(field_review_handler):
+                    raise InputSequenceInterrupted(str(error)) from error
+                try:
+                    from app.core.input_sequence_partial import _compound_input_fact
+                    from .main_field_approval import MainFieldApproval
+                    from .visual_field_proof import build_main_approved_visual_field_proof
+                    fact = _compound_input_fact(result, spec.model_dump(mode="json"), expected_field["window_identity"])
+                    if started_actions != ["focus_type"] or fact is None or not fact["completed"]:
+                        raise ValueError("visual_field_main_original_input_not_settled")
+                    handoff = result["main_handoff"]
+                    handoff["original_input"] = {"completed_steps": deepcopy(result["completed_steps"]),
+                        "interrupted_at": "check_input", "action_executed": result["action_executed"],
+                        "input_check": deepcopy(result["input_check"]),
+                        "typing_dispatch": deepcopy(fact["fact"]["typing_dispatch"])}
+                    # owner.call 已退回工作线程；人工等待不得占住桌面 owner。
+                    approval = field_review_handler(error, stage="after_type", progress=deepcopy(result),
+                        context=visual_field_context)
+                    if type(approval) is not MainFieldApproval:
+                        raise ValueError("visual_field_main_approval_required")
+                    visual_field_context["deadline_ns"] = approval.deadline_ns
+                    action_review_deadline_ns = approval.deadline_ns
+                    def accepted_value():
+                        proof = build_main_approved_visual_field_proof(approval, error=error,
+                            focus_receipt=focus_receipt, input_receipt=typed, frame=result["observation"]["capture"],
+                            expected_field=expected_field, context=visual_field_context)
+                        return proof, proof.to_reference()
+                    value_proof, value_reference = coordinator._owner.call(accepted_value)
+                    result.setdefault("field_review_resolutions", []).append({
+                        "handoff": deepcopy(handoff), "main_review": approval.to_reference()})
+                    result.pop("main_handoff")
+                except AgentCommandCancelled as failure:
+                    # 此处只读审核尚未派发后缀；保留进入等待前已认证的原输入回执。
+                    result["input_check"] = {"status": "unavailable", "phase": "check_input",
+                        "reason": "agent_command_cancelled"}
+                    raise InputSequenceInterrupted("agent_command_cancelled") from failure
+                except ValueError as failure:
+                    result["input_check"] = {"status": "unavailable", "phase": "check_input", "reason": str(failure)}
+                    raise InputSequenceInterrupted(str(failure)) from failure
             except ValueError as error:
                 result["input_check"] = {"status": "unavailable", "phase": "check_input", "reason": str(error)}
                 raise InputSequenceInterrupted(str(error)) from error
             result["field_proofs"].append(value_reference)
             result["input_check"] = ({"status": "matched", "source": value_reference["reading"]["source"],
                 "value_sha256": value_reference["value_sha256"], "evidence_kind": "visual"}
-                if native_evidence else {"status": "verified", "source": "decision_visual", "evidence_kind": "visual"})
+                if native_evidence else {"status": "verified", "source": value_reference["source"], "evidence_kind": "visual"})
             result["completed_steps"].append("check_input")
             if spec.submit_search:
                 result["phase"] = "prepare_search"

@@ -9,26 +9,26 @@
   </picture>
 </h1>
 
-**让你的 AI Agent 连续执行 Windows 桌面任务。**
+**执行版 0.1.5 — 让你的 AI Agent 连续执行 Windows 桌面任务。**
 
 视觉模型定位目标，Decision 核验当前步骤。<br>
 通过后继续执行；未解决的问题交回原主 Agent。
 
-**[下载 v0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
+**[下载执行版 v0.1.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
 
-**0.1.4 安装版已通过记事本与 7-Zip 实测。** 独立 Sol 任务也已通过，卸载收尾边界见发布说明。
+**审核后，继续原输入命令。** 原规划 Agent（Main）可检查已结算的文字输入，明确续行同一命令，不重复输入。[独立验收状态与校验文件 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 </div>
 
 Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Agent 给出一份明确的线性计划，它就可以在应用中导航、点击目标、替换文字、按键和滚动。受支持的步骤在同一会话中执行并核验结果，减少每次成功操作后都返回主 Agent 的等待。
 
-**使用外部视觉 API，不需要本地模型权重或 GPU。** 你可以选择外部视觉 API、支持图像的 Agent，或者本地模型。**执行运行时 0.1.4** 为独立组件；**学习工作台 0.1.0-preview.3** 仍为可选组件，本次不更新。
+**使用外部视觉 API，不需要本地模型权重或 GPU。** 你可以选择外部视觉 API、支持图像的 Agent，或者本地模型。**执行运行时 0.1.5** 为独立组件；**学习工作台 0.1.0-preview.3** 仍为可选组件，本次不更新。
 
 <a id="demos"></a>
 
-## 实录演示
+## 实录演示（0.1.4）
 
-已发布视频的压缩预览，降低尺寸与帧率，**不加速播放**。浏览器与记事本片剪去了开头等待，GIF 长度不代表性能。[完整视频与真实计划耗时 →](#evaluation)
+以下为 **0.1.4** 已发布视频的压缩预览，降低尺寸与帧率，**不加速播放**。浏览器与记事本片剪去了开头等待，GIF 长度不代表性能。[完整视频与真实计划耗时 →](#evaluation)
 
 <p align="center">
   <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4">
@@ -67,7 +67,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 需要 **Windows x64、Python 3.11、[uv](https://docs.astral.sh/uv/getting-started/installation/)** 和支持 MCP 的 Agent。安装器提供源码及配置脚本，首次配置时安装依赖，不附带密钥或模型权重。
 
-1. **[下载安装执行版 0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4)。** 校验文件及安装态／独立验收状态见发布说明。
+1. **[下载安装执行版 0.1.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)。** 校验文件及最终包的独立验收状态见该版本发布说明。
 2. **选择视觉来源。** 使用外部 Luna + Decision 时，复制[视觉配置](configs/vision-api-openai-luna.example.json)和 [Decision 配置](configs/decision-profile.visual-execution.example.json)，让 MCP 进程能够读取 `OPENAI_API_KEY`。
 3. **运行配置脚本，接入 Agent。** 按[安装命令](docs/EXECUTION_GUIDE.zh-CN.md#安装与配置)操作，将生成的 `agent-review-instant` MCP 条目合并到客户端后重新连接，保留其他服务器条目。
 
@@ -79,12 +79,16 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 默认视觉组合输入需要 Decision 的 auto 模式可用。不配置 Decision 时，仍可使用基础动作和显式 legacy／原生路线，由主 Agent 核验；运行时不会静默切换路线。所有路线都需要本机 Windows 运行时，API 服务商按实际用量收费。
 
-**0.1.4 的服务配置：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna；替换服务须兼容 Decisions／Responses 协议。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器，当前源码继续保留。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
+**0.1.5 的服务配置：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna；替换服务须兼容 Decisions／Responses 协议。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
+
+**Amadeus／Pi：** 按[扩展指南](integrations/amadeus/agent-review-instant/README.zh-CN.md)安装独立本地 wheel；需要兼容 Host 和既有 Runtime 安装，不依赖插件商店。
 
 <a id="evaluation"></a>
 ## 工程验证与实测
 
-**0.1.4 安装版，浏览器之外的任务：** 通过维护的视觉执行路线，在记事本和 7-Zip 中使用全新内容。
+**0.1.5 已安装 Amadeus／Pi 路线：** 两项正常合成记事本任务完成六步，磁盘精确匹配、自有窗口与 Runtime 清理通过，没有 Main 语义 override；外层自纠错仍保留。最终源码回归 **135 项通过**。[范围与限制 →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [最终包独立验收状态 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+
+**0.1.4 历史安装态任务，浏览器之外：** 通过维护的视觉执行路线，在记事本和 7-Zip 中使用全新内容。
 
 | 任务 | 实际结果 | 计划耗时 |
 | --- | --- | ---: |
@@ -94,9 +98,9 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 安装版 12 步全部无 Main 审核完成，一次普通复核自动解决。本轮窗口关闭及宿主收尾通过。独立 Sol 随后完成全新记事本 3 步和 7-Zip 3 步任务，磁盘／原图核对及收尾通过。7-Zip 范围为目录及预制 ZIP 导航，没有测试压缩或解压。
 
-**实录演示：** [记事本，完整窗口](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4) · [浏览器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)。新记事本／浏览器片剪掉首次等待，保留首次输入前约 1 秒；后续动作和等待均为 **1× 原速**，无旁白。成片为 **19.8 秒／27.2 秒**，原始完整三步计划耗时为 **28.0 秒／31.4 秒**。[录制范围与剪辑说明 →](docs/verification/DEMO_RECORDING_20261015.md)
+**0.1.4 历史实录演示：** [记事本，完整窗口](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4) · [浏览器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)。新记事本／浏览器片剪掉首次等待，保留首次输入前约 1 秒；后续动作和等待均为 **1× 原速**，无旁白。成片为 **19.8 秒／27.2 秒**，原始完整三步计划耗时为 **28.0 秒／31.4 秒**。[录制范围与剪辑说明 →](docs/verification/DEMO_RECORDING_20261015.md)
 
-另有 source02 的 **12 步计划及后续 4 步**证据。非空线性计划不设固定步数上限，预算及证据检查继续有效。此前源码误拒及公共客户端回执上限导致的失败，继续记为失败。[本轮结果、精确计时及失败历史 →](docs/verification/MULTI_APP_EXECUTION_20261015.md) · [长计划回归 →](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
+另有历史 0.1.4 source02 的 **12 步计划及后续 4 步**证据。非空线性计划不设固定步数上限，预算及证据检查继续有效。此前源码误拒及公共客户端回执上限导致的失败，继续记为失败。[本轮结果、精确计时及失败历史 →](docs/verification/MULTI_APP_EXECUTION_20261015.md) · [长计划回归 →](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
 
 **0.1.3 历史浏览器任务：** 安装候选在同一窗口／会话中两轮完成 Bing → Rust collections 文档，耗时 **30.809 秒／27.354 秒**，使用 **41,097 个 API token**，无 Main 接管或普通 Luna 复核。这些是历史指定任务耗时，不构成受控提速比较；token 不含 Main／worker 套餐用量。[计时与恢复证据 →](docs/verification/EXECUTION_SPEED_20261015.md) · [逐操作拆分 →](docs/verification/EXECUTION_OPERATION_TIMINGS_20261015.md)
 
@@ -113,6 +117,8 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 **0.1.3 的改进：** 复用观察结果、预装计划、保留 HTTP 连接，减少重复准备；安装版两轮任务减少了 10 次外层重复截图。主 Agent 可基于绑定证据审核已完成步骤并续行，无需重复该动作。
 
+**0.1.5 — Main 审核：** 已结算文字输入后的双模型非通过判断通过认证后，读取绑定原图，明确继续同一命令，不重复输入。余下提交动作仍保留 fresh-target 与结果核验门禁。旧 live04 在未发布载荷上使用显式 TEST 注入，不是自然误拒或性能结果。[合同 →](docs/development/MAIN_FIELD_REVIEW_RESUME.md) · [验收与限制 →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md)
+
 [详细执行流程 →](docs/EXECUTION_GUIDE.zh-CN.md#decision-和视觉模型如何配合) · [任务计划协议 →](docs/development/TASK_PLAN.md) · [Choice 协议 →](docs/development/DECISION_CHOICE.md)
 
 ## 可选的学习工作台
@@ -123,7 +129,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 ## 当前限制
 
-- **0.1.4 线性计划：** 非空计划不设固定步数上限；唯一步骤 ID、逐步核验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在升级前保留构建时协议。[源码验证](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
+- **自 0.1.4 起的线性计划：** 非空计划不设固定步数上限；唯一步骤 ID、逐步核验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在升级前保留构建时协议。[源码验证](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
 
 - 模型可能误拒，也可能误放。第一层误放会跳过二次复核，这是已知限制；不承诺任意任务都能无人干预完成。
 - 安装器未签名。本轮验收使用已有 Python 环境，尚未验证全新机器的首次依赖安装。[发布范围与历史记录](docs/EXECUTION_GUIDE.zh-CN.md#发布边界与历史记录)
@@ -135,7 +141,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 | [安装指南](FRIEND_SETUP.md) | [执行详细指南与完整流程图](docs/EXECUTION_GUIDE.zh-CN.md) |
 | [Agent / MCP 指南](AGENT_GUIDE.md) | [Decision API 配置](docs/development/DECISION_API.md) |
 | [外部视觉 API](docs/development/EXTERNAL_VISION_API.md) | [视觉文字输入](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [0.1.4 发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.4) | [本轮多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
+| [0.1.5 发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5) | [0.1.4 历史多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 

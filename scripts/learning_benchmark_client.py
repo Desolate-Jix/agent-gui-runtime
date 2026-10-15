@@ -34,6 +34,69 @@ _PLAN_TERMINAL = frozenset({"completed", "failed", "cancelled"})
 _TOOLS = frozenset({"instant_status", "instant_submit", "instant_result", "instant_run", "instant_image"})
 
 
+def _validate_field_review_packet(packet, snapshot, previous):
+    from app.execution.task_plan_review import digest
+    body = {key: value for key, value in packet.items() if key != "packet_sha256"}
+    pending, request = snapshot.get("pending"), packet.get("request")
+    assessment, frames = packet.get("assessment"), packet.get("frames")
+    refs, progress = packet.get("evidence_refs"), packet.get("progress_snapshot")
+    is_hash = lambda value: isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    if (snapshot.get("status") != "pending" or snapshot.get("runner_state") != "waiting"
+            or snapshot.get("wait_reason") != "verification_required" or not isinstance(pending, dict)
+            or any(packet.get(key) != snapshot.get(key) for key in ("run_id", "plan_sha256", "session_directory"))
+            or packet.get("step_id") != snapshot.get("current_step_id")
+            or pending.get("step_id") != packet.get("step_id")
+            or packet.get("command_id") != packet.get("execution_request_id")
+            or packet.get("execution_request_id") != snapshot.get("active_command_id")
+            or pending.get("execution_request_id") != packet.get("execution_request_id")
+            or packet.get("stage") != "after_type" or type(packet.get("assessment_round")) is not int
+            or packet["assessment_round"] != 0 or packet.get("authorizes_action") is not False
+            or packet.get("automatic_retry_allowed") is not False or not is_hash(packet.get("plan_sha256"))
+            or not isinstance(packet.get("session_directory"), str)
+            or packet.get("packet_sha256") != digest(body)
+            or not isinstance(refs, list) or not refs or packet.get("evidence_set_sha256") != digest(refs)
+            or not isinstance(progress, dict) or progress not in refs or not is_hash(packet.get("progress_sha256"))
+            or packet.get("progress_sha256") != progress.get("sha256")
+            or not isinstance(request, dict) or not isinstance(assessment, dict)
+            or not isinstance(request.get("review_context"), dict)
+            or not isinstance(frames, list) or len(frames) != 1 or packet.get("after") != frames[-1]
+            or request.get("frames") != frames or request.get("execution_request_id") != packet.get("execution_request_id")
+            or not isinstance(packet.get("condition"), str) or not packet["condition"].strip()
+            or packet.get("condition") != request.get("condition")
+            or any(assessment.get(key) != request.get(key) for key in (
+                "request_id", "execution_request_id", "step_id", "condition", "frames", "review_context"))
+            or (request.get("review_context") or {}).get("source_id") != packet.get("run_id")
+            or (request.get("review_context") or {}).get("source_sha256") != packet.get("plan_sha256")):
+        raise ValueError("benchmark_task_plan_field_review_binding_invalid")
+    # 只映射宿主已绑定的引用；客户端不读取截图，也不将输入前缀推断为整个命令完成。
+    root = Path(packet["session_directory"])
+    paths = set()
+    for ref in refs:
+        if (not isinstance(ref, dict) or set(ref) != {"path", "sha256"}
+                or not isinstance(ref["path"], str) or not ref["path"] or not is_hash(ref["sha256"])):
+            raise ValueError("benchmark_task_plan_field_review_evidence_invalid")
+        path = Path(ref["path"])
+        if (not root.is_absolute() or not path.parts or path.is_absolute() or path.drive or ".." in path.parts
+                or path.as_posix() != ref["path"] or ref["path"] in paths):
+            raise ValueError("benchmark_task_plan_field_review_evidence_invalid")
+        paths.add(ref["path"])
+    for frame in frames:
+        if (not isinstance(frame, dict) or not isinstance(frame.get("image_path"), str)
+                or not is_hash(frame.get("sha256")) or frame.get("role") != "after"
+                or not isinstance(frame.get("capture_id"), str) or not frame["capture_id"]
+                or frame.get("window_identity") != snapshot.get("target_identity")):
+            raise ValueError("benchmark_task_plan_field_review_evidence_invalid")
+        path = Path(frame["image_path"])
+        if not path.is_absolute() or not path.is_relative_to(root):
+            raise ValueError("benchmark_task_plan_field_review_evidence_invalid")
+        relative = path.relative_to(root)
+        if not relative.parts or ".." in relative.parts or {"path": relative.as_posix(), "sha256": frame["sha256"]} not in refs:
+            raise ValueError("benchmark_task_plan_field_review_evidence_invalid")
+    prior = (previous or {}).get("review_packet")
+    if prior is not None and prior != packet:
+        raise ValueError("benchmark_task_plan_field_review_packet_changed")
+
+
 def _validate_manual_packet_progress(packet, previous):
     ancestors = packet.get("packet_ancestors")
     revision = packet.get("packet_revision")
@@ -343,7 +406,9 @@ class LearningBenchmarkClient:
                            for key in ("capture_id", "image_path", "sha256"))):
                 raise ValueError("benchmark_task_plan_grounding_evidence_invalid")
         packet = value.get("review_packet")
-        if packet is not None:
+        if isinstance(packet, dict) and packet.get("schema") == "field_review_packet.v1":
+            _validate_field_review_packet(packet, value, previous)
+        elif packet is not None:
             from app.execution.task_plan_review import digest
             body = {key: item for key, item in packet.items() if key != "packet_sha256"} if isinstance(packet, dict) else {}
             v2_packet = isinstance(packet, dict) and packet.get("schema") in {"review_packet.v2", "review_packet.v3", "review_packet.v4"}
@@ -373,9 +438,14 @@ class LearningBenchmarkClient:
                         or any(ref not in packet["artifact_refs"] for ref in video["ledger_refs"])):
                     raise ValueError("benchmark_task_plan_video_review_packet_binding_invalid")
             previous_packet = (previous or {}).get("review_packet")
+            field_completed = (isinstance(previous_packet, dict)
+                and previous_packet.get("schema") == "field_review_packet.v1"
+                and packet.get("original_input_status") == "completed"
+                and all(packet.get(key) == previous_packet.get(key) for key in (
+                    "run_id", "step_id", "execution_request_id", "plan_sha256", "session_directory")))
             if packet.get("schema") == "review_packet.v3":
                 _validate_manual_packet_progress(packet, previous_packet)
-            elif previous_packet is not None and previous_packet != packet and not resumed_ticket:
+            elif previous_packet is not None and previous_packet != packet and not resumed_ticket and not field_completed:
                 raise ValueError("benchmark_task_plan_stale_review_packet")
         if value.get("observation_pending") is True and (packet is not None
                 or value.get("wait_reason") != "verification_required" or value.get("pending") is None
@@ -686,6 +756,8 @@ class LearningBenchmarkClient:
                     return self._result(value, original_request_id, status_request_id, command_id, "terminal")
                 if state == "awaiting_grounding":
                     return self._result(value, original_request_id, status_request_id, command_id, "awaiting_grounding")
+                if state == "awaiting_field_review":
+                    return self._result(value, original_request_id, status_request_id, command_id, "review_required")
                 if state != "running":
                     raise ValueError("benchmark_agent_command_state_invalid")
                 if monotonic() >= deadline:

@@ -113,6 +113,28 @@ class TaskPlanRuntime(WorkflowRuntime):
         self.runner = WorkflowRunner(self.session, backend=self.backend,
             submit_command=self._enqueue, read_result=self._read_result, verify_step=self._verify,
             settle_failed=self._verify)
+        if self.agent_jobs is not None:
+            self.agent_jobs.field_review_plan_validator = self._field_review_plan_matches
+
+    def _field_review_plan_matches(self, execution_id, action_review):
+        # 只有真实原计划的待处理命令可暂停；自声明上下文不能创建无人可审核的等待。
+        if not isinstance(action_review, dict) or (self.session / "closing.json").exists():
+            return False
+        try:
+            state = self.backend.status(action_review["run_id"])
+            pending = state.get("pending")
+            if (state.get("status") != "pending" or not pending
+                    or pending["execution_request_id"] != execution_id
+                    or pending["step_id"] != action_review.get("step_id")
+                    or pending["suggested_command"].get("action_review") != action_review):
+                return False
+            self.backend.validate_resume(state["run_id"], None)
+            source = self.backend._source(state)
+            original = read_json_snapshot(self.session / "commands" / (execution_id + ".json"))
+            assert_no_queued_plan_cancel(self.session, state["run_id"])
+            return source["plan"] == action_review.get("plan") and original == pending["suggested_command"]
+        except (KeyError, ValueError, OSError):
+            return False
 
     def _enqueue(self, execution_id, command):
         run_id = self.runner._active_run()
@@ -146,6 +168,9 @@ class TaskPlanRuntime(WorkflowRuntime):
 
     def _remember_active(self, snapshot):
         snapshot = self._review_snapshot(snapshot)
+        if snapshot.get("field_review_pending_settlement") is True:
+            self._enabled_run = snapshot["run_id"]
+            return snapshot
         if snapshot.get("observation_pending") is True and snapshot.get("status") != "cancel_requested":
             self._enabled_run = snapshot["run_id"]
             return snapshot
@@ -162,6 +187,10 @@ class TaskPlanRuntime(WorkflowRuntime):
     def _review_snapshot(self, snapshot):
         value = deepcopy(snapshot)
         value["prefix_sha256"] = self.backend.prefix_sha256(value["run_id"])
+        from .task_plan_field_review import project_field_review
+        field_review = project_field_review(self, value)
+        if field_review is not None:
+            return field_review
         from .task_plan_observation import projection
         observed = projection(self.backend, value)
         if observed is None:
@@ -388,6 +417,10 @@ class TaskPlanRuntime(WorkflowRuntime):
                 return self._remember_active(snapshot)
             if action == "review":
                 snapshot = self.runner.status(run_id)
+                from .task_plan_field_review import control_field_review
+                field_result = control_field_review(self, snapshot, request, request_id)
+                if field_result is not None:
+                    return field_result
                 source = self.backend._source(self.backend.status(run_id))
                 if source["plan"]["schema_version"] == "task_plan.v1" and any(key in request for key in
                         ("review_packet_sha256", "evidence_set_sha256", "assessment_round")):
@@ -400,6 +433,10 @@ class TaskPlanRuntime(WorkflowRuntime):
                     coordinator=self.coordinator, target_identity=self._target_identity)
                 # 审核只结算原票据；调用方用原 wait_id 明确继续，避免状态查询产生输入。
                 return self._review_snapshot(self.runner.status(run_id))
+            from .task_plan_field_review import control_field_review
+            field_result = control_field_review(self, self.runner.status(run_id), request, request_id)
+            if field_result is not None:
+                return field_result
             return self._remember_active(self.runner.resume(run_id, request_id, request["wait_id"]))
         finally:
             self._control_id = None

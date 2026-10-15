@@ -1,4 +1,5 @@
 from pathlib import Path
+from copy import deepcopy
 from threading import RLock
 from uuid import uuid4
 import hashlib
@@ -187,7 +188,7 @@ class InstantAttachmentTransport:
             raise ValueError("instant_agent_worker_evidence_invalid") from error
         if (not isinstance(state, dict) or state.get("contract_version") != "agent_command.v1"
                 or state.get("command_id") != command_id
-                or state.get("status") not in {"running", "awaiting_grounding", "completed", "failed", "cancelled"}
+                or state.get("status") not in {"running", "awaiting_grounding", "awaiting_field_review", "completed", "failed", "cancelled"}
                 or state.get("action_executed") is not None and type(state["action_executed"]) is not bool):
             raise ValueError("instant_agent_worker_evidence_invalid")
         return {**evidence, "sha256": hashlib.sha256(raw).hexdigest(), "status": state["status"],
@@ -250,13 +251,26 @@ class InstantAttachmentTransport:
                     operation_success_scope="task_plan_control", task_effect_verified=None,
                     next_action="inspect_original_plan_status_without_resubmitting_start")
             if result.get("contract_version") == "agent_command.v1":
-                waiting = outcome in {"running", "awaiting_grounding"}
+                waiting = outcome in {"running", "awaiting_grounding", "awaiting_field_review"}
                 receipt.update(operation_succeeded=None if waiting else ok and outcome == "completed",
                     operation_success_scope="agent_command_progress", task_effect_verified=None,
                     action_executed=result.get("action_executed"))
                 if waiting:
                     receipt['next_action'] = ('read_pending_image_then_grounding_resolve_and_agent_command_continue'
                         if outcome == 'awaiting_grounding' else 'poll_agent_command_status_with_new_request_id')
+                    if outcome == "awaiting_field_review":
+                        receipt["next_action"] = "review_original_field_packet_then_continue_original_task_plan"
+                        packet = result.get("pending_field_review") or {}
+                        after = packet.get("after") if isinstance(packet, dict) else None
+                        if (isinstance(packet, dict) and packet.get("schema") == "field_review_packet.v1"
+                                and packet.get("execution_request_id") == result.get("command_id")
+                                and isinstance(after, dict) and isinstance(after.get("image_path"), str)
+                                and isinstance(after.get("sha256"), str)):
+                            # 只投影原审核包的绑定帧；保留原 instant_image 路径与摘要校验。
+                            capture = {key: deepcopy(after[key]) for key in (
+                                "image_path", "sha256", "capture_id", "frame_id", "window_size",
+                                "window_identity", "target_identity", "observation_stage") if key in after}
+                            receipt["observation"] = {"status": "captured", "capture": capture}
                     receipt["next"] = {"tool": "instant_run", "arguments": {
                         "request_id": "agent-status-" + uuid4().hex,
                         "command": {"kind": "agent_command_status", "request": {
