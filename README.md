@@ -30,15 +30,27 @@ Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents
 
 Compressed previews of the published videos, with lower resolution/frame rate and **no playback acceleration**. Browser and Notepad clips trim the initial wait; GIF length is not a performance measurement. [Full videos and actual plan timings →](#evaluation)
 
-[![Browser: Google URL, java search, first ordinary result](docs/assets/demos/browser-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4)
+<p align="center">
+  <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4">
+    <img src="docs/assets/demos/browser-0.1.4.gif" alt="Browser: Google URL, java search, first ordinary result">
+  </a>
+</p>
 
 Google URL → search java → open the first ordinary result. [Full MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4)
 
-[![Notepad: edit a note, open File, Save](docs/assets/demos/notepad-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4)
+<p align="center">
+  <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4">
+    <img src="docs/assets/demos/notepad-0.1.4.gif" alt="Notepad: edit a note, open File, Save">
+  </a>
+</p>
 
 Edit a note → File → Save. [Full MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4)
 
-[![7-Zip: navigate folders and a prepared ZIP](docs/assets/demos/7zip-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)
+<p align="center">
+  <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4">
+    <img src="docs/assets/demos/7zip-0.1.4.gif" alt="7-Zip: navigate folders and a prepared ZIP">
+  </a>
+</p>
 
 Navigate A → nested → Up → root → B → bundle.zip. [Full MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)
 

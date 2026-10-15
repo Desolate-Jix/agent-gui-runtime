@@ -30,15 +30,27 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 已发布视频的压缩预览，降低尺寸与帧率，**不加速播放**。浏览器与记事本片剪去了开头等待，GIF 长度不代表性能。[完整视频与真实计划耗时 →](#evaluation)
 
-[![浏览器：Google URL、搜索 java、首个普通结果](docs/assets/demos/browser-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4)
+<p align="center">
+  <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4">
+    <img src="docs/assets/demos/browser-0.1.4.gif" alt="浏览器：Google URL、搜索 java、首个普通结果">
+  </a>
+</p>
 
 Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4)
 
-[![记事本：编辑便笺、打开 File、Save](docs/assets/demos/notepad-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4)
+<p align="center">
+  <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4">
+    <img src="docs/assets/demos/notepad-0.1.4.gif" alt="记事本：编辑便笺、打开 File、Save">
+  </a>
+</p>
 
 编辑便笺 → File → Save。[完整 MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4)
 
-[![7-Zip：导航目录及预制 ZIP](docs/assets/demos/7zip-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)
+<p align="center">
+  <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4">
+    <img src="docs/assets/demos/7zip-0.1.4.gif" alt="7-Zip：导航目录及预制 ZIP">
+  </a>
+</p>
 
 导航 A → nested → Up → root → B → bundle.zip。[完整 MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)
 
