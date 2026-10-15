@@ -64,7 +64,7 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 安装版 12 步全部无 Main 审核完成，一次普通复核自动解决。本轮窗口关闭及宿主收尾通过。独立 Sol 随后完成全新记事本 3 步和 7-Zip 3 步任务，磁盘／原图核对及收尾通过。7-Zip 范围为目录及预制 ZIP 导航，没有测试压缩或解压。
 
-**实录演示：** [记事本](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)。两段均为 **1× 原速**，仅去除任务间人工检查空档；完整操作和模型等待均保留，无旁白。
+**实录演示：** [记事本，完整窗口](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4) · [浏览器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)。新记事本／浏览器片剪掉首次等待，保留首次输入前约 1 秒；后续动作和等待均为 **1× 原速**，无旁白。成片为 **19.8 秒／27.2 秒**，原始完整三步计划耗时为 **28.0 秒／31.4 秒**。[录制范围与剪辑说明 →](docs/verification/DEMO_RECORDING_20261015.md)
 
 另有 source02 的 **12 步计划及后续 4 步**证据。非空线性计划不设固定步数上限，预算及证据检查继续有效。此前源码误拒及公共客户端回执上限导致的失败，继续记为失败。[本轮结果、精确计时及失败历史 →](docs/verification/MULTI_APP_EXECUTION_20261015.md) · [长计划回归 →](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
 

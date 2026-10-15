@@ -40,7 +40,7 @@ Both accounting records are complete with no unknown requests; these totals come
 
 Final test-installation removal passed with a retained first-attempt boundary. The first external-setup uninstall removed its payload and completed worker cleanup, but deliberately preserved **6** unknown empty directories created by live imports, plus the ownership marker and `Uninstall.exe`. Main verified that only those **2** files and **6** empty directories remained, removed exactly those **6** empty directories, then reran the same setup. The second uninstall removed the test root; the external sentinel/user data and daily integration remained unchanged. This is not a first-attempt whole-root removal. Both attempt records are retained in `final-uninstall/` and `final-uninstall-empty-dir-recovery/report.json`.
 
-Release demos: [Notepad](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4). Both are **1× speed**, with only manual-inspection gaps between tasks removed; all operations and model waiting are retained, with no narration. The cleanup result is established by the uninstall receipts, not the video.
+Original installed-run recordings: [Notepad, client area only](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4). Both retain original-speed model waiting apart from between-task operator gaps, but the Notepad clip omits its native menu and popup; it is incomplete as a task demonstration. A [full-window Notepad clip and browser demo](DEMO_RECORDING_20261015.md) from separate new runs supersede that presentation and explicitly trim initial waiting. Their edited durations do not replace this report's original plan timings. Cleanup is proved by uninstall receipts, not video.
 
 ### Installed step intervals
 
@@ -152,7 +152,7 @@ Runtime 0.1.4 - second installed saved note
 
 最终测试安装移除通过，但保留首次过程边界。第一次 external setup 卸载已移除其载荷并完成 worker 收尾，按设计保留 live import 生成的 **6** 个未知空目录，以及归属 marker 和 `Uninstall.exe`。Main 核对只剩这 **2** 个文件及 **6** 个空目录，精确移除这 **6** 个空目录，再运行同一 setup。第二次卸载移除测试根；外部 sentinel／用户数据及日常集成保持不变。这不是首次卸载直接删除整根，两次证据分别保留在 `final-uninstall/` 和 `final-uninstall-empty-dir-recovery/report.json`。
 
-发布演示：[记事本](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)。两段均为 **1× 原速**，仅去除任务间人工检查空档，完整操作及模型等待保留，无旁白。收尾结果由卸载回执证明，不由视频代替。
+原安装态录像：[记事本，仅客户区](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad.mp4) · [7-Zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)。两段除任务间人工空档外均保留原速模型等待，但记事本片漏掉原生菜单及下拉菜单，不能完整展示任务。另用全新运行补录的[记事本完整窗口片及浏览器 Demo](DEMO_RECORDING_20261015.md)已替代该展示，并明确剪去首次等待；剪后时长不替换本文原计划耗时。收尾由卸载回执证明，不由视频代替。
 
 ### 安装态逐步区间
 
