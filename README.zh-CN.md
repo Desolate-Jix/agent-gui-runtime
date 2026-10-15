@@ -14,7 +14,7 @@
 视觉模型定位目标，Decision 核验当前步骤。<br>
 通过后继续执行；未解决的问题交回原主 Agent。
 
-**[下载 v0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe)** · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
+**[下载 v0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
 
 **0.1.4 安装版已通过记事本与 7-Zip 实测。** 独立 Sol 任务也已通过，卸载收尾边界见发布说明。
 
@@ -23,6 +23,24 @@
 Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Agent 给出一份明确的线性计划，它就可以在应用中导航、点击目标、替换文字、按键和滚动。受支持的步骤在同一会话中执行并核验结果，减少每次成功操作后都返回主 Agent 的等待。
 
 **使用外部视觉 API，不需要本地模型权重或 GPU。** 你可以选择外部视觉 API、支持图像的 Agent，或者本地模型。**执行运行时 0.1.4** 为独立组件；**学习工作台 0.1.0-preview.3** 仍为可选组件，本次不更新。
+
+<a id="demos"></a>
+
+## 实录演示
+
+已发布视频的压缩预览，降低尺寸与帧率，**不加速播放**。浏览器与记事本片剪去了开头等待，GIF 长度不代表性能。[完整视频与真实计划耗时 →](#evaluation)
+
+[![浏览器：Google URL、搜索 java、首个普通结果](docs/assets/demos/browser-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4)
+
+Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4)
+
+[![记事本：编辑便笺、打开 File、Save](docs/assets/demos/notepad-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4)
+
+编辑便笺 → File → Save。[完整 MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4)
+
+[![7-Zip：导航目录及预制 ZIP](docs/assets/demos/7zip-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)
+
+导航 A → nested → Up → root → B → bundle.zip。[完整 MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)
 
 ## 能做什么
 

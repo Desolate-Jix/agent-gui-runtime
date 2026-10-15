@@ -14,7 +14,7 @@
 Visual grounding finds the target. Decision checks the current step.<br>
 Successful steps continue; unresolved cases return to your agent.
 
-**[Download v0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe)** · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
+**[Download v0.1.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
 
 **0.1.4 installed: Notepad and 7-Zip verified.** Independent Sol tasks also passed; release notes record the cleanup boundary.
 
@@ -23,6 +23,24 @@ Successful steps continue; unresolved cases return to your agent.
 Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents. Give it an explicit linear plan to navigate an application, click targets, replace text, press keys or scroll. It executes supported steps in one session and checks their results, reducing the need to return to the main agent after every successful action.
 
 **API vision needs no local model weights or GPU.** Use an external vision API, your image-capable agent, or a local model. The **execution runtime 0.1.4** is a separate component; the **learning workbench 0.1.0-preview.3** remains optional and unchanged.
+
+<a id="demos"></a>
+
+## Demos
+
+Compressed previews of the published videos, with lower resolution/frame rate and **no playback acceleration**. Browser and Notepad clips trim the initial wait; GIF length is not a performance measurement. [Full videos and actual plan timings →](#evaluation)
+
+[![Browser: Google URL, java search, first ordinary result](docs/assets/demos/browser-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4)
+
+Google URL → search java → open the first ordinary result. [Full MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Browser.mp4)
+
+[![Notepad: edit a note, open File, Save](docs/assets/demos/notepad-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4)
+
+Edit a note → File → Save. [Full MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-Notepad-FullWindow.mp4)
+
+[![7-Zip: navigate folders and a prepared ZIP](docs/assets/demos/7zip-0.1.4.gif)](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)
+
+Navigate A → nested → Up → root → B → bundle.zip. [Full MP4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.4/AgentGUIRuntime-0.1.4-7Zip.mp4)
 
 ## What you can do
 
