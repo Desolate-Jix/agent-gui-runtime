@@ -26,7 +26,7 @@ Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents
 
 | Capability | What it means in practice |
 | --- | --- |
-| **Keep a task moving** | Run a supported 1–8 step plan in the same session—for example, open a search engine, enter a query and follow a result. |
+| **Keep a task moving** | Run multi-step tasks continuously in the same session—for example, open a search engine, enter a query and follow a result. |
 | **Check the step that just happened** | Ground targets from screenshots. Use cropped, annotated evidence to check a target or the requested result with Decision. |
 | **Recover with the original agent** | If Decision does not accept, the standard Luna vision model reviews the same evidence once. Unresolved cases return with evidence; after reviewing it, the original agent can explicitly continue without replaying completed actions. |
 

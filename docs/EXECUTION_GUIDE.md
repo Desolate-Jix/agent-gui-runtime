@@ -126,7 +126,7 @@ Remove `-WhatIf` to perform local setup. Local use requires the official [VISTA-
 
 MCP stdio exposes seven core tools: `instant_start`, `instant_status`, `instant_run`, `instant_submit`, `instant_result`, `instant_image` and `instant_stop`, plus `instant_recovery_preview` and `instant_recover_session`.
 
-Keep one persistent session and one desktop input owner. Supported requests include single actions, combined input and linear plans of 1–8 steps. Wait expiry is not cancellation: poll the original request ID rather than replaying input. See the [agent guide](../AGENT_GUIDE.md), [task plans](development/TASK_PLAN.md) and [Decision configuration](development/DECISION_API.md).
+Keep one persistent session and one desktop input owner. Supported requests include single actions, combined input and linear plans. The current `task_plan` schema accepts 1–8 steps per submission; this is not a total action limit for a task or session. After a plan completes, subsequent plans can be submitted in the same session through normal admission. Wait expiry is not cancellation: poll the original request ID rather than replaying input. See the [agent guide](../AGENT_GUIDE.md), [task plans](development/TASK_PLAN.md) and [Decision configuration](development/DECISION_API.md).
 
 The [learning workbench 0.1.0-preview.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3) captures reusable interfaces and workflows for human review and editing. It installs independently, is optional and is not updated in this release. See the [learning quickstart](LEARNING_PREVIEW_QUICKSTART.md).
 

@@ -140,7 +140,7 @@ This is the preserved v2 compatibility example; the new v3 route is documented a
 
 This example describes a schema, not permission to click an arbitrary application. Select the intended window first. Start freezes handle, PID and process creation time; each dispatch rechecks them. Agent vision routes additionally require `request.vision_capabilities` using the existing ClientVisionCapabilities fields. / 示例只说明结构；先选择目标窗口，开始时固定完整进程身份，逐次派发前核对。Agent 视觉来源另须声明既有视觉能力。
 
-Plans contain 1–8 linear steps with unique `step_id`, explicit action and verification. / 初期限定 1–8 个线性步骤。
+Each `task_plan` submission currently contains 1–8 linear steps with unique `step_id`, explicit action and verification. This is a per-submission schema bound, not a total action limit for a task or session; after a plan completes, subsequent plans may be submitted in the same session through normal admission. / 当前每次 `task_plan` 提交接收 1–8 个线性步骤，每步具有唯一 `step_id`、明确动作和核验条件。这是单次提交的协议限制，不是整个任务或会话的总动作上限；计划完成后，可在同一会话中通过正常准入提交后续计划。
 
 | Action / 动作 | Fields / 字段 |
 | --- | --- |
