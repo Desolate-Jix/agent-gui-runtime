@@ -1,5 +1,13 @@
 ## Current availability / 当前可用状态
 
+**0.1.5 frozen release code:** `6fa3c487da5710f1e86d7a93f484226c94b96c70`. Main can review authenticated nonpass evidence after settled typing and explicitly continue the original command without retyping; original IDs, images and submit-suffix gates remain required. The final installed independent check passed on its first attempt: **3 steps / 27.70161 s / 10 HTTP (7 Decision + 3 grounding)**, no Main override and full cleanup. Total tokens remain unknown because one usage record is opaque. [Final acceptance and limits](../verification/AMADEUS_PI_MAIN_REVIEW_20261015.md#final-independent-installed-acceptance--最终独立安装态验收); publication/checksums are handled in the [release notes](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5).
+
+**0.1.5 冻结发布源码：** `6fa3c487da5710f1e86d7a93f484226c94b96c70`。已结算输入后的认证非通过证据可由 Main 审核并明确续行原命令，不重复输入；原 ID、原图与提交后缀门禁继续有效。最终安装态独立检查首次通过：**3 步／27.70161 秒／10 次 HTTP（7 Decision＋3 grounding）**，无 Main override，完整收尾通过；一项用量不可读，因此总 tokens 仍未知。[最终验收及限制](../verification/AMADEUS_PI_MAIN_REVIEW_20261015.md#final-independent-installed-acceptance--最终独立安装态验收)，发布及校验值由[发布说明](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)承接。
+
+### Historical candidate checkpoint / 历史候选检查点
+
+The following candidate/pending paragraph records the earlier checkpoint, superseded by the final acceptance above. / 下方“候选／待验收”段落保留较早检查点，不是当前状态，最终验收以上方为准。
+
 **Execution 0.1.5 candidate (unreleased):** authenticated dual-model nonpass after settled typed input can wait for Main's bound-image review and explicit continuation of the same live command, without retyping. Use the returned review/continue controls; unknown input or missing tickets cannot be replayed. Formal 0.1.5 installed/independent acceptance is pending. [Contract](MAIN_FIELD_REVIEW_RESUME.md). / **执行版 0.1.5 候选（未发布）：** 已结算文字输入后的认证非通过判断，可等待 Main 读取绑定原图审核，再明确续原活跃命令，不重复输入。只用实际返回的 review／continue controls；未知输入或无票据均不能重放。0.1.5 正式安装态／独立验收待完成，见合同。
 
 Execution **0.1.4 source supports nonempty linear caller plans without a fixed count**, retaining per-step validation, content budgets, original evidence/window bindings, cancellation and API/time budgets. Candidate01 exposed a separate eight-step receipt limit in the public client; it is repaired and offline verified. Frozen source02/candidate02 then completed a fresh-data 12+4-step run and cleanup. Notepad's two rounds belong to pre-repair source01; original 7-Zip failures remain recorded. Installed and independent acceptance are separate release-note results. See [current evidence](../verification/MULTI_APP_EXECUTION_20261015.md). / 执行版 **0.1.4 源码支持非空线性调用方计划，不设固定数量上限**，保留逐步校验、内容预算、原始证据／窗口绑定、取消及 API／时间预算。candidate01 暴露的公共客户端独立八步回执限制已修复并通过离线验证；冻结 source02／candidate02 随后完成新数据 12+4 步及收尾。记事本两轮属于修复前 source01，7-Zip 原始失败继续保留；安装态与独立验收由发布说明分别记录，见本轮证据。
@@ -13,6 +21,8 @@ Execution **0.1.4 source supports nonempty linear caller plans without a fixed c
 Keep `action.goal` / `field_goal` to the current visible target while preserving every required qualifier. State filtering and ordering explicitly: the first matching ordinary result with visible domain `curl.se` differs from the first result overall. Put task objectives in `plan.goal`, expected outcomes in `verification`, and retry/recovery in plan controls. Grounding and candidate Decision receive the same target. The runtime does not rewrite it or substitute the candidate model label.
 
 This is a caller-facing usage contract, not a semantic parser or additional model call. Frozen requests and prior failures remain unchanged. See [retained-image diagnosis](../verification/DECISION_TARGET_USAGE_20261013.md). / 这是调用契约，不增加语义解析器或模型请求，不改写冻结请求与历史失败。
+
+Dated development-status checkpoints below retain their original limitations and pending statements; they do not replace the final 0.1.5 acceptance above. / 下方带日期的开发检查点保留当时的限制与待办表述，不替代上方 0.1.5 最终验收。
 
 ## 2026-10-12 默认纯视觉输入 / Default visual input
 

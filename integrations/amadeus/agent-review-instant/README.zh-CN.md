@@ -6,7 +6,7 @@
 
 **兼容范围：** 仅 execution Runtime **0.1.4 或 0.1.5**、Windows、Amadeus Host Python **3.12**，以及依赖已准备好的 Runtime Python **3.11** 环境。Main 审核续行应使用 0.1.5；接受 0.1.4 marker 不会给 0.1.4 增加该功能。本包通过本地 wheel 交付，不通过插件商店。
 
-**冻结 wheel：** `amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl`，SHA256 `32d27ed81eab33db05ae2780b98a808205da5057ee98bd71bdad8382e35a6588`。此相同 wheel 已构建、安装、配置 Pi、启用并在 backend restart 后加载。包内含 MCP 启动器、Skill、reference 和 ISC 许可证，不含 Runtime 载荷、用户数据、真实 profile 或 key。本独立 README 是当前交付指南，冻结 wheel 的内嵌描述保留早期构建时记录；此次文档更新不改变任何 wheel 字节。
+**冻结 wheel：** [amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl)，SHA256 `32d27ed81eab33db05ae2780b98a808205da5057ee98bd71bdad8382e35a6588`。此相同 wheel 已构建、安装、配置 Pi、启用并在 backend restart 后加载。包内含 MCP 启动器、Skill、reference 和 ISC 许可证，不含 Runtime 载荷、用户数据、真实 profile 或 key。本独立 README 是当前交付指南，冻结 wheel 的内嵌描述保留早期构建时记录；此次文档更新不改变任何 wheel 字节。
 
 **正常安装态使用：** 两项全新 synthetic Notepad 编辑 → File → Save 任务在同一 Amadeus 产品／Chat 内，经 Chat → Pi → 已安装扩展 0.0.2 → 已安装 Runtime 0.1.5 完成，各用独立 Pi Work 和 Runtime session。全部 **6 个 Runtime 步骤**、两份精确磁盘结果、自有窗口关闭及 Runtime 清理通过，每任务正文仅派发一次。首任务发生一次普通 Luna 复核，两任务均无 Main 语义 override；Host 逐次权限批准另计。第二 Pi Work 在 Runtime 派发前纠正了 shell 策略拒绝和缺 request_id 的 SDK 错误，不称为零错误首过。实际禁用／重启、移除／重启和默认保留数据也已通过。
 

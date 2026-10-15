@@ -81,12 +81,12 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 **0.1.5 的服务配置：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna；替换服务须兼容 Decisions／Responses 协议。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
 
-**Amadeus／Pi：** 按[扩展指南](integrations/amadeus/agent-review-instant/README.zh-CN.md)安装独立本地 wheel；需要兼容 Host 和既有 Runtime 安装，不依赖插件商店。
+**Amadeus／Pi：** 下载 [MCP＋Pi Skill 扩展 0.0.2](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl)，按[扩展指南](integrations/amadeus/agent-review-instant/README.zh-CN.md)安装；需要兼容 Host 和既有 Runtime 安装，无需插件商店。
 
 <a id="evaluation"></a>
 ## 工程验证与实测
 
-**0.1.5 已安装 Amadeus／Pi 路线：** 两项正常合成记事本任务完成六步，磁盘精确匹配、自有窗口与 Runtime 清理通过，没有 Main 语义 override；外层自纠错仍保留。最终源码回归 **135 项通过**。[范围与限制 →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [最终包独立验收状态 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+**0.1.5 已安装 Amadeus／Pi 路线：** 两项正常合成记事本任务完成六步、磁盘精确核对与收尾；无 Main 语义接管，外层自纠错仍保留。最终源码回归 **135 项通过**。最终安装包另经独立验收，三步记事本计划首次通过，**27.70 秒／10 次 API 请求**，文件内容与收尾通过。这是单个限定样本，总 token 数未知。[范围与限制 →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [发布说明与校验文件 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 **0.1.4 历史安装态任务，浏览器之外：** 通过维护的视觉执行路线，在记事本和 7-Zip 中使用全新内容。
 

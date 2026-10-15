@@ -81,12 +81,12 @@ Default visual input sequences require Decision in auto mode. Without Decision, 
 
 **Provider configuration in 0.1.5:** Decision and secondary review each support their own endpoint, model and key environment variable. Defaults remain OpenAI Decisions + ordinary Luna; replacements require Decisions/Responses-compatible services. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. [Configuration and compatibility →](docs/development/DECISION_PROVIDERS.md)
 
-**Amadeus/Pi:** install the separate local wheel using the [extension guide](integrations/amadeus/agent-review-instant/README.md). It requires a compatible Host and an existing Runtime installation; it does not depend on a plugin store.
+**Amadeus/Pi:** download the [MCP + Pi Skill extension 0.0.2](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl) and follow the [extension guide](integrations/amadeus/agent-review-instant/README.md). It requires a compatible Host and an existing Runtime installation; no plugin store is needed.
 
 <a id="evaluation"></a>
 ## Engineering evidence
 
-**0.1.5 installed Amadeus/Pi route:** two normal synthetic Notepad tasks completed six steps, with exact disk results, owned-window closure and Runtime cleanup. No Main semantic override was needed; outer self-corrections remain recorded. Final source regression passed **135 checks**. [Scope and limitations →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [Independent final-package status →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+**0.1.5 installed Amadeus/Pi route:** two normal synthetic Notepad tasks completed six steps, exact disk checks and cleanup; no Main semantic override was needed, and outer self-corrections remain recorded. Final source regression: **135 passed**. The final installer independently completed a three-step Notepad plan on its first attempt in **27.70 s / 10 API requests**, with exact disk output and cleanup. This is one scoped sample; total token usage is unknown. [Scope and limitations →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [Release and checksums →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 **Historical 0.1.4 installed tasks, beyond the browser:** fresh Notepad and 7-Zip tasks used the maintained visual execution route.
 
