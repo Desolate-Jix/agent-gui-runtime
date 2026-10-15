@@ -102,4 +102,4 @@ Capture reusable interfaces and workflows, then review and edit them before reus
 
 ## Optional benchmark data
 
-The [benchmark backup](https://github.com/Desolate-Jix/agent-gui-runtime-benchmarks) is stored in a separate **private repository**; access must be granted. The frozen suite contains **39 original screenshots, 30 interface families and 254 labelled cases**. Dataset images, annotations and raw evaluation records are not bundled with the execution installer or downloaded during setup. Clone separately when needed.
+The [benchmark backup](https://github.com/Desolate-Jix/agent-gui-runtime-benchmarks) is available in a separate **public repository**. The frozen suite contains **39 original screenshots, 30 interface families and 254 labelled cases**. Dataset images, annotations and raw evaluation records are not bundled with the execution installer or downloaded during setup. Clone separately when needed.
