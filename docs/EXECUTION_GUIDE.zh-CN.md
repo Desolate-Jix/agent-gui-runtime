@@ -10,7 +10,7 @@ Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图�
 
 [下载 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe) · [发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3)
 
-**源码更新（版本仍为 0.1.3）：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案和已发布的 0.1.3 安装包不变。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
+**源码更新（版本仍为 0.1.3）：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。2026-10-15 重打包的 0.1.3 安装器已包含这些配置；已有安装需要重新下载安装。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
 
 ## Decision 和视觉模型如何配合
 
@@ -134,7 +134,7 @@ MCP stdio 提供七个核心工具：`instant_start`、`instant_status`、`insta
 
 ## 发布边界与历史记录
 
-安装器未签名。本轮验收使用已有 Python 环境，尚未证明全新机器的依赖安装流程。公开安装器与已验收候选一致，包内 README 保留构建时快照；最新验收状态见仓库 README 和发布页。已有安装需要手动升级。执行模式与学习模式均不承诺任意任务无人干预完成。
+安装器未签名。本轮验收使用已有 Python 环境，尚未证明全新机器的依赖安装流程。2026-10-15 重打包的安装器加入独立服务配置和当前中英文指南。此前浏览器计时及模型评测描述原验收候选，本次重打包没有重跑这些测量。发布页记录重打包源码与校验值。已有安装需要手动升级。执行模式与学习模式均不承诺任意任务无人干预完成。
 
 历史开发失败与结果保留在 [0.1.2 验收记录](verification/EXECUTION_STABLE_012_20261012.md)、[目标审核诊断](verification/DECISION_TARGET_USAGE_20261013.md) 和 [0.1.3 验证记录](verification/EXECUTION_SPEED_20261015.md)。历史检查点描述当时状态，不代表当前发布状态。
 

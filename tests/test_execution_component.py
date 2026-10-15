@@ -60,6 +60,17 @@ def test_public_plan_resources_include_current_usage_configuration_and_acceptanc
             "docs/verification/CONTINUOUS_EXECUTION_ACCEPTANCE.md"} <= set(resources)
 
 
+def test_provider_configuration_and_bilingual_homepage_resources_are_delivered():
+    from scripts.build_execution_component import collect_execution_sources
+    root = Path(__file__).resolve().parents[1]
+    _, resources, _ = collect_execution_sources(root)
+    assert {"configs/decision-profile.providers.example.json",
+        "docs/development/DECISION_PROVIDERS.md", "docs/development/DECISION_PROVIDERS.zh-CN.md",
+        "README.zh-CN.md", "docs/EXECUTION_GUIDE.md", "docs/EXECUTION_GUIDE.zh-CN.md",
+        "docs/assets/readme-hero.svg", "docs/assets/readme-hero.mobile.svg",
+        "docs/assets/readme-hero.zh-CN.svg", "docs/assets/readme-hero.zh-CN.mobile.svg"} <= set(resources)
+
+
 def test_copied_execution_sources_close_adaptive_protocol_and_linked_profile(tmp_path):
     from scripts.build_component_sources import copy_component_sources
     from scripts.build_execution_component import collect_execution_sources

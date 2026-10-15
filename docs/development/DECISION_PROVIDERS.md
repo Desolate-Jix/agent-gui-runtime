@@ -2,7 +2,7 @@
 
 [简体中文](DECISION_PROVIDERS.zh-CN.md) · [Home](../../README.md)
 
-**Source update; version remains 0.1.3.** The published execution 0.1.3 installer still uses the fixed OpenAI endpoints and Luna models. These settings require the updated source; the version number and learning component are unchanged.
+**Included in the 2026-10-15 rebuilt installer; version remains 0.1.3.** Download and reinstall the updated execution installer to use these settings. Earlier 0.1.3 installers do not include them. The release page records the build source and SHA256; the learning component is unchanged.
 
 Decision and secondary review now have independent endpoints, model IDs and credential environment variables. Visual grounding still uses its separate [vision API profile](EXTERNAL_VISION_API.md). Replacing one layer does not change the other layers.
 

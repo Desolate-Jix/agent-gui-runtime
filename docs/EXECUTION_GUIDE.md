@@ -10,7 +10,7 @@ Agent Review Instant lets an MCP-compatible agent operate Windows applications: 
 
 [Download the Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe) · [Release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3)
 
-**Source update (version remains 0.1.3):** Decision and secondary review can be configured independently through `--decision-profile`, while the defaults and the published 0.1.3 installer remain unchanged. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
+**Source update (version remains 0.1.3):** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. The 2026-10-15 rebuilt 0.1.3 installer includes these settings; reinstall to update an existing installation. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
 
 ## How Decision and the vision model work together
 
@@ -134,7 +134,7 @@ Maintained code is organized around `app/execution` for plans and actions, `app/
 
 ## Release boundaries and history
 
-The installer is unsigned. Acceptance used an existing Python environment and does not prove dependency setup on a new machine. The published installer is the unchanged accepted candidate; its bundled README is the build-time snapshot. This repository README and the release page report the final acceptance status. Existing installations require an explicit upgrade. Neither execution nor learning promises unattended completion of arbitrary tasks.
+The installer is unsigned. Acceptance used an existing Python environment and does not prove dependency setup on a new machine. The 2026-10-15 installer rebuild adds independent provider configuration and the current bilingual guides. Earlier browser timings and model benchmarks describe the original accepted candidate and were not repeated for this rebuild. The release page records the rebuild source and checksums. Existing installations require an explicit upgrade. Neither execution nor learning promises unattended completion of arbitrary tasks.
 
 Earlier development failures and results remain in the [0.1.2 acceptance record](verification/EXECUTION_STABLE_012_20261012.md), [target-check diagnosis](verification/DECISION_TARGET_USAGE_20261013.md) and [0.1.3 verification record](verification/EXECUTION_SPEED_20261015.md). Earlier checkpoints describe their original state, not the current release status.
 
