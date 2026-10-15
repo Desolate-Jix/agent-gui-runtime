@@ -10,6 +10,8 @@ Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图�
 
 [下载 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe) · [发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3)
 
+**源码更新（版本仍为 0.1.3）：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案和已发布的 0.1.3 安装包不变。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
+
 ## Decision 和视觉模型如何配合
 
 视觉模型回答 **“在哪里操作？”**，OpenAI [Decisions API](https://developers.openai.com/api/docs/guides/decisions) 通过 GPT-6 Luna（`gpt-6-luna`）的 Choice 模式回答 **“这个目标或本步结果是否符合要求？”**。Decision 不生成坐标，也不替代主 Agent 制订计划。

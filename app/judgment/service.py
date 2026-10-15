@@ -11,15 +11,19 @@ from threading import RLock
 from time import perf_counter_ns
 
 from .evidence import prepare_request
-from .openai_decisions import DecisionNotConnected, MODEL, OpenAIDecisionsProvider, _probability, _usage_counts
+from .openai_decisions import DecisionNotConnected, OpenAIDecisionsProvider, _probability, _usage_counts
 from .profile import DecisionProfile, load_decision_profile
 from .adaptive_policy import assessment, effective_review_policy, enabled_predicates, metadata, require_review
 from .choice_contract import choice_assessment, validate_choice_result
 from .field_content_choice import (field_content_requested, field_content_assessment,
     validate_field_content_result)
 from .ordinary_review import (validate_review_answer, validate_review_record, combined_usage, review_assessment,
-    review_record_usage)
+    review_record_usage, review_metadata)
 from .timeout_contract import ProviderTimeout, review_timeout_diagnostic, timeout_diagnostic, validate_timeout_diagnostic
+
+
+_CONNECTION_FIELDS = ("api_key_env", "endpoint", "model", "ordinary_review_endpoint",
+                      "ordinary_review_model", "ordinary_review_api_key_env")
 
 
 def _canonical(value):
@@ -146,11 +150,15 @@ class DecisionService:
         return cls(session_dir, profile=load_decision_profile(path))
 
     def status(self):
-        result = {"enabled": self.enabled, "mode": self.adoption_mode, "model": MODEL,
+        result = {"enabled": self.enabled, "mode": self.adoption_mode, "model": self.profile.model,
                  "contract_version": self.profile.contract_version, "configured": self.enabled,
                  "request_cap": self.profile.request_cap, "timeout_seconds": self.profile.timeout_seconds,
                  "closed": self._closed}
         result.update(self._budget_status())
+        if self.profile.ordinary_review != "off":
+            model = review_metadata(self.profile).get("ordinary_review_model")
+            if model is not None:
+                result["ordinary_review_model"] = model
         if self._v2:
             result.update(proactive_review=self.profile.proactive_review, review_policy=self.profile.review_policy,
                           profile_sha256=self._profile_sha256())
@@ -206,11 +214,12 @@ class DecisionService:
             if self._closed:
                 raise OSError("decision_service_closed")
             if self._provider is None:
-                self._provider = OpenAIDecisionsProvider(api_key_env=self.profile.api_key_env, timeout_seconds=self.profile.timeout_seconds)
+                self._provider = OpenAIDecisionsProvider(timeout_seconds=self.profile.timeout_seconds,
+                    **{name: getattr(self.profile, name) for name in _CONNECTION_FIELDS})
             return self._provider
 
     def _base(self, *, status="uncertain", phase="after_action", request_id=None, execution_request_id=None):
-        result = {"status": status, "verdict": "uncertain", "source": "openai_decisions", "model": MODEL,
+        result = {"status": status, "verdict": "uncertain", "source": "openai_decisions", "model": self.profile.model,
                 "phase": phase, "request_id": request_id, "execution_request_id": execution_request_id,
                 "predicates": {}, "probabilities": {}, "usage": None, "elapsed_ms": 0,
                 "http_elapsed_ms": None, "server_processing_ms": None, "provider_request_id": None,
@@ -266,6 +275,10 @@ class DecisionService:
                     from .candidate_view import INPUT_FIELD_VIEW_RECIPE
                     policy.update(prompt_version="decision_prompt.target_check.input_field_view.v1",
                         candidate_view_recipe=INPUT_FIELD_VIEW_RECIPE)
+        elif set(_CONNECTION_FIELDS[1:]).intersection(self.profile.model_fields_set):
+            # 旧协议只在明确使用新连接配置时扩展绑定，默认历史摘要不变。
+            policy["connections"] = {name: getattr(self.profile, name) for name in _CONNECTION_FIELDS}
+            policy["connections"]["ordinary_review_api_key_env"] = self.profile.ordinary_review_api_key_env or self.profile.api_key_env
         digest = sha256(_canonical({"binding": binding, "policy": policy})).hexdigest()
         return binding, frames, digest
 
@@ -667,7 +680,7 @@ class DecisionService:
         try:
             if content_requested:
                 record["reason"] = "ordinary_review_field_content_unsupported"
-            elif not callable(getattr(provider, "review", None)):
+            elif not callable(getattr(provider, "review", None)) or getattr(provider, "review_ready", None) is False:
                 record["reason"] = "ordinary_review_unavailable"
             else:
                 remaining = (deadline - perf_counter_ns()) / 1_000_000_000

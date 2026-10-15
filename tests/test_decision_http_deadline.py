@@ -1,13 +1,66 @@
 """本机慢分块 HTTP 和迟到 provider 回归，不连接外部 API。"""
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 import json
+import socket
 from threading import Event, Thread
 from time import monotonic, sleep
 
 import pytest
 
 from tests.test_openai_decisions import payload, reply
+
+
+@pytest.fixture(autouse=True)
+def loopback_network_only(monkeypatch):
+    # 所有用例在 DNS 和 TCP 连接前拦截非回环地址，不改超时或连接池。
+    def require_loopback(host):
+        if isinstance(host, bytes):
+            host = host.decode("ascii")
+        try:
+            allowed = ip_address(host).is_loopback
+        except ValueError:
+            allowed = False
+        if not allowed:
+            raise AssertionError("test_external_network_blocked")
+
+    original_resolve = socket.getaddrinfo
+
+    def resolve(host, *args, **kwargs):
+        require_loopback(host)
+        return original_resolve(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    for method in ("connect", "connect_ex"):
+        original = getattr(socket.socket, method)
+
+        def connect(sock, address, *args, _original=original, **kwargs):
+            if sock.family in (socket.AF_INET, socket.AF_INET6):
+                require_loopback(address[0])
+            return _original(sock, address, *args, **kwargs)
+
+        monkeypatch.setattr(socket.socket, method, connect)
+
+
+def test_network_guard_rejects_external_dns_before_resolver(monkeypatch):
+    import _socket
+
+    def forbidden_resolver(*args, **kwargs):
+        pytest.fail("native resolver reached; no network was attempted")
+
+    monkeypatch.setattr(_socket, "getaddrinfo", forbidden_resolver)
+    with pytest.raises(AssertionError, match="test_external_network_blocked"):
+        socket.getaddrinfo("api.openai.com", 443)
+
+
+@pytest.mark.parametrize("method", ["connect", "connect_ex"])
+def test_network_guard_rejects_direct_external_ip_before_native_socket(method):
+    probe = socket.socket()
+    probe.close()
+    # 关闭的 fd 保证防护缺失时的 RED 也不会连网。
+    with pytest.raises(AssertionError, match="test_external_network_blocked"):
+        getattr(probe, method)(("203.0.113.1", 443))
 
 
 @contextmanager
@@ -51,8 +104,10 @@ def test_owned_transport_stops_continuous_chunks_at_total_deadline(monkeypatch):
     import app.judgment.openai_decisions as module
     monkeypatch.setenv("DECISION_TEST_KEY", "synthetic-secret")
     with trickle_server(first_fast=True) as (url, calls):
-        monkeypatch.setattr(module, "ENDPOINT", url)
-        provider = module.OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", timeout_seconds=2)
+        review_url = url.rsplit("/", 1)[0] + "/responses"
+        provider = module.OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", timeout_seconds=2,
+            endpoint=url, ordinary_review_endpoint=review_url)
+        assert provider.endpoint == url and provider.ordinary_review_endpoint == review_url
         try:
             assert provider.judge(payload())["usage"]["total_tokens"] == 12
             provider.timeout_seconds = 0.2
@@ -176,7 +231,7 @@ def test_absolute_deadline_limits_the_existing_read_budget():
 
 
 @contextmanager
-def error_response_server(*, status, body_mode):
+def error_response_server(*, status, body_mode, body_wait_seconds=2):
     calls, release = [], Event()
 
     class Handler(BaseHTTPRequestHandler):
@@ -194,7 +249,7 @@ def error_response_server(*, status, body_mode):
                 self.send_header("Content-Encoding", "gzip")
             self.end_headers()
             if body_mode == "delayed":
-                release.wait(2)
+                release.wait(body_wait_seconds)
             try:
                 self.wfile.write(body)
                 self.wfile.flush()
@@ -278,9 +333,12 @@ def test_owned_decision_transport_preserves_non_200_status_before_body(monkeypat
     import app.judgment.openai_decisions as module
 
     monkeypatch.setenv("DECISION_TEST_KEY", "synthetic-secret")
-    with error_response_server(status=status, body_mode=body_mode) as (url, calls):
-        monkeypatch.setattr(module, "ENDPOINT", url)
-        provider = module.OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", timeout_seconds=1)
+    # 状态码测试预留连接组件初始化预算；延迟正文仍超过总预算，误读正文必然失败。
+    with error_response_server(status=status, body_mode=body_mode, body_wait_seconds=10) as (url, calls):
+        review_url = url.rsplit("/", 1)[0] + "/responses"
+        provider = module.OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", timeout_seconds=5,
+            endpoint=url, ordinary_review_endpoint=review_url)
+        assert provider.endpoint == url and provider.ordinary_review_endpoint == review_url
         try:
             with pytest.raises(OSError, match=f"decision_http_status_{status}"):
                 provider.judge(payload())

@@ -4,6 +4,7 @@ import re
 
 from .choice_contract import CHOICES, CHOICE_NAME, choice_assessment
 from .timeout_contract import validate_timeout_diagnostic
+from .profile import DEFAULT_MODEL, DEFAULT_REVIEW_ENDPOINT
 
 
 def effective_choice(result):
@@ -59,17 +60,24 @@ def review_record_usage(record):
     return (record.get("diagnostic") or {}).get("usage")
 
 
+def review_metadata(profile):
+    # 默认路线保留旧标记，自定义普通复核则明确标识真实配置模型。
+    if profile.ordinary_review_endpoint == DEFAULT_REVIEW_ENDPOINT and profile.ordinary_review_model == DEFAULT_MODEL:
+        return {"judged_by": "ordinary_luna"}
+    return {"judged_by": "ordinary_review", "ordinary_review_model": profile.ordinary_review_model}
+
+
 def review_assessment(profile, record):
     status = record["status"]
     if status == "completed":
         choice = record["review_result"]["choice"]
         return {"status": "completed", **choice_assessment(profile, choice),
-                "reason_codes": ["ordinary_review_" + choice], "judged_by": "ordinary_luna"}
+                "reason_codes": ["ordinary_review_" + choice], **review_metadata(profile)}
     reason = record["reason"]
     return {"status": status, "verdict": "uncertain", "adopted": False,
             "disposition": "review_required", "suggested_disposition": "review_required",
             "review_scope": "runtime_diagnostic" if status != "refused" else "effect",
-            "reason": reason, "reason_codes": [reason], "judged_by": "ordinary_luna"}
+            "reason": reason, "reason_codes": [reason], **review_metadata(profile)}
 
 
 def validate_review_record(record, digest, *, identity_spec=None):

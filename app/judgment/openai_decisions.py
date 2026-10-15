@@ -1,4 +1,4 @@
-"""固定端点的同步 httpx 适配器；单请求、无重试和重定向。"""
+"""Decisions/Responses 兼容适配器；两层独立配置，无重试和重定向。"""
 import base64
 from hashlib import sha256
 from io import BytesIO
@@ -15,6 +15,8 @@ from PIL import Image
 
 from app.core.model_usage import ModelUsage
 from .http_deadline import DeadlineHTTPTransport
+from .profile import (DEFAULT_DECISION_ENDPOINT, DEFAULT_REVIEW_ENDPOINT, DEFAULT_MODEL,
+    validate_provider_endpoint, validate_provider_model)
 from .visual_action_conditions import (CANDIDATE_CONDITION, VISUAL_VALUE_CONDITION, VISUAL_TEXT_VALUE_CONDITION,
     VISUAL_INPUT_CLICKED_CONDITION, VISUAL_INPUT_READY_CONDITION, VISUAL_REPLACEMENT_READY_CONDITION)
 from .native_focus_evidence import (bound_native_focus, NATIVE_FOCUS_INTRO, NATIVE_FOCUS_QUESTION,
@@ -28,9 +30,9 @@ from .field_content_choice import (FIELD_CONTENT_NAME, field_content_requested, 
     validate_field_content_result)
 
 
-ENDPOINT = "https://api.openai.com/v1/decisions"
-REVIEW_ENDPOINT = "https://api.openai.com/v1/responses"
-MODEL = "gpt-6-luna"
+ENDPOINT = DEFAULT_DECISION_ENDPOINT
+REVIEW_ENDPOINT = DEFAULT_REVIEW_ENDPOINT
+MODEL = DEFAULT_MODEL
 
 
 class DecisionNotConnected(OSError):
@@ -64,8 +66,8 @@ def _usage_counts(usage):
     return counts
 
 
-def _parse_reply(body, names):
-    if not isinstance(body, dict) or set(body) != {"model", "answers", "usage"} or body["model"] != MODEL:
+def _parse_reply(body, names, *, expected_model=MODEL):
+    if not isinstance(body, dict) or set(body) != {"model", "answers", "usage"} or body["model"] != expected_model:
         raise ValueError("decision_response_invalid")
     answers = body["answers"]
     if not isinstance(answers, list) or len(answers) != len(names):
@@ -83,8 +85,8 @@ def _parse_reply(body, names):
     return predicates, _usage_counts(body["usage"])
 
 
-def _parse_choice_reply(body):
-    if type(body) is not dict or set(body) != {"model", "answers", "usage"} or body["model"] != MODEL:
+def _parse_choice_reply(body, *, expected_model=MODEL):
+    if type(body) is not dict or set(body) != {"model", "answers", "usage"} or body["model"] != expected_model:
         raise ValueError("decision_response_invalid")
     answers = body["answers"]
     if type(answers) is not list or len(answers) != 1 or type(answers[0]) is not dict:
@@ -95,23 +97,23 @@ def _parse_choice_reply(body):
     return validate_choice_result(answer), _usage_counts(body["usage"])
 
 
-def _parse_field_content_reply(body):
+def _parse_field_content_reply(body, *, expected_model=MODEL):
     if type(body) is not dict or type(body.get("answers")) is not list or len(body["answers"]) != 2:
         raise ValueError("decision_field_content_answers_invalid")
-    main, usage = _parse_choice_reply({**body, "answers": [body["answers"][0]]})
+    main, usage = _parse_choice_reply({**body, "answers": [body["answers"][0]]}, expected_model=expected_model)
     content = body["answers"][1]
     if type(content) is dict and content.get("type") == "refusal" and set(content) == {"type", "name"}:
         content = {**content, "choice": None, "confidence": None, "probabilities": None}
     return main, validate_field_content_result(content), usage
 
 
-def _parse_ordinary_review_reply(body, *, choices=CHOICES, name=CHOICE_NAME):
+def _parse_ordinary_review_reply(body, *, choices=CHOICES, name=CHOICE_NAME, expected_model=MODEL):
     """普通回答只接受单个原始选项或明确拒绝，不补造置信度。"""
     if type(body) is not dict:
         raise ValueError("ordinary_review_response_invalid")
     if body.get("status") != "completed" or body.get("error") is not None or body.get("incomplete_details") is not None:
         raise ValueError("ordinary_review_status_invalid")
-    if body.get("model") != MODEL:
+    if body.get("model") != expected_model:
         raise ValueError("ordinary_review_model_invalid")
     if "tools" in body and (type(body["tools"]) is not list or body["tools"]):
         raise ValueError("ordinary_review_tools_invalid")
@@ -235,18 +237,32 @@ class OpenAIDecisionsProvider:
     model_id = MODEL
     supports_images = True
 
-    def __init__(self, *, api_key_env="OPENAI_API_KEY", timeout_seconds=8, client=None):
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", api_key_env):
+    def __init__(self, *, api_key_env="OPENAI_API_KEY", timeout_seconds=8, client=None,
+                 endpoint=ENDPOINT, model=MODEL, ordinary_review_endpoint=REVIEW_ENDPOINT,
+                 ordinary_review_model=MODEL, ordinary_review_api_key_env=None):
+        if type(api_key_env) is not str or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", api_key_env):
             raise ValueError("decision_key_environment_invalid")
+        if ordinary_review_api_key_env is not None and (type(ordinary_review_api_key_env) is not str
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", ordinary_review_api_key_env)):
+            raise ValueError("ordinary_review_key_environment_invalid")
         if type(timeout_seconds) not in (int, float) or not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= 60:
             raise ValueError("decision_timeout_invalid")
         self.api_key_env, self.timeout_seconds = api_key_env, timeout_seconds
+        self.endpoint = validate_provider_endpoint(endpoint)
+        self.model_id = validate_provider_model(model)
+        self.ordinary_review_endpoint = validate_provider_endpoint(ordinary_review_endpoint)
+        self.ordinary_review_model = validate_provider_model(ordinary_review_model)
+        self.ordinary_review_api_key_env = api_key_env if ordinary_review_api_key_env is None else ordinary_review_api_key_env
         self._client, self._owns_client = client, client is None
         self._closed, self._lock = False, RLock()
 
     @property
     def ready(self):
         return not self._closed and bool((os.environ.get(self.api_key_env) or "").strip())
+
+    @property
+    def review_ready(self):
+        return not self._closed and bool((os.environ.get(self.ordinary_review_api_key_env) or "").strip())
 
     @contextmanager
     def _request_slot(self, timeout_seconds=None):
@@ -293,6 +309,7 @@ class OpenAIDecisionsProvider:
     def _judge(self, payload, *, ordinary_review=False):
         preparation_started = perf_counter_ns()
         absolute_started = monotonic()
+        selected_model = self.ordinary_review_model if ordinary_review else self.model_id
         from .timeout_contract import ProviderTimeout
         from app.execution.visual_field_proof import VISUAL_SELECTION_CONDITION
 
@@ -679,7 +696,7 @@ class OpenAIDecisionsProvider:
                 raise ValueError("decision_field_value_view_missing")
             # 字段已由原回执绑定；模型只读标图中的文字和比较值。
             content = [{"type": "input_image", "image_url": compact_field_image}]
-        body = {"model": MODEL, "input": [{"role": "user", "content": content}], "questions": [
+        body = {"model": selected_model, "input": [{"role": "user", "content": content}], "questions": [
             {"type": "predicate", "name": names[0], "instructions": condition_question},
             {"type": "predicate", "name": danger, "instructions": (
                 "Would the proposed action have a visibly unsafe, destructive, final submit, send, confirm or payment effect? Evaluate only the active target flow; do not treat unrelated global navigation as its effect."
@@ -816,7 +833,7 @@ class OpenAIDecisionsProvider:
                     if identity_spec is not None else
                     "Question and allowed choices (JSON): " + json.dumps(questions[0], ensure_ascii=False, sort_keys=True)
                     + "\nOutput exactly one allowed choice value and nothing else. Do not output JSON, explanations, confidence or probabilities.")}]
-            body = {"model": MODEL, "input": [{"role": "user", "content": review_content}],
+            body = {"model": selected_model, "input": [{"role": "user", "content": review_content}],
                 "reasoning": {"effort": "none"}, "max_output_tokens": 32, "store": False, "service_tier": "default"}
         if request_timeout is not None:
             request_timeout -= (perf_counter_ns() - preparation_started) / 1_000_000_000
@@ -826,7 +843,7 @@ class OpenAIDecisionsProvider:
             entered_slot = perf_counter_ns()
             if self._closed:
                 raise OSError("decision_provider_closed")
-            key = os.environ.get(self.api_key_env)
+            key = os.environ.get(self.ordinary_review_api_key_env if ordinary_review else self.api_key_env)
             if not key or not key.strip():
                 raise DecisionNotConnected("decision_key_missing")
             if self._client is None:
@@ -838,7 +855,7 @@ class OpenAIDecisionsProvider:
                     raise ProviderTimeout("decision_provider_budget_expired", phase="preparation")
             started = perf_counter_ns()
             try:
-                response = self._client.post(REVIEW_ENDPOINT if ordinary_review else ENDPOINT, json=body, headers={"Authorization": "Bearer " + key,
+                response = self._client.post(self.ordinary_review_endpoint if ordinary_review else self.endpoint, json=body, headers={"Authorization": "Bearer " + key,
                                              "Accept-Encoding": "identity"},
                                              timeout=remaining, follow_redirects=False,
                                              extensions={"total_deadline": absolute_deadline})
@@ -880,19 +897,20 @@ class OpenAIDecisionsProvider:
                     raw = response.json()
                     if ordinary_review:
                         raw_answer, usage = _parse_ordinary_review_reply(raw,
-                            choices=[item["value"] for item in questions[0]["choices"]], name="observed_target")
+                            choices=[item["value"] for item in questions[0]["choices"]], name="observed_target", expected_model=selected_model)
                     else:
                         if (type(raw) is not dict or set(raw) != {"model", "answers", "usage"}
-                                or raw["model"] != MODEL or type(raw["answers"]) is not list or len(raw["answers"]) != 1):
+                                or raw["model"] != selected_model or type(raw["answers"]) is not list or len(raw["answers"]) != 1):
                             raise ValueError("decision_identity_response_invalid")
                         raw_answer, usage = raw["answers"][0], _usage_counts(raw["usage"])
                     predicates, identity_result = normalize_identity_answer(raw_answer, identity_spec, ordinary=ordinary_review)
                 elif ordinary_review:
-                    predicates, usage = _parse_ordinary_review_reply(response.json())
+                    predicates, usage = _parse_ordinary_review_reply(response.json(), expected_model=selected_model)
                 elif content_requested:
-                    predicates, field_content_result, usage = _parse_field_content_reply(response.json())
+                    predicates, field_content_result, usage = _parse_field_content_reply(response.json(), expected_model=selected_model)
                 else:
-                    predicates, usage = (_parse_choice_reply(response.json()) if choice_mode else _parse_reply(response.json(), names))
+                    predicates, usage = (_parse_choice_reply(response.json(), expected_model=selected_model) if choice_mode
+                        else _parse_reply(response.json(), names, expected_model=selected_model))
             except (ValueError, TypeError) as error:
                 if ordinary_review and re.fullmatch(r"ordinary_review_[a-z0-9_]+", str(error)):
                     raise

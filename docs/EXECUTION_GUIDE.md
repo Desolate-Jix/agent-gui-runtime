@@ -10,6 +10,8 @@ Agent Review Instant lets an MCP-compatible agent operate Windows applications: 
 
 [Download the Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe) · [Release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3)
 
+**Source update (version remains 0.1.3):** Decision and secondary review can be configured independently through `--decision-profile`, while the defaults and the published 0.1.3 installer remain unchanged. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
+
 ## How Decision and the vision model work together
 
 The vision model answers **“Where should the action happen?”** OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions), using GPT-6 Luna (`gpt-6-luna`) in Choice mode, answers **“Is this target or this step's result correct?”** Decision does not generate coordinates or replace the main agent's planner.

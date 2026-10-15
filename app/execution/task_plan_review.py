@@ -130,7 +130,7 @@ def assessment_summary(value):
         "review_scope", "reason", "error_type", "reason_codes", "enabled_predicates", "profile_sha256",
         "budget", "local_proof_complete", "probabilities", "predicates", "suggested_disposition",
         "suggested_reason_codes", "decision_format", "choice_result", "identity_result", "ordinary_review", "primary_usage",
-        "usage", "judged_by") if key in value}
+        "usage", "judged_by", "ordinary_review_model") if key in value}
 
 
 def field_main_handoff(state, effective, references, *, session, service, original_status):

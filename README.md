@@ -47,6 +47,8 @@ You need **Windows x64, Python 3.11, [uv](https://docs.astral.sh/uv/getting-star
 
 Default visual input sequences require Decision in auto mode. Without Decision, basic actions and explicit legacy/native routes remain available with main-agent review; the runtime does not silently switch routes. All routes require the local Windows runtime. API usage is billed by the provider.
 
+**Source update (version remains 0.1.3):** Decision and secondary review each support their own endpoint, model and key environment variable. Defaults remain OpenAI Decisions + ordinary Luna. This requires Decisions/Responses-compatible services; the published 0.1.3 installer is unchanged. [Configuration and compatibility →](docs/development/DECISION_PROVIDERS.md)
+
 <a id="evaluation"></a>
 ## Engineering evidence
 

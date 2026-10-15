@@ -47,6 +47,8 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 默认视觉组合输入需要 Decision 的 auto 模式可用。不配置 Decision 时，仍可使用基础动作和显式 legacy／原生路线，由主 Agent 核验；运行时不会静默切换路线。所有路线都需要本机 Windows 运行时，API 服务商按实际用量收费。
 
+**源码更新（版本仍为 0.1.3）：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna。替换服务须兼容 Decisions／Responses 协议；已发布的 0.1.3 安装包不变。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
+
 <a id="evaluation"></a>
 ## 工程验证与实测
 

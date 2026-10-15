@@ -1,12 +1,42 @@
-"""只读取非秘密配置；模型和供应商地址固定。"""
+"""只读取非秘密配置；判断与普通复核分别绑定接口、模型及密钥变量。"""
 import json
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
+
+import httpx
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_serializer, model_validator
 
 
 Condition = Annotated[str, StringConstraints(strict=True, min_length=1, max_length=4000)]
+KeyEnvironment = Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+DEFAULT_DECISION_ENDPOINT = "https://api.openai.com/v1/decisions"
+DEFAULT_REVIEW_ENDPOINT = "https://api.openai.com/v1/responses"
+DEFAULT_MODEL = "gpt-6-luna"
+
+
+def validate_provider_endpoint(value):
+    """完整地址不拼接路径；远程只允许 HTTPS，明文 HTTP 仅限回环服务。"""
+    if type(value) is not str or not 1 <= len(value) <= 2048 or any(ord(c) < 33 for c in value):
+        raise ValueError("decision_endpoint_invalid")
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+        httpx.URL(value)
+    except (ValueError, httpx.InvalidURL):
+        raise ValueError("decision_endpoint_invalid") from None
+    if (not parts.hostname or port == 0 or parts.username is not None or parts.password is not None
+            or parts.query or parts.fragment
+            or (parts.scheme != "https" and not (parts.scheme == "http" and parts.hostname in {"localhost", "127.0.0.1", "::1"}))):
+        raise ValueError("decision_endpoint_invalid")
+    return value
+
+
+def validate_provider_model(value):
+    if type(value) is not str or not 1 <= len(value) <= 128 or any(c.isspace() or ord(c) < 32 for c in value):
+        raise ValueError("decision_model_invalid")
+    return value
 
 
 class ConditionTemplateIdentity(BaseModel):
@@ -20,7 +50,12 @@ class DecisionProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     contract_version: Literal["decision_profile.v1", "decision_profile.v2"] = "decision_profile.v1"
     mode: Literal["off", "shadow", "auto"] = "shadow"
-    api_key_env: Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")] = "OPENAI_API_KEY"
+    api_key_env: KeyEnvironment = "OPENAI_API_KEY"
+    endpoint: str = DEFAULT_DECISION_ENDPOINT
+    model: str = DEFAULT_MODEL
+    ordinary_review_endpoint: str = DEFAULT_REVIEW_ENDPOINT
+    ordinary_review_model: str = DEFAULT_MODEL
+    ordinary_review_api_key_env: KeyEnvironment | None = None
     timeout_seconds: float = Field(default=8, gt=0, le=60, strict=True, allow_inf_nan=False)
     pass_threshold: float = Field(default=0.9, ge=0, le=1, strict=True, allow_inf_nan=False)
     fail_threshold: float = Field(default=0.1, ge=0, le=1, strict=True, allow_inf_nan=False)
@@ -52,6 +87,10 @@ class DecisionProfile(BaseModel):
     @model_serializer(mode="wrap")
     def serialize_versioned_policy(self, serializer):
         value = serializer(self)
+        for field in ("endpoint", "model", "ordinary_review_endpoint", "ordinary_review_model", "ordinary_review_api_key_env"):
+            if field not in self.model_fields_set:
+                # 未声明扩展字段的旧配置保留原摘要与恢复身份。
+                value.pop(field, None)
         if self.ordinary_review_timeout_seconds is None:
             value.pop("ordinary_review_timeout_seconds", None)
         if "ordinary_review" not in self.model_fields_set:
@@ -75,6 +114,16 @@ class DecisionProfile(BaseModel):
             value.pop("proactive_review", None)
             value.pop("review_policy", None)
         return value
+
+    @field_validator("endpoint", "ordinary_review_endpoint", mode="before")
+    @classmethod
+    def validate_endpoints(cls, value):
+        return validate_provider_endpoint(value)
+
+    @field_validator("model", "ordinary_review_model", mode="before")
+    @classmethod
+    def validate_models(cls, value):
+        return validate_provider_model(value)
 
     @field_validator("auto_condition_templates", mode="before")
     @classmethod

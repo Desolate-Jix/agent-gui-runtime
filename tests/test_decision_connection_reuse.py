@@ -2,7 +2,9 @@
 from contextlib import contextmanager
 from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import ip_address
 import json
+import socket
 from threading import Event, Lock, Thread
 from types import SimpleNamespace
 
@@ -11,6 +13,57 @@ import httpx
 import pytest
 
 from tests.test_luna_choice_review_provider import decision_body, payload, response_body
+
+
+@pytest.fixture(autouse=True)
+def loopback_network_only(monkeypatch):
+    # 所有用例在 DNS 和 TCP 连接前拦截非回环地址，不改超时或连接池。
+    def require_loopback(host):
+        if isinstance(host, bytes):
+            host = host.decode("ascii")
+        try:
+            allowed = ip_address(host).is_loopback
+        except ValueError:
+            allowed = False
+        if not allowed:
+            raise AssertionError("test_external_network_blocked")
+
+    original_resolve = socket.getaddrinfo
+
+    def resolve(host, *args, **kwargs):
+        require_loopback(host)
+        return original_resolve(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    for method in ("connect", "connect_ex"):
+        original = getattr(socket.socket, method)
+
+        def connect(sock, address, *args, _original=original, **kwargs):
+            if sock.family in (socket.AF_INET, socket.AF_INET6):
+                require_loopback(address[0])
+            return _original(sock, address, *args, **kwargs)
+
+        monkeypatch.setattr(socket.socket, method, connect)
+
+
+def test_network_guard_rejects_external_dns_before_resolver(monkeypatch):
+    import _socket
+
+    def forbidden_resolver(*args, **kwargs):
+        pytest.fail("native resolver reached; no network was attempted")
+
+    monkeypatch.setattr(_socket, "getaddrinfo", forbidden_resolver)
+    with pytest.raises(AssertionError, match="test_external_network_blocked"):
+        socket.getaddrinfo("api.openai.com", 443)
+
+
+@pytest.mark.parametrize("method", ["connect", "connect_ex"])
+def test_network_guard_rejects_direct_external_ip_before_native_socket(method):
+    probe = socket.socket()
+    probe.close()
+    # 关闭的 fd 保证防护缺失时的 RED 也不会连网。
+    with pytest.raises(AssertionError, match="test_external_network_blocked"):
+        getattr(probe, method)(("203.0.113.1", 443))
 
 
 @contextmanager
@@ -67,8 +120,6 @@ def _owned_provider(monkeypatch, url):
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
     monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1")
     monkeypatch.setenv("NO_PROXY", "")
-    monkeypatch.setattr(module, "ENDPOINT", url + "/v1/decisions")
-    monkeypatch.setattr(module, "REVIEW_ENDPOINT", url + "/v1/responses")
     clients, extensions = [], []
     real_client = httpx.Client
 
@@ -87,7 +138,11 @@ def _owned_provider(monkeypatch, url):
         return client
 
     monkeypatch.setattr(module.httpx, "Client", create_client)
-    return module.OpenAIDecisionsProvider(api_key_env="CONNECTION_REUSE_TEST_KEY"), clients, extensions
+    provider = module.OpenAIDecisionsProvider(api_key_env="CONNECTION_REUSE_TEST_KEY",
+        endpoint=url + "/v1/decisions", ordinary_review_endpoint=url + "/v1/responses")
+    assert provider.endpoint == url + "/v1/decisions"
+    assert provider.ordinary_review_endpoint == url + "/v1/responses"
+    return provider, clients, extensions
 
 
 def _idle_clock(monkeypatch):
@@ -148,7 +203,10 @@ def test_idle_over_sixty_seconds_reconnects_and_close_releases_connections(monke
         with pytest.raises(OSError, match="decision_provider_closed"):
             provider.judge(payload())
         assert len(state.requests) == 2
-        replacement = module.OpenAIDecisionsProvider(api_key_env="CONNECTION_REUSE_TEST_KEY")
+        replacement = module.OpenAIDecisionsProvider(api_key_env="CONNECTION_REUSE_TEST_KEY",
+            endpoint=url + "/v1/decisions", ordinary_review_endpoint=url + "/v1/responses")
+        assert replacement.endpoint == url + "/v1/decisions"
+        assert replacement.ordinary_review_endpoint == url + "/v1/responses"
         try:
             replacement.judge(payload())
             assert [r["connection"] for r in state.requests] == [1, 2, 3]
