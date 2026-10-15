@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="432" viewBox="0 0 1120 432" role="img" aria-labelledby="title desc">
+<title id="title">Agent Review Instant</title>
+<desc id="desc">Visual grounding. Decision checks. Continuous execution.. Plan, Ground, Check, Act, Verify. Workflow illustration.</desc>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#101b30"/><stop offset="1" stop-color="#0b1220"/></linearGradient><linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#285bea"/><stop offset="1" stop-color="#2043b8"/></linearGradient></defs>
+<rect width="1120" height="432" rx="24" fill="url(#bg)"/>
+<rect x=".5" y=".5" width="1119" height="431" rx="23.5" fill="none" stroke="#26364f"/>
+<g font-family="Segoe UI, Inter, Noto Sans, Microsoft YaHei, Arial, sans-serif">
+<text x="560" y="42" text-anchor="middle" font-size="14" font-weight="600" letter-spacing="2.8" fill="#85cfff">WINDOWS COMPUTER USE</text>
+<text x="560" y="108" text-anchor="middle" font-size="52" font-weight="700" letter-spacing="-1.5" fill="#f8fafc">Agent Review Instant</text>
+<text x="560" y="151" text-anchor="middle" font-size="23" fill="#b6c9e5">Visual grounding. Decision checks. Continuous execution.</text>
+<rect x="365.5" y="177" width="116" height="27" rx="7" fill="#1d2d45" stroke="#31445f"/>
+<text x="423.5" y="195" text-anchor="middle" font-size="13" font-weight="600" fill="#dbeafe">Windows x64</text>
+<rect x="489.5" y="177" width="112" height="27" rx="7" fill="#1d2d45" stroke="#31445f"/>
+<text x="545.5" y="195" text-anchor="middle" font-size="13" font-weight="600" fill="#dbeafe">Python 3.11</text>
+<rect x="609.5" y="177" width="61" height="27" rx="7" fill="#1d2d45" stroke="#31445f"/>
+<text x="640" y="195" text-anchor="middle" font-size="13" font-weight="600" fill="#dbeafe">MCP</text>
+<rect x="678.5" y="177" width="76" height="27" rx="7" fill="#1d2d45" stroke="#31445f"/>
+<text x="716.5" y="195" text-anchor="middle" font-size="13" font-weight="600" fill="#dbeafe">v0.1.3</text>
+<rect x="48" y="236" width="192" height="124" rx="14" fill="#18263b" stroke="#30415c"/>
+<text x="62" y="259" font-size="12" fill="#9cb4d5">01</text>
+<g transform="translate(128 256)" fill="none" stroke="#90d1ff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 3 3 5-6M14 7h12M2 19l3 3 5-6M14 19h12"/></g>
+<text x="144" y="316" text-anchor="middle" font-size="23" font-weight="600" fill="#f1f5f9">Plan</text>
+<text x="144" y="340" text-anchor="middle" font-size="15" fill="#a9bdd8">Main agent</text>
+<path d="M244 298h8m-4-4 4 4-4 4" fill="none" stroke="#6d91c0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="256" y="236" width="192" height="124" rx="14" fill="#18263b" stroke="#30415c"/>
+<text x="270" y="259" font-size="12" fill="#9cb4d5">02</text>
+<g transform="translate(336 256)" fill="none" stroke="#90d1ff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10V3h7m12 0h7v7M3 22v7h7m12 0h7v-7"/><circle cx="16" cy="16" r="6"/><circle cx="16" cy="16" r="1"/></g>
+<text x="352" y="316" text-anchor="middle" font-size="23" font-weight="600" fill="#f1f5f9">Ground</text>
+<text x="352" y="340" text-anchor="middle" font-size="15" fill="#a9bdd8">Vision model</text>
+<path d="M452 298h8m-4-4 4 4-4 4" fill="none" stroke="#6d91c0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="464" y="236" width="192" height="124" rx="14" fill="url(#accent)" stroke="#638aff"/>
+<text x="478" y="259" font-size="12" fill="#dce7ff">03</text>
+<g transform="translate(544 256)" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M16 2 28 7v9c0 7-6 12-12 15C10 28 4 23 4 16V7Z"/><path d="m10 16 4 4 8-9"/></g>
+<text x="560" y="316" text-anchor="middle" font-size="23" font-weight="600" fill="#f1f5f9">Check</text>
+<text x="560" y="340" text-anchor="middle" font-size="15" fill="#e4edff">Decision</text>
+<path d="M660 298h8m-4-4 4 4-4 4" fill="none" stroke="#6d91c0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="672" y="236" width="192" height="124" rx="14" fill="#18263b" stroke="#30415c"/>
+<text x="686" y="259" font-size="12" fill="#9cb4d5">04</text>
+<g transform="translate(752 256)" fill="none" stroke="#90d1ff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m7 3 20 14-10 2-5 9Z"/><path d="m17 19 6 10"/></g>
+<text x="768" y="316" text-anchor="middle" font-size="23" font-weight="600" fill="#f1f5f9">Act</text>
+<text x="768" y="340" text-anchor="middle" font-size="15" fill="#a9bdd8">Runtime</text>
+<path d="M868 298h8m-4-4 4 4-4 4" fill="none" stroke="#6d91c0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="880" y="236" width="192" height="124" rx="14" fill="#18263b" stroke="#30415c"/>
+<text x="894" y="259" font-size="12" fill="#9cb4d5">05</text>
+<g transform="translate(960 256)" fill="none" stroke="#90d1ff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="13"/><path d="m9 16 5 5 9-10"/></g>
+<text x="976" y="316" text-anchor="middle" font-size="23" font-weight="600" fill="#f1f5f9">Verify</text>
+<text x="976" y="340" text-anchor="middle" font-size="15" fill="#a9bdd8">Current result</text>
+<text x="560" y="399" text-anchor="middle" font-size="17" fill="#a9bdd8">Continue after successful checks. Return unresolved cases to your agent.</text>
+</g></svg>
