@@ -2,6 +2,8 @@
   "contract_version": "decision_profile.v2",
   "mode": "auto",
   "decision_format": "choice",
+  "ordinary_review": "on_reject",
+  "ordinary_review_timeout_seconds": 12,
   "api_key_env": "OPENAI_API_KEY",
   "timeout_seconds": 8,
   "pass_threshold": 0.9,

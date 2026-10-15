@@ -35,6 +35,44 @@ class VisualSubmitTarget:
                 or permitted.get("field_goal") != self._field["field_goal"]
                 or resolve_action_text(permitted.get("text"), self._context["plan"]["inputs"]) != self._field["expected_text"]):
             raise ValueError("visual_submit_original_action_mismatch")
+        self._target_identity = None
+        if "target_identity_binding" in action:
+            from app.judgment.target_identity import normalize_target_identity
+            from app.execution.visual_field_proof import _digest
+            binding = action["target_identity_binding"]
+            required = {"schema", "goal", "target_identity", "focus_receipt_sha256", "action_review_sha256",
+                "source_request_sha256", "source_assessment_sha256"}
+            if (type(binding) is not dict or set(binding) != required
+                    or binding["schema"] != "target_identity_binding.v1" or binding["goal"] != self.goal
+                    or binding["focus_receipt_sha256"] != action["focus_receipt_sha256"]
+                    or binding["action_review_sha256"] != _digest(self._context)
+                    or any(type(binding[key]) is not str or len(binding[key]) != 64
+                        or any(char not in "0123456789abcdef" for char in binding[key]) for key in
+                        ("focus_receipt_sha256", "action_review_sha256", "source_request_sha256", "source_assessment_sha256"))):
+                raise ValueError("visual_submit_target_identity_binding_invalid")
+            self._target_identity = normalize_target_identity(binding["target_identity"])
+            if ("target_identity" not in permitted and next(row["description"] for row in
+                    self._target_identity["choices"] if row["value"] == self._target_identity["expected"]) != self.goal):
+                raise ValueError("visual_submit_target_identity_goal_mismatch")
+        self._target_check = None
+        if "target_check_binding" in action:
+            from app.judgment.target_check import normalize_target_check
+            from app.execution.visual_field_proof import _digest
+            binding = action["target_check_binding"]
+            required = {"schema", "goal", "target_check", "focus_receipt_sha256", "action_review_sha256",
+                "source_request_sha256", "source_assessment_sha256"}
+            if (type(binding) is not dict or set(binding) != required
+                    or binding["schema"] != "target_check_binding.v1" or binding["goal"] != self.goal
+                    or binding["focus_receipt_sha256"] != action["focus_receipt_sha256"]
+                    or binding["action_review_sha256"] != _digest(self._context)
+                    or any(type(binding[key]) is not str or len(binding[key]) != 64
+                        or any(char not in "0123456789abcdef" for char in binding[key]) for key in
+                        ("focus_receipt_sha256", "action_review_sha256", "source_request_sha256", "source_assessment_sha256"))):
+                raise ValueError("visual_submit_target_check_binding_invalid")
+            self._target_check = normalize_target_check(binding["target_check"])
+            if (self._target_check["target"] != self.goal or self._target_check["kind"] != "input_field"
+                    or self._target_identity is not None):
+                raise ValueError("visual_submit_target_check_goal_mismatch")
         issued = _ISSUED.setdefault(keyboard_target.proof._service, set())
         binding = value["assessment"]["request_sha256"]
         if binding in issued:
@@ -55,6 +93,34 @@ class VisualSubmitTarget:
     @property
     def input_claimed(self):
         return self._claimed
+
+    def review_target_identity(self, action):
+        """回锚只复用当前值证明认证的原定位身份，不追加定位调用。"""
+        from .agent_grounding_target import current_agent_grounding
+        from app.execution.visual_field_proof import _checked_proof
+        from app.judgment.target_identity import normalize_target_identity
+        if (current_agent_grounding() is not self or action.get("field_goal", action.get("goal")) != self.goal
+                or _checked_proof(self.keyboard_target.proof) != self._value):
+            raise ValueError("visual_submit_target_identity_binding_invalid")
+        binding = self._value["request"]["action"].get("target_identity_binding")
+        expected = None if binding is None else normalize_target_identity(binding["target_identity"])
+        if self._target_identity != expected:
+            raise ValueError("visual_submit_target_identity_binding_invalid")
+        return deepcopy(self._target_identity)
+
+    def review_target_check(self, action):
+        """回锚复用已认证原检查，不能把缓存改写为另一个目标。"""
+        from .agent_grounding_target import current_agent_grounding
+        from app.execution.visual_field_proof import _checked_proof
+        from app.judgment.target_check import normalize_target_check
+        if (current_agent_grounding() is not self or action.get("field_goal", action.get("goal")) != self.goal
+                or _checked_proof(self.keyboard_target.proof) != self._value):
+            raise ValueError("visual_submit_target_check_binding_invalid")
+        binding = self._value["request"]["action"].get("target_check_binding")
+        expected = None if binding is None else normalize_target_check(binding["target_check"])
+        if self._target_check != expected:
+            raise ValueError("visual_submit_target_check_binding_invalid")
+        return deepcopy(self._target_check)
 
     def _identity(self, identity):
         from app.execution.decision_check import _identity

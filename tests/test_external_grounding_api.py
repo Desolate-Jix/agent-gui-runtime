@@ -100,6 +100,75 @@ def test_default_transport_reuses_one_deadline_pool_and_keeps_provider_reasoning
     assert len(calls) == 2
 
 
+def test_reasoning_none_is_explicit_only_and_does_not_change_other_wire_content(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "synthetic-secret")
+    calls, outputs = [], []
+    usage = {"prompt_tokens": 30, "completion_tokens": 20, "total_tokens": 50,
+        "completion_tokens_details": {"reasoning_tokens": 7}}
+    def handle(request):
+        calls.append(request)
+        return httpx.Response(200, json=reply(usage=usage))
+    for changes in ({}, {"reasoning_effort": None}, {"reasoning_effort": "none"}):
+        with ChatCompletionsGrounder(profile(**changes), transport=httpx.MockTransport(handle)) as grounder:
+            outputs.append(grounder.ground(request_id="request-1", capture=capture, goal="Search"))
+    assert calls[0].content == calls[1].content
+    original = json.loads(calls[0].content)
+    explicit = json.loads(calls[2].content)
+    assert "reasoning_effort" not in original and explicit.pop("reasoning_effort") == "none"
+    assert explicit == original
+    assert [output["provider"]["requested_reasoning_effort"] for output in outputs] == [None, None, "none"]
+    assert all(output["provider"]["usage"] == usage for output in outputs)
+    assert all(output["result"] == outputs[0]["result"] for output in outputs)
+    assert all(output["provider"]["attempts"] == 1 for output in outputs)
+
+
+def test_reasoning_none_and_omission_preserve_profile_serialization():
+    omitted = profile()
+    explicit_null = profile(reasoning_effort=None)
+    assert omitted.reasoning_effort is None
+    assert omitted.model_dump() == explicit_null.model_dump()
+    assert omitted.model_dump_json() == explicit_null.model_dump_json()
+    assert "reasoning_effort" not in omitted.model_dump()
+    assert profile(reasoning_effort="none").model_dump()["reasoning_effort"] == "none"
+
+
+@pytest.mark.parametrize("value", [True, 0, "", "NONE", "low", {"effort": "none"}, ["none"]])
+def test_reasoning_configuration_rejects_unimplemented_values(value):
+    with pytest.raises(ValueError):
+        profile(reasoning_effort=value)
+
+
+@pytest.mark.parametrize("protocol", ["responses_json", "decisions"])
+def test_reasoning_configuration_never_ignores_an_unsupported_protocol(tmp_path, protocol):
+    path = tmp_path / "unsupported-protocol.json"
+    path.write_text(json.dumps({**profile().model_dump(), "protocol": protocol, "reasoning_effort": "none"}), encoding="utf-8")
+    with pytest.raises(api.ApiGroundingError, match="api_profile_invalid"):
+        api.load_api_grounding_profile(path)
+
+
+def test_reasoning_rejection_is_not_retried_without_parameter(capture, monkeypatch):
+    monkeypatch.setenv("TEST_VISION_KEY", "synthetic-secret")
+    calls = []
+    def handle(request):
+        calls.append(request)
+        assert json.loads(request.content)["reasoning_effort"] == "none"
+        return httpx.Response(400, text="unsupported reasoning_effort synthetic-secret")
+    with ChatCompletionsGrounder(profile(reasoning_effort="none"), transport=httpx.MockTransport(handle)) as grounder:
+        with pytest.raises(api.ApiGroundingError, match="api_request_rejected") as failure:
+            grounder.ground(request_id="request-1", capture=capture, goal="Search")
+    assert len(calls) == 1 and failure.value.attempt["status"] == "failure"
+    assert "synthetic-secret" not in str(failure.value)
+
+
+def test_reasoning_experiment_example_is_separate_from_maintained_default():
+    root = Path(__file__).resolve().parents[1] / "configs"
+    default = api.load_api_grounding_profile(root / "vision-api-openai-luna.example.json")
+    experiment = api.load_api_grounding_profile(root / "vision-api-openai-luna.no-reasoning.example.json")
+    assert default.reasoning_effort is None and experiment.reasoning_effort == "none"
+    configured = experiment.model_dump()
+    assert configured.pop("reasoning_effort") == "none" and configured == default.model_dump()
+
+
 def test_explicit_resize_maps_geometry_back_to_original_capture(capture, monkeypatch):
     monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
     path = Path(capture["image_path"])
@@ -416,6 +485,24 @@ def benchmark_manifest(capture, **changes):
         **changes}
 
 
+def test_benchmark_reports_explicit_reasoning_setting(capture, monkeypatch, tmp_path):
+    from scripts.benchmark_external_vision import BenchmarkManifest, preflight, run_benchmark
+    monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
+    configured = profile(reasoning_effort="none")
+    manifest = BenchmarkManifest.model_validate(benchmark_manifest(capture))
+    assert preflight(manifest, configured)["requested_reasoning_effort"] == "none"
+    def handle(request):
+        body = json.loads(request.content)
+        assert body["reasoning_effort"] == "none"
+        context = json.loads(body["messages"][1]["content"][0]["text"])
+        payload = result()
+        payload["request_id"] = context["request_id"]
+        return httpx.Response(200, json=reply(payload))
+    report = run_benchmark(manifest, configured, output_path=tmp_path / "reasoning.json",
+        transport=httpx.MockTransport(handle))
+    assert report["profile"]["requested_reasoning_effort"] == "none"
+
+
 def test_benchmark_keeps_first_failure_and_truth_out_of_model_request(capture, monkeypatch, tmp_path):
     from scripts.benchmark_external_vision import BenchmarkManifest, run_benchmark
     monkeypatch.setenv("TEST_VISION_KEY", "secret-value")
@@ -568,6 +655,7 @@ def test_luna_default_bounds_submitted_image_and_restores_original_coordinates(t
         "capture_id": "capture-1", "image_size": {"width": original_size[0], "height": original_size[1]}}
     configured = api.load_api_grounding_profile(
         Path(__file__).resolve().parents[1] / "configs/vision-api-openai-luna.example.json")
+    assert configured.response_binding == "runtime"
     seen = []
     def handler(request):
         parts = json.loads(request.content)["messages"][1]["content"]
@@ -577,7 +665,10 @@ def test_luna_default_bounds_submitted_image_and_restores_original_coordinates(t
         assert max(actual) <= 1600
         assert actual[0] <= original_size[0] and actual[1] <= original_size[1]
         assert context["image_size"] == {"width": actual[0], "height": actual[1]}
+        assert "request_id" not in context and "capture_id" not in context
         payload = result()
+        del payload["request_id"], payload["capture_id"]
+        payload["target_description"] = {"kind": "input_field", "appearance": "Long rounded box", "container": "Browser toolbar"}
         payload["image_size"] = context["image_size"]
         if original_size == (2560, 1400):
             assert actual == (1600, 875)
@@ -595,6 +686,8 @@ def test_luna_default_bounds_submitted_image_and_restores_original_coordinates(t
     assert len(seen) == 1
     assert path.read_bytes() == source_bytes
     assert value["result"]["image_size"] == capture["image_size"]
+    assert value["result"]["request_id"] == "request-1"
+    assert value["result"]["capture_id"] == "capture-1"
     candidate = value["result"]["candidates"][0]
     if original_size == (2560, 1400):
         assert candidate["click_point"] == {"x": 1224, "y": 60}

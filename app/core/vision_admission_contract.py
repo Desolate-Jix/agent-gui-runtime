@@ -7,6 +7,10 @@ class AgentCommandError(ValueError):
     pass
 
 
+class AgentCommandCancelled(AgentCommandError):
+    """内部协作取消；输入事实仍由命令的原子派发账本保存。"""
+
+
 class AgentCommandVisionAdmissionError(AgentCommandError):
     """仅在能力路由判定后、创建 worker 和派发前提供零输入事实。"""
 

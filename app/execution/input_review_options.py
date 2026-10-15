@@ -42,10 +42,14 @@ def build_input_review_options(coordinator, command, execution_request_id, *, de
         "allowed_states": deepcopy(step["verification"].get("allowed_states", []))}
     if "review_policy" in step["verification"]:
         review_context["review_policy"] = step["verification"]["review_policy"]
+    identity_context = {}
+    if "target_identity" in step["action"]:
+        from app.judgment.target_identity import normalize_target_identity
+        identity_context["target_identity"] = normalize_target_identity(step["action"]["target_identity"])
     return {**result, "field_evidence_mode": "visual", "visual_field_context": {
         "service": getattr(coordinator, "_decision_service", None),
         "execution_request_id": execution_request_id, "deadline_ns": deadline_ns,
-        "review_context": review_context,
+        "review_context": review_context, "action_review": deepcopy(context),
         "field_kind": "search" if command["request"]["submit_search"] else "text",
         "native_field_evidence": False, "ocr_enabled": False,
-        "cancelled": cancelled}}
+        "cancelled": cancelled, **identity_context}}

@@ -5,6 +5,7 @@ from time import perf_counter, perf_counter_ns, sleep
 from uuid import uuid4
 
 from app.core.input_sequence_contract import InputSequenceRequest
+from app.core.vision_admission_contract import AgentCommandCancelled
 
 
 class InputSequenceInterrupted(ValueError):
@@ -106,6 +107,8 @@ def _focus_field_binding(located, receipt, target):
         paths = [Path(p).resolve(strict=True) for p in paths]
         if len(set(paths)) != 1: invalid()
         digest = sha256(paths[0].read_bytes()).hexdigest()
+    except AgentCommandCancelled:
+        raise
     except (OSError, ValueError):
         raise InputSequenceInterrupted("input_field_binding_capture_unavailable") from None
     if capture.get("sha256") is not None and capture["sha256"] != digest:
@@ -307,6 +310,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 **({"observation_condition": observation_condition}
                    if name == "search" and observation_condition is not None else {}),
                 **({"learning_context": learning_context} if learning_context is not None else {}))
+        except AgentCommandCancelled:
+            raise
         except Exception:
             row["status"] = "result_unknown"
             result["action_executed"] = True if result["action_executed"] is True else None
@@ -361,6 +366,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 from app.agent.windows_text_field_reader import TextFieldReadError
                 raise TextFieldReadError("text_field_selection_unavailable")
             return snapshot
+        except AgentCommandCancelled:
+            raise
         except Exception as error:
             from app.agent.windows_text_field_reader import TextFieldReadError
             if name == "check_focus" and isinstance(error, TextFieldReadError):
@@ -450,6 +457,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                     row.update(status="not_adopted", request_sha256=handoff["assessment"]["request_sha256"])
                     result["main_handoff"] = {**handoff, "stage": stage}
                     raise
+                except AgentCommandCancelled:
+                    raise
                 except ValueError:
                     row["status"] = "not_adopted"
                     raise
@@ -471,6 +480,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 nonlocal visual_focus_readonly_error, visual_focus_readonly_stage
                 try:
                     return callback()
+                except AgentCommandCancelled:
+                    raise
                 except Exception as error:
                     if native_evidence:
                         raise
@@ -507,6 +518,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                     keyboard_target = coordinator._owner.call(lambda: issue_visual_keyboard_target(
                         focus_proof, "type_text", text=spec.text, clear_existing=effective_clear, selection_reviewer=review_selection,
                         freshness_reviewer=review_field_freshness))
+                except AgentCommandCancelled:
+                    raise
                 except ValueError as error:
                     result["input_check"] = {"status": "unavailable", "phase": "check_focus", "reason": str(error)}
                     if error is visual_focus_readonly_error:
@@ -531,6 +544,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                     lambda: assess_visual_field(phase="value",
                     focus_receipt=focus_receipt, input_receipt=typed, frame=result["observation"]["capture"],
                     expected_field=expected_field, context=visual_field_context, value_reading=value_reading)))
+            except AgentCommandCancelled:
+                raise
             except ValueError as error:
                 result["input_check"] = {"status": "unavailable", "phase": "check_input", "reason": str(error)}
                 raise InputSequenceInterrupted(str(error)) from error
@@ -549,6 +564,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                             from app.core.visual_submit_target import VisualSubmitTarget
                             return VisualSubmitTarget(keyboard, action_review=action_review)
                         return keyboard
+                    except AgentCommandCancelled:
+                        raise
                     except ValueError:
                         # 只认证签发前沿的真实取消或期限；异常文字不能证明 Enter 未派发。
                         cancelled = visual_field_context.get("cancelled")
@@ -660,6 +677,8 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
                 keyboard_target=keyboard_target)
         result.update(status="completed", phase="returned",
             next_action="inspect_returned_image_and_judge_task_effect")
+    except AgentCommandCancelled:
+        raise
     except Exception as error:
         # 组合可能已有输入，必须保留子步回执，不把整个命令伪装成零副作用。
         from app.core.screenshot import CaptureVisibilityError

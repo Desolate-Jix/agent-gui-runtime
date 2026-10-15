@@ -15,7 +15,7 @@ from test_decision_candidate_annotation_integration import request_args
 from test_decision_choice import choice_reply, runtime
 
 
-INPUT_FEASIBILITY = "This click starts text input in the marked field. "
+INPUT_FEASIBILITY = "Match the marked text input itself. "
 
 
 def candidate_args(root, future):

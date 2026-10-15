@@ -478,7 +478,11 @@ def test_job_cancel_during_candidate_decision_has_zero_real_owner_action_clicks(
         def __init__(self, **kwargs):
             pass
         def capture_window(self, **kwargs):
-            return {**deepcopy(frame), "window_size": {"width": 100, "height": 80}, "roi": None}
+            # 离线替身补齐真实截图绑定，确保到达 Decision 取消前沿。
+            return {**deepcopy(frame), "window_size": {"width": 100, "height": 80}, "roi": None,
+                "window_rect": [0, 0, 100, 80], "image_width": 100, "image_height": 80,
+                "capture_visibility": {"contract_version": "bound_capture_visibility_v2", "allowed": True,
+                    "coordinate_space": "window", "bound_window_handle": 100, "occluded_regions": [], "masked": False}}
     monkeypatch.setattr(direct, "ScreenshotService", Capture)
     monkeypatch.setattr(direct, "_capture_observation", lambda *args: deepcopy(frame))
     monkeypatch.setattr(direct, "_post_action", REAL_POST_ACTION)

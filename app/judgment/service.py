@@ -17,6 +17,9 @@ from .adaptive_policy import assessment, effective_review_policy, enabled_predic
 from .choice_contract import choice_assessment, validate_choice_result
 from .field_content_choice import (field_content_requested, field_content_assessment,
     validate_field_content_result)
+from .ordinary_review import (validate_review_answer, validate_review_record, combined_usage, review_assessment,
+    review_record_usage)
+from .timeout_contract import ProviderTimeout, review_timeout_diagnostic, timeout_diagnostic, validate_timeout_diagnostic
 
 
 def _canonical(value):
@@ -25,6 +28,51 @@ def _canonical(value):
 
 def decision_profile_sha256(profile):
     return sha256(_canonical(profile.model_dump(mode="json"))).hexdigest()
+
+
+def _generic_choice_prompt_revision(binding):
+    """只区分本轮实际改题的分支，不代替供应商的证据与问题校验。"""
+    from .visual_action_conditions import (CANDIDATE_CONDITION, VISUAL_VALUE_CONDITION,
+        VISUAL_TEXT_VALUE_CONDITION, VISUAL_INPUT_CLICKED_CONDITION,
+        VISUAL_INPUT_READY_CONDITION, VISUAL_REPLACEMENT_READY_CONDITION)
+
+    action = binding.get("action") or {}
+    if (binding.get("temporal_context") is not None or action.get("target_identity") is not None
+            or action.get("target_check") is not None):
+        return None
+    condition, phase = binding["condition"], binding["phase"]
+    if phase == "before_action":
+        permitted = action.get("permitted_action") or {}
+        if (condition == CANDIDATE_CONDITION and action.get("review_scope") == "candidate"
+                and "freshness_context" not in action and len(binding["frames"]) == 1
+                and isinstance(permitted, dict) and isinstance(permitted.get("kind"), str)
+                and permitted["kind"].strip()):
+            return "decision_prompt.choice.candidate.v2"
+        return None
+    visual_field = action.get("operation") == "visual_field_check"
+    field_phase, focus_stage = action.get("field_phase"), action.get("focus_stage")
+    reading = action.get("value_reading")
+    evidence = reading.get("evidence") if isinstance(reading, dict) else None
+    native = visual_field and (
+        field_phase == "focus" and focus_stage == "after_click" and "focus_value_snapshot" in action
+        or focus_stage == "before_keyboard_freshness"
+        or field_phase == "value" and isinstance(evidence, dict) and "contract_version" in evidence)
+    if native:
+        return None
+    readiness = condition in (VISUAL_INPUT_CLICKED_CONDITION, VISUAL_INPUT_READY_CONDITION,
+        VISUAL_REPLACEMENT_READY_CONDITION)
+    if readiness and condition == VISUAL_INPUT_CLICKED_CONDITION:
+        return "decision_prompt.choice.input_clicked.v2"
+    visual_value = (visual_field and field_phase == "value" and action.get("value_verification") == "visual"
+        and condition in (VISUAL_VALUE_CONDITION, VISUAL_TEXT_VALUE_CONDITION))
+    if (visual_value and condition == VISUAL_TEXT_VALUE_CONDITION and "field_image_scope" in action
+            and binding.get("assessment_context") is None):
+        return "decision_prompt.choice.compact_text_value.v2"
+    field_detail = visual_field and (visual_value
+        or field_phase == "focus" and focus_stage in ("after_click", "after_selection"))
+    if not (field_detail or readiness or binding.get("assessment_context") is not None):
+        return "decision_prompt.choice.result.v2"
+    return None
 
 
 def _connect_decision_ledger_readonly(session_dir):
@@ -53,6 +101,11 @@ def read_decision_budget_status(session_dir, profile):
             clause = "" if v2 else " AND scope='execution'"
             used, unknown = db.execute("SELECT COUNT(*), COALESCE(SUM(result_blob IS NULL),0) "
                 "FROM dispatches WHERE dispatched=1" + clause).fetchone()
+            if v2 and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ordinary_reviews'").fetchone():
+                secondary, unresolved = db.execute("SELECT COUNT(*), COALESCE(SUM(d.result_blob IS NULL),0) FROM ordinary_reviews r "
+                    "JOIN dispatches d ON d.request_id=r.request_id").fetchone()
+                used += secondary
+                unknown += unresolved
         result.update(used=used, remaining=max(0, profile.request_cap - used), unknown_dispatches=unknown)
     except (sqlite3.Error, OSError, ValueError):
         result.update(used=None, remaining=None, unknown_dispatches=None, budget_status="unavailable")
@@ -103,6 +156,8 @@ class DecisionService:
                           profile_sha256=self._profile_sha256())
             if "decision_format" in self.profile.model_fields_set:
                 result["decision_format"] = self.profile.decision_format
+            if "ordinary_review" in self.profile.model_fields_set:
+                result["ordinary_review"] = self.profile.ordinary_review
         return result
 
     @property
@@ -176,6 +231,18 @@ class DecisionService:
                 or isinstance(kwargs.get("review_context"), dict) and "wait_policy" in kwargs["review_context"]):
             raise ValueError("decision_profile_v2_required")
         binding, frames = prepare_request(self.session_dir, **kwargs, include_upload=include_upload)
+        identity_spec = (binding.get("action") or {}).get("target_identity")
+        target_check = (binding.get("action") or {}).get("target_check")
+        if target_check is not None:
+            from .target_check import normalize_target_check
+            if identity_spec is not None or not self._v2 or self.profile.decision_format != "choice":
+                raise ValueError("decision_target_check_choice_required")
+            binding["action"]["target_check"] = normalize_target_check(target_check)
+        if identity_spec is not None:
+            from .target_identity import normalize_target_identity
+            if not self._v2 or self.profile.decision_format != "choice":
+                raise ValueError("decision_target_identity_choice_required")
+            binding["action"]["target_identity"] = normalize_target_identity(identity_spec)
         if field_content_requested(binding) and (not self._v2 or self.profile.decision_format != "choice"):
             raise ValueError("decision_field_content_choice_required")
         policy = {"mode": self.profile.mode, "pass_threshold": self.profile.pass_threshold,
@@ -186,6 +253,19 @@ class DecisionService:
                       "enabled_predicates": enabled_predicates(self.profile, binding["phase"], binding["review_context"]),
                       "review_policy": effective_review_policy(self.profile, binding["review_context"]),
                       "prompt_version": "decision_prompt." + binding["temporal_context"]["schema"] if "temporal_context" in binding else "decision_prompt.v2"}
+            if self.profile.decision_format == "choice":
+                revision = _generic_choice_prompt_revision(binding)
+                if revision is not None:
+                    policy["prompt_version"] = revision
+            if identity_spec is not None:
+                policy["prompt_version"] = "decision_prompt.target_identity.v1"
+            if target_check is not None:
+                policy["prompt_version"] = "decision_prompt.target_check.v2"
+                if (target_check["kind"] == "input_field" and binding["phase"] == "before_action"
+                        and binding["action"].get("review_scope") == "candidate"):
+                    from .candidate_view import INPUT_FIELD_VIEW_RECIPE
+                    policy.update(prompt_version="decision_prompt.target_check.input_field_view.v1",
+                        candidate_view_recipe=INPUT_FIELD_VIEW_RECIPE)
         digest = sha256(_canonical({"binding": binding, "policy": policy})).hexdigest()
         return binding, frames, digest
 
@@ -202,6 +282,7 @@ class DecisionService:
         try:
             connection.execute("PRAGMA synchronous=FULL")
             connection.execute("CREATE TABLE IF NOT EXISTS dispatches (request_id TEXT PRIMARY KEY, request_sha256 TEXT NOT NULL, scope TEXT NOT NULL, dispatched INTEGER NOT NULL, marker_blob BLOB NOT NULL, result_blob BLOB)")
+            connection.execute("CREATE TABLE IF NOT EXISTS ordinary_reviews (request_id TEXT PRIMARY KEY, request_sha256 TEXT NOT NULL)")
         except sqlite3.Error:
             connection.close()
             raise
@@ -234,6 +315,10 @@ class DecisionService:
                     or value.get("verdict") not in ("success", "failure", "uncertain")
                     or type(value.get("adopted")) is not bool):
                 raise ValueError("decision_saved_binding_invalid")
+            if "timeout_diagnostic" in value:
+                if value["status"] != "timeout" and value.get("reason") != "decision_service_closed_during_evaluation":
+                    raise ValueError("decision_saved_timeout_diagnostic_invalid")
+                validate_timeout_diagnostic(value["timeout_diagnostic"])
             if value["adopted"] and (not self.auto_condition_allowed(binding["condition"],
                     condition_snapshot=binding.get("condition_snapshot"))
                     or value["status"] != "completed" or value["verdict"] == "uncertain"):
@@ -263,7 +348,29 @@ class DecisionService:
                 choice = value.get("choice_result")
                 if choice is not None:
                     choice = validate_choice_result(choice)
-                if value["status"] == "completed":
+                identity_spec = (binding.get("action") or {}).get("target_identity")
+                if "identity_result" in value or identity_spec is not None and choice is not None:
+                    from .target_identity import validate_identity_record
+                    if identity_spec is None or choice is None:
+                        raise ValueError("decision_saved_identity_unrequested")
+                    validate_identity_record(value.get("identity_result"), choice, spec=identity_spec)
+                if "ordinary_review" in value:
+                    if (self.profile.ordinary_review != "on_reject" or self.adoption_mode != "auto"
+                            or choice is None or choice["type"] != "choice" or choice["choice"] == "condition_met"):
+                        raise ValueError("decision_saved_ordinary_review_invalid")
+                    record = validate_review_record(value["ordinary_review"], digest, identity_spec=identity_spec)
+                    primary_usage = _usage_counts(value["primary_usage"])
+                    secondary_usage = review_record_usage(record)
+                    expected_usage = combined_usage(primary_usage, secondary_usage) if secondary_usage is not None else primary_usage
+                    expected = review_assessment(self.profile, record)
+                    if value.get("reason") == "decision_service_closed_during_evaluation":
+                        # 关闭先于结果结算时保留两层证据，认证恢复必须重现关闭门禁。
+                        expected.update(status="error", verdict="uncertain", adopted=False,
+                            reason="decision_service_closed_during_evaluation")
+                        require_review(expected, "decision_service_closed_during_evaluation")
+                    if value["usage"] != expected_usage or any(value.get(key) != item for key, item in expected.items()):
+                        raise ValueError("decision_saved_ordinary_review_disposition_invalid")
+                elif value["status"] == "completed":
                     if choice is None or choice["type"] != "choice":
                         raise ValueError("decision_saved_choice_invalid")
                     if content_requested and content["type"] != "choice":
@@ -285,7 +392,7 @@ class DecisionService:
                                 or value.get("reason") != "decision_field_content_refused"):
                             raise ValueError("decision_saved_field_content_refusal_invalid")
             return value
-        except (OSError, ValueError, UnicodeError, TypeError):
+        except (OSError, ValueError, UnicodeError, TypeError, KeyError):
             return self._diagnostic(base, "decision_saved_result_invalid", status="error")
 
     def evaluate(self, *, request_id, execution_request_id, condition, frames, mode="execution", phase="after_action",
@@ -297,6 +404,7 @@ class DecisionService:
         if self._closed:
             return self._diagnostic(base, "decision_service_closed", status="error")
         started = perf_counter_ns()
+        adoption_deadline = started + self.profile.timeout_seconds * 1_000_000_000
         kwargs = {"request_id": request_id, "execution_request_id": execution_request_id, "condition": condition,
                   "frames": frames, "mode": mode, "phase": phase, "run_id": run_id, "step_id": step_id, "action": action,
                   "review_context": review_context, "assessment_context": assessment_context, "condition_snapshot": condition_snapshot,
@@ -336,6 +444,8 @@ class DecisionService:
                     return self._saved(prior, binding, digest)
                 count = (db.execute("SELECT COUNT(*) FROM dispatches WHERE dispatched=1").fetchone()[0] if self._v2 else
                          db.execute("SELECT COUNT(*) FROM dispatches WHERE scope=? AND dispatched=1", (scope,)).fetchone()[0])
+                if self._v2:
+                    count += db.execute("SELECT COUNT(*) FROM ordinary_reviews").fetchone()[0]
                 if self._v2:
                     base["budget"] = self._admission_budget(count)
                 if skip_reason is not None:
@@ -380,18 +490,22 @@ class DecisionService:
             budgets = [binding[key]["timeout_seconds"] for key in ("assessment_context", "temporal_context") if key in binding]
             if "request_budget_seconds" in binding:
                 budgets.append(binding["request_budget_seconds"])
-            if budgets:
-                # 取得 provider 后再扣余量，包含 getter 等待；认证摘要保持入场余量不变。
-                remaining = min(budgets) - (perf_counter_ns() - started) / 1_000_000_000
-                if remaining <= 0:
-                    raise TimeoutError("decision_assessment_budget_expired")
-                payload["request_timeout_seconds"] = min(self.profile.timeout_seconds, remaining)
+            if self.profile.ordinary_review == "on_reject" and self.profile.ordinary_review_timeout_seconds is None:
+                # 两级请求共享起点和总期限，首层通过也不能采用迟到结果。
+                budgets.append(self.profile.timeout_seconds)
+            adoption_deadline = started + min([self.profile.timeout_seconds, *budgets]) * 1_000_000_000
+            # 主层也使用入场总时限，准备、账本和 provider getter 不重开预算。
+            remaining = (adoption_deadline - perf_counter_ns()) / 1_000_000_000
+            if remaining <= 0:
+                raise ProviderTimeout("decision_provider_budget_expired", phase="admission")
+            payload["request_timeout_seconds"] = remaining
             answer = provider.judge(payload)
-            if (budgets and (perf_counter_ns() - started) / 1_000_000_000 >= min(budgets)):
-                raise TimeoutError("decision_assessment_budget_expired")
             result_key = "choice_result" if self._v2 and self.profile.decision_format == "choice" else "predicates"
             content_requested = field_content_requested(binding)
             answer_keys = {"request_sha256", result_key, "usage", "http_elapsed_ms", "server_processing_ms", "provider_request_id"}
+            identity_spec = (binding.get("action") or {}).get("target_identity")
+            if identity_spec is not None:
+                answer_keys.add("identity_result")
             if content_requested:
                 answer_keys.add("field_content_result")
             if (not isinstance(answer, dict) or set(answer) != answer_keys
@@ -406,8 +520,15 @@ class DecisionService:
             provider_id = answer["provider_request_id"]
             if provider_id is not None and (not isinstance(provider_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", provider_id)):
                 raise ValueError("decision_provider_request_id_invalid")
+            if perf_counter_ns() >= adoption_deadline:
+                raise ProviderTimeout("decision_provider_timeout", phase="service_deadline", measurements={
+                    **{key: answer[key] for key in ("http_elapsed_ms", "server_processing_ms", "provider_request_id")}, "usage": usage})
             if result_key == "choice_result":
                 choice = validate_choice_result(answer["choice_result"])
+                if identity_spec is not None:
+                    from .target_identity import validate_identity_record
+                    validate_identity_record(answer["identity_result"], choice, spec=identity_spec)
+                    base["identity_result"] = answer["identity_result"]
                 content = validate_field_content_result(answer["field_content_result"]) if content_requested else None
                 if content_requested:
                     base["field_content_result"] = content
@@ -423,6 +544,9 @@ class DecisionService:
                         base["reason"] = "decision_field_content_refused"
                 else:
                     base.update(status="completed", **choice_assessment(self.profile, choice["choice"]))
+                if (self.profile.ordinary_review == "on_reject" and self.adoption_mode == "auto"
+                        and choice["type"] == "choice" and choice["choice"] != "condition_met"):
+                    adoption_deadline = self._review_nonpass(base, payload, provider, started, budgets, content_requested=content_requested)
             else:
                 danger = "unsafe_effect" if phase == "before_action" else "visible_error"
                 predicates = answer["predicates"]
@@ -468,8 +592,13 @@ class DecisionService:
             base.update(status="not_connected", reason="decision_key_missing")
             if self._v2:
                 require_review(base, "decision_key_missing")
-        except TimeoutError:
+        except TimeoutError as error:
             base.update(status="timeout", reason="decision_provider_timeout")
+            diagnostic = getattr(error, "diagnostic", None)
+            if diagnostic is not None:
+                base["timeout_diagnostic"] = validate_timeout_diagnostic(diagnostic)
+                base.update({key: diagnostic[key] for key in ("usage", "http_elapsed_ms", "server_processing_ms", "provider_request_id")
+                    if diagnostic[key] is not None})
             if self._v2:
                 require_review(base, "decision_provider_timeout")
         except (OSError, ValueError, KeyError, TypeError) as error:
@@ -488,6 +617,7 @@ class DecisionService:
                 base.update(status="error", verdict="uncertain", adopted=False, reason="decision_service_closed_during_evaluation")
                 if self._v2:
                     require_review(base, "decision_service_closed_during_evaluation")
+            self._expire_adoption(base, adoption_deadline)
             base["elapsed_ms"] = (perf_counter_ns() - started) / 1_000_000
             try:
                 encrypted = _protect(_canonical(base), self._entropy(request_id))
@@ -495,9 +625,95 @@ class DecisionService:
                     changed = db.execute("UPDATE dispatches SET result_blob=? WHERE request_id=? AND request_sha256=? AND result_blob IS NULL", (encrypted, request_id, digest)).rowcount
                     if changed != 1:
                         raise OSError("decision_result_write_conflict")
+                    if self._expire_adoption(base, adoption_deadline):
+                        # 写盘本身也可能耗尽期限；认证回读必须得到同一个不采用结果。
+                        base["elapsed_ms"] = (perf_counter_ns() - started) / 1_000_000
+                        replacement = _protect(_canonical(base), self._entropy(request_id))
+                        changed = db.execute("UPDATE dispatches SET result_blob=? WHERE request_id=? AND request_sha256=? AND result_blob=?",
+                            (replacement, request_id, digest, encrypted)).rowcount
+                        if changed != 1:
+                            raise OSError("decision_result_write_conflict")
             except (sqlite3.Error, OSError, ValueError, TypeError):
                 return self._diagnostic(base, "decision_result_persistence_failed", status="error", verdict="uncertain", adopted=False)
         return base
+
+    def _expire_adoption(self, base, deadline):
+        if not base.get("adopted") or perf_counter_ns() < deadline:
+            return False
+        if "ordinary_review" in base:
+            record = base["ordinary_review"]
+            base["ordinary_review"] = {"request_sha256": base["request_sha256"], "status": "timeout",
+                "reason": "ordinary_review_timeout", "diagnostic": timeout_diagnostic("service_deadline",
+                    "ordinary_review_stage_budget_expired", record)}
+            base.update(review_assessment(self.profile, base["ordinary_review"]))
+        else:
+            base.update(status="timeout", reason="decision_provider_timeout", adopted=False, verdict="uncertain",
+                timeout_diagnostic=timeout_diagnostic("service_deadline", "decision_stage_budget_expired", base))
+            if self._v2:
+                require_review(base, "decision_provider_timeout")
+        return True
+
+    def _review_nonpass(self, base, payload, provider, started, budgets, *, content_requested):
+        """第二层只复核有效的模型非通过；协议错误不靠再次调用掩盖。"""
+        digest, request_id = base["request_sha256"], base["request_id"]
+        base["primary_usage"] = base["usage"]
+        record = {"request_sha256": digest, "status": "error", "reason": "ordinary_review_failed"}
+        stage_started = perf_counter_ns()
+        independent = self.profile.ordinary_review_timeout_seconds
+        deadline = (started + self.profile.timeout_seconds * 1_000_000_000 if independent is None
+            else stage_started + independent * 1_000_000_000)
+        if budgets:
+            deadline = min(deadline, started + min(budgets) * 1_000_000_000)
+        try:
+            if content_requested:
+                record["reason"] = "ordinary_review_field_content_unsupported"
+            elif not callable(getattr(provider, "review", None)):
+                record["reason"] = "ordinary_review_unavailable"
+            else:
+                remaining = (deadline - perf_counter_ns()) / 1_000_000_000
+                if remaining <= 0:
+                    raise ProviderTimeout("ordinary_review_stage_budget_expired", phase="admission")
+                # 同一个账本原子预留第二次费用；中断后原请求只能读回，不重派。
+                with self._provider_lock:
+                    if self._closed:
+                        record["reason"] = "ordinary_review_service_closed"
+                    else:
+                        with closing(self._connect()) as db:
+                            db.execute("BEGIN IMMEDIATE")
+                            used = (db.execute("SELECT COUNT(*) FROM dispatches WHERE dispatched=1").fetchone()[0]
+                                    + db.execute("SELECT COUNT(*) FROM ordinary_reviews").fetchone()[0])
+                            if used >= self.profile.request_cap:
+                                record.update(status="limited", reason="ordinary_review_request_cap")
+                            else:
+                                db.execute("INSERT INTO ordinary_reviews(request_id, request_sha256) VALUES(?,?)", (request_id, digest))
+                                base["budget"] = self._admission_budget(used + 1)
+                                record = None
+                            db.commit()
+                if record is None:
+                    remaining = (deadline - perf_counter_ns()) / 1_000_000_000
+                    if remaining <= 0:
+                        raise ProviderTimeout("ordinary_review_stage_budget_expired", phase="admission")
+                    answer = validate_review_answer(provider.review({**payload, "request_timeout_seconds": remaining}), digest,
+                        identity_spec=(payload.get("action") or {}).get("target_identity"))
+                    if perf_counter_ns() >= deadline:
+                        raise ProviderTimeout("ordinary_review_stage_budget_expired", phase="service_deadline", measurements=answer)
+                    refused = answer["review_result"]["type"] == "refusal"
+                    record = {**answer, "status": "refused" if refused else "completed"}
+                    if refused:
+                        record["reason"] = "ordinary_review_refused"
+                    base["usage"] = combined_usage(base["primary_usage"], answer["usage"])
+        except TimeoutError as error:
+            diagnostic = review_timeout_diagnostic(error)
+            record = {"request_sha256": digest, "status": "timeout", "reason": "ordinary_review_timeout", "diagnostic": diagnostic}
+            if diagnostic["usage"] is not None:
+                base["usage"] = combined_usage(base["primary_usage"], diagnostic["usage"])
+        except sqlite3.Error:
+            record = {"request_sha256": digest, "status": "error", "reason": "ordinary_review_persistence_failed"}
+        except (OSError, ValueError, KeyError, TypeError):
+            record = {"request_sha256": digest, "status": "error", "reason": "ordinary_review_failed"}
+        base["ordinary_review"] = record
+        base.update(review_assessment(self.profile, record))
+        return deadline
 
     def validate_result(self, result, *, condition_snapshot=None, **original_evaluate_kwargs):
         if not self.enabled or self._closed or not isinstance(result, dict):

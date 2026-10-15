@@ -14,8 +14,8 @@ def _assert_value_then_submit_gate(requests):
     value, submit = [json.loads(request.content) for request in requests]
     assert all([question["name"] for question in body["questions"]] == ["current_step"]
         for body in (value, submit))
-    assert f"Is the entered text exactly {json.dumps(TEXT, ensure_ascii=False)}?" in value["questions"][0]["instructions"]
-    assert "before Enter submits its already verified text" in submit["questions"][0]["instructions"]
+    assert f"Does the entered field text exactly equal {json.dumps(TEXT, ensure_ascii=False)}?" in value["questions"][0]["instructions"]
+    assert "Match the marked text input itself." in submit["questions"][0]["instructions"]
     assert [sum(part["type"] == "input_image" for part in body["input"][0]["content"])
         for body in (value, submit)] == [1, 1]
     return value, submit

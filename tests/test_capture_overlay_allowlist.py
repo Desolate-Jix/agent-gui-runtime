@@ -113,7 +113,9 @@ def test_capture_preserves_hud_pixels_and_only_masks_unrelated_windows(monkeypat
         def __exit__(self, *args):
             return False
         def grab(self, monitor):
-            return SimpleNamespace(size=pixels.size, rgb=pixels.tobytes())
+            from mss.screenshot import ScreenShot
+
+            return ScreenShot.from_size(bytearray(pixels.tobytes("raw", "BGRX")), *pixels.size)
 
     monkeypatch.setattr(screenshot, "mss", Screen)
     service = screenshot.ScreenshotService(window_manager=manager, capture_dir=tmp_path)

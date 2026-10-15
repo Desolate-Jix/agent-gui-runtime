@@ -355,6 +355,13 @@ def main():
               "learning_enabled": False, "legacy_learning_executor_enabled": False,
               "learning_recording": {"status": "disabled", "recording_enabled": False},
               "observer": args.observer, "completed_commands": []}
+
+    def publish_report():
+        # 仅在既有发布点读取原账本，关闭后也保存最终用量和关闭状态。
+        if decision_service is not None:
+            report["decision_service"] = decision_service.status()
+        write(out / "report.json", report)
+
     import ctypes
     report["host_is_admin"] = bool(ctypes.windll.shell32.IsUserAnAdmin()) if os.name == "nt" else False
     sampler = ProcessSampler(os.getpid(), extra_root_getter=lambda: target, sample_interval=3)
@@ -419,7 +426,6 @@ def main():
     try:
         from app.core.decision_configuration import create_session_decision_service
         decision_service = create_session_decision_service(out, profile_path=args.decision_profile)
-        report["decision_service"] = decision_service.status()
         resource_journal = initialize_session_resources(out, args.recognition_source, parent_pid=args.parent_pid)
         host = DesktopReviewHost(out / "inbox.json", out / "reviews", secrets.token_urlsafe(32))
         host.start()
@@ -433,7 +439,7 @@ def main():
         api_profile = configure_recognition_startup(co, args, report)
         resource_journal.mark_ready()
         report["phase"] = "ready"
-        write(out / "report.json", report)
+        publish_report()
         from app.vision.grounding_handoff import GroundingHandoffStore
         from app.vision.grounding_commands import GROUNDING_COMMANDS
         from app.vision.recognition_source import RecognitionSourceConfig
@@ -471,25 +477,25 @@ def main():
                     workflow_snapshot = workflow_runtime.tick()
                     if workflow_snapshot is not None:
                         record_workflow_snapshot(report, workflow_snapshot, clear_error=True)
-                        write(out / "report.json", report)
+                        publish_report()
                 except Exception as error:
                     workflow_runtime.stop()
                     report["workflow_runtime_error"] = {"error_type": type(error).__name__,
                         "message": str(error), "automatic_retry_allowed": False,
                         "next": "Inspect the original workflow and command before continuing; never replay input."}
-                    write(out / "report.json", report)
+                    publish_report()
                 try:
                     task_plan_snapshot = task_plan_runtime.tick()
                     if task_plan_snapshot is not None:
                         report["task_plan_run"] = task_plan_snapshot
                         report.pop("task_plan_runtime_error", None)
-                        write(out / "report.json", report)
+                        publish_report()
                 except Exception as error:
                     task_plan_runtime.stop()
                     report["task_plan_runtime_error"] = {"error_type": type(error).__name__,
                         "message": str(error), "automatic_retry_allowed": False,
                         "next": "Inspect the original plan and receipts; do not replay uncertain input."}
-                    write(out / "report.json", report)
+                    publish_report()
                 paths = sorted(p for p in (out / "commands").glob("*.json") if p.name not in done)
             if (out / "closing.json").is_file():
                 closing_id = json.loads((out / "closing.json").read_text(encoding="utf-8"))["request_id"]
@@ -693,7 +699,7 @@ def main():
             done.add(path.name)
             report["completed_commands"].append({"name": path.name, "status": response["status"]})
             report["target"] = target
-            write(out / "report.json", report)
+            publish_report()
             if kind == "close":
                 break
         report["phase"] = "stopped"
@@ -711,7 +717,7 @@ def main():
             while not agent_jobs.close(timeout=5):
                 report.update(phase='cleanup_pending', cleanup_verified=False,
                     agent_command_cleanup={'status': 'waiting_for_worker', 'automatic_retry_allowed': False})
-                write(out / 'report.json', report)
+                publish_report()
             report['agent_command_cleanup'] = {'status': 'stopped'}
         try:
             flush_learning_receipts(learning, pending_learning)
@@ -734,7 +740,7 @@ def main():
                 path = out / 'cleanup-retry.json'
                 return read_json_snapshot(path).get('request_id') if path.is_file() else None
 
-            shutdown_retaining_owner(co, report, lambda: write(out / 'report.json', report), cleanup_retry_token)
+            shutdown_retaining_owner(co, report, publish_report, cleanup_retry_token)
             report['phase'] = 'failed' if terminal_phase == 'failed' else 'stopped'
         try:
             if host is not None:
@@ -746,7 +752,7 @@ def main():
             sampler_thread.join(timeout=10)
         report.update(finished_at=now(), cleanup_errors=errors, host_phase=host.status()["phase"] if host else "not_created",
             sampler_stopped=sampler_thread is None or not sampler_thread.is_alive())
-        write(out / "report.json", report)
+        publish_report()
 
 
 if __name__ == "__main__":

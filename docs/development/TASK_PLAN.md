@@ -211,6 +211,22 @@ The v2 `review` control requires the original fields in the control table plus:
 
 Read and review the original evidence first. Successful review only settles the original ticket; `continue` still needs its original `wait_id`. A stale packet, changed source/evidence, cancellation or unresolved input cannot be converted into a successful effect by review. / 审核后仍须明确 continue；过期包、被改证据、取消及未决输入不能补记成功。
 
+### Caller control parameters / 调用方控制参数
+
+**2026-10-14 unreleased source repair / 未发布源码修复。** At a supported packet-based review wait, read `instant_status.task_plan_run.caller_controls.review`, or `result.caller_controls.review` in the current `instant_run`/`instant_result` control receipt. Copy its `request` exactly, inspect the original evidence and current packet, then add the caller's explicit `verdict` (`success` or `failure`) and nonempty `reason`. The projection never supplies either decision. The existing benchmark client's compact plan output retains the same projection. / 支持的审核等待直接提供当前绑定参数；复制 `request`，核对原证据和当前包，再由调用方明确补上结论与理由，精简客户端结果也保留该字段。运行时不代填结论。
+
+```python
+review = snapshot["caller_controls"]["review"]
+request = {**review["request"], "verdict": caller_verdict, "reason": caller_reason}
+command = {"kind": "task_plan", "request": request}
+```
+
+`review.request` includes `action`, `run_id`, `step_id`, `execution_request_id`, original after-image `evidence_sha256`, current `review_packet_sha256`, `evidence_set_sha256` and actual `assessment_round`; `caller_supplied_fields` lists `verdict` and `reason`. `wait_id` belongs to `continue`, not `review`. Even after a manual observation, `evidence_sha256` remains `review_packet.after.sha256`; the latest observation changes the packet/evidence-set bindings, not that original-image binding. / 审核参数绑定原后图与当前包及实际轮次；不要加入 `wait_id`，也不要以最新观察图摘要替换原后图摘要。
+
+Only after a successful bound caller review does `caller_controls.continue.request` appear. Submit that request separately to retain the original wait ID. There is no review/continue recipe during execution, automatic observation, unresolved manual capture, unknown/partial input, pre-dispatch obstruction, cancellation, failed review or terminal runner state. Failed review still records failure; cancel/closure remains explicit. / 成功审核后才提供原 wait 的独立续行参数；执行中、自动观察、未决采集、未知或部分输入、派发前阻塞、取消、失败审核及运行器终态不生成此配方。失败审核仍记录失败，取消和收尾仍须显式处理。
+
+`caller_controls` is an unsigned status projection outside `review_packet`, so existing packet bytes and hashes are unchanged. It neither approves evidence nor grants input permission; the original evidence, stale-packet, ownership and action gates still run on submission. Invalid control fields return actionable `missing_fields`, `unknown_fields` and `allowed_fields` without logging submitted values or queueing input. / 参数投影不写入签名包、不授予权限；提交仍走原认证与门禁。字段校验明确列出缺失、未知和允许项，不记录提交值，也不入队动作。These source/offline checks are separate from installed/live acceptance. / 源码离线验证与安装及实机验收分别报告。
+
 ### Declared-loading observations (unreleased source) / 已声明加载状态的观察（未发布源码）
 
 **2026-10-10 source addition, offline verified / 新增源码，离线已验证:** v2 `agent_judgment` verification may explicitly set `render_grace_ms` to an integer in `[0, 2000]` only for a click or `input_sequence` with `submit_search=true`, alongside a valid `wait_policy` with `completion_excludes_loading=true` and a declared semantic condition. `0` captures the first post-action frame without the fixed two-second pre-observation sleep; it does not certify navigation. Decision still evaluates the original result and declared loading state, then uses bounded read-only observations or returns the original Main wait. Without Decision, the original Main reviews that earlier image. Earlier capture can add an observation/API call on slow pages; speed and accuracy require comparison. Omission preserves existing command hashes and wait behavior; native conditions retain their original bounded early-completion probe and do not accept this override. / 仅点击或提交搜索的输入序列可设置；必须声明加载状态与互斥的完成条件。显式设0只提前采图，不宣称跳转成功；仍按Decision/原Main审核及加载观察合同结算。慢页面可能多一次观察或请求，收益待测。省略字段保持旧计划语义；原生条件沿用已有提前完成探测。见[本轮离线记录 / Offline evidence](../verification/LUNA_EXECUTION_OFFLINE_20261010.md)。

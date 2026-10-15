@@ -280,7 +280,7 @@ def test_owned_decision_transport_preserves_non_200_status_before_body(monkeypat
     monkeypatch.setenv("DECISION_TEST_KEY", "synthetic-secret")
     with error_response_server(status=status, body_mode=body_mode) as (url, calls):
         monkeypatch.setattr(module, "ENDPOINT", url)
-        provider = module.OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", timeout_seconds=0.2)
+        provider = module.OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", timeout_seconds=1)
         try:
             with pytest.raises(OSError, match=f"decision_http_status_{status}"):
                 provider.judge(payload())

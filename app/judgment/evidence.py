@@ -154,12 +154,16 @@ def prepare_request(session_dir, *, request_id, execution_request_id, condition,
     binding = {"request_id": request_id, "execution_request_id": execution_request_id, "condition": condition,
                "frames": normalized, "mode": mode, "phase": phase, "run_id": run_id, "step_id": step_id, "action": action}
     if annotate:
-        from .candidate_annotation import candidate_annotation_metadata, render_candidate_annotation
+        from .candidate_annotation import candidate_annotation_metadata
         annotation = candidate_annotation_metadata(normalized[-1], dimensions, action.get("candidate"))
         if include_upload:
-            marked = render_candidate_annotation(data, annotation)
-            uploaded[-1]["candidate_annotation"] = {"metadata": annotation,
-                "data_url": "data:image/png;base64," + base64.b64encode(marked).decode("ascii")}
+            # 先验证完整像素解码；整窗标记仅在实际上传该视图时编码。
+            try:
+                with Image.open(BytesIO(data)) as image:
+                    image.convert("RGBA")
+            except (UnidentifiedImageError, Image.DecompressionBombError, OSError, SyntaxError):
+                raise ValueError("decision_candidate_annotation_image_invalid") from None
+            uploaded[-1]["candidate_annotation"] = {"metadata": annotation}
     if review_context is not None:
         from .adaptive_policy import normalize_review_context
         binding["review_context"] = normalize_review_context(review_context)

@@ -15,6 +15,7 @@ from app.core.input_controller import VK_A, VK_CONTROL, VK_RETURN, VK_V
 from app.judgment import DecisionService, OpenAIDecisionsProvider, load_decision_profile
 from tests.test_visual_field_proof import FIELD, TEXT, scene
 from tests.test_visual_input_no_uia import visual_sequence
+from tests.test_luna_choice_review_provider import response_body
 
 
 PROFILE = Path(__file__).resolve().parents[1] / "configs/decision-profile.visual-execution.example.json"
@@ -52,9 +53,13 @@ def _assert_bound_result(service, wire, request, assessment):
 
 
 @pytest.mark.parametrize("content", ["empty", "nonempty"])
-@pytest.mark.parametrize("choice", ["condition_met", "condition_not_met", "evidence_insufficient"])
+@pytest.mark.parametrize("choice,ordinary_choice", [
+    ("condition_met", "condition_met"),
+    ("condition_not_met", "condition_not_met"),
+    ("evidence_insufficient", "evidence_insufficient"),
+])
 def test_visual_input_runtime_uses_example_profile_and_real_decision_boundary(
-        visual_sequence, monkeypatch, content, choice):
+        visual_sequence, monkeypatch, content, choice, ordinary_choice):
     v = visual_sequence
     s = v.scene
     from app.core.ocr_service import ocr_service
@@ -71,15 +76,24 @@ def test_visual_input_runtime_uses_example_profile_and_real_decision_boundary(
     profile = load_decision_profile(PROFILE).model_copy(update={"api_key_env": "VISUAL_INPUT_FLOW_TEST_KEY"})
     monkeypatch.setenv(profile.api_key_env, "synthetic-offline-key")
     wire = []
+    decision_wire, ordinary_wire, paths = [], [], []
 
     def handle(request):
         body = json.loads(request.content)
         wire.append(body)
-        assert [q["name"] for q in body["questions"]] == ["current_step"]
+        paths.append(request.url.path)
         assert v.events.count((VK_CONTROL, VK_A)) == v.events.count((VK_CONTROL, VK_V)) == 1
-        return httpx.Response(200, json={"model": "gpt-6-luna", "answers": [
-            _answer(q, choice) for q in body["questions"]],
-            "usage": {"input_tokens": 4, "output_tokens": 0, "total_tokens": 4}})
+        if request.url.path == "/v1/decisions":
+            decision_wire.append(body)
+            assert [q["name"] for q in body["questions"]] == ["current_step"]
+            return httpx.Response(200, json={"model": "gpt-6-luna", "answers": [
+                _answer(q, choice) for q in body["questions"]],
+                "usage": {"input_tokens": 4, "output_tokens": 0, "total_tokens": 4}})
+        assert request.url.path == "/v1/responses"
+        ordinary_wire.append(body)
+        assert "questions" not in body and body["model"] == "gpt-6-luna"
+        assert (VK_RETURN,) not in v.events
+        return httpx.Response(200, json=response_body(ordinary_choice))
 
     def forbidden_focus_observation(*args, **kwargs):
         pytest.fail("普通视觉输入不得等待焦点或补采焦点图")
@@ -97,21 +111,34 @@ def test_visual_input_runtime_uses_example_profile_and_real_decision_boundary(
         try:
             result = v.run()
             assert [row["stage"] for row in result["field_evaluations"]] == ["after_type"]
-            assert len(wire) == (2 if choice == "condition_met" else 1)
+            assert len(decision_wire) == (2 if choice == "condition_met" else 1)
+            assert len(ordinary_wire) == (0 if choice == "condition_met" else 1)
+            assert len(wire) == len(decision_wire) + len(ordinary_wire) == 2
+            assert paths == (["/v1/decisions", "/v1/decisions"] if choice == "condition_met"
+                             else ["/v1/decisions", "/v1/responses"])
             assert ocr_calls == []
             assert s.requests == [] and v.forbidden_calls == []
             assert s.focus == original_focus
             assert Path(s.typed["observation"]["capture"]["image_path"]).read_bytes() == original_capture
             assert PROFILE.read_bytes() == original_profile
 
-            for body in wire:
+            for body in decision_wire:
                 questions = json.dumps(body["questions"]).lower()
-                if body is wire[0]:
+                if body is decision_wire[0]:
                     assert not re.search(r"\b(?:focus|caret|playback|continuity|future|task)\b", questions)
                     assert [part["type"] for part in body["input"][0]["content"]] == ["input_image"]
                 else:
-                    assert "before enter submits its already verified text" in questions
-                    assert "does it have focus" not in questions
+                    assert "match the marked text input itself." in questions
+                    assert not re.search(r"\b(?:focus|caret)\b", questions)
+            if ordinary_wire:
+                primary_content = decision_wire[0]["input"][0]["content"]
+                review_content = ordinary_wire[0]["input"][0]["content"]
+                assert review_content[:-1] == primary_content
+                question_text = review_content[-1]["text"]
+                question_json = question_text.split("Question and allowed choices (JSON): ", 1)[1].split("\nOutput exactly", 1)[0]
+                assert json.loads(question_json) == decision_wire[0]["questions"][0]
+                assert {"choice", "probabilities", "confidence"}.isdisjoint(json.loads(question_json))
+            for body in wire:
                 text = " ".join(p["text"] for p in body["input"][0]["content"] if p["type"] == "input_text")
                 assert TASK_SENTINEL not in text and FUTURE_SENTINEL not in text
                 assert "remaining_plan" not in text
@@ -145,7 +172,7 @@ def test_visual_input_runtime_uses_example_profile_and_real_decision_boundary(
                 assert value_request["frames"][0]["capture_id"] == s.typed["observation"]["capture"]["capture_id"]
                 _assert_bound_result(service, wire, value_request, value_assessment)
                 assert len(wire[-1]["questions"]) == 1
-                assert f"Is the entered text exactly {json.dumps(TEXT, ensure_ascii=False)}?" in wire[0]["questions"][0]["instructions"]
+                assert f"Does the entered field text exactly equal {json.dumps(TEXT, ensure_ascii=False)}?" in wire[0]["questions"][0]["instructions"]
                 assert '"permitted_action_kind": "input_sequence"' in " ".join(
                     part["text"] for part in wire[-1]["input"][0]["content"] if part["type"] == "input_text")
 
@@ -158,6 +185,14 @@ def test_visual_input_runtime_uses_example_profile_and_real_decision_boundary(
             for key in ("capture_id", "image_path", "sha256", "window_identity"):
                 assert request["frames"][0][key] == capture[key]
             assert assessment["choice_result"]["choice"] == choice
+            if choice != "condition_met":
+                assert assessment["ordinary_review"]["status"] == "completed"
+                assert assessment["ordinary_review"]["review_result"]["choice"] == ordinary_choice
+                assert assessment["primary_usage"]["input_tokens"] == 4
+                assert assessment["ordinary_review"]["usage"]["input_tokens"] == 16
+                assert assessment["usage"]["input_tokens"] == 20 and assessment["usage"]["output_tokens"] == 2
+            else:
+                assert "ordinary_review" not in assessment
             assert "field_content_result" not in assessment
             assert "field_content_ocr" not in request["action"] and "field_content_check" not in request["action"]
             _assert_bound_result(service, wire, request, assessment)

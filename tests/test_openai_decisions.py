@@ -43,7 +43,8 @@ def test_provider_batches_shared_images_and_preserves_real_usage_and_timings(mon
     assert result["predicates"]["condition_met"] == {"type": "predicate", "probability": 0.97}
     assert result["usage"]["total_tokens"] == 12 and result["server_processing_ms"] == 564
     assert result["http_elapsed_ms"] >= 0 and result["provider_request_id"] == "req-123"
-    assert captured[0].extensions["timeout"]["read"] == 3
+    assert 0 < captured[0].extensions["timeout"]["read"] <= 3
+    assert "total_deadline" in captured[0].extensions
     provider.close()
     assert not client.is_closed
     client.close()
@@ -110,7 +111,7 @@ def test_owned_client_is_created_lazily_reused_and_closed(monkeypatch):
         client = original_client(**kwargs)
         created.append(client)
         return client
-    def transport():
+    def transport(**_kwargs):
         return httpx.MockTransport(handle)
     monkeypatch.setattr(module.httpx, "Client", create_client)
     monkeypatch.setattr(module, "DeadlineHTTPTransport", transport)
@@ -134,13 +135,13 @@ def test_queued_request_times_out_without_second_dispatch(monkeypatch):
         assert release.wait(2)
         return httpx.Response(200, json=reply())
     with httpx.Client(transport=httpx.MockTransport(handle)) as client:
-        provider = OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", client=client, timeout_seconds=0.02)
+        provider = OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", client=client)
         with ThreadPoolExecutor(max_workers=1) as pool:
             pending = pool.submit(provider.judge, payload())
             assert entered.wait(1)
             try:
                 with pytest.raises(TimeoutError):
-                    provider.judge(payload())
+                    provider.judge({**payload(), "request_timeout_seconds": 0.02})
             finally:
                 release.set()
             assert pending.result(timeout=1)["usage"]["input_tokens"] == 12

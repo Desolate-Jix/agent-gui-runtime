@@ -2019,6 +2019,9 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         purpose="recognition_plan_execution",
                         name_hint=request.app_name or "recognition_plan",
                     )
+                from app.core.settled_observation_scope import publish_before_capture
+                publish_before_capture(manager=window_manager, request=request.model_dump(),
+                    caller=execute_recognition_plan, verifier=verifier, capture=live_capture)
                 if content_preparation is not None:
                     with timer.step("browser_content_capture_binding"):
                         browser_content_snapshot = content_preparation.capture_snapshot(live_capture)
@@ -3167,12 +3170,25 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                     perform_visual_submit(input_controller, window_manager, selected_point,
                         click_result, output=base_result)
                 with timer.step("post_click_verification", attempt=attempt_index, enabled=request.enable_post_click_verification):
+                    diagnostic_options = {"judged_by_agent": True} if local_policy_off else {}
+                    if (local_policy_off and request.enable_post_click_verification
+                            and request.agent_mode == 'execute' and request.learning_mode is None
+                            and request.write_policy.path_graph is False and request.write_policy.element_memory is False
+                            and not (effective_metadata or {}).get('verification_policy')
+                            and not should_verify_mouse_tester_semantics(request=request, plan=plan)
+                            and (plan.get('grounding_evidence') or {}).get('evidence_source')
+                                in {'api_visual', 'agent_current', 'verified_visual_field'}):
+                        from app.core.settled_observation_scope import claim_settled_observation
+                        permit = claim_settled_observation(manager=window_manager, request=request.model_dump(),
+                            caller=execute_recognition_plan, verifier=verifier)
+                        if permit is not None:
+                            diagnostic_options['_settled_observation_permit'] = permit
                     post_click_verification = (
                         verifier.verify_action(
                             "execute_recognition_plan",
                             before_state=before_state,
                             click_result=click_result,
-                            **({"judged_by_agent": True} if local_policy_off else {}),
+                            **diagnostic_options,
                         )
                         if request.enable_post_click_verification
                         else {"verified": None, "verification_skipped": True}

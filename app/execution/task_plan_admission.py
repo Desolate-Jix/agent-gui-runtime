@@ -38,7 +38,15 @@ def validate_task_plan_request(value):
         raise ValueError("task_plan_control_action_unsupported")
     required, optional = fields[action]
     if not required <= set(value) or set(value) - required - optional:
-        raise ValueError("task_plan_control_fields_invalid")
+        missing = sorted(required - set(value))
+        unknown = sorted(set(value) - required - optional)
+        allowed = sorted(required | optional)
+        error = ValueError(f"task_plan_control_fields_invalid: action={action}; "
+            f"missing_fields={missing}; unknown_fields={unknown}; allowed_fields={allowed}")
+        error.missing_fields = missing
+        error.unknown_fields = unknown
+        error.allowed_fields = allowed
+        raise error
     if action == "start":
         validate_task_plan(value["plan"])
         if value.get("recovery_policy", "legacy") not in {"legacy", "intervention_v1"}:
@@ -176,6 +184,10 @@ class TaskPlanRuntime(WorkflowRuntime):
             value["review_required"] = True
         from .task_plan_manual_observation import manual_observation_status
         value.update(manual_observation_status(self.backend, value))
+        from .task_plan_review import caller_controls
+        controls = caller_controls(value)
+        if controls:
+            value["caller_controls"] = controls
         return value
 
     def _successor(self, request):

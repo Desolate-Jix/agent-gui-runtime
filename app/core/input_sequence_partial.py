@@ -642,6 +642,7 @@ def _enter_preparation_verified(result, request, identity):
     """只认证完整输入之后、尚未进入 Enter 动作的受控停止，不赋予动作权限。"""
     from pathlib import Path
     from app.judgment import DecisionProfile, DecisionService
+    from app.judgment.ordinary_review import effective_choice
     service = None
     try:
         proof = result["enter_preparation_failure"]
@@ -715,14 +716,14 @@ def _enter_preparation_verified(result, request, identity):
                 or assessment["request_sha256"] != proof["value_request_sha256"]
                 or assessment["decision_format"] != "choice" or assessment["status"] != "completed"
                 or assessment["adopted"] is not True or assessment["verdict"] != "success"
-                or assessment["disposition"] != "continue" or assessment["choice_result"]["name"] != "current_step"
-                or assessment["choice_result"]["choice"] != "condition_met"):
+                or assessment["disposition"] != "continue"):
             return False
         profile = DecisionProfile.model_validate(evidence["profile"])
         service = DecisionService(evidence["session_directory"], profile=profile)
         if not compound and new_click and not _click_before_enter_verified(service, focus_evidence, result, request, identity):
             return False
-        return service.validate_result(assessment, **value) is True
+        return (service.validate_result(assessment, **value) is True
+            and effective_choice(assessment) == "condition_met")
     except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, OverflowError):
         return False
     finally:
@@ -736,6 +737,7 @@ def _click_before_enter_verified(service, evidence, result, request, identity):
     from app.execution.visual_field_proof import _field
     from app.judgment.executed_click_annotation import executed_click_reference
     from app.judgment.visual_action_conditions import VISUAL_INPUT_CLICKED_CONDITION
+    from app.judgment.ordinary_review import effective_choice
     focus = result["steps"][0]["receipt"]
     value, assessment = evidence["request"], evidence["assessment"]
     action = value["action"]
@@ -767,10 +769,10 @@ def _click_before_enter_verified(service, evidence, result, request, identity):
             or reference != expected_reference
             or assessment["decision_format"] != "choice" or assessment["status"] != "completed"
             or assessment["adopted"] is not True or assessment["verdict"] != "success"
-            or assessment["disposition"] != "continue" or assessment["choice_result"]["name"] != "current_step"
-            or assessment["choice_result"]["choice"] != "condition_met"):
+            or assessment["disposition"] != "continue"):
         return False
-    return service.validate_result(assessment, **value) is True
+    return (service.validate_result(assessment, **value) is True
+        and effective_choice(assessment) == "condition_met")
 
 
 def visual_prefix_failure_verified(receipt, command, *, target_identity=None):

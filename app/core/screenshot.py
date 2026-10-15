@@ -166,7 +166,8 @@ class ScreenshotService:
                 logger.warning("Capture visibility changed: before={} after={}", visibility.get("occluded_regions"), after_visibility.get("occluded_regions"))
                 raise CaptureVisibilityError("capture_visibility_changed")
             mark("post_binding_and_visibility")
-            image = Image.frombytes("RGB", raw.size, raw.rgb)  # type: ignore[union-attr]
+            # 直接解码原生 BGRA，省去逐通道切片和中间 RGB 缓冲，忽略未使用的透明通道。
+            image = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")  # type: ignore[union-attr]
             mark("pixel_conversion")
 
         # 不把其他窗口的像素当成目标内容；窗口坐标只在遮罩时换算一次。

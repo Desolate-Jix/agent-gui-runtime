@@ -1,6 +1,6 @@
 """会话内 Agent 命令暂停器；交接识别时不重放已完成输入。"""
 
-from app.core.vision_admission_contract import AgentCommandError, AgentCommandVisionAdmissionError
+from app.core.vision_admission_contract import AgentCommandCancelled, AgentCommandError, AgentCommandVisionAdmissionError
 from app.core.receipt_action import _receipt_action
 from copy import deepcopy
 from hashlib import sha256
@@ -23,7 +23,7 @@ from app.vision.recognition_source import ClientVisionCapabilities, resolve_reco
 
 
 
-class _Cancelled(AgentCommandError):
+class _Cancelled(AgentCommandCancelled):
     pass
 
 
@@ -391,7 +391,8 @@ class AgentCommandJobs:
             attempt = getattr(error, "attempt", None)
             if attempt is not None:
                 self._record_recognition_call(job, pending["request_id"],
-                    pending["capture"]["capture_id"], provider=getattr(error, "provider", None), attempt=attempt)
+                    pending["capture"]["capture_id"], provider=getattr(error, "provider", None), attempt=attempt,
+                    failure_trace=getattr(error, "trace", None))
             raise
         provider = response.get("provider")
         # 早停无法撤销已发出的 HTTP；迟返只记调用事实，不采用坐标或派发输入。
@@ -449,13 +450,23 @@ class AgentCommandJobs:
                 else "scene_precheck_result_unavailable")
         return result["grounding"]["response"]
 
-    def _record_recognition_call(self, job, request_id, capture_id, *, provider=None, attempt=None):
+    def _record_recognition_call(self, job, request_id, capture_id, *, provider=None, attempt=None,
+                                 failure_trace=None):
         call = {"request_id": request_id, "capture_id": capture_id}
         call["source"] = "external_api"
         if provider is not None:
             call["provider"] = deepcopy(provider)
         if attempt is not None:
             call["attempt"] = deepcopy(attempt)
+        if isinstance(failure_trace, dict):
+            # 失败证据不扩散请求头、系统提示词或完整请求体。
+            call["failure_trace"] = {name: deepcopy(failure_trace[name]) for name in (
+                "stage", "error_code", "raw_model_text", "parsed_model_json", "parse_error",
+                "redactions_applied", "raw_model_text_normalized", "unicode_escapes_applied", "binding") if name in failure_trace}
+            prompt = failure_trace.get("prompt")
+            if isinstance(prompt, dict):
+                call["failure_trace"]["prompt"] = {name: deepcopy(prompt[name]) for name in (
+                    "request_id", "capture_id", "image_size", "goal") if name in prompt}
         with self._condition:
             calls = self._snapshots[job.command_id].get("recognition_calls", [])
             existing = next((item for item in calls if item.get("request_id") == request_id), None)

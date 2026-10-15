@@ -8,7 +8,7 @@ import math
 import os
 import re
 from threading import RLock
-from time import perf_counter_ns
+from time import monotonic, perf_counter_ns
 
 import httpx
 from PIL import Image
@@ -22,13 +22,14 @@ from .native_focus_evidence import (bound_native_focus, NATIVE_FOCUS_INTRO, NATI
     bound_native_field_freshness, NATIVE_FIELD_FRESHNESS_INTRO, NATIVE_FIELD_FRESHNESS_QUESTION,
     bound_native_value, NATIVE_VALUE_INTRO, NATIVE_VALUE_QUESTION)
 from .field_detail import build_field_detail, FIELD_DETAIL_INTRO
-from .choice_contract import (CHOICE_NAME, choice_question, text_value_choice_question,
+from .choice_contract import (CHOICES, CHOICE_NAME, choice_question, text_value_choice_question,
     input_clicked_choice_question, input_ready_choice_question, result_choice_question, candidate_choice_question, validate_choice_result)
 from .field_content_choice import (FIELD_CONTENT_NAME, field_content_requested, field_content_question,
     validate_field_content_result)
 
 
 ENDPOINT = "https://api.openai.com/v1/decisions"
+REVIEW_ENDPOINT = "https://api.openai.com/v1/responses"
 MODEL = "gpt-6-luna"
 
 
@@ -102,6 +103,45 @@ def _parse_field_content_reply(body):
     if type(content) is dict and content.get("type") == "refusal" and set(content) == {"type", "name"}:
         content = {**content, "choice": None, "confidence": None, "probabilities": None}
     return main, validate_field_content_result(content), usage
+
+
+def _parse_ordinary_review_reply(body, *, choices=CHOICES, name=CHOICE_NAME):
+    """普通回答只接受单个原始选项或明确拒绝，不补造置信度。"""
+    if type(body) is not dict:
+        raise ValueError("ordinary_review_response_invalid")
+    if body.get("status") != "completed" or body.get("error") is not None or body.get("incomplete_details") is not None:
+        raise ValueError("ordinary_review_status_invalid")
+    if body.get("model") != MODEL:
+        raise ValueError("ordinary_review_model_invalid")
+    if "tools" in body and (type(body["tools"]) is not list or body["tools"]):
+        raise ValueError("ordinary_review_tools_invalid")
+    output = body.get("output")
+    if type(output) is not list or len(output) != 1 or type(output[0]) is not dict:
+        raise ValueError("ordinary_review_output_invalid")
+    message = output[0]
+    if (set(message) - {"id", "type", "role", "status", "content", "phase"}
+            or message.get("phase") not in (None, "final_answer")
+            or message.get("type") != "message" or message.get("role") != "assistant" or message.get("status") != "completed"):
+        raise ValueError("ordinary_review_message_invalid")
+    content = message.get("content")
+    if type(content) is not list or len(content) != 1 or type(content[0]) is not dict:
+        raise ValueError("ordinary_review_content_invalid")
+    item = content[0]
+    if item.get("type") == "output_text":
+        text = item.get("text")
+        if set(item) - {"type", "text", "annotations", "logprobs"} or type(text) is not str or text.strip() not in choices:
+            raise ValueError("ordinary_review_choice_invalid")
+        result = {"type": "choice", "name": name, "choice": text.strip()}
+    elif (item.get("type") == "refusal" and set(item) == {"type", "refusal"}
+            and type(item.get("refusal")) is str and item["refusal"].strip()):
+        result = {"type": "refusal", "name": name, "choice": None}
+    else:
+        raise ValueError("ordinary_review_content_invalid")
+    try:
+        usage = _usage_counts(body.get("usage"))
+    except (ValueError, TypeError):
+        raise ValueError("ordinary_review_usage_invalid") from None
+    return result, usage
 
 
 def _current_action_evidence(action):
@@ -213,19 +253,52 @@ class OpenAIDecisionsProvider:
         timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
         started = perf_counter_ns()
         if not self._lock.acquire(timeout=timeout):
-            raise TimeoutError("decision_provider_queue_timeout")
+            from .timeout_contract import ProviderTimeout
+            raise ProviderTimeout("decision_provider_queue_timeout", phase="queue")
         try:
-            remaining = timeout if timeout_seconds is None else timeout - (perf_counter_ns() - started) / 1_000_000_000
+            remaining = timeout - (perf_counter_ns() - started) / 1_000_000_000
             if remaining <= 0:
-                raise TimeoutError("decision_provider_budget_expired")
+                from .timeout_contract import ProviderTimeout
+                raise ProviderTimeout("decision_provider_budget_expired", phase="queue")
             yield remaining
         finally:
             self._lock.release()
 
     def judge(self, payload):
+        return self._judge(payload)
+
+    def review(self, payload):
+        try:
+            return self._judge(payload, ordinary_review=True)
+        except (TimeoutError, DecisionNotConnected, OSError, ValueError) as error:
+            if isinstance(error, TimeoutError):
+                from .timeout_contract import ProviderTimeout, review_timeout_diagnostic
+                diagnostic = review_timeout_diagnostic(error)
+                code = str(error)
+                if code.startswith("decision_"):
+                    code = "ordinary_review_" + code[len("decision_"):]
+                elif not code.startswith("ordinary_review_"):
+                    code = diagnostic["code"]
+                raise ProviderTimeout(code, phase=diagnostic["phase"], measurements=diagnostic,
+                    diagnostic_code=diagnostic["code"]) from None
+            code = str(error)
+            if code.startswith("ordinary_review_"):
+                raise
+            code = ("ordinary_review_" + code[len("decision_"):]
+                if re.fullmatch(r"decision_[a-z0-9_]+", code) else "ordinary_review_payload_invalid")
+            raise type(error)(code) from None
+        except (KeyError, TypeError, AttributeError):
+            raise ValueError("ordinary_review_payload_invalid") from None
+
+    def _judge(self, payload, *, ordinary_review=False):
+        preparation_started = perf_counter_ns()
+        absolute_started = monotonic()
+        from .timeout_contract import ProviderTimeout
         from app.execution.visual_field_proof import VISUAL_SELECTION_CONDITION
 
-        preparation_started = perf_counter_ns()
+        if ordinary_review and (type(payload) is not dict or payload.get("schema_version") != "decision_request.v2"
+                or payload.get("decision_format") != "choice"):
+            raise ValueError("ordinary_review_choice_v2_required")
         if payload["phase"] not in ("before_action", "after_action"):
             raise ValueError("decision_phase_invalid")
         danger = "unsafe_effect" if payload["phase"] == "before_action" else "visible_error"
@@ -235,6 +308,8 @@ class OpenAIDecisionsProvider:
         if "decision_format" in payload and (version != "decision_request.v2" or payload["decision_format"] not in ("predicate", "choice")):
             raise ValueError("decision_format_invalid")
         content_requested = field_content_requested(payload)
+        if ordinary_review and content_requested:
+            raise ValueError("ordinary_review_field_content_unsupported")
         if content_requested and not choice_mode:
             raise ValueError("decision_field_content_choice_required")
         context, assessment_context, temporal_context, request_timeout = None, None, None, None
@@ -261,12 +336,13 @@ class OpenAIDecisionsProvider:
             if len({frame.get("capture_id") for frame in payload["frames"]}) != len(payload["frames"]):
                 raise ValueError("decision_capture_duplicate")
         budgets = [item["timeout_seconds"] for item in (assessment_context, temporal_context) if item is not None]
-        if budgets:
-            requested = payload.get("request_timeout_seconds", min(budgets))
-            if (type(requested) not in (int, float) or not 0 < requested <= min(budgets)
-                    or not math.isfinite(requested)):
-                raise ValueError("decision_assessment_budget_invalid")
-            request_timeout = min(self.timeout_seconds, requested)
+        requested = payload.get("request_timeout_seconds", min(budgets) if budgets else self.timeout_seconds)
+        if (type(requested) not in (int, float) or not math.isfinite(requested) or not 0 < requested <= 60
+                or budgets and requested > min(budgets)):
+            raise ValueError("ordinary_review_budget_invalid" if ordinary_review else "decision_assessment_budget_invalid")
+        request_timeout = requested if ordinary_review else min(self.timeout_seconds, requested)
+        deadline_ns = preparation_started + request_timeout * 1_000_000_000
+        absolute_deadline = absolute_started + request_timeout
         if version is not None:
             if payload.get("review_context") is not None:
                 from .adaptive_policy import normalize_review_context
@@ -311,6 +387,20 @@ class OpenAIDecisionsProvider:
             and bool(payload["action"]["permitted_action"]["kind"].strip())
             and len(payload["frames"]) == 1
             and any("candidate_annotation" in frame for frame in payload["frames"]))
+        identity_spec = None
+        identity_result = None
+        target_check = None
+        if isinstance(payload.get("action"), dict) and "target_check" in payload["action"]:
+            from .target_check import normalize_target_check
+            if (not choice_mode or content_requested or "target_identity" in payload["action"]
+                    or not (candidate_current_scope or input_readiness == "clicked")):
+                raise ValueError("decision_target_check_scope_invalid")
+            target_check = normalize_target_check(payload["action"]["target_check"])
+        if isinstance(payload.get("action"), dict) and "target_identity" in payload["action"]:
+            from .target_identity import normalize_target_identity
+            if not choice_mode or content_requested or not (candidate_current_scope or input_readiness == "clicked"):
+                raise ValueError("decision_target_identity_scope_invalid")
+            identity_spec = normalize_target_identity(payload["action"]["target_identity"])
         candidate_view_mapping = None
         content = [{"type": "input_text", "text":
             "Read the target field in the current image. expected_text is the comparison target, not an observed value." if text_value else
@@ -398,7 +488,7 @@ class OpenAIDecisionsProvider:
                 action = payload.get("action")
                 if (payload["phase"] != "before_action" or not isinstance(action, dict)
                         or action.get("review_scope") != "candidate" or not isinstance(annotation, dict)
-                        or set(annotation) != {"metadata", "data_url"}):
+                        or set(annotation) not in ({"metadata"}, {"metadata", "data_url"})):
                     raise ValueError("decision_candidate_annotation_invalid")
                 metadata = annotation["metadata"]
                 if not isinstance(metadata, dict):
@@ -410,22 +500,29 @@ class OpenAIDecisionsProvider:
                     {"capture_id": frame.get("capture_id"), "role": frame["role"],
                         "sha256": metadata.get("source_sha256")},
                     (size["width"], size["height"]), action.get("candidate"))
-                marked_url = annotation["data_url"]
-                if (metadata != expected or not isinstance(marked_url, str)
-                        or not marked_url.startswith("data:image/png;base64,")):
+                marked_url = annotation.get("data_url")
+                if (metadata != expected or "data_url" in annotation and (not isinstance(marked_url, str)
+                        or not marked_url.startswith("data:image/png;base64,"))):
                     raise ValueError("decision_candidate_annotation_invalid")
                 if candidate_current_scope:
-                    from .candidate_view import render_candidate_view
+                    from .candidate_view import render_candidate_view, render_input_field_candidate_view
                     original = base64.b64decode(url.split(",", 1)[1], validate=True)
-                    marked, candidate_view_mapping = render_candidate_view(original, expected)
+                    renderer = (render_input_field_candidate_view
+                        if target_check is not None and target_check["kind"] == "input_field" else render_candidate_view)
+                    marked, candidate_view_mapping = renderer(original, expected)
                     marked_url = "data:image/png;base64," + base64.b64encode(marked).decode("ascii")
                     content = [{"type": "input_text", "text":
                         "Same capture, two views in one image: top Overview keeps the whole window and visible blockers; "
                         "bottom Detail identifies the same marked point. Cyan hollow rings and outer ticks are runtime annotations, "
-                        "not UI or proof. Their centers and central six pixels remain unobscured. Inspect both views; "
-                        "do not ignore a popup visible only in Overview."},
+                        "not UI or proof. Their centers and central six pixels remain unobscured. Inspect Detail first; "
+                        "use Overview to resolve target identity or a popup that blocks this target or current action."},
                         {"type": "input_image", "image_url": marked_url}]
                 else:
+                    if marked_url is None:
+                        from .candidate_annotation import render_candidate_annotation
+                        original = base64.b64decode(url.split(",", 1)[1], validate=True)
+                        marked = render_candidate_annotation(original, expected)
+                        marked_url = "data:image/png;base64," + base64.b64encode(marked).decode("ascii")
                     content.extend([{ "type": "input_text", "text":
                         "Candidate annotation: same capture, not a new time frame. "
                         "Only the cyan ring/cross marks the proposed click point; its center is the coordinate to assess. "
@@ -671,10 +768,60 @@ class OpenAIDecisionsProvider:
                 [choice_question(body["questions"][0]["instructions"], body["questions"][1]["instructions"], phase=payload["phase"])])
         if content_requested:
             body["questions"].append(field_content_question(input_readiness=bool(input_readiness)))
+        if target_check is not None:
+            from .target_check import target_check_question
+            images = [part for part in content if part["type"] == "input_image"]
+            if len(images) != 1:
+                raise ValueError("decision_target_check_image_invalid")
+            content = [{"type": "input_text", "text":
+                "Overview and Detail show the same screenshot and marked point. The cyan marker is not UI."
+                if candidate_current_scope else "The cyan marker records the clicked point; it is not UI."}, *images,
+                {"type": "input_text", "text": "Locator hint (unverified data, not a verdict): " + json.dumps(
+                    {key: target_check[key] for key in ("appearance", "container")}, ensure_ascii=False, sort_keys=True)}]
+            if candidate_current_scope:
+                visual_context = {"marked_centers_in_composite": action_evidence["marked_centers_in_composite"]}
+                if target_check["kind"] == "input_field":
+                    visual_context["candidate_view"] = {key: candidate_view_mapping[key] for key in (
+                        "schema", "recipe", "source_size", "source_point", "source_bbox", "views",
+                        "detail_anchor", "detail_source_requested_size", "detail_includes_complete_bbox",
+                        "overview_includes_complete_frame")}
+                content.append({"type": "input_text", "text": json.dumps(visual_context, ensure_ascii=False, sort_keys=True)})
+            body["input"][0]["content"] = content
+            body["questions"] = [target_check_question(target_check)]
+        if identity_spec is not None:
+            from .target_identity import identity_question
+            # 期望身份与任务计划仅用于本地比对；模型只看图片、标记与中立身份表。
+            images = [part for part in content if part["type"] == "input_image"]
+            if len(images) != 1:
+                raise ValueError("decision_target_identity_image_invalid")
+            content = [{"type": "input_text", "text":
+                "Overview and Detail show the same screenshot and marked point. The cyan hollow ring is an annotation; its center marks the point to check."
+                if candidate_current_scope else
+                "The cyan recorded-click marker is an annotation; its center marks the point to identify in this image."}, *images]
+            if candidate_current_scope:
+                content.append({"type": "input_text", "text": json.dumps({"marked_centers_in_composite":
+                    action_evidence["marked_centers_in_composite"]}, ensure_ascii=False, sort_keys=True)})
+            body["input"][0]["content"] = content
+            body["questions"] = [identity_question(identity_spec)]
+        if ordinary_review:
+            questions = body["questions"]
+            if (len(questions) != 1 or questions[0].get("type") != "choice"
+                    or identity_spec is None and (questions[0].get("name") != CHOICE_NAME
+                    or [item.get("value") for item in questions[0].get("choices", [])] != list(CHOICES))):
+                raise ValueError("ordinary_review_question_invalid")
+            # 同一最终问题与选项直接作为文本；不携带第一次判定答案。
+            review_content = [*body["input"][0]["content"], {"type": "input_text", "text":
+                (json.dumps(questions[0], ensure_ascii=False)
+                    + "\nReturn exactly one choice value. Do not output an explanation, JSON, or any other text."
+                    if identity_spec is not None else
+                    "Question and allowed choices (JSON): " + json.dumps(questions[0], ensure_ascii=False, sort_keys=True)
+                    + "\nOutput exactly one allowed choice value and nothing else. Do not output JSON, explanations, confidence or probabilities.")}]
+            body = {"model": MODEL, "input": [{"role": "user", "content": review_content}],
+                "reasoning": {"effort": "none"}, "max_output_tokens": 32, "store": False, "service_tier": "default"}
         if request_timeout is not None:
             request_timeout -= (perf_counter_ns() - preparation_started) / 1_000_000_000
             if request_timeout <= 0:
-                raise TimeoutError("decision_provider_budget_expired")
+                raise ProviderTimeout("decision_provider_budget_expired", phase="preparation")
         with self._request_slot(request_timeout) as remaining:
             entered_slot = perf_counter_ns()
             if self._closed:
@@ -684,21 +831,29 @@ class OpenAIDecisionsProvider:
                 raise DecisionNotConnected("decision_key_missing")
             if self._client is None:
                 self._client = httpx.Client(timeout=self.timeout_seconds, follow_redirects=False, trust_env=False,
-                                            transport=DeadlineHTTPTransport())
+                                            transport=DeadlineHTTPTransport(limits=httpx.Limits(keepalive_expiry=60.0)))
             if request_timeout is not None:
                 remaining -= (perf_counter_ns() - entered_slot) / 1_000_000_000
                 if remaining <= 0:
-                    raise TimeoutError("decision_provider_budget_expired")
+                    raise ProviderTimeout("decision_provider_budget_expired", phase="preparation")
             started = perf_counter_ns()
             try:
-                response = self._client.post(ENDPOINT, json=body, headers={"Authorization": "Bearer " + key,
+                response = self._client.post(REVIEW_ENDPOINT if ordinary_review else ENDPOINT, json=body, headers={"Authorization": "Bearer " + key,
                                              "Accept-Encoding": "identity"},
-                                             timeout=remaining, follow_redirects=False)
+                                             timeout=remaining, follow_redirects=False,
+                                             extensions={"total_deadline": absolute_deadline})
                 provider_id = response.headers.get("x-request-id")
                 if provider_id is not None and key in provider_id:
                     provider_id = None
-            except httpx.TimeoutException:
-                raise TimeoutError("decision_provider_timeout") from None
+            except httpx.TimeoutException as error:
+                suffix = next((name for kind, name in ((httpx.ConnectTimeout, "connect_timeout"),
+                    (httpx.ReadTimeout, "read_timeout"), (httpx.WriteTimeout, "write_timeout"),
+                    (httpx.PoolTimeout, "pool_timeout")) if isinstance(error, kind)), "provider_timeout")
+                raise ProviderTimeout("decision_provider_timeout", phase="http", diagnostic_code="decision_" + suffix,
+                    measurements={"http_elapsed_ms": (perf_counter_ns() - started) / 1_000_000}) from None
+            except TimeoutError:
+                raise ProviderTimeout("decision_provider_timeout", phase="http",
+                    measurements={"http_elapsed_ms": (perf_counter_ns() - started) / 1_000_000}) from None
             except (httpx.HTTPError, ValueError):
                 raise OSError("decision_transport_error") from None
             finally:
@@ -708,13 +863,6 @@ class OpenAIDecisionsProvider:
                 raise OSError(f"decision_http_status_{response.status_code}")
             if len(response.content) > 64 * 1024:
                 raise ValueError("decision_response_too_large")
-            try:
-                if content_requested:
-                    predicates, field_content_result, usage = _parse_field_content_reply(response.json())
-                else:
-                    predicates, usage = (_parse_choice_reply(response.json()) if choice_mode else _parse_reply(response.json(), names))
-            except (ValueError, TypeError):
-                raise ValueError("decision_protocol_error") from None
             timing = response.headers.get("openai-processing-ms")
             server_ms = None
             if timing is not None:
@@ -726,8 +874,36 @@ class OpenAIDecisionsProvider:
                     pass
             if provider_id is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", provider_id):
                 provider_id = None
+            try:
+                if identity_spec is not None:
+                    from .target_identity import normalize_identity_answer
+                    raw = response.json()
+                    if ordinary_review:
+                        raw_answer, usage = _parse_ordinary_review_reply(raw,
+                            choices=[item["value"] for item in questions[0]["choices"]], name="observed_target")
+                    else:
+                        if (type(raw) is not dict or set(raw) != {"model", "answers", "usage"}
+                                or raw["model"] != MODEL or type(raw["answers"]) is not list or len(raw["answers"]) != 1):
+                            raise ValueError("decision_identity_response_invalid")
+                        raw_answer, usage = raw["answers"][0], _usage_counts(raw["usage"])
+                    predicates, identity_result = normalize_identity_answer(raw_answer, identity_spec, ordinary=ordinary_review)
+                elif ordinary_review:
+                    predicates, usage = _parse_ordinary_review_reply(response.json())
+                elif content_requested:
+                    predicates, field_content_result, usage = _parse_field_content_reply(response.json())
+                else:
+                    predicates, usage = (_parse_choice_reply(response.json()) if choice_mode else _parse_reply(response.json(), names))
+            except (ValueError, TypeError) as error:
+                if ordinary_review and re.fullmatch(r"ordinary_review_[a-z0-9_]+", str(error)):
+                    raise
+                raise ValueError("decision_protocol_error") from None
+            if perf_counter_ns() >= deadline_ns:
+                raise ProviderTimeout("decision_provider_timeout", phase="parse", diagnostic_code="decision_parse_deadline",
+                    measurements={"usage": usage, "http_elapsed_ms": elapsed,
+                        "server_processing_ms": server_ms, "provider_request_id": provider_id})
             return {**({"field_content_result": field_content_result} if content_requested else {}),
-                    "request_sha256": payload["request_sha256"], ("choice_result" if choice_mode else "predicates"): predicates, "usage": usage,
+                    **({"identity_result": identity_result} if identity_result is not None else {}),
+                    "request_sha256": payload["request_sha256"], ("review_result" if ordinary_review else "choice_result" if choice_mode else "predicates"): predicates, "usage": usage,
                     "http_elapsed_ms": elapsed, "server_processing_ms": server_ms, "provider_request_id": provider_id}
 
     def close(self):

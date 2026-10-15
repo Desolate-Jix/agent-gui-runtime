@@ -41,6 +41,29 @@ class AgentGroundingTarget:
     def input_claimed(self):
         return self._claimed
 
+    def review_target_identity(self, action):
+        """保留旧内部接口；定位备选不再自动变成身份类别。"""
+        if current_agent_grounding() is not self or action.get("field_goal", action.get("goal")) != self.goal:
+            raise ValueError("agent_grounding_identity_goal_mismatch")
+        return None
+
+    def review_target_check(self, action):
+        """原目标决定核验对象，当前定位只提供尚未核实的外观和容器描述。"""
+        from app.judgment.target_check import grounding_target_check
+        if current_agent_grounding() is not self or action.get("field_goal", action.get("goal")) != self.goal:
+            raise ValueError("agent_grounding_target_check_goal_mismatch")
+        if self._state["configuration"].get("source") != "external_api" or self._source != "api_visual":
+            return None
+        capture = self._state["capture"]
+        current = validate_grounding_result(self._state["result"], request_id=self._state["request_id"],
+            capture_id=capture["capture_id"], image_size=(capture["image_size"]["width"], capture["image_size"]["height"]))
+        if current.model_dump() != self._result.model_dump():
+            raise ValueError("agent_grounding_target_description_changed")
+        if current.target_description is None:
+            return None
+        return grounding_target_check(self.goal, current.target_description.model_dump(),
+            input_field=action.get("kind") == "input_sequence")
+
     def _identity(self, identity):
         expected = self._state["capture"]["window_identity"]
         if (identity.get("target_window_handle") != expected["handle"]

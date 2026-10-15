@@ -40,20 +40,25 @@ def resolve_action_text(value, inputs):
     return resolved
 
 
-def _action(value, inputs):
+def _action(value, inputs, *, version="task_plan.v1"):
     if not isinstance(value, dict):
         raise ValueError("task_plan_action_invalid")
     if "target_memory" in value:
         raise ValueError("task_plan_target_memory_unsupported")
     kind = value.get("kind")
+    if "target_identity" in value:
+        if version != "task_plan.v3" or kind not in {"click", "input_sequence"}:
+            raise ValueError("task_plan_target_identity_unsupported")
+        from app.judgment.target_identity import normalize_target_identity
+        normalize_target_identity(value["target_identity"])
     if kind == "click":
-        if not {"kind", "goal"} <= set(value) or set(value) - {"kind", "goal", "click_kind", "target"}:
+        if not {"kind", "goal"} <= set(value) or set(value) - {"kind", "goal", "click_kind", "target", "target_identity"}:
             raise ValueError("task_plan_action_fields_invalid")
         _text(value["goal"], "goal", 2000)
         if value.get("click_kind", "single") not in {"single", "double"}:
             raise ValueError("task_plan_click_kind_invalid")
     elif kind == "input_sequence":
-        if set(value) - {"target"} != {"kind", "field_goal", "text", "clear_existing", "submit_search"}:
+        if set(value) - {"target", "target_identity"} != {"kind", "field_goal", "text", "clear_existing", "submit_search"}:
             raise ValueError("task_plan_action_fields_invalid")
         _text(value["field_goal"], "field_goal", 2000)
         if type(value["clear_existing"]) is not bool or type(value["submit_search"]) is not bool:
@@ -195,7 +200,7 @@ def validate_task_plan(value: dict) -> dict:
         if step_id in seen:
             raise ValueError("task_plan_step_duplicate")
         seen.add(step_id)
-        _action(step["action"], inputs)
+        _action(step["action"], inputs, version=version)
         _verification(step["verification"], step["action"], version=value["schema_version"], inputs=inputs)
     if version == "task_plan.v3":
         completion = value["completion"]

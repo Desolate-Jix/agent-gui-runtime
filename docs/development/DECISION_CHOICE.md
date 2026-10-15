@@ -15,7 +15,17 @@ This is a caller-facing usage contract, not a semantic parser or additional mode
 
 Execution 0.1.2 uses OpenAI Decisions API with `gpt-6-luna`. Artifact status and live evidence: [release record](../verification/EXECUTION_STABLE_012_20261012.md). / 执行 0.1.2 接入 Choice；安装与实测状态以发布记录为准。
 
+## Unreleased two-stage extension / 未发布两级扩展
+
+2026-10-14：新 Choice 示例配置启用 `ordinary_review: "on_reject"`，有效的非通过 Choice 由普通 Luna 用同一证据复核一次，以后者选择为最终模型结论；仍不通过交 Main。旧冻结配置与下方正式版历史行为不变。图形优先提示词、预算和已知误放缺陷见 [两级审核合同](DECISION_LUNA_REVIEW.md)。 / New Choice example profiles enable one ordinary Luna review after a valid nonpass, with the latter choice controlling the model outcome. Existing frozen profiles and historical release behavior below remain unchanged; see the linked contract for budgets and the deferred false-accept defect.
+
 ## Contract / 合同
+
+### Unreleased prompt revisions / 未发布提示词版本
+
+2026-10-15候选对页面结果与局部输入内容采用冻结评测后的问句；图形和输入框问句不按保留集回调。通用Choice中已改题的候选、实际点击、局部文字与页面结果分支使用各自的prompt revision参与认证摘要。旧问句回执不能认证为新问句结果，同一旧请求ID发生冲突时不得重派计费；新请求ID只派发一次，之后持久回读。未变的predicate、身份分类、target_check、原生证据与动态内容路线保持各自原绑定。 / The candidate uses frozen page-result and compact entered-text wording. Changed generic Choice branches bind a distinct prompt revision into authenticated request digests. Old results cannot authenticate as new prompts, and a conflicting old ID never triggers another paid dispatch. Unchanged predicate, identity, target-check, native-evidence and temporal routes retain their bindings.
+
+保留集第一层三分类95%并不代表两层达到95%：普通Luna纠正部分误拒也会新增误放。本批两层为149/160，误放7、误拒1；不宣称减少主Agent接管或改善通用安全性。完整数据和用量口径见[冻结评测](../verification/DECISION_PROMPT_BENCHMARK_20261015.md)。 / Primary exact agreement does not establish cascade accuracy or safety; see the frozen evaluation for corrections, regressions and measurement limits.
 
 - One question per checkpoint: `type: choice`, `name: current_step`, with `condition_met`, `condition_not_met`, `evidence_insufficient`. / 每个审核点一次三选一，不代表整个任务一次请求。
 - In auto mode, met adopts/continues; unmet is failure and insufficient is uncertain, both requiring the existing Main. Provider refusal, invalid responses and timeouts also return for review without automatic input replay. / 满足继续，不满足或证据不足交原 Main；服务异常不重放输入。

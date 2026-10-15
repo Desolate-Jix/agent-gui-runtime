@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
+from app.core.vision_admission_contract import AgentCommandCancelled
 from .input_sequence import _action_data, run_input_sequence
 
 
@@ -179,6 +180,8 @@ def run_form_fill(coordinator, target, request, *, persist=None):
                 target_process_id=target["process_id"], operation="execute_recognition_plan",
                 request={"goal": goal, "click_kind": "single"},
                 include_observation=True, observation_wait_ms=0, control_target=binding)
+        except AgentCommandCancelled:
+            raise
         except Exception:
             step["status"] = "result_unknown"
             merge_action(None)
@@ -227,6 +230,8 @@ def run_form_fill(coordinator, target, request, *, persist=None):
                 if receipt is not None and receipt.get("target_identity") != before.get("window_identity"):
                     raise FormFillInterrupted("form_control_window_identity_changed")
             return snapshot
+        except AgentCommandCancelled:
+            raise
         except Exception as error:
             current_state_unavailable(row, reason_code(error))
             from app.agent.windows_form_control_reader import FormControlReadError
@@ -377,6 +382,8 @@ def run_form_fill(coordinator, target, request, *, persist=None):
             checkpoint()
         result.update(status="completed", phase="returned",
             next_action="inspect_returned_image_and_judge_task_effect")
+    except AgentCommandCancelled:
+        raise
     except Exception as error:
         failure = {"code": reason_code(error), "type": type(error).__name__}
         if failure["code"] in {"form_control_state_unavailable", "form_control_expansion_unavailable"}:

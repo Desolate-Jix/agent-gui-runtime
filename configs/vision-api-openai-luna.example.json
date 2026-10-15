@@ -8,5 +8,7 @@
   "max_response_bytes": 262144,
   "max_image_bytes": 20971520,
   "max_image_edge": 1600,
-  "max_concurrency": 1
+  "max_concurrency": 1,
+  "target_description": true,
+  "response_binding": "runtime"
 }

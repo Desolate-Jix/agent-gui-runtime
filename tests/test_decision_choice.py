@@ -63,7 +63,7 @@ def test_single_choice_drives_outcome_without_probability_threshold_or_observati
     body = json.loads(calls[0].content)
     assert len(body["questions"]) == 1 and body["questions"][0]["type"] == "choice"
     instructions = body["questions"][0]["instructions"]
-    assert args["condition"] in instructions and "current" in instructions and "obstacle" in instructions
+    assert json.dumps(args["condition"], ensure_ascii=False) in instructions and "current" in instructions
     assert "needs_agent_review" not in json.dumps(body["questions"])
     changed = deepcopy(result)
     changed["choice_result"]["choice"] = "condition_not_met" if choice != "condition_not_met" else "condition_met"

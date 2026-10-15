@@ -20,6 +20,7 @@ def desktop_scene(monkeypatch):
     state = SimpleNamespace(icon_host=110, foreground=200)
     wrappers = {h: SimpleNamespace(handle=h, window_text=lambda h=h: rows[h][1]) for h in rows}
     gui = SimpleNamespace(
+        EnumWindows=lambda callback, extra: [callback(handle, extra) for handle in list(rows)],
         IsWindow=lambda h: h in rows,
         IsWindowVisible=lambda h: h in rows,
         GetAncestor=lambda h, flag: h,
@@ -90,12 +91,13 @@ def test_moved_icon_tree_invalidates_old_desktop_binding(desktop_scene):
     assert manager.bind_window_by_handle(120).handle == 120
 
 
-def test_shell_query_failure_does_not_expose_program_manager_as_desktop(desktop_scene, monkeypatch):
+def test_shell_query_failure_does_not_report_a_partial_inventory(desktop_scene, monkeypatch):
     manager, _, _ = desktop_scene
     def unavailable():
         raise OSError("shell query unavailable")
     monkeypatch.setattr(manager, "_shell_window_handle", unavailable)
-    assert [w["handle"] for w in manager.list_visible_windows()] == [200]
+    with pytest.raises(OSError, match="shell query unavailable"):
+        manager.list_visible_windows()
 
 
 def test_bound_window_can_refresh_current_empty_title_and_recover_title(desktop_scene):

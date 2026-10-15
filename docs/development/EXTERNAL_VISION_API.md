@@ -1,5 +1,25 @@
 # 外部视觉 API 接口 / External vision API
 
+## Runtime-owned response binding / 运行时绑定返回身份
+
+`response_binding` supports `model_echo` (default) and `runtime`. Omitted or explicit `model_echo` preserves legacy profile serialization and HTTP body bytes. Both maintained Luna examples explicitly choose `runtime`; existing installed configurations do not reload or migrate automatically. / `response_binding`支持默认`model_echo`与`runtime`。省略或显式默认值保持旧profile序列化与HTTP请求字节。两个维护Luna示例显式启用`runtime`；既有安装配置不会自动迁移或热重载。
+
+In runtime mode, the model schema and actual prompt context omit `request_id` and `capture_id`. A reply containing either reserved field, even a correct value or null, is rejected. The current synchronous HTTP invocation freezes the original capture before waiting; only after rejecting foreign metadata does it construct and validate the complete internal `GroundingResult` with its original IDs. Image dimensions, geometry restoration, source, freshness, Decision and action gates still apply. Local binding proves transport correlation, not correct visual recognition. / runtime模式不向模型给出或要求返回`request_id`、`capture_id`。回复带任一保留字段（包括正确值或null）均拒绝；先排除外来身份，再按本次HTTP等待前冻结的capture构造并完整验证内部合同。尺寸、坐标还原、来源、新鲜度、Decision与动作门禁不变。本地绑定证明调用关联，不证明视觉判断正确。
+
+This is a separate explicit protocol, not a repair fallback. Legacy wrong IDs remain errors; runtime failures do not retry or downgrade. / 这是显式新协议，不是修补返回值的回退；旧模式错ID仍报错，新模式失败不重试、不降级。
+
+### Persisted failure diagnostics / 失败诊断持久化
+
+API failures after a recorded attempt save `recognition_calls[].failure_trace` with usage in the original job, before cancellation may replace the outward exception. It records the actual stage, available model text and parsed JSON, concrete parse/validation error, controlled error code and local binding. Missing model text/usage stays null rather than being invented or zeroed. The HTTP response size cap and request deadlines remain unchanged. / 已记录尝试后的API失败，在原job的`recognition_calls[].failure_trace`与用量同次保存，早于取消对外转换异常。记录实际阶段、可取得的模型文本/解析JSON、具体解析或校验错误、受控错误码及本地绑定。没有文本或未知用量仍为空，不伪造、不填0；原响应大小上限和期限不变。
+
+The persisted whitelist excludes headers, server error bodies, image base64, system prompts and full request bodies. Credentials and image data are redacted, including JSON-escaped strings. `redactions_applied` marks transformations; `raw_model_text_normalized` marks changed string representation, and `unicode_escapes_applied` marks reversible literal escaping of isolated Unicode surrogates. Normal Chinese remains UTF-8. Deep malformed JSON must not replace the original API error or lose known usage. Successful responses stay trace-free unless explicitly requested; the legacy wire is byte-identical to candidate01 in the offline comparison. / 持久化白名单不含请求头、服务端错误正文、图片base64、系统提示词或完整请求体。凭证/图片数据脱敏覆盖JSON转义字符串；`redactions_applied`标记变换，`raw_model_text_normalized`标记字符串表示变化，`unicode_escapes_applied`标记孤立Unicode代理字符的可逆字面转义。正常中文保持UTF-8；深嵌套坏JSON不能覆盖原API错误或丢掉已知用量。成功返回默认无trace；离线对照证明legacy wire与candidate01字节相同。
+
+172 core and a separate186 delivery/routing checks passed. Current source then passed two continuous live Bing-to-Rust-documentation rounds and request-phase cancellation. A visibly open menu was rejected by both models and handed to Main; Main cancelled the first batch; a fresh subsequent batch passed bound Main review, explicit same-run continuation and normal cleanup without repeating the original menu click. The accepted boundary is Main backstop rather than perfect model accuracy. Rebuilt-package and independent acceptance remain pending. / 172项核心和另一组186项交付/路由检查通过；新源码随后完成两轮Bing→Rust文档连续实测及请求中取消。菜单已打开却被两层误拒，按设计交Main；首批Main核图后取消并收尾；新批已验证绑定原证据的Main审核、同run显式续行及正常收尾，没有重复菜单点击。用户接受由主Agent兜底，不要求模型每次正确；新包与独立验收仍待完成。
+
+## Source-only optional latency experiment / 仅源码的可选延迟实验
+
+`chat_completions_json` profile可显式设置 `reasoning_effort: "none"`；省略或null保留原请求字节与profile摘要，其他值或协议明确拒绝，不在HTTP失败后偷偷去掉参数重试。独立示例为源码中的 `configs/vision-api-openai-luna.no-reasoning.example.json`（不随当前执行安装包分发），普通Luna示例保持原推理配置。本轮真实流程仍使用普通示例；`none`只完成离线协议检查，尚未验证定位准确率、速度或token收益，不作为默认推荐。 / Chat-completions profiles may explicitly request `reasoning_effort: "none"`. Omission or null preserves prior wire bytes and profile digests; unsupported values/protocols fail explicitly with no parameter-stripping retry. The separate experiment example has offline protocol coverage only. Live flows still use the normal example; accuracy and latency gains are unverified.
+
 ## 输入字段范围合同 / Input-field extent contract
 
 输入目标的 `bbox` 必须覆盖整个可见输入字段，包括已有文字区；即使 `goal` 要求点击字段右侧空白等子区域，也不能把框缩成该点击子区。`click_point` 独立选择所要求的可点击子区域，可以偏离框中心。其他 UI 目标仍使用其真实目标框；`grounding.v1` 字段、版本和校验不变。 / For an input target, `bbox` covers the entire visible field, including existing text, even when the goal requests a blank or other clickable subregion. Choose `click_point` independently within that subregion; it need not be the box center. Other UI targets retain their real target boxes. Protocol fields, version and validation are unchanged.
@@ -113,3 +133,7 @@ API 截图数据边界与错误处理要求见上文；本版实测状态以验�
 2026-10-12：Luna 默认 profile 已设置 `max_image_edge:1600`，复用既有显式缩图和按实际宽高回映；每次定位仍只调用一次模型。真实同图对照中，原尺寸复现尺度偏移，缩图后地址栏两次回映点为(1224,60)/(1225,59)，右侧小按钮点为(2446,180)。174项相关离线检查通过；共4次Luna API请求、零桌面输入，尚未验证点击或完整浏览器流程。自定义profile及已运行宿主不自动改变，需新连接加载；安装器未更新。 / The Luna default profile now sets `max_image_edge:1600`, reusing explicit resize and actual-dimension coordinate restoration with one model call per localization. Same-image API comparisons reproduced the original scale mismatch and restored address-bar points to(1224,60)/(1225,59), plus a right-side button to(2446,180).174 related offline checks passed; four Luna requests, no desktop input or full-flow acceptance. Custom profiles/running hosts do not change automatically; reconnect to load. Installers are unchanged.
 
 1600是本次验证的输入策略，不是对服务端内部尺寸规则的保证。缩图会损失小字/小目标细节；本次仅验证同一截图内两个目标，不宣称通用准确率或整流程提速。原图地址栏请求HTTP6.098s，对照缩图5.337s、默认复测5.498s；样本不足以证明稳定速度增益。见[完整证据](../verification/VISUAL_EXECUTION_DECISION_FLOW_20261011.md)。 /1600 is a tested input policy, not a guarantee of provider internals. Downsampling loses fine detail. Two targets in one saved image do not establish general accuracy or end-to-end speed; HTTP samples6.098/5.337/5.498s are not a latency benchmark.
+
+## Current candidate acceptance / 当前候选验收
+
+Candidate02 passed Main installed continuity and cancellation/Main-assisted recovery, then independent same-session7-step acceptance and normal cleanup. Models still misreject; this validates bound Main continuation, not perfect model accuracy. See [actual evidence](../verification/EXECUTION_SPEED_20261015.md). / 候选02安装态连续、取消和Main辅助恢复及独立7步验收通过；不代表模型每次正确，见完整证据。

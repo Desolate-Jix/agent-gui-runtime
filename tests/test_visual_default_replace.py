@@ -31,12 +31,14 @@ def test_default_replacement_never_reads_empty_state(visual_sequence, monkeypatc
         assert all([q["name"] for q in body["questions"]] == ["current_step"]
             for body in (value, submit))
         prompt = value["questions"][0]["instructions"]
-        assert f"Is the entered text exactly {json.dumps(TEXT, ensure_ascii=False)}?" in prompt
-        assert "gray completion immediately following the typed text" in prompt
-        assert "separate shortcut hints" in prompt
+        assert f"Does the entered field text exactly equal {json.dumps(TEXT, ensure_ascii=False)}?" in prompt
+        assert "If gray unaccepted completion is attached" in prompt
+        assert "Ignore separate icons and shortcut hints" in prompt
         for removed in ("empty", "focus", "caret", "usable", "read-only", "can text be entered"):
             assert removed not in prompt.lower()
-        assert "before Enter submits its already verified text" in submit["questions"][0]["instructions"]
+        submit_prompt = submit["questions"][0]["instructions"]
+        assert "Match the marked text input itself." in submit_prompt
+        assert "focus" not in submit_prompt.lower() and "caret" not in submit_prompt.lower()
         submit_text = " ".join(part["text"] for part in submit["input"][0]["content"]
             if part["type"] == "input_text")
         assert '"permitted_action_kind": "input_sequence"' in submit_text

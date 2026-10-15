@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError, model_validator
+from pydantic import (BaseModel, ConfigDict, Field, StrictInt, StrictStr, ValidationError,
+    field_validator, model_serializer, model_validator)
 
 
 class _StrictModel(BaseModel):
@@ -40,6 +41,22 @@ class GroundingCandidate(_StrictModel):
     confidence: float | None = Field(default=None, strict=True, ge=0, le=1, allow_inf_nan=False)
 
 
+IdentityOption = Annotated[StrictStr, Field(min_length=1, max_length=4000)]
+
+
+class TargetDescription(_StrictModel):
+    kind: Literal["graphic", "input_field"]
+    appearance: StrictStr = Field(min_length=1, max_length=1000)
+    container: StrictStr = Field(min_length=1, max_length=1000)
+
+    @field_validator("appearance", "container")
+    @classmethod
+    def validate_description_text(cls, value):
+        if not value.strip():
+            raise ValueError("target_description text must be non-empty")
+        return value
+
+
 class GroundingResult(_StrictModel):
     schema_version: Literal["grounding.v1"]
     request_id: StrictStr = Field(min_length=1)
@@ -49,9 +66,41 @@ class GroundingResult(_StrictModel):
     image_size: ImageSize
     candidates: list[GroundingCandidate]
     selected_candidate_id: StrictStr | None
+    identity_options: list[IdentityOption] | None = Field(default=None, min_length=1, max_length=7,
+        description="Concrete neutral, mutually exclusive descriptions of visually confusable alternative UI identities, "
+            "excluding the requested goal. Not expected IDs, correctness labels or an identity answer; found status only.")
+    target_description: TargetDescription | None = Field(default=None,
+        description="Unverified locator description of the found object's visible appearance and containing UI region. "
+            "Not a replacement goal, expected identity, set of options or correctness answer; found status only.")
+
+    @field_validator("identity_options")
+    @classmethod
+    def validate_identity_options(cls, value):
+        if value is None:
+            return value
+        keys = ["".join(item.split()).casefold() for item in value]
+        reserved = {"expected", "correct", "incorrect", "right", "wrong", "yes", "no", "true", "false",
+            "pass", "fail", "condition_met", "condition_not_met", "evidence_insufficient", "other", "unknown",
+            "正确", "错误", "是", "否", "对", "错"}
+        if any(not key or key in reserved for key in keys) or len(set(keys)) != len(keys):
+            raise ValueError("identity_options must contain distinct concrete neutral descriptions")
+        return value
+
+    @model_serializer(mode="wrap")
+    def serialize_optional_locator_context(self, serializer):
+        value = serializer(self)
+        # 旧定位和委派结果省略新字段，既有摘要与持久化形状保持原样。
+        for field in ("identity_options", "target_description"):
+            if field not in self.model_fields_set:
+                value.pop(field, None)
+        return value
 
     @model_validator(mode="after")
     def validate_consistency(self) -> GroundingResult:
+        if self.status != "found" and self.identity_options is not None:
+            raise ValueError("identity_options require found status")
+        if self.status != "found" and self.target_description is not None:
+            raise ValueError("target_description requires found status")
         ids = [candidate.id for candidate in self.candidates]
         if len(ids) != len(set(ids)):
             raise ValueError("candidate IDs must be unique")

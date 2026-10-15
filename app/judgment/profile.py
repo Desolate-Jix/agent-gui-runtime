@@ -34,6 +34,8 @@ class DecisionProfile(BaseModel):
     review_policy: Literal["adaptive", "always_main"] = "adaptive"
     scene_precheck: Literal["off", "parallel"] = "off"
     decision_format: Literal["predicate", "choice"] = "predicate"
+    ordinary_review: Literal["off", "on_reject"] = "off"
+    ordinary_review_timeout_seconds: float | None = Field(default=None, gt=0, le=60, strict=True, allow_inf_nan=False)
 
     @model_validator(mode="before")
     @classmethod
@@ -43,13 +45,18 @@ class DecisionProfile(BaseModel):
             value = {**value, "mode": "auto"}
         if (isinstance(value, dict) and value.get("contract_version", "decision_profile.v1") == "decision_profile.v1"
                 and {"proactive_review", "review_policy", "auto_condition_templates",
-                     "before_action_pass_threshold", "after_action_pass_threshold", "after_action_review_threshold", "scene_precheck", "decision_format"}.intersection(value)):
+                     "before_action_pass_threshold", "after_action_pass_threshold", "after_action_review_threshold", "scene_precheck", "decision_format", "ordinary_review"}.intersection(value)):
             raise ValueError("decision_v2_policy_requires_v2_profile")
         return value
 
     @model_serializer(mode="wrap")
     def serialize_versioned_policy(self, serializer):
         value = serializer(self)
+        if self.ordinary_review_timeout_seconds is None:
+            value.pop("ordinary_review_timeout_seconds", None)
+        if "ordinary_review" not in self.model_fields_set:
+            # 既有会话保持原配置摘要，新配置明确声明两级审核。
+            value.pop("ordinary_review", None)
         if "decision_format" not in self.model_fields_set:
             # 缺省保留旧谓词配置及其认证摘要。
             value.pop("decision_format", None)
@@ -97,6 +104,11 @@ class DecisionProfile(BaseModel):
 
     @model_validator(mode="after")
     def validate_thresholds(self):
+        if self.ordinary_review_timeout_seconds is not None and (self.ordinary_review != "on_reject"
+                or self.contract_version != "decision_profile.v2" or self.decision_format != "choice"):
+            raise ValueError("ordinary_review_timeout_requires_enabled_v2_choice")
+        if self.ordinary_review == "on_reject" and (self.contract_version != "decision_profile.v2" or self.decision_format != "choice"):
+            raise ValueError("ordinary_review_requires_v2_choice")
         if self.fail_threshold >= self.pass_threshold:
             raise ValueError("decision_thresholds_overlap")
         if self.before_action_pass_threshold is not None and self.before_action_pass_threshold <= self.fail_threshold:

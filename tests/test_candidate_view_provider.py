@@ -63,10 +63,11 @@ def test_choice_candidate_wire_uses_compact_current_semantics_and_one_hollow_com
         popup = json.loads(next(text.split(": ", 1)[1] for text in texts
             if text.startswith("Current popup evidence")))
         assert popup == {"owned_popup": False}
-        assert "An unrelated popup that does not obscure or block the target is not by itself a blocker." in question
-        assert "wrong, disabled or directly blocked target" in question
-        assert "explicit interactive prerequisite for this target" in question
-        assert "without unsafe destructive, final-submit, send, confirm or payment effects" in question
+        assert "An unrelated popup that does not obscure or block the target is not a mismatch." in question
+        choices = body["questions"][0]["choices"]
+        assert [item["value"] for item in choices] == ["condition_met", "condition_not_met", "evidence_insufficient"]
+        refusal = choices[1]["description"]
+        assert "different target" in refusal and "disabled" in refusal and "directly blocked" in refusal
         for forbidden in ("focused", "caret", "empty field", "can type", "future results",
                 "would only dismiss", "without first handling an interactive popup"):
             assert forbidden not in question.lower()

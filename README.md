@@ -1,5 +1,55 @@
 # Agent Review Instant
 
+## 0.1.3 执行正式版 / Execution stable
+
+执行正式版为**0.1.3**，已完成隔离包、Main安装验收及Sol独立验收；学习工作台保持**0.1.0-preview.3**。 / Execution stable is**0.1.3**, with package, Main installed and independent Sol acceptance completed. The optional learning workbench stays at**0.1.0-preview.3**.
+
+- 同次截图复用、同会话预装计划、HTTP连接保留；两轮少10次外层重复采图。安装版Bing→搜索Rust文档→首个普通结果实测**30.809秒／27.354秒，合计41,097 API tokens**，两轮无Main接管。 / Observation sharing and preloaded same-session execution completed the scoped task twice without Main handoff.
+- 模型误拒时仍由**Decision→普通Luna→原主Agent**兜底；已实测绑定原证据审核、显式续行、不重复已完成点击及正常收尾。Sol另用Python itertools搜索验证同会话两轮，含一次Main角色辅助。 / Bound review and explicit continuation were tested, including independent assisted recovery; perfect model judgment is not required.
+- 真实截图benchmark：39张原图、30场景族、254项AI复核标注；保留集三分类一致率**92.5%→95.0%**，输入token少**1.64%**，通过／不通过准确率仍95%。两级最终149/160，误放仍是已知缺陷，不宣称通用准确率、整步提速或安全收益。 / The frozen benchmark shows limited exact-label/token gains; binary routing is unchanged and cascade errors remain.
+- API路线不强制本地模型权重；本地、当前Agent和外部视觉API入口继续保留。新Luna协议由Runtime绑定请求/截图身份，保留严格坐标与新鲜度检查。 / Local weights remain optional for API use; runtime-owned provenance avoids model ID transcription without weakening action gates.
+
+[完整流程计时与验收 / Flow evidence](docs/verification/EXECUTION_SPEED_20261015.md) · [Benchmark口径与限制 / Benchmark method](docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md)
+
+<details>
+<summary>历史开发检查点（不代表当前验收状态） / Historical checkpoints</summary>
+
+**当前源码实测 / Current source live result:** 新协议源码在同一会话完成两轮 Bing→搜索`Rust standard library collections documentation`→首个普通结果，**33.218秒／30.549秒，两轮41,173 tokens**；6步完成，20次Decision、6次定位、0次普通复核，少10次外层重复采图，正常关窗和宿主收尾通过。另一批请求中取消通过；Bing菜单实际已打开，但两层模型均误拒，流程按设计交Main，首批Main核图后取消并正常收尾；随后独立新批已实测**原证据审核→显式继续原会话→地址栏进入Google→正常收尾**，菜单只点击一次。按用户最新确认，保留模型误拒，由原主Agent兜底，不要求模型每次正确、不为此调阈值或刷通过。新包和同冻结候选独立验收仍待完成，正式版仍0.1.2，学习版不变。 / Runtime-bound source completed two continuous Bing-to-Rust-documentation rounds in 33.218s/30.549s using41,173 tokens total, with20 primary decisions,6 groundings and no ordinary reviews. Ten duplicate outer captures were removed; normal cleanup passed. A separate cancellation passed, but both judges rejected a visibly open Bing menu and correctly handed off to Main. Main cancelled and cleaned up the first batch. A fresh follow-up passed bound Main review, explicit same-run continuation to Google and normal cleanup, without repeating the menu click. The user accepts Main as the backstop for model errors; perfect automatic judgment is not a release prerequisite. Rebuilt-package and independent acceptance remain pending. [证据与限制 / Evidence and limits](docs/verification/EXECUTION_SPEED_20261015.md).
+
+**此前协议修复检查点 / Earlier protocol-fix checkpoint:** 一次历史图诊断复现了Luna抄错请求ID（`…92ab…`→`…92eb…`），导致目标已定位仍被拒。现增加显式`response_binding="runtime"`：维护Luna示例由Runtime绑定原请求/截图身份，模型不生成这两个ID；旧协议仍严格拒绝错ID。失败诊断补齐，172项相关离线检查通过，同图新协议一次真实API返回有效定位，**尚未重做新源码的连续桌面、取消恢复或新包验收**。以下candidate01耗时是旧冻结候选数据；Decision benchmark、阈值及正式0.1.2未改。 / A recorded-image probe reproduced an echoed request-ID typo. Explicit runtime binding now owns request/capture IDs while the legacy contract remains strict. Diagnostic and binding regressions passed172 checks; one read-only API probe returned valid grounding. Current source has not passed fresh desktop/installer acceptance. Candidate01 timings below remain historical frozen evidence. [协议与诊断 / Protocol and diagnostics](docs/development/EXTERNAL_VISION_API.md).
+
+**冻结候选01检查点 / Frozen candidate01 checkpoint:** 源码与安装候选均完成同会话两轮 DuckDuckGo→搜索`Python decimal documentation`→首个普通结果；源码 **31.476／32.214秒、41,806 tokens**，安装候选 **35.388／30.563秒、41,948 tokens**（每组两轮合计）。安装候选每组20次Decision、6次定位、0次普通复核，少10次外层重复采图。取消原请求、正常关窗和测试卸载通过；但Edge菜单恢复被两层拒绝，Bing菜单定位结果合同校验失败，**恢复验收未通过，独立桌面验收未跑，尚未发布**。正确输入被误拒的Google首败也保留。不同任务不能作旧版受控提速比较；正式下载仍为0.1.2，学习版不变。 / Source and installed candidates completed the scoped two-round task in31.476s/32.214s and35.388s/30.563s respectively, using41,806 and41,948 tokens per pair. Cancellation and normal cleanup passed, but menu recovery failed; independent desktop acceptance has not run. This is an unreleased candidate, not a general reliability or controlled speedup claim. [完整结果与限制 / Results and limits](docs/verification/EXECUTION_SPEED_20261015.md).
+
+**2026-10-15 未发布0.1.3候选 / Unreleased0.1.3 candidate:** 历史04正常流程及06取消恢复检查完成后，按冻结的训练／验证／保留集比较提示词；最终0.1.3恢复验收状态见上。80个保留案例、每例两次，Decision三分类符合标签的比例从148/160（92.5%）到152/160（95.0%），输入token少1.64%；但两组误放和误拒均各4次，通过／不通过准确率均95%。改善来自“不满足”与“证据不足”的区分，**未证明减少Main介入或整步提速**。仅收敛页面结果与输入内容问句；图形、输入框定位问句及阈值不变。 / Historical pipeline checks preceded frozen train/validation/held-out evaluation; final-candidate recovery remains incomplete. Exact three-class agreement improved from92.5% to95.0%, with1.64% fewer input tokens, while binary routing accuracy stayed unchanged. This does not establish fewer Main handoffs or faster actions.
+
+普通Luna复核另外实测164次。当前问句组纠正4次误拒中的3次，同时新增3次误放；最终7次误放、1次误拒，三分类149/160（93.125%）。二层不是准确率或安全性的保证，第一层误放仍跳过复核。标签为AI初标与Main AI复核，不能当作人工标注或通用准确率；正式安装版仍为0.1.2，候选尚未发布。 / A separate164-request secondary evaluation corrected three of four false rejections in the new-prompt group but introduced three false accepts; final exact agreement was149/160, with seven false accepts and one false rejection. Review is not an accuracy or safety guarantee. Labels are AI-reviewed; the published installer remains0.1.2. [评测口径与限制 / Method and limits](docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md) · [同阶段观察复用 / Same-phase observation sharing](docs/development/SETTLED_OBSERVATION.md).
+
+**以下为历史检查点，不代表当前发布状态。 / The following entries are historical checkpoints, not current release status.**
+
+**2026-10-15 最新流程优化 / Latest pipeline update:** 正常流程在04候选中连续完成 Google→搜索`python json`→首个普通结果，分别 **37.647秒、26.325秒**，无Main接管；同次前图复用共省10次外层采图，BGRA解码及60秒连接保留已落地。随后修复“派发前取消被组合输入误记为未知”：Main451项相关检查通过，06冻结源码实测取消原请求→同会话打开菜单→地址栏进入Google两步完成，原取消零输入，窗口和宿主正常关闭。04与06相差这4个取消处理源文件；旧失败保留。这些是限定场景证据，任务／视口不同，不能宣称通用稳定性或受控提速比例。benchmark付费比较仍后置，版本号与安装包未更新。 / The04 candidate completed two fresh continuous Google-to-Python-documentation rounds in37.647s and26.325s without Main intervention and removed10 duplicate outer captures. A subsequent four-file cancellation fix passed451 Main checks; frozen06 passed request-phase cancellation and same-session menu/navigation with normal cleanup. Initial failures remain recorded. These scoped results are not a general reliability or controlled speedup claim; benchmark evaluation and release packaging remain pending. [完整证据 / Evidence](docs/verification/EXECUTION_SPEED_20261015.md).
+
+下面同日较早记录是历史检查点，以本条最新两轮结果为准。 / Earlier same-day entries below are historical checkpoints.
+
+**2026-10-15 流程提速开发中 / Pipeline optimization in progress:** 纯视觉步骤合并重复即时诊断与最终观察，调用方预装完整计划并在同一连接连续执行；保留新鲜证据、Decision→普通Luna→Main及原跳转等待。宽输入框增加点击处细节视图，窗口枚举可跳过已消失的单个句柄。Main新增关联回归245项通过。新Google→搜索python pathlib→打开Python文档首轮自动完成44.908秒；第二轮在输入前被两层拒绝，已取消并正常收尾，故连续验收仍未通过，也不能把不同任务与旧Java任务作受控提速比较。原浏览器资料保留，安装包未更新；先优化流程，再做大样本benchmark。 / Observation consolidation and a preloaded same-session caller reduce redundant work while preserving review and freshness gates. A fresh pathlib flow completed in44.908s; round two required review before input and was cancelled with normal cleanup. Continuous acceptance and controlled speed gains remain unproven. [实测与限制 / Evidence and limits](docs/verification/EXECUTION_SPEED_20261015.md).
+
+**2026-10-15 最新完整实测 / Latest full live check:** 修复后Google→搜索java→打开首个普通结果Java官网，三步首次完成，无Main接管；两次普通Luna纠正地址栏误拒，无超时。自动计划53.5秒；窗口就绪至最终截图93.1秒，含初始核对及调度。沿用原独立Edge资料，未清理缓存；单轮不代表连续稳定或安装包已更新。 / One complete Google-to-Java flow passed automatically with two successful secondary corrections. Plan53.5s; window-ready to final capture93.1s including caller inspection/orchestration. Browser data retained; one pass is not continuous acceptance. [原始计时、用量与收尾 / Evidence and limits](docs/verification/GOOGLE_JAVA_FIXED_20261015.md).
+
+**2026-10-15 最新未发布源码：短提示词＋独立复核时限 / Latest unreleased source: short questions and separate review timing.** 当前目标仍按原动作只核对“图形/按钮是否符合目标”或“点是否在指定输入框内”；简短单问在选型样本9/12、保留集8/8，旧提示词分别3/12、6/8，响应约0.23秒，20次配对请求输入token约少4.4%。样本只有4组截图，不宣称通用准确率。普通Luna改为独立12秒额度、主层8秒，仍受原整步截止约束；真实3次复核均在2.37–2.60秒返回，但最难地址栏图仍被两层误拒并交Main。相关Main回归368项通过，裁剪、阈值及安装包未改。 / Short instructions outperform the prior wording on this small fixed selection/held-out sample. Separate review timing prevents primary-budget starvation, while unresolved cases still return to Main. General accuracy is unproven; released installers are unchanged. [当前逻辑 / Current flow](docs/development/TARGET_CHECK.md) · [提示词对照 / Prompt comparison](docs/verification/TARGET_CHECK_PROMPT_20261014.md) · [时限修复 / Deadline repair](docs/verification/ORDINARY_REVIEW_TIMEOUT_20261014.md) · [此前完整实测 / Earlier live flow](docs/verification/TARGET_CHECK_LIVE_20261014.md).
+
+以下同日身份分类与实测记录为此前方案的历史，不能替代上述新逻辑的验收。 / The same-day identity-classification records below are historical, not acceptance of the revised route.
+
+**2026-10-14 源码实机检查 / Source live check:** 直接身份分类已在同一 Edge 窗口连续完成两轮“搜索→打开官方文档”，整轮约34.5秒、25.3秒，无 Main 接管；只读错目标反例经 Decision 与普通 Luna 双重识别后返回审核。179项相关离线通过，扩展回归仍有8项失败；未更新安装包，不宣称通用准确率或旧版速度收益。 / Two consecutive real documentation flows completed without Main handoff; a wrong-target replay traversed both models and required review. Focused checks passed179; eight broader failures remain. No installer update or general accuracy/speedup claim. [完整计时、用量与限制 / Timings, usage and limits](docs/verification/TARGET_IDENTITY_LIVE_20261014.md).
+
+**2026-10-14 未发布：直接识别控件身份 / Unreleased: direct target identity.** 新 v3 计划可声明具体身份选项；Decision 识别标记处控件，本地比对期望身份。不符合或无法识别时，普通 Luna 用同一问题和标图复核，通过续行，否则返回原 Main。期望答案不上传，两层原始结果分别保留；旧计划、发布安装包不自动变更。 / New v3 plans can classify concrete target identities, compare locally and invoke one ordinary Luna review on mismatch/unknown. Expected identity stays local; legacy plans and installed releases are unchanged. [接入与边界 / Integration and limits](docs/development/TARGET_IDENTITY_REVIEW.md). 受控二选一复测三组均10/10，但只有两张图片，不能证明通用准确率提升。 / All three controlled groups scored10/10 on two images, not general GUI accuracy. [受控复测 / Controlled rerun](docs/verification/SYMBOL_CASCADE_CONTROLLED_20261014.md).
+
+实验口径补充 / Experiment qualification: 两级重放与旧实验问题、上下文不同，且没有自动触发第二层，不能用其分数判断两级总体效果；原始记录不变。 / The replay is not a controlled comparison and did not traverse stage two; its scores do not establish general cascade efficacy. [复核说明 / Audit](docs/verification/DECISION_CASCADE_AUDIT_20261014.md).
+
+**2026-10-14 两级实测限制 / Live cascade limitation:** 同两张「＋/×」图各5次，自动路线正确5/10，第一层全部通过、第二层触发0次；同新提示词普通 Luna 的独立诊断正确2/10。**未证明准确率提升。** 已修复普通响应合法 `phase: final_answer` 被适配器误拒的问题，误放防护仍按要求暂缓。 / The two-image replay scored 5/10 with zero secondary calls; separate ordinary Luna diagnostics scored 2/10. Accuracy improvement is unproven. A legal response-phase parsing defect was fixed; false-accept protection remains deferred. [完整计时、token 与首败记录 / Timings, tokens and initial failure](docs/verification/DECISION_CASCADE_REPLAY_20261014.md).
+
+**2026-10-14 未发布：图形优先＋两级审核 / Unreleased: visual-first two-stage review.** 新 Choice 示例配置启用 `ordinary_review: "on_reject"`：Decision 先识别标记中心的实际图形/控件；满足条件直接继续，不满足或证据不足时，用普通 Luna 对同一截图证据复核一次。以第二层选择为最终模型结论，仍不满足或不确定则携带两层证据交回原主 Agent。两次请求共用预算和总时限，认证回读不重派。**已知缺陷：Decision 误放会跳过第二层，本轮暂不修复。** 源码与离线检查不代表安装版、实机速度或准确率已更新；旧冻结配置不自动迁移。 / New Choice example profiles enable one ordinary Luna review of the same evidence after a valid negative/uncertain Decision choice; the second choice controls the model outcome, with unresolved cases handed to the existing Main. Both requests share a cap and deadline; authenticated replay never resends. **Known defect: a false pass from Decision bypasses review.** Existing frozen profiles and released installers are unchanged. See [design, configuration and limits / 设计、配置与限制](docs/development/DECISION_LUNA_REVIEW.md).
+
+**2026-10-14 未发布源码修复 / Unreleased source repair:** 当前 `task_plan_run.caller_controls` 提供审核参数（只需调用方补 `verdict`、`reason`）及成功审核后的独立续行参数。缺失、未知和允许字段会明确列出；原证据、当前审核包及输入门禁保持原校验。离线协议回归不代表安装版或实机验收已更新。 / Task-plan status now projects exact review bindings and, after successful caller review, a separate explicit continue request. Field rejection names missing, unknown and allowed keys. Existing evidence, packet and input checks remain; offline checks do not update installed or live acceptance. See [caller contract](docs/development/TASK_PLAN.md#caller-control-parameters--调用方控制参数).
+
 **What happens when a decision model meets computer use? / 当决策模型遇到 Computer Use，会发生什么？**
 
 A simple browser task—open a website, search, follow a result—once took minutes in our tests. Preparation, grounding and repeated handoffs all contributed to the wait. In **Agent Review Instant 0.1.2**, we connected **OpenAI’s Decisions API** to the Windows runtime and gave it a focused job: check the current target or the result of the current step.
@@ -8,23 +58,25 @@ Main supplies a short plan. A vision model locates the target. The runtime acts.
 
 一个打开网站、搜索、进入结果的简单任务，曾在我们的测试中耗时数分钟：准备、定位和反复交接都增加了等待。**0.1.2 将 OpenAI Decisions API 接入 Windows 运行时，专注判断当前目标或当前步骤的结果。** 主 Agent 给出短计划，视觉模型定位，运行时操作，Decision 核验证据。满足条件就在同一会话继续，未满足或证据不足才交回原主 Agent；裁剪与点击标注让审核聚焦相关证据。执行组件独立安装，学习工作台可选。
 
+</details>
+
 ## 本次正式版 / This stable release
 
-**执行组件 0.1.2 正式版。** [下载执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.2/AgentGUIRuntimeExecution-Setup.exe) · [发行页与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.2) · [验证记录](docs/verification/EXECUTION_STABLE_012_20261012.md)。学习工作台保持 **0.1.0-preview.3**，本次不更新学习安装器。此前版本见[发行列表](https://github.com/Desolate-Jix/agent-gui-runtime/releases)。
+**执行组件 0.1.3 正式版。** [下载执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.3/AgentGUIRuntimeExecution-Setup.exe) · [发行页与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.3) · [验证记录](docs/verification/EXECUTION_SPEED_20261015.md)。学习工作台保持 **0.1.0-preview.3**，本次不更新学习安装器。此前版本见[发行列表](https://github.com/Desolate-Jix/agent-gui-runtime/releases)。
 
-**Execution 0.1.2 stable.** Source, installed Main and independent installed acceptance passed the scoped continuous flow. The optional learning workbench stays at **0.1.0-preview.3**; its installer is unchanged.
+**Execution 0.1.3 stable.** Scoped installed continuity passed; Main and independent Sol also verified evidence-bound assisted recovery without repeating completed actions. The optional learning workbench stays at **0.1.0-preview.3**; its installer is unchanged.
 
-### 新决策模型接入 / New decision-model integration
+### Decisions API 与两级复核 / Decisions API and two-stage review
 
-本版接入 OpenAI 最新推出的 [Decisions API](https://developers.openai.com/api/docs/guides/decisions)，使用 **GPT-6 Luna（`gpt-6-luna`）的 Choice 能力**，根据当前步骤的截图证据直接选择继续或交回主 Agent。官方文档截至 2026-10-12 仍将该 API 标为 public beta；项目正式版不代表上游 API 已正式商用发布。
+本版延续 OpenAI [Decisions API](https://developers.openai.com/api/docs/guides/decisions)，使用 **GPT-6 Luna（`gpt-6-luna`）的 Choice 能力**，根据当前步骤的截图证据直接选择继续或交回主 Agent。官方文档截至 2026-10-12 仍将该 API 标为 public beta；项目正式版不代表上游 API 已正式商用发布。
 
-The integration uses **GPT-6 Luna through OpenAI Decisions API**, with **Choice** decisions over current-step image evidence. The upstream API remains in public beta as of 2026-10-12.
+The integration uses **GPT-6 Luna through OpenAI Decisions API**, with **Choice** decisions over current-step image evidence and one ordinary Luna review on nonpass; unresolved cases return to the existing Main. The upstream API remains in public beta as of 2026-10-12.
 
 | Choice 结果 / Result | 执行行为 / Runtime behavior |
 |---|---|
 | `condition_met` | 满足当前条件，继续原计划 / Continue the existing plan |
-| `condition_not_met` | 条件未满足，交原主 Agent / Return to the existing main agent |
-| `evidence_insufficient` | 证据不足，交原主 Agent / Return to the existing main agent |
+| `condition_not_met` | 普通Luna同证据复核一次；仍未通过再交原主Agent / One ordinary Luna review, then Main if unresolved |
+| `evidence_insufficient` | 普通Luna同证据复核一次；仍不确定再交原主Agent / One ordinary Luna review, then Main if still unclear |
 
 每个审核点使用一个三选一问题，不是整个任务只调用一次 API。Choice 的概率和置信度用于诊断，不再叠加旧概率阈值进行第二次否决。旧 predicate 配置继续按原语义工作。详见 [Choice 合同](docs/development/DECISION_CHOICE.md)。
 
@@ -45,6 +97,8 @@ Each checkpoint uses one three-way question. Probabilities are diagnostic in Cho
 
 ## 执行流程 / Execution flow
 
+以下为0.1.3正式版的两层审核流程。旧安装包不会随源码自动升级，以实际安装版本为准。 / This diagram describes the0.1.3 two-stage review. Existing installations require an explicit upgrade.
+
 ```mermaid
 flowchart TD
     U([用户下达任务 / User task]) --> M[主 Agent 给出短计划 / Main creates a bounded plan]
@@ -52,11 +106,15 @@ flowchart TD
     C --> V[视觉模型定位 / Visual grounding]
     V --> D{Decision 审核目标与动作 / Review target and action}
     D -->|满足 / Met| A[执行点击或输入 / Execute action]
-    D -->|未满足或证据不足 / Unmet or insufficient| R[交回原主 Agent / Existing Main reviews]
+    D -->|未满足或证据不足 / Unmet or insufficient| DR{普通Luna同图复核一次 / One ordinary Luna review}
+    DR -->|满足 / Met| A
+    DR -->|仍未通过或失败 / Unresolved or failed| R[交回原主 Agent / Existing Main reviews]
     A --> E[采集本步结果 / Capture current-step evidence]
     E --> O{Decision 核验本步结果 / Verify current outcome}
     O -->|满足 / Met| N{还有步骤 / More steps?}
-    O -->|未满足或证据不足 / Unmet or insufficient| R
+    O -->|未满足或证据不足 / Unmet or insufficient| OR{普通Luna同图复核一次 / One ordinary Luna review}
+    OR -->|满足 / Met| N
+    OR -->|仍未通过或失败 / Unresolved or failed| R
     N -->|有 / Yes| C
     N -->|无 / No| F([完成并返回回执 / Completed receipt])
     R --> P[审核原结果或修订剩余计划 / Review or revise remaining plan]
@@ -82,7 +140,9 @@ This demonstrates that supported ordinary steps can run without a Main-agent rou
 
 这些结果验证了受支持的普通步骤可以连续执行，减少逐步回到主 Agent 的等待；它们不是通用准确率证明。此前首败单独保留，不用复测成功覆盖。
 
-### Actual action-stage time and token use / 实际动作阶段耗时与 token 用量
+### 0.1.2 action-stage evidence / 0.1.2 历史整步耗时与 token 用量
+
+以下为0.1.2历史流程；0.1.3两轮整计划数据见页首，任务不同不能计算受控提速比例。 / These are0.1.2 historical flows; current plan times appear above and are not controlled old-version comparisons.
 
 These are the recorded action-stage durations from the **two installed Main runs**, rather than API response times:
 

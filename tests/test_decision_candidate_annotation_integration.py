@@ -43,7 +43,7 @@ def test_annotation_is_bound_to_original_and_authentication_does_not_render(tmp_
     assert len(uploaded) == 1
     assert base64.b64decode(uploaded[0]["data_url"].split(",", 1)[1]) == original
     assert uploaded[0]["candidate_annotation"]["metadata"] == annotation
-    assert base64.b64decode(uploaded[0]["candidate_annotation"]["data_url"].split(",", 1)[1]) != original
+    assert set(uploaded[0]["candidate_annotation"]) == {"metadata"}
     from app.judgment import candidate_annotation
     def forbidden(*args, **kwargs):
         raise AssertionError("authentication must not render or encode")
@@ -182,13 +182,19 @@ def test_historical_choice_receipt_reopens_without_rendering_or_redispatch(tmp_p
     service, calls, client = runtime(tmp_path, monkeypatch, profile=config)
     prepare = service._prepare
     historical_views = []
-    if not marked:
-        def unmarked_prepare(kwargs, **options):
-            binding, uploaded, digest = prepare(kwargs, **options)
-            for item in uploaded:
+    def historical_prepare(kwargs, **options):
+        binding, uploaded, digest = prepare(kwargs, **options)
+        for item in uploaded:
+            if marked:
+                from app.judgment.candidate_annotation import render_candidate_annotation
+                annotation = item["candidate_annotation"]
+                original = base64.b64decode(item["data_url"].split(",", 1)[1])
+                annotation["data_url"] = "data:image/png;base64," + base64.b64encode(
+                    render_candidate_annotation(original, annotation["metadata"])).decode("ascii")
+            else:
                 item.pop("candidate_annotation", None)
-            return binding, uploaded, digest
-        monkeypatch.setattr(service, "_prepare", unmarked_prepare)
+        return binding, uploaded, digest
+    monkeypatch.setattr(service, "_prepare", historical_prepare)
 
     def historical_reply(payload):
         # 旧模型边界使用 v1 整图；持久化与认证仍运行真实服务。

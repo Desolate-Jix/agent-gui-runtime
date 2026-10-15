@@ -14,11 +14,14 @@ from tests.test_task_plan_contract import plan
 from tests.test_task_plan_runner import complete_original, scene
 
 
-def configured_scene(tmp_path, monkeypatch, *, profile=None, review=0.01, native=False, key=True):
+def configured_scene(tmp_path, monkeypatch, *, profile=None, review=0.01, native=False, key=True, ordinary='evidence_insufficient'):
     requests = []
 
     def respond(request):
         requests.append(request)
+        if request.url.path == '/v1/responses':
+            from tests.test_luna_choice_review_provider import response_body
+            return httpx.Response(200, json=response_body(ordinary))
         body = reply(0.97, 0.01)
         questions = json.loads(request.content)["questions"]
         if questions[0]["type"] == "choice":
@@ -65,7 +68,8 @@ def test_new_profile_routes_real_plan_without_shadow_or_per_step_main_default(tm
     try:
         original = complete_original(s, native=False)
         current = s.runtime.tick(force=True)
-        assert len(requests) == 1
+        expected_calls = 2 if needs_review and payload.get('ordinary_review') == 'on_reject' else 1
+        assert len(requests) == expected_calls
         choice = payload.get("decision_format") == "choice"
         assert [question["name"] for question in json.loads(requests[0].content)["questions"]] == (
             ["current_step"] if choice else ["condition_met", "visible_error", "needs_agent_review"])
@@ -81,7 +85,26 @@ def test_new_profile_routes_real_plan_without_shadow_or_per_step_main_default(tm
         assert current["wait_reason"] == "execution_pending"
         assert current["pending"]["step_id"] == "step-1"
         assert len(list(s.session.glob("commands/*.json"))) == 2
-        assert len(requests) == 1
+        assert len(requests) == expected_calls
+    finally:
+        service.close()
+        client.close()
+
+
+def test_two_stage_pass_advances_real_plan_without_main_roundtrip(tmp_path, monkeypatch):
+    payload = json.loads((Path(__file__).resolve().parents[1] / 'configs' /
+        'decision-profile.visual-execution.example.json').read_text(encoding='utf-8'))
+    payload['auto_conditions'] = [CONDITION]
+    s, service, requests, client = configured_scene(tmp_path, monkeypatch, profile=payload,
+        review=0.97, ordinary='condition_met')
+    try:
+        complete_original(s, native=False)
+        current = s.runtime.tick(force=True)
+        assert current['wait_reason'] == 'execution_pending' and current['pending']['step_id'] == 'step-1'
+        assert len(list(s.session.glob('commands/*.json'))) == 2
+        assert len(requests) == 2 and requests[1].url.path == '/v1/responses'
+        s.runtime.tick(force=True)
+        assert len(requests) == 2
     finally:
         service.close()
         client.close()

@@ -17,7 +17,7 @@ import pytest
 def test_actual_mcp_initialization_reports_release_version():
     from app.instant_mcp import build_server
     server = build_server(None)
-    assert server._lowlevel_server.create_initialization_options().server_version == "0.1.2"
+    assert server._lowlevel_server.create_initialization_options().server_version == "0.1.3"
 
 
 def test_checker_rejects_descriptor_version_different_from_actual_mcp(monkeypatch):
@@ -68,6 +68,17 @@ def test_copied_execution_sources_close_adaptive_protocol_and_linked_profile(tmp
     payload = tmp_path / "copied-execution"
     manifest = copy_component_sources(root, payload, entries, resources=resources)
     paths = {row["path"] for row in manifest["files"]}
+    execution_documents = {"docs/development/TARGET_CHECK.md", "docs/development/SETTLED_OBSERVATION.md",
+        "docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md",
+        "docs/development/DECISION_LUNA_REVIEW.md", "docs/development/TARGET_IDENTITY_REVIEW.md",
+        "docs/verification/EXECUTION_SPEED_20261015.md", "docs/verification/GOOGLE_JAVA_FIXED_20261015.md",
+        "docs/verification/TARGET_CHECK_PROMPT_20261014.md",
+        "docs/verification/ORDINARY_REVIEW_TIMEOUT_20261014.md",
+        "docs/verification/TARGET_CHECK_LIVE_20261014.md", "docs/verification/TARGET_CHECK_OFFLINE_20261014.md",
+        "docs/verification/TARGET_IDENTITY_LIVE_20261014.md",
+        "docs/verification/SYMBOL_CASCADE_CONTROLLED_20261014.md",
+        "docs/verification/DECISION_CASCADE_AUDIT_20261014.md",
+        "docs/verification/DECISION_CASCADE_REPLAY_20261014.md"}
     required = {"configs/decision-profile.adaptive.example.json",
         "configs/decision-profile.visual-execution.example.json", "configs/decision-profile.legacy.example.json",
         "docs/development/VISUAL_EXECUTION_INPUT.md", "docs/development/DECISION_CHOICE.md",
@@ -83,7 +94,7 @@ def test_copied_execution_sources_close_adaptive_protocol_and_linked_profile(tmp
         "app/execution/task_plan_native_condition.py",
         "app/execution/task_plan_conditions.py", "app/judgment/condition_templates.py",
         "app/learning_memory/workflow_condition_templates.py",
-        "app/learning_memory/runtime_verification.py", "app/learning_memory/decision_verification.py"}
+        "app/learning_memory/runtime_verification.py", "app/learning_memory/decision_verification.py"} | execution_documents
     assert required <= paths
     assert all((payload / name).read_bytes() == (root / name).read_bytes() for name in required)
     assert not any(name.startswith("tests/") for name in paths)
@@ -91,6 +102,12 @@ def test_copied_execution_sources_close_adaptive_protocol_and_linked_profile(tmp
         target = urlsplit(reference)
         if not target.scheme and target.path:
             assert unquote(target.path) in paths, "packaged README link missing: " + reference
+    for name in execution_documents:
+        for reference in re.findall(r'\]\(([^)]+)\)', (payload / name).read_text(encoding="utf-8")):
+            target = urlsplit(reference)
+            if not target.scheme and target.path:
+                linked = ((payload / name).parent / unquote(target.path)).resolve().relative_to(payload.resolve())
+                assert linked.as_posix() in paths, "packaged execution document link missing: " + reference
     profile = json.loads((payload / "configs/decision-profile.adaptive.example.json").read_text(encoding="utf-8"))
     assert profile["contract_version"] == "decision_profile.v2" and profile["mode"] == "auto"
     assert profile["proactive_review"] is True and profile["review_policy"] == "adaptive"
@@ -125,7 +142,7 @@ def test_real_payload_has_execution_identity_installer_manifest_and_isolated_inp
     from scripts.build_component_installer import validate
     from app.learning_memory.execution_installation import load_execution_installation
     root = Path(__file__).resolve().parents[1]
-    result = build(root, tmp_path / "execution", version="0.1.2")
+    result = build(root, tmp_path / "execution", version="0.1.3")
     payload = Path(result["directory"])
     installer_rows = validate(payload, result["installer_manifest"])
     assert all(set(row) == {"path", "size", "sha256"} for row in installer_rows)
@@ -137,10 +154,10 @@ def test_real_payload_has_execution_identity_installer_manifest_and_isolated_inp
         "requirements/agent-runtime-win311.txt", "execution-installation.json"} <= paths
     assert "app/application_profiles/seek/application.py" in paths
     assert not any("workbench" in name or name.endswith(".qm") for name in paths)
-    assert load_execution_installation(payload).version == "0.1.2"
+    assert load_execution_installation(payload).version == "0.1.3"
     evidence = json.loads(Path(result["verification_report"]).read_text(encoding="utf-8"))
     assert evidence["passed"] is True
-    assert evidence["mcp_server_version"] == evidence["version"] == "0.1.2"
+    assert evidence["mcp_server_version"] == evidence["version"] == "0.1.3"
     assert evidence["input_executed"] is False
     assert evidence["qt_imported"] is False
     assert evidence["entrypoints"]["execution_client"] == {"imported": True, "main_executed": False}

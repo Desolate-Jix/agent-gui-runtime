@@ -402,7 +402,7 @@ class LearningBenchmarkClient:
         value = {key: deepcopy(snapshot[key]) for key in (
             "schema", "source_kind", "run_id", "plan_id", "plan_sha256", "start_request_id", "status",
             "runner_state", "mode", "current_step_id", "active_command_id", "wait_reason", "metrics",
-            "plan_schema_version", "review_packet", "review_required", "main_handoff", "prefix_sha256", "lineage_generation", "successor_of",
+            "plan_schema_version", "review_packet", "review_required", "caller_controls", "main_handoff", "prefix_sha256", "lineage_generation", "successor_of",
             "successor", "start_transport_request_id", "recovery_policy", "step_attempts",
             "intervention_resumes", "intervention_recovery", "completion_snapshot_sha256")
             if key in snapshot}

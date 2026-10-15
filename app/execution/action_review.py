@@ -70,6 +70,41 @@ def build_action_review(*, scope, plan, step, run_id, attempt_id, capture, ident
         selected = _candidate(candidate, candidate.get("click_point"))
     elif candidate is not None:
         raise ValueError("action_review_scene_candidate_forbidden")
+    reviewed_action = deepcopy(action)
+    declared = step.get("action", {})
+    identity_spec = None
+    target_check = None
+    if "target_identity" in declared:
+        if plan.get("schema_version") != "task_plan.v3" or declared.get("kind") not in {"click", "input_sequence"}:
+            raise ValueError("action_review_target_identity_unsupported")
+        from app.judgment.target_identity import normalize_target_identity
+        identity_spec = normalize_target_identity(declared["target_identity"])
+    elif scope == "candidate" and plan.get("schema_version") == "task_plan.v3":
+        from app.core.agent_grounding_target import AgentGroundingTarget, current_agent_grounding
+        from app.core.visual_submit_target import VisualSubmitTarget
+        target = current_agent_grounding()
+        if type(target) in {AgentGroundingTarget, VisualSubmitTarget}:
+            identity_spec = target.review_target_identity(declared)
+            if identity_spec is None:
+                target_check = target.review_target_check(declared)
+    if identity_spec is not None:
+        if "target_identity" in action and action["target_identity"] != identity_spec:
+            raise ValueError("action_review_target_identity_conflict")
+        if scope == "candidate":
+            # 身份选项只来自冻结计划或当前内部定位原件，不采用任意候选字典。
+            reviewed_action["target_identity"] = deepcopy(identity_spec)
+        else:
+            reviewed_action.pop("target_identity", None)
+    elif "target_identity" in action:
+        raise ValueError("action_review_target_identity_conflict")
+    if scope == "scene":
+        reviewed_action.pop("target_check", None)
+    elif target_check is not None:
+        if "target_check" in action and action["target_check"] != target_check:
+            raise ValueError("action_review_target_check_conflict")
+        reviewed_action["target_check"] = deepcopy(target_check)
+    elif "target_check" in action:
+        raise ValueError("action_review_target_check_conflict")
     def describe(item):
         action_value = item.get("action", {})
         return str(action_value.get("field_goal", action_value.get("goal", action_value.get("kind", ""))))[:2000]
@@ -82,7 +117,7 @@ def build_action_review(*, scope, plan, step, run_id, attempt_id, capture, ident
         **({"review_policy": verification["review_policy"]} if "review_policy" in verification else {})})
     envelope = {"schema": "action_review.v1", "scope": scope, "run_id": run_id,
         "step_id": step["step_id"], "attempt_id": attempt_id, "frame": frame,
-        "action": deepcopy(action), "candidate": selected, "review_context": context,
+        "action": reviewed_action, "candidate": selected, "review_context": context,
         "profile_sha256": profile_sha256, "deadline_ns": _deadline(deadline_ns)}
     envelope["envelope_sha256"] = _digest(envelope)
     return envelope
@@ -96,6 +131,9 @@ def build_freshness_review(envelope, *, current_frame, changed_region):
     checked["prior_frame"] = deepcopy(envelope["frame"])
     checked["frame"] = {**deepcopy(current_frame), "role": "observation"}
     checked["candidate"]["capture_id"] = current_frame["capture_id"]
+    # 新鲜度只审核本次变化，旧身份声明不能作为当前帧的分类结果。
+    checked["action"].pop("target_identity", None)
+    checked["action"].pop("target_check", None)
     checked["action"]["freshness_context"] = {"schema": "action_freshness.v1",
         "changed_region": deepcopy(changed_region)}
     checked["envelope_sha256"] = _digest({k: v for k, v in checked.items() if k != "envelope_sha256"})

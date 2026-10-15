@@ -97,6 +97,7 @@ def test_zero_dispatch_block_is_resumable_and_old_rejection_is_immutable(interve
     waiting = s.runtime.tick(force=True)
     assert waiting['wait_reason'] == 'verification_required' and waiting['status'] == 'pending'
     assert waiting['review_packet']['reason'] == 'blocked_before_dispatch'
+    assert 'caller_controls' not in waiting
     assert waiting['review_packet']['action_executed'] is False and waiting['history'] == []
     fresh = resume(s, waiting)
     assert fresh['pending']['step_id'] == old['step_id']

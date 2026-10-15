@@ -252,6 +252,79 @@ def _validate_png(frame, expected):
         image.verify()
 
 
+
+def _focus_target_binding(context, focus_receipt, expected, *, required=False):
+    """原候选判断必须认证到本次计划和实际点击，值判断只保存本地绑定。"""
+    from .action_review import normalize_action_review_context, CANDIDATE_CONDITION
+    from app.judgment.target_identity import normalize_target_identity
+    from app.judgment.target_check import normalize_target_check
+    data = focus_receipt["response"]["data"]
+    data = data.get("result", data)
+    summary = data.get("action_assessment")
+    original = context.get("action_review")
+    if original is None:
+        source_action = (summary.get("evaluation_request", {}).get("action") or {}) if isinstance(summary, dict) else {}
+        if {"target_identity", "target_check"}.intersection(source_action):
+            raise ValueError("visual_field_target_review_context_required")
+        return None
+    checked = normalize_action_review_context(original)
+    if checked["plan"]["schema_version"] != "task_plan.v3":
+        return None
+    step = next(row for row in checked["plan"]["steps"] if row["step_id"] == checked["step_id"])
+    permitted = step["action"]
+    if summary is None and (not required or "target_identity" in permitted):
+        return None
+    try:
+        request = summary["evaluation_request"]
+        action = request["action"]
+        raw = summary["judgment"]["judgment_result"]
+        candidate = _candidate(data["recognition_plan"]["recommended_target"], expected["click_point"])
+        frame = request["frames"][0]
+        if (summary["scope"] != "candidate" or summary["disposition"] != "pass"
+                or summary["authorizes_action"] is not False
+                or summary["envelope_sha256"] != action["envelope_sha256"]
+                or request["condition"] != CANDIDATE_CONDITION or request["phase"] != "before_action"
+                or request["step_id"] != checked["step_id"] or len(request["frames"]) != 1
+                or request["execution_request_id"] != "attempt-" + _digest([
+                    checked["run_id"], checked["step_id"], checked["attempt_id"]])[:40]
+                or request["request_id"] != "action-review-" + summary["envelope_sha256"][:40]
+                or request["review_context"]["source_id"] != checked["run_id"]
+                or request["review_context"]["source_sha256"] != _digest(checked["plan"])
+                or action["operation"] != "execute_recognition_plan" or action["review_scope"] != "candidate"
+                or action["permitted_action"] != permitted or permitted.get("kind") != "input_sequence"
+                or action["goal"] != permitted["field_goal"] or permitted["field_goal"] != expected["field_goal"]
+                or action["source_candidate"] != candidate
+                or action["candidate"] != {**candidate, "capture_id": frame["capture_id"]}
+                or action["target_window_identity"] != expected["window_identity"]
+                or frame["window_identity"] != expected["window_identity"]
+                or raw.get("adopted") is not True or raw.get("verdict") != "success"
+                or context["service"].validate_result(raw, **request) is not True):
+            raise ValueError("visual_field_target_identity_source_invalid")
+        if {"target_identity", "target_check"} <= set(action):
+            raise ValueError("visual_field_target_review_sources_conflict")
+        if "target_check" in action:
+            key = "target_check"
+            spec = normalize_target_check(action[key])
+            if ("target_identity" in permitted or spec["target"] != expected["field_goal"]
+                    or spec["kind"] != "input_field"):
+                raise ValueError("visual_field_target_check_goal_mismatch")
+        elif "target_identity" in action:
+            key = "target_identity"
+            spec = normalize_target_identity(action[key])
+            if "target_identity" in permitted:
+                if spec != permitted["target_identity"]:
+                    raise ValueError("visual_field_target_identity_source_invalid")
+            elif next(row["description"] for row in spec["choices"] if row["value"] == spec["expected"]) != expected["field_goal"]:
+                raise ValueError("visual_field_target_identity_goal_mismatch")
+        else:
+            return None
+        return {"schema": key + "_binding.v1", "goal": expected["field_goal"], key: spec,
+            "focus_receipt_sha256": _digest(focus_receipt), "action_review_sha256": _digest(checked),
+            "source_request_sha256": raw["request_sha256"], "source_assessment_sha256": _digest(raw)}
+    except (KeyError, TypeError, IndexError, AttributeError) as error:
+        raise ValueError("visual_field_target_identity_source_invalid") from error
+
+
 def _request(*, phase, focus_receipt, input_receipt, frame, expected_field, context, value_reading,
              focus_observation=None):
     _deadline(context)
@@ -337,6 +410,18 @@ def _request(*, phase, focus_receipt, input_receipt, frame, expected_field, cont
         if executed is not None:
             action["executed_click"] = executed
             action["field_image_scope"] = {"schema": "visual_field_roi.v1", "padding": 16}
+    target_binding = (_focus_target_binding(context, focus_receipt, expected, required=phase == "value")
+        if not native_evidence and (phase == "value" or "target_identity" not in context) else None)
+    if phase == "focus" and not native_evidence:
+        from app.judgment.target_identity import normalize_target_identity
+        if "target_identity" in context:
+            action["target_identity"] = normalize_target_identity(context["target_identity"])
+        elif target_binding is not None:
+            key = "target_check" if "target_check" in target_binding else "target_identity"
+            action[key] = deepcopy(target_binding[key])
+    elif phase == "value" and not native_evidence and target_binding is not None:
+        key = "target_check" if "target_check" in target_binding else "target_identity"
+        action[key + "_binding"] = target_binding
     if phase == "focus" and "field_content_check" in context:
         action["field_content_check"] = deepcopy(context["field_content_check"])
     if phase == "focus" and "field_content_ocr" in context:
@@ -448,6 +533,8 @@ def assess_visual_selection(proof, *, frame, dispatch):
         raise ValueError("visual_field_selection_frame_not_fresh")
     request["action"].pop("field_content_check", None)
     request["action"].pop("field_content_ocr", None)
+    request["action"].pop("target_identity", None)
+    request["action"].pop("target_check", None)
     request["action"].update(focus_stage="after_selection", selection_dispatch=fact,
         prior_focus_request_sha256=previous["assessment"]["request_sha256"])
     assessment = _evaluate(proof._service, **{k: v for k, v in request.items() if k != "mode"}, deadline_ns=proof._deadline_ns)
@@ -806,6 +893,8 @@ def _field_freshness_request(proof, *, frame, native_snapshot):
     request.pop("request_budget_seconds", None)
     request["request_id"] += "-freshness"
     request["condition"] = VISUAL_FIELD_FRESHNESS_CONDITION
+    request["action"].pop("target_identity", None)
+    request["action"].pop("target_check", None)
     request["frames"] = [{**request["frames"][-1], "role": "before"}, after]
     request["action"].update(focus_stage="before_keyboard_freshness", field_freshness_context={
         "schema": "visual_field_freshness.v1", "changed_region": changed,

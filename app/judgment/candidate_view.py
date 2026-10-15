@@ -10,6 +10,7 @@ from .candidate_annotation import candidate_annotation_metadata
 
 
 _FIELDS = {"schema", "capture_id", "source_sha256", "role", "viewport_size", "bbox", "click_point", "candidate_id"}
+INPUT_FIELD_VIEW_RECIPE = "overview_input_field_point384x160_zoom2.v1"
 
 
 def _invalid(reason):
@@ -67,11 +68,29 @@ def _detail_crop(size, bbox):
 
 def render_candidate_view(data: bytes, metadata: dict) -> tuple[bytes, dict]:
     """验证原图和闭合 v1 绑定，返回确定性 PNG 及精确坐标映射。"""
+    return _render_candidate_view(data, metadata, input_field=False)
+
+
+def render_input_field_candidate_view(data: bytes, metadata: dict) -> tuple[bytes, dict]:
+    """输入框只放大点击处局部原像素；完整窗口继续提供边界和归属。"""
+    return _render_candidate_view(data, metadata, input_field=True)
+
+
+def _render_candidate_view(data, metadata, *, input_field):
     checked = _checked_metadata(metadata)
     source = _source_image(data, checked)
     width, height = source.size
     bbox, point = checked["bbox"], checked["click_point"]
-    crop = _detail_crop(source.size, bbox)
+    if input_field:
+        cw, ch = min(width, 384), min(height, 160)
+        left = max(0, min(width - cw, math.floor(point["x"] + .5 - cw / 2)))
+        top = max(0, min(height - ch, math.floor(point["y"] + .5 - ch / 2)))
+        if bbox["h"] <= ch:
+            # 高度可容纳时保留上下框边，避免靠框边的点裁掉另一条边。
+            top = max(max(0, bbox["y"] + bbox["h"] - ch), min(top, min(height - ch, bbox["y"])))
+        crop = (left, top, left + cw, top + ch)
+    else:
+        crop = _detail_crop(source.size, bbox)
     views = []
     for name, rect, edge in (("overview", (0, 0, width, height), 640), ("detail", crop, 768)):
         # 每块视图独立从未标注原图裁剪，缩放后再画环，不能放大旧标记。
@@ -121,6 +140,13 @@ def render_candidate_view(data: bytes, metadata: dict) -> tuple[bytes, dict]:
         "detail_padding_requested_pixels": 48, "detail_minimum_requested_size": [320, 160],
         "detail_minimum_met": views[1][0].width >= 320 and views[1][0].height >= 160,
         "detail_includes_complete_bbox": True, "overview_includes_complete_frame": True}
+    if input_field:
+        mapping.update(schema="decision_candidate_view.v2", recipe=INPUT_FIELD_VIEW_RECIPE,
+            detail_anchor="click_point", detail_source_requested_size=[384, 160],
+            detail_includes_complete_bbox=(crop[0] <= bbox["x"] and crop[1] <= bbox["y"]
+                and crop[2] >= bbox["x"] + bbox["w"] and crop[3] >= bbox["y"] + bbox["h"]))
+        # 局部视图不承诺整框留白；人工裁剪边与原始 UI 边界分别记录。
+        mapping.pop("detail_padding_requested_pixels")
     output = BytesIO()
     canvas.save(output, format="PNG", optimize=False, compress_level=3)
     return output.getvalue(), mapping

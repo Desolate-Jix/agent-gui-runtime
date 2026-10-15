@@ -376,13 +376,21 @@ class LocalDirectStepMixin:
                 capture_scope = learning_capture_scope(self, learning_context)
             focus_scope = (visual_text_focus_scope(focus_target) if type(focus_target) is VisualTextFocusTarget
                 else local_text_focus_scope(focus_target))
+            shared_observation = (operation == 'execute_recognition_plan'
+                and timing_context.get('include_observation') is True
+                and timing_context.get('observation_condition') is None
+                and timing_context.get('decision_check') is None and learning_context is None
+                and control_target is None and keyboard_target is None and memory_target is None
+                and (focus_target is None or type(focus_target) is VisualTextFocusTarget))
             with _local_operator_step_scope(), local_control_target_scope(control_target), local_keyboard_target_scope(keyboard_target), focus_scope, agent_grounding_scope(grounding_target), memory_grounding_scope(memory_target), (pinned_vision_configuration(configuration) if configuration else nullcontext()), capture_scope:
-                return self._perform_local_step_on_owner(handle, pid, operation, request, timer, timing_context)
+                return self._perform_local_step_on_owner(handle, pid, operation, request, timer, timing_context,
+                    shared_observation=shared_observation)
         finally:
             timing_context["local_step_timings"] = {**timer.to_dict(), "scope": "owner_execution",
                 "inclusive": True, "nested_timings_additive": False}
 
-    def _perform_local_step_on_owner(self, handle, pid, operation, request, timer, timing_context):
+    def _perform_local_step_on_owner(self, handle, pid, operation, request, timer, timing_context,
+                                    *, shared_observation=False):
         def cancelled():
             predicate = timing_context.get("input_cancelled")
             value = False if predicate is None else predicate()
@@ -413,16 +421,34 @@ class LocalDirectStepMixin:
             report["memory_resolution"] = deepcopy(timing_context["memory_resolution"])
         timing_context.update(report=report, output=output)
         failure = None
+        from app.core.settled_observation_scope import before_capture_sharing_eligible
+        shared_before = before_capture_sharing_eligible(request, shared_observation=shared_observation)
+        roi = None
+
+        def publish_before(captured):
+            if cancelled():
+                raise ValueError('before_capture cancelled')
+            with timer.step('capture_hash', source='same_invocation_live_capture'):
+                copied = _copy_before_capture(captured, output, request, identity, window_rect)
+            if cancelled():
+                raise ValueError('before_capture cancelled')
+            report.update(capture=copied, before_capture_status='captured')
+            with timer.step('report_persist', phase='before_input'):
+                _write_report(output, report)
+
         try:
-            with timer.step("capture_hash"):
-                from app.api.models.request import ROIModel
-                roi = ROIModel.model_validate(request["capture_roi"]) if request.get("capture_roi") else None
-                capture = ScreenshotService(window_manager=manager, capture_dir=output / "captures").capture_window(
-                    roi=roi, focus_window=False, purpose="local-direct-no-learning")
-                _validate_coordinates(request, capture)
-                image_path = Path(capture["image_path"])
-                report["capture"] = {**capture, "sha256": sha256(image_path.read_bytes()).hexdigest(),
-                    "frame_id": "before_input", "observation_stage": "before_input"}
+            if shared_before:
+                report['before_capture_status'] = 'pending'
+            else:
+                with timer.step("capture_hash"):
+                    from app.api.models.request import ROIModel
+                    roi = ROIModel.model_validate(request["capture_roi"]) if request.get("capture_roi") else None
+                    capture = ScreenshotService(window_manager=manager, capture_dir=output / "captures").capture_window(
+                        roi=roi, focus_window=False, purpose="local-direct-no-learning")
+                    _validate_coordinates(request, capture)
+                    image_path = Path(capture["image_path"])
+                    report["capture"] = {**capture, "sha256": sha256(image_path.read_bytes()).hexdigest(),
+                        "frame_id": "before_input", "observation_stage": "before_input"}
             condition = timing_context.get("observation_condition")
             if request.get('selection_intent') is not None and timing_context['selection_preflight']['selected'] is True:
                 from app.core.memory_grounding_target import current_memory_grounding
@@ -453,6 +479,14 @@ class LocalDirectStepMixin:
                     execution_id = timing_context.get("execution_request_id")
                     from app.execution.popup_decision import popup_decision_scope
                     from app.execution.action_review import action_review_scope
+                    observation_scope = nullcontext()
+                    if shared_observation:
+                        from app.api import action
+                        from app.core.settled_observation_scope import _settled_observation_scope
+                        observation_scope = _settled_observation_scope(owner=self, manager=manager,
+                            identity=identity, window_rect=window_rect, step_id=step_id, request=request,
+                            caller=action.execute_recognition_plan, verifier=action.verifier,
+                            before_capture=publish_before if shared_before else None)
                     with _typing_route_scope(operation, report) as typing_scope, \
                             execution_decision_scope(getattr(self, "_decision_service", None),
                             decision_check=checked, execution_request_id=execution_id,
@@ -464,7 +498,7 @@ class LocalDirectStepMixin:
                             action_review_scope(getattr(self, "_decision_service", None),
                                 context=timing_context.get("action_review"),
                                 deadline_ns=timing_context.get("action_review_deadline_ns"),
-                                cancelled=cancelled) as review_scope:
+                                cancelled=cancelled) as review_scope, observation_scope:
                         report["response"] = _post_action(operation, request, manager)
                         if decision_scope is not None and decision_scope["result"] is not None:
                             report["decision_judgment"] = deepcopy(decision_scope["result"])
@@ -472,6 +506,10 @@ class LocalDirectStepMixin:
                             report["popup_decision_judgment"] = deepcopy(popup_scope["result"])
                         if review_scope is not None and review_scope["assessment"] is not None:
                             report["action_assessment"] = deepcopy(review_scope["assessment"])
+            if shared_before and report.get('before_capture_status') != 'captured':
+                report['before_capture_status'] = 'unavailable'
+                if report['response'].get('success') is True:
+                    raise ValueError('before_capture publication missing after route success')
             # 进入原路由后可能已产生部分输入，失败返回不能证明没有副作用。
             report["phase"] = "returned" if report["response"].get("success") is True else "result_unknown"
             if request.get('selection_intent') is not None:
@@ -569,6 +607,8 @@ class LocalDirectStepMixin:
             report.update(phase=phase, error_type=type(error).__name__, error="local_step_failed")
             raise
         finally:
+            if shared_before and report.get('before_capture_status') != 'captured':
+                report['before_capture_status'] = 'unavailable'
             report.update(finished_at=_now(), local_input_scope_closed=True)
             try:
                 with timer.step("report_persist", phase="finished"):
@@ -577,6 +617,43 @@ class LocalDirectStepMixin:
                 if failure is None:
                     raise
                 failure.add_note("local step report persistence failed: " + type(persistence_error).__name__)
+
+
+def _copy_before_capture(capture, output, request, identity, window_rect):
+    from io import BytesIO
+    import os
+    from PIL import Image
+
+    width, height = window_rect[2] - window_rect[0], window_rect[3] - window_rect[1]
+    if (not isinstance(capture, dict) or not isinstance(capture.get('image_path'), str)
+            or capture.get('window_rect') != list(window_rect) or capture.get('roi') is not None
+            or capture.get('image_width') != width or capture.get('image_height') != height
+            or (capture.get('capture_visibility') or {}).get('allowed') is not True
+            or (capture.get('capture_visibility') or {}).get('coordinate_space') != 'window'
+            or (capture.get('capture_visibility') or {}).get('bound_window_handle') != identity['target_window_handle']):
+        raise ValueError('before_capture window binding invalid')
+    _validate_coordinates(request, capture)
+    source = Path(capture['image_path']).resolve(strict=True)
+    if source.stat().st_size > 20 * 1024 * 1024:
+        raise ValueError('before_capture image too large')
+    data = source.read_bytes()
+    digest = sha256(data).hexdigest()
+    if len(data) > 20 * 1024 * 1024 or capture.get('sha256') not in (None, digest):
+        raise ValueError('before_capture hash mismatch')
+    with Image.open(BytesIO(data)) as image:
+        if image.format != 'PNG' or image.size != (width, height) or getattr(image, 'is_animated', False):
+            raise ValueError('before_capture PNG binding invalid')
+        image.verify()
+    target = output / 'captures' / ('before-input-' + digest + '.png')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # 不重编码；独立步骤保留原字节，避免公共截图目录的保留上限删掉前图。
+    with target.open('xb') as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return {**deepcopy(capture), 'image_path': str(target.resolve()), 'sha256': digest,
+        'frame_id': 'before_input', 'observation_stage': 'before_input',
+        'source_image_path': str(source), 'source': 'same_invocation_live_capture'}
 
 
 def _capture_observation(manager, reader, identity, handle, pid, output, roi):

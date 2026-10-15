@@ -129,7 +129,8 @@ def assessment_summary(value):
     return {key: deepcopy(value[key]) for key in ("schema_version", "status", "verdict", "disposition",
         "review_scope", "reason", "error_type", "reason_codes", "enabled_predicates", "profile_sha256",
         "budget", "local_proof_complete", "probabilities", "predicates", "suggested_disposition",
-        "suggested_reason_codes", "decision_format", "choice_result") if key in value}
+        "suggested_reason_codes", "decision_format", "choice_result", "identity_result", "ordinary_review", "primary_usage",
+        "usage", "judged_by") if key in value}
 
 
 def field_main_handoff(state, effective, references, *, session, service, original_status):
@@ -296,6 +297,36 @@ def pending_packet(state):
     from .task_plan_observation_evidence import project_packet
     from pathlib import Path
     return project_packet(state, packet, Path(state["session_directory"]))
+
+
+def caller_controls(state):
+    """投影已验证状态的调用参数；不写入签名审核包，也不代填审核结论。"""
+    wait = state.get("wait") or {}
+    if (state.get("runner_state") != "waiting" or state.get("wait_reason") != "verification_required"
+            or state.get("status") == "cancel_requested" or state.get("observation_pending") is True
+            or wait.get("run_id") != state["run_id"]):
+        return {}
+    packet = state.get("review_packet")
+    if packet is not None:
+        if ("review" not in state.get("allowed_controls", packet.get("allowed_controls", []))
+                or "review" not in packet.get("allowed_controls", [])
+                or packet.get("original_input_status") != "completed" or not isinstance(packet.get("after"), dict)):
+            return {}
+        request = {"action": "review", **{key: packet[key] for key in
+            ("run_id", "step_id", "execution_request_id", "evidence_set_sha256", "assessment_round")},
+            "evidence_sha256": packet["after"]["sha256"], "review_packet_sha256": packet["packet_sha256"]}
+        return {"schema": "task_plan_caller_controls.v1", "authorizes_action": False,
+            "review": {"request": request, "caller_supplied_fields": ["verdict", "reason"]}}
+    history = state.get("history") or []
+    settled = history[-1] if history else {}
+    if (state.get("pending") is None and state.get("status") in {"ready", "completed"}
+            and settled.get("judged_by") == "agent" and settled.get("verdict") == "success"
+            and settled.get("original_input_status") == "completed"
+            and settled.get("step_id") == wait.get("step_id")
+            and settled.get("execution_request_id") == wait.get("command_id")):
+        return {"schema": "task_plan_caller_controls.v1", "authorizes_action": False,
+            "continue": {"request": {"action": "continue", "run_id": state["run_id"], "wait_id": wait["wait_id"]}}}
+    return {}
 
 
 def validate_packet(packet, state, session):

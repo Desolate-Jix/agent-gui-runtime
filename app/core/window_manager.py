@@ -12,19 +12,21 @@ from app.core.runtime_input_authority import runtime_backend_input_is_active
 
 WINDOWS_BACKEND_AVAILABLE = False
 WINDOWS_BACKEND_IMPORT_ERROR: Optional[str] = None
+_INVALID_WINDOW_ERRORS: tuple[type[Exception], ...] = ()
 
 # 仅豁免已知录屏宿主的截图矩形遮挡，不豁免实际点位和原生区域门禁。
 _CAPTURE_OVERLAY_ALLOWLIST = frozenset({("nvidia overlay.exe", "CEF-OSC-WIDGET")})
 
 try:
     from pywinauto import Desktop
-    from pywinauto.controls.hwndwrapper import HwndWrapper
+    from pywinauto.controls.hwndwrapper import HwndWrapper, InvalidWindowHandle
     import win32api
     import win32con
     import win32gui
     import win32process
 
     WINDOWS_BACKEND_AVAILABLE = True
+    _INVALID_WINDOW_ERRORS = (InvalidWindowHandle,)
 except Exception as exc:  # pragma: no cover - depends on runtime platform/environment
     Desktop = None  # type: ignore[assignment]
     HwndWrapper = object  # type: ignore[assignment]
@@ -647,13 +649,7 @@ class WindowManager:
         self._ensure_windows_backend()
         candidates: list[dict[str, Optional[int | str]]] = []
 
-        for wrapper in Desktop(backend="win32").windows():  # type: ignore[operator]
-            if not self._is_candidate_window(wrapper):
-                continue
-
-            window_title = wrapper.window_text() or ""
-            process_id = self._get_process_id(wrapper.handle)
-            process_name = self._get_process_name(process_id)
+        for wrapper, window_title, process_id, process_name, desktop_role in self._enumerate_window_candidates():
             candidates.append(
                 {
                     "handle": int(wrapper.handle),
@@ -662,7 +658,7 @@ class WindowManager:
                     "process_name": process_name,
                 }
             )
-            if self._desktop_window_role(wrapper.handle) == "icon_host":
+            if desktop_role == "icon_host":
                 # 保留真实空标题；单独提供角色和显示名称，避免伪造窗口身份。
                 candidates[-1].update(window_kind="desktop", display_name="Windows Desktop")
 
@@ -676,13 +672,7 @@ class WindowManager:
         process_query = process_name.strip().lower() if process_name else None
 
         candidates: list[tuple[HwndWrapper, str, Optional[int], Optional[str]]] = []
-        for wrapper in Desktop(backend="win32").windows():  # type: ignore[operator]
-            if not self._is_candidate_window(wrapper):
-                continue
-
-            window_title = wrapper.window_text() or ""
-            pid = self._get_process_id(wrapper.handle)
-            current_process_name = self._get_process_name(pid)
+        for wrapper, window_title, pid, current_process_name, _ in self._enumerate_window_candidates():
             candidates.append((wrapper, window_title, pid, current_process_name))
 
         logger.info(
@@ -725,6 +715,37 @@ class WindowManager:
         raise ValueError("No matching visible top-level window found")
 
     @staticmethod
+    def _window_disappeared(error: Exception) -> bool:
+        return isinstance(error, _INVALID_WINDOW_ERRORS) or getattr(error, "winerror", None) == 1400
+
+    def _enumerate_window_candidates(
+        self,
+    ) -> list[tuple[HwndWrapper, str, Optional[int], Optional[str], Optional[str]]]:
+        self._ensure_windows_backend()
+        handles: list[int] = []
+        # 原生快照后逐项包装，避免一个刚关闭的窗口中断全部候选发现。
+        win32gui.EnumWindows(lambda handle, _: handles.append(handle) or True, None)
+        candidates = []
+        for handle in handles:
+            try:
+                if not win32gui.IsWindow(handle):
+                    continue
+                wrapper = HwndWrapper(handle)
+                if not self._is_candidate_window(wrapper, strict=True):
+                    continue
+                title = wrapper.window_text() or ""
+                pid = self._get_process_id(handle)
+                process_name = self._get_process_name(pid)
+                desktop_role = self._desktop_window_role(handle)
+                if win32gui.IsWindow(handle):
+                    candidates.append((wrapper, title, pid, process_name, desktop_role))
+            except Exception as error:
+                # 只跳过已明确失效的句柄；其他故障必须保留失败语义。
+                if not self._window_disappeared(error):
+                    raise
+        return candidates
+
+    @staticmethod
     def _shell_window_handle() -> int:
         """读取系统 Shell，pywin32 不一定暴露 GetShellWindow。"""
         import ctypes
@@ -750,7 +771,9 @@ class WindowManager:
         icons = win32gui.FindWindowEx(view, 0, "SysListView32", None) if view else 0
         return "icon_host" if icons else "shell_background"
 
-    def _is_candidate_window(self, wrapper: HwndWrapper, *, require_title: bool = True) -> bool:
+    def _is_candidate_window(
+        self, wrapper: HwndWrapper, *, require_title: bool = True, strict: bool = False,
+    ) -> bool:
         """Return whether a window is a usable top-level candidate."""
         if not WINDOWS_BACKEND_AVAILABLE:
             return False
@@ -776,6 +799,8 @@ class WindowManager:
                 return rejected("empty_title")
             return True
         except Exception as error:
+            if strict and not self._window_disappeared(error):
+                raise
             return rejected("candidate_query_failed", error_type=type(error).__name__,
                             winerror=getattr(error, "winerror", None))
 

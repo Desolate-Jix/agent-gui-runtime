@@ -135,7 +135,7 @@ def preflight(manifest, profile, *, max_calls=12):
         except (OSError, TypeError, SyntaxError):
             raise ValueError("benchmark_capture_invalid") from None
     return {"suite_id": manifest.suite_id, "cases": len(manifest.cases), "maximum_calls": max_calls,
-            "model": profile.model, "requested_reasoning_effort": None, "network_called": False,
+            "model": profile.model, "requested_reasoning_effort": profile.reasoning_effort, "network_called": False,
             "truth_sent_to_provider": False, "action_executed": False}
 
 
@@ -226,7 +226,7 @@ def run_benchmark(manifest, profile, *, output_path, max_calls=12, iou_threshold
         "manifest_sha256": sha256(json.dumps(manifest.model_dump(), ensure_ascii=False, sort_keys=True,
             separators=(",", ":")).encode("utf-8")).hexdigest(),
         "profile": {"model": profile.model, "protocol": profile.protocol, "endpoint": profile.endpoint,
-                    "requested_reasoning_effort": None, "timeout_seconds": profile.timeout_seconds,
+                     "requested_reasoning_effort": profile.reasoning_effort, "timeout_seconds": profile.timeout_seconds,
                     "max_completion_tokens": profile.max_completion_tokens},
         "maximum_calls": max_calls, "iou_threshold": iou_threshold, "status": "running",
         "automatic_retry_allowed": False, "truth_sent_to_provider": False,

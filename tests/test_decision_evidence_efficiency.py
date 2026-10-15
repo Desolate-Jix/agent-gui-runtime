@@ -23,8 +23,8 @@ def test_cropped_field_choice_preserves_ambiguous_completion_handoff_without_ano
     try:
         result = service.evaluate(**args)
         question = json.loads(calls[0].content)["questions"][0]
-        assert "gray completion immediately following the typed text" in question["instructions"]
-        assert "separate shortcut hints" in question["instructions"]
+        assert "If gray unaccepted completion is attached" in question["instructions"]
+        assert "Ignore separate icons and shortcut hints" in question["instructions"]
         assert "choose evidence_insufficient" in question["instructions"]
         assert result["choice_result"]["choice"] == choice and result["adopted"] is adopted
         assert result["disposition"] == ("continue" if adopted else "review_required")
@@ -53,7 +53,7 @@ def test_field_roi_upload_keeps_only_comparison_text_but_authenticates_complete_
         assert "crop_bbox" not in text and "crop_click_point" not in text
         assert "field_goal" not in text and args["action"]["field"]["field_goal"] not in text
         assert len([p for p in body["input"][0]["content"] if p["type"] == "input_text"]) == 0
-        assert "Ignore icons, the click marker, dropdown choices and separate shortcut hints" in body["questions"][0]["instructions"]
+        assert "Ignore separate icons and shortcut hints" in body["questions"][0]["instructions"]
         assert len(body["questions"]) == 1
         url = next(p["image_url"] for p in body["input"][0]["content"] if p["type"] == "input_image")
         roi = result["executed_click_annotations"][0]["field_roi"]["upload_size"]
@@ -87,10 +87,11 @@ def test_ordinary_result_choice_does_not_recheck_action_feasibility(tmp_path, mo
         prompt = question["instructions"]
         assert condition in prompt and len(body["questions"]) == 1
         assert "feasibility" not in json.dumps(question).lower()
-        assert "cropped" in prompt and "uncaptured" in prompt
+        assert json.dumps(condition, ensure_ascii=False) in prompt
+        assert question["choices"][2]["description"] == "Required evidence is missing, hidden or ambiguous."
         assert "evidence_insufficient" in prompt and "condition_not_met" in prompt
-        assert "earlier" in prompt and "future" in prompt
-        assert "screen text" in prompt and "temporal" in prompt
+        assert "Check only this visible current result:" in prompt
+        assert "One static image cannot establish temporal progress or hidden persistence." in prompt
         assert service.validate_result(result, **args)
     finally:
         service.close()

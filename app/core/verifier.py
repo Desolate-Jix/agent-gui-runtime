@@ -134,9 +134,27 @@ class Verifier:
         wait_ms: int = 250,
         capture_scope_evidence: bool = False,
         judged_by_agent: bool = False,
+        _settled_observation_permit=None,
     ) -> dict[str, Any]:
         """Verify an action using before/after screenshots plus focus/cursor checks."""
         logger.info("Verifying action: {}", action_name)
+        if _settled_observation_permit is not None:
+            from app.core.settled_observation_scope import consume_settled_observation
+            if not judged_by_agent or capture_scope_evidence:
+                raise PermissionError('settled observation cannot replace semantic verification')
+            reference = consume_settled_observation(_settled_observation_permit, verifier=self,
+                action_name=action_name, before_state=before_state, click_result=click_result)
+            # 这里只承接诊断；正式后图仍由 owner 等待并采集，缺图不能视为成功。
+            return {'verified': None, 'action_name': action_name,
+                'before': _label_observation_frame(before_state, 'before_immediate'),
+                'after': {'image_path': None, 'capture_status': 'deferred'},
+                'diff': {'available': False, 'changed': None,
+                    'reason': 'deferred_to_settled_observation', 'evidence_role': 'diagnostic_not_agent_review'},
+                'cursor_moved': None, 'foreground_consistent': None,
+                'verification_basis': {'diff_changed': None, 'cursor_and_focus': False},
+                'verification_status': 'awaiting_agent_review', 'judged_by': 'agent',
+                'diagnostic_status': 'deferred_to_settled_observation', 'observation_ref': reference,
+                'automatic_retry_allowed': False}
         time.sleep(max(0, wait_ms) / 1000.0)
 
         if capture_scope_evidence:

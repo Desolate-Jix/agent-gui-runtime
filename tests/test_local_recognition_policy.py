@@ -63,7 +63,9 @@ def test_disabled_policy_still_requires_valid_current_geometry(defect):
 
 @pytest.mark.parametrize("diff_changed", [False, True])
 def test_real_route_scoped_policy_dry_run_does_not_mint_strict_approval(monkeypatch, tmp_path, diff_changed):
+    from hashlib import sha256
     from types import SimpleNamespace
+    from PIL import Image
     from app.api import action
     from app.api.models.request import ExecuteRecognitionPlanRequest
     from app.api.models.response import APIResponse
@@ -75,10 +77,15 @@ def test_real_route_scoped_policy_dry_run_does_not_mint_strict_approval(monkeypa
         rect=SimpleNamespace(left=100, top=200, right=1100, bottom=890))
     manager = SimpleNamespace(get_bound_window=lambda: bound)
     monkeypatch.setattr(action, "window_manager", manager)
-    monkeypatch.setattr(action.screenshot_service, "capture_window", lambda **kw: {
-        "image_path": "capture.png", "window_size": {"width": 1000, "height": 690}, "roi": None})
+    capture_path = tmp_path / "capture.png"
+    Image.new("RGB", (1000, 690), "white").save(capture_path)
+    capture = {"capture_id": str(capture_path), "image_path": str(capture_path),
+        "sha256": sha256(capture_path.read_bytes()).hexdigest(),
+        "image_size": {"width": 1000, "height": 690}, "window_size": {"width": 1000, "height": 690},
+        "window_identity": {"handle": 321, "process_id": 12, "process_create_time": 123.5}, "roi": None}
+    monkeypatch.setattr(action.screenshot_service, "capture_window", lambda **kw: deepcopy(capture))
     monkeypatch.setattr(action, "_run_recognition_plan_for_execution", lambda req:
-        APIResponse(success=True, message="fixture", data={"result": plan_fixture()}))
+        APIResponse(success=True, message="fixture", data={"result": plan_fixture(str(capture_path))}))
     monkeypatch.setattr(action, "_render_recognition_plan_overlay_for_execution", lambda p: None)
     monkeypatch.setattr(action, "write_trace", lambda **kw: str(tmp_path / "trace.json"))
     monkeypatch.setattr(action, "_rewrite_execute_trace_result", lambda **kw: None)
@@ -130,7 +137,7 @@ def test_real_route_scoped_policy_dry_run_does_not_mint_strict_approval(monkeypa
     assert observed_result['verification_scope']['judged_by'] == 'agent'
     assert observed_result['verification_scope']['post_click_checks_passed'] is None
     assert len(clicks) == 2
-    broken = plan_fixture()
+    broken = plan_fixture(str(capture_path))
     broken["candidate_result"]["rejected"] = broken["candidate_result"]["candidates"]
     broken["candidate_result"]["candidates"] = []
     monkeypatch.setattr(action, "_run_recognition_plan_for_execution", lambda req:

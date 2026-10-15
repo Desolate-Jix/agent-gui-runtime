@@ -67,6 +67,12 @@ def review_original_action(*, capture, identity, candidate, point, goal, click_k
                     current_bound.rect.right, current_bound.rect.bottom] != rect):
             _reject(scope, "action_review_window_changed")
         try:
+            expected = build_action_review(scope="candidate", plan=context["plan"], step=step,
+                run_id=context["run_id"], attempt_id=context["attempt_id"], capture=capture,
+                identity=identity, candidate=selected, action=action,
+                profile_sha256=decision_profile_sha256(service.profile), deadline_ns=scope["deadline_ns"])
+            if expected != envelope:
+                _reject(scope, "action_review_target_identity_changed")
             # 认证帧不得被改写；实时边界只核对身份和原候选，不再重拍做语义否决。
             if sha256(Path(frame["image_path"]).read_bytes()).hexdigest() != frame["sha256"]:
                 _reject(scope, "action_review_source_changed")

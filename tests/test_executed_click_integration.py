@@ -58,7 +58,11 @@ def test_completed_click_producer_uploads_only_marked_full_image(tmp_path, monke
         if phase == "focus":
             assert "Assess the marked target" in text
             assert "proof of present focus" not in text
-            assert "focus" not in json.dumps(body["questions"]).lower()
+            # 问题明确排除焦点核验，选项只比较历史点击与输入框的位置。
+            question = body["questions"][0]
+            assert "Keyboard focus and the field's value are outside this check." in question["instructions"]
+            assert "focus" not in json.dumps(question["choices"]).lower()
+            assert "inside the intended input" in question["choices"][0]["description"]
         else:
             assert "same original" in text and "not UI text or evidence" in text
             assert "focus" not in json.dumps(body["questions"]).lower()

@@ -24,12 +24,14 @@ def captured_scene(monkeypatch):
             return False
 
         def grab(self, monitor):
+            from mss.screenshot import ScreenShot
+
             state.grabs.append(dict(monitor))
             if state.drift:
                 state.bound.rect.left += 1
                 state.bound.rect.right += 1
             size = (monitor["width"], monitor["height"])
-            return SimpleNamespace(size=size, rgb=b"\x10\x20\x30" * (size[0] * size[1]))
+            return ScreenShot.from_size(bytearray(b"\x30\x20\x10\x00" * (size[0] * size[1])), *size)
 
     monkeypatch.setattr(screenshot, "mss", Screen)
     return service, state
@@ -54,6 +56,55 @@ def test_drifting_capture_cannot_publish_current_or_previous_geometry(captured_s
     with pytest.raises(ValueError, match="capture_binding_changed"):
         service.capture_window(save_image=False, focus_window=False)
     assert len(state.grabs) == 1
+
+
+@pytest.mark.parametrize("size", [(1, 1), (3, 2), (7, 5)])
+def test_capture_decodes_bgra_without_intermediate_rgb_copy(captured_scene, monkeypatch, tmp_path, size):
+    from io import BytesIO
+    from pathlib import Path
+
+    from mss.screenshot import ScreenShot
+    from PIL import Image
+
+    service, state = captured_scene
+    width, height = size
+    state.bound.rect.right = state.bound.rect.left + width
+    state.bound.rect.bottom = state.bound.rect.top + height
+    state.bound.title, state.bound.process_name = "Pixel fixture", "test.exe"
+    service._capture_dir = tmp_path
+    pixels = [((i * 31) % 256, (i * 73 + 7) % 256, (i * 109 + 13) % 256)
+              for i in range(width * height)]
+    raw_bytes = bytearray(channel for i, (r, g, b) in enumerate(pixels)
+                          for channel in (b, g, r, (i * 43) % 256))
+
+    class RawShot(ScreenShot):
+        @property
+        def rgb(self):
+            raise AssertionError("intermediate RGB conversion must not be requested")
+
+    raw = RawShot.from_size(raw_bytes, width, height)
+    class Screen:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def grab(self, monitor):
+            assert monitor["width"] == width and monitor["height"] == height
+            return raw
+
+    monkeypatch.setattr(screenshot, "mss", Screen)
+    capture = service.capture_window(focus_window=False)
+    expected = Image.new("RGB", size)
+    expected.putdata(pixels)
+    with Image.open(capture["image_path"]) as actual:
+        assert actual.mode == "RGB" and actual.size == size
+        assert actual.tobytes() == expected.tobytes()
+    encoded = BytesIO()
+    expected.save(encoded, format="PNG", compress_level=3)
+    assert Path(capture["image_path"]).read_bytes() == encoded.getvalue()
+    assert capture["window_rect"] == [-30, 40, -30 + width, 40 + height]
 
 
 @pytest.mark.parametrize("before,after,accepted", [

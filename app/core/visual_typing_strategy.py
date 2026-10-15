@@ -19,6 +19,7 @@ def validated_effective_typing_request(result, request):
     try:
         from app.agent.native_identity import validate_native_identity_fact
         from app.judgment import DecisionProfile, DecisionService
+        from app.judgment.ordinary_review import effective_choice
         strategy, evidence = result["typing_strategy"], result["typing_strategy_evidence"]
         if (type(strategy) is not dict or set(strategy) != {"schema", "requested_clear_existing",
                 "effective_clear_existing", "reason", "focus_request_sha256"}
@@ -91,9 +92,7 @@ def validated_effective_typing_request(result, request):
                 or assessment["request_sha256"] != strategy["focus_request_sha256"]
                 or assessment["decision_format"] != "choice" or assessment["status"] != "completed"
                 or assessment["adopted"] is not True or assessment["verdict"] != "success"
-                or assessment["disposition"] != "continue"
-                or assessment["choice_result"]["name"] != "current_step"
-                or assessment["choice_result"]["choice"] != "condition_met"):
+                or assessment["disposition"] != "continue"):
             raise ValueError("visual_typing_strategy_proof_invalid")
         if ocr:
             if (reference.get("field_content_ocr") != action["field_content_ocr"]
@@ -113,7 +112,8 @@ def validated_effective_typing_request(result, request):
         if profile.contract_version != "decision_profile.v2" or profile.decision_format != "choice" or profile.mode != "auto":
             raise ValueError("visual_typing_strategy_profile_invalid")
         service = DecisionService(evidence["session_directory"], profile=profile)
-        if not service.validate_result(assessment, **focus_request):
+        if (service.validate_result(assessment, **focus_request) is not True
+                or effective_choice(assessment) != "condition_met"):
             raise ValueError("visual_typing_strategy_authentication_failed")
         effective["clear_existing"] = strategy["effective_clear_existing"]
         return effective
