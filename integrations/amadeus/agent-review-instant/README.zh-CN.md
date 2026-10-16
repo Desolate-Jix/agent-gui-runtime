@@ -6,7 +6,7 @@
 
 **兼容范围：** 仅 execution Runtime **0.1.4 或 0.1.5**、Windows、Amadeus Host Python **3.12**，以及依赖已准备好的 Runtime Python **3.11** 环境。Main 审核续行应使用 0.1.5；接受 0.1.4 marker 不会给 0.1.4 增加该功能。本包通过本地 wheel 交付，不通过插件商店。
 
-**冻结 wheel：** [amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl)，SHA256 `32d27ed81eab33db05ae2780b98a808205da5057ee98bd71bdad8382e35a6588`。此相同 wheel 已构建、安装、配置 Pi、启用并在 backend restart 后加载。包内含 MCP 启动器、Skill、reference 和 ISC 许可证，不含 Runtime 载荷、用户数据、真实 profile 或 key。本独立 README 是当前交付指南，冻结 wheel 的内嵌描述保留早期构建时记录；此次文档更新不改变任何 wheel 字节。
+**冻结 wheel：** [amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/amadeus_agent_gui_runtime-0.0.2-py3-none-any.whl)，SHA256 `32d27ed81eab33db05ae2780b98a808205da5057ee98bd71bdad8382e35a6588`。此相同 wheel 已构建、安装、配置 Pi、启用并在 backend restart 后加载。包内含 MCP 启动器、Skill、reference 和 ISC 许可证，不含 Runtime 载荷、用户数据、真实 profile 或 key。本独立 README 是当前交付指南，冻结 wheel 的内嵌描述保留早期构建时记录；本次审查后续中 Runtime **0.1.5** 与 wheel **0.0.2** 的版本、字节均不变，没有重新打包。
 
 **正常安装态使用：** 两项全新 synthetic Notepad 编辑 → File → Save 任务在同一 Amadeus 产品／Chat 内，经 Chat → Pi → 已安装扩展 0.0.2 → 已安装 Runtime 0.1.5 完成，各用独立 Pi Work 和 Runtime session。全部 **6 个 Runtime 步骤**、两份精确磁盘结果、自有窗口关闭及 Runtime 清理通过，每任务正文仅派发一次。首任务发生一次普通 Luna 复核，两任务均无 Main 语义 override；Host 逐次权限批准另计。第二 Pi Work 在 Runtime 派发前纠正了 shell 策略拒绝和缺 request_id 的 SDK 错误，不称为零错误首过。实际禁用／重启、移除／重启和默认保留数据也已通过。
 
@@ -14,7 +14,7 @@
 
 ## 安装本地扩展包
 
-1. 使用包含 Pi、原生 MCP/Skill 贡献和本地插件管理器的兼容 Amadeus。本适配实测使用 Host 基线 [a9a488ae](https://github.com/Code-Amadeus/Amadeus/commit/a9a488ae)，并应用 [PR #225](https://github.com/Code-Amadeus/Amadeus/pull/225) 与 [PR #226](https://github.com/Code-Amadeus/Amadeus/pull/226)。核验时两个 PR 均已 ready for review、尚未合并；不保证所有已发布 Amadeus 版本兼容。[Host profile](https://github.com/Code-Amadeus/Amadeus/blob/main/docs/extension_host_profile_v0.1.md) 仍是实验子集；本包无需、也不提供插件商店安装。
+1. 使用包含 Pi、原生 MCP/Skill 贡献和本地插件管理器的兼容 Amadeus。较早安装态检查使用 Host 基线 [a9a488ae](https://github.com/Code-Amadeus/Amadeus/commit/a9a488ae)，并应用当时 revision 的 [PR #225](https://github.com/Code-Amadeus/Amadeus/pull/225) 与 [PR #226](https://github.com/Code-Amadeus/Amadeus/pull/226)。下方当前审查 checkpoint 记录 #225 新 head 和 #226 上游合并状态；此前 ready／未合并仅为历史。不保证所有已发布 Amadeus 版本兼容。[Host profile](https://github.com/Code-Amadeus/Amadeus/blob/main/docs/extension_host_profile_v0.1.md) 仍是实验子集；本包无需、也不提供插件商店安装。
 2. 从 [Runtime Releases](https://github.com/Desolate-Jix/agent-gui-runtime/releases) 获取**执行 Runtime** 安装器。需要 Main 审核续行时选择 **0.1.5**。填写真正的安装根目录，其中应有 `execution-installation.json`（`schema=execution_installation.v1`、`component=execution`、`version=0.1.5`）及 `scripts/start_instant_mcp.py`；不要填安装器 EXE、快捷方式或学习工作台目录。
 3. 从该 Runtime 根目录复制 `configs/vision-api-openai-luna.example.json` 和 `configs/decision-profile.visual-execution.example.json` 到自己的配置目录，不把 key 写入其中。按原维护 setup 准备 Runtime 依赖；下列示例路径应替换为自己的既有安装路径和选定配置／数据路径：
 
@@ -61,7 +61,9 @@ manifest 如实披露 `network:["*"]`、`process:["*"]` 和文件系统 `* / rea
 
 Runtime 0.1.5 可在双模型真实非通过并认证后，将原活跃输入 job 保持在 `field_review_packet.v1` 等待。原 Agent 读取绑定 after 原图，复制确切 `caller_controls.review.request` 并补实际 verdict/reason，再单独调用返回的 `caller_controls.continue.request`。review 只记录，明确 continue 才恢复原线程且不重输。该审核只确认已经输入的文字；若原请求还有 submit 后缀，仍须经过既有 fresh-target／输入门禁与结果核验。本包不实现该 Runtime 修复。
 
-Main 视觉审核要求 **Pi 执行模型支持 image 输入**，且 adapter 保留 MCP image 内容；仅有文本回执不能证明审核者看到了绑定 after 原图。实测 Host 的最终 session-scoped 公共 hook 修正 PR #225 经 **17 项实际 SDK 检查**，不替换 Provider、改写用户配置或第三方源码。独立的取消收尾 PR #226 经 **28 项相关检查**。核验时两个 PR 均 ready for review、尚未合并，其他 Host 构建必须具备等价行为，不能假定兼容。较早 live04 Pi 在提交绑定审核前收到原 PNG，但不代表捕获了 provider 原始 HTTP payload 或证明通用视觉准确率。
+Main 视觉审核要求 **Pi 执行模型支持 image 输入**，且 adapter 保留 MCP image 内容；仅有文本回执不能证明审核者看到了绑定 after 原图。2026-10-16 审查 checkpoint 中，PR #225 head `5b3a434ab8617e4eb2d7472f49fa8171ac445004` 经 **24 项原生 SDK＋21 项 Provider＝45 项通过**，TypeScript typecheck 通过；Root 也已核验该 head 远端 **5 个 workflows、15 个 check runs 全部 success**。session-scoped 公共 hook 修补保留 Provider／配置归属；可选元数据修补无法安全应用时保留 Pi 原生选择，只给一次脱敏提示，不产生致命扩展错误。
+
+此前 **17 项 SDK**、五项 CI 全绿及 ready／未合并记录均归属旧 revision。独立的取消收尾 PR #226 保留 **28 项相关检查**，已于 **2026-10-16 合入上游**，merge commit 为 `5dd0b2f2355f0177b89b903b8bc34cd6939fa77e`。其他 Host 构建必须具备等价行为，不能假定兼容。较早 live04 Pi 在提交绑定审核前收到原 PNG，但不代表捕获了 provider 原始 HTTP payload 或证明通用视觉准确率。
 
 原执行未终态时，先用**新的外层 request** 提交 `agent_command_status`，其中 `command_id=packet.execution_request_id`，再用该 status request ID 调 `instant_image` 取原图，不直接对未完成的原执行取图。**已发布 0.1.4 基线限制**仍然保留：部分 `field_review` 失败没有恢复票据。当前宿主未返回实际 review/continue recipe 时停报，不猜票据、不重启重放、不改记成功；仅版本 marker 相同不能证明具备新能力。
 
@@ -91,4 +93,8 @@ Get-FileHash -Algorithm SHA256 -LiteralPath 'C:/explicit/evidence/dist/amadeus_a
 
 开发检查、历史 fault-proxy 测试、真实任务结果与只读审计应分开；数量不相加，前置缺失而跳过不算验收通过。[验证文档](https://github.com/Desolate-Jix/agent-gui-runtime/blob/main/docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) 保留首次失败、历史注入范围和当前安装态使用边界。
 
-壁纸补充（2026-10-16）：Lively 2.2.1.0 的空显示器名称报告缺陷已通过原版／修正副本真实对照确认，修正副本上的两轮 Amadeus 生命周期通过。随后本机已备份原DLL并应用修正；这是第三方本机修复，非官方升级，不包含在本wheel或Runtime安装器中。Amadeus的不确定挂载恢复修复见 [PR #228](https://github.com/Code-Amadeus/Amadeus/pull/228)。其他用户须单独处理受影响的Lively安装，安装本扩展不等于壁纸兼容已验收；正常启动路径最终结果见Runtime发布说明。
+壁纸补充（2026-10-16）：Lively 2.2.1.0 的空显示器名称报告缺陷已通过较早的原版／修正副本真实对照确认，该修正副本上的两轮 Amadeus 生命周期通过。随后本机已备份原 DLL 并应用修正；这是第三方本机修复，非官方升级，不包含在本 wheel 或 Runtime 安装器中；这些历史运行不计为当前 Amadeus 审查候选验收。
+
+[PR #228](https://github.com/Code-Amadeus/Amadeus/pull/228) 保持 **DRAFT**，已推送 head `6dfb187cad6535631048f11e3703b7d57b6147b3`；范围收窄为 `Preparing`／`Pending`／`Settled` 阶段回滚、主异常与清理异常保留，以及按进程身份归属清理责任。**35 项离线契约通过**；原版 Lively 假空报告加 Close 成功但 no-op 仍为**未解决反例，不计入通过数**。该新 head 的 CI 正在运行，最终结果尚未确认；旧五项全绿／ready 记录仅属历史。
+
+Root 的真实 Close 探针 case03 使用隔离副本中的原版 Lively 2.2.1.0 DLL，场景报告正常且非空；确切项目 Close 后自有 player 退出。关闭不存在的项目也返回成功，因此回执本身不能证明已关闭。本轮未自然复现假空，故障协议仍未闭合。其他用户须单独处理受影响的 Lively 安装，安装本扩展不等于壁纸兼容已验收；历史正常启动路径结果仍见 Runtime 发布说明。
