@@ -11,7 +11,8 @@ from threading import RLock
 from time import perf_counter_ns
 
 from .evidence import prepare_request
-from .openai_decisions import DecisionNotConnected, OpenAIDecisionsProvider, _probability, _usage_counts
+from .openai_decisions import (DecisionNotConnected, OpenAIDecisionsProvider, _probability, _usage_counts,
+    _measure_stage, _validate_provider_timings)
 from .profile import DecisionProfile, load_decision_profile
 from .adaptive_policy import assessment, effective_review_policy, enabled_predicates, metadata, require_review
 from .choice_contract import choice_assessment, validate_choice_result
@@ -417,13 +418,16 @@ class DecisionService:
         if self._closed:
             return self._diagnostic(base, "decision_service_closed", status="error")
         started = perf_counter_ns()
+        service_timings = {}
+        base["stage_timings"] = {"schema": "decision_stage_timings.v1", "service": service_timings}
         adoption_deadline = started + self.profile.timeout_seconds * 1_000_000_000
         kwargs = {"request_id": request_id, "execution_request_id": execution_request_id, "condition": condition,
                   "frames": frames, "mode": mode, "phase": phase, "run_id": run_id, "step_id": step_id, "action": action,
                   "review_context": review_context, "assessment_context": assessment_context, "condition_snapshot": condition_snapshot,
                   "temporal_context": temporal_context, "request_budget_seconds": request_budget_seconds}
         try:
-            binding, upload_frames, digest = self._prepare(kwargs)
+            with _measure_stage(service_timings, "evidence_prepare_ms"):
+                binding, upload_frames, digest = self._prepare(kwargs)
         except (OSError, ValueError, TypeError):
             return self._diagnostic(base, "decision_evidence_or_binding_invalid", status="rejected")
         base.update(binding, request_sha256=digest, evidence_hashes=[f["sha256"] for f in binding["frames"]])
@@ -448,6 +452,7 @@ class DecisionService:
                                else "decision_condition_not_allowlisted")
             elif self.profile.proactive_review and binding["review_context"] is None:
                 skip_reason = "decision_review_context_missing"
+        admission_started = perf_counter_ns()
         try:
             with closing(self._connect()) as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -467,6 +472,7 @@ class DecisionService:
                             "decision_condition_template_not_allowlisted") else "runtime_diagnostic")
                     skipped = self._diagnostic(base, skip_reason, status="skipped", review_scope=review_scope)
                     skipped["predicates"] = {name: {"type": "not_requested", "probability": None} for name in base["predicates"]}
+                    service_timings["admission_ms"] = (perf_counter_ns() - admission_started) / 1_000_000
                     encrypted = _protect(_canonical(skipped), self._entropy(request_id))
                     db.execute("INSERT INTO dispatches(request_id, request_sha256, scope, dispatched, marker_blob, result_blob) VALUES(?,?,?,0,?,?)",
                                (request_id, digest, scope, encrypted, encrypted))
@@ -474,6 +480,7 @@ class DecisionService:
                     return skipped
                 if count >= self.profile.request_cap:
                     limited = self._diagnostic(base, "decision_scope_request_cap", status="limited")
+                    service_timings["admission_ms"] = (perf_counter_ns() - admission_started) / 1_000_000
                     encrypted = _protect(_canonical(limited), self._entropy(request_id))
                     db.execute("INSERT INTO dispatches(request_id, request_sha256, scope, dispatched, marker_blob, result_blob) VALUES(?,?,?,0,?,?)", (request_id, digest, scope, encrypted, encrypted))
                     db.commit()
@@ -487,6 +494,9 @@ class DecisionService:
                 db.commit()
         except (sqlite3.Error, OSError):
             return self._diagnostic(base, "decision_persistence_unavailable", status="error")
+        finally:
+            service_timings.setdefault("admission_ms", (perf_counter_ns() - admission_started) / 1_000_000)
+        assessment_started = None
         try:
             payload = {"condition": condition, "phase": phase, "frames": upload_frames,
                        "action": binding["action"], "request_sha256": digest}
@@ -499,7 +509,8 @@ class DecisionService:
                     payload["assessment_context"] = json.loads(_canonical(binding["assessment_context"]))
                 if "temporal_context" in binding:
                     payload["temporal_context"] = json.loads(_canonical(binding["temporal_context"]))
-            provider = self._get_provider()
+            with _measure_stage(service_timings, "provider_lookup_ms"):
+                provider = self._get_provider()
             budgets = [binding[key]["timeout_seconds"] for key in ("assessment_context", "temporal_context") if key in binding]
             if "request_budget_seconds" in binding:
                 budgets.append(binding["request_budget_seconds"])
@@ -512,7 +523,18 @@ class DecisionService:
             if remaining <= 0:
                 raise ProviderTimeout("decision_provider_budget_expired", phase="admission")
             payload["request_timeout_seconds"] = remaining
-            answer = provider.judge(payload)
+            with _measure_stage(service_timings, "provider_call_ms"):
+                try:
+                    answer = provider.judge(payload)
+                except (TimeoutError, OSError, ValueError, KeyError, TypeError) as error:
+                    diagnostic = getattr(error, "decision_timings", None)
+                    if diagnostic is not None:
+                        base["stage_timings"]["provider"] = _validate_provider_timings(diagnostic)
+                    raise
+            assessment_started = perf_counter_ns()
+            if isinstance(answer, dict) and "provider_timings" in answer:
+                base["stage_timings"]["provider"] = _validate_provider_timings(answer["provider_timings"])
+                answer = {key: value for key, value in answer.items() if key != "provider_timings"}
             result_key = "choice_result" if self._v2 and self.profile.decision_format == "choice" else "predicates"
             content_requested = field_content_requested(binding)
             answer_keys = {"request_sha256", result_key, "usage", "http_elapsed_ms", "server_processing_ms", "provider_request_id"}
@@ -624,6 +646,9 @@ class DecisionService:
                 base["provider_error_code"] = code
             if self._v2:
                 require_review(base, "decision_provider_or_contract_error")
+        finally:
+            if assessment_started is not None:
+                service_timings["result_assessment_ms"] = (perf_counter_ns() - assessment_started) / 1_000_000
         # 完成和关闭共用锁；先完成的认证记录保留，先关闭则只保存不确定结果。
         with self._provider_lock:
             if self._closed:

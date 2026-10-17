@@ -245,6 +245,12 @@ python scripts/configure_instant_mcp.py --recognition-source agent_current --dec
 
 动态文字读取、输出变量、坏图、错窗、陈旧证据和取消/恢复冲突不会由“是/否”替代。自动采用经过原 Trial 结算，核对 run/step/execution/窗口/证据；不能伪装人工审核，单独声明的 Agent 成功断言仍需满足。已有条件会在图像规则编辑时保留，不会因修改阈值或关闭图像核验而静默丢失。 / Predicates do not extract dynamic output or override invalid evidence, cancellation, recovery or separate Agent assertions. Automatic adoption uses the original Trial settlement and binding checks. Editing or disabling image checks preserves an existing semantic condition.
 
+## 2026-10-17 Unreleased timing fields / 未发布计时字段
+
+Authenticated Decision receipts additionally expose `stage_timings` with `service` stages (evidence preparation, admission, provider lookup/call, result assessment) and optional `provider` stages (preparation, queue, client setup, HTTP, parse, total, `client_created`). Allowlisted HTTP transport spans distinguish TCP/TLS/request-send/response headers/body; they are nested within HTTP and must not be summed with it. `result_assessment_ms` can include ordinary review; it is not purely local overhead. Missing/error-stage values remain unavailable rather than zero. Existing `elapsed_ms`, `http_elapsed_ms`, verdicts and schemas retain their roles. No prompt or acceptance threshold changed. [Diagnosis and actual coverage](../verification/WAIT_AND_DECISION_LATENCY_20261017.md).
+
+认证回执新增上述 `stage_timings`，分开本地、Provider 和 HTTP 内部阶段。HTTP 内跨度不能与 HTTP 总耗时重复相加；结果判定可能含普通复核，不是纯本地开销。缺失／错误阶段留空，不补零；原总耗时、判断及门禁含义不变。未改提示词或通过阈值，详见上述实测。
+
 ## Evidence, timing and limits / 证据、耗时与限制
 
 - 已发布 preview.3 的超时约束 HTTP 各阶段与排队；当前未发布源码增加自有传输总截止，见上文。两者都不是包含本地 I/O 的全流程硬截止；均无自动重试、重定向或换模型。 / Published preview.3 uses stage/queue timeouts; unreleased source adds the owned-transport total deadline above. Neither is a hard end-to-end local-I/O deadline; neither retries, redirects or switches models.

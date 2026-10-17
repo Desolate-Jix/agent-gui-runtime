@@ -17,6 +17,40 @@ def _action_data(step):
     return data.get("result", data)
 
 
+def _completed_visual_submit(local, execution_id):
+    """只认证真实提交子步的完整 Enter 前沿，不把回锚点击当作提交。"""
+    from math import isfinite
+    from app.core.input_sequence_partial import _identity
+    data = _action_data(local)
+    submit = data.get("visual_submit") if isinstance(data, dict) else None
+    if not isinstance(submit, dict):
+        return None
+    dispatch, key = submit.get("key_dispatch"), submit.get("key_result")
+    identity = _identity(local.get("target_identity"))
+    if (local.get("phase") != "returned" or (local.get("response") or {}).get("success") is not True
+            or submit.get("schema") != "visual_submit.v1" or submit.get("execution_request_id") != execution_id
+            or identity is None or submit.get("window_identity") != identity
+            or not isinstance(dispatch, dict) or dispatch.get("schema") != "key_dispatch.v1"
+            or dispatch.get("key") != "Enter" or dispatch.get("point") != submit.get("point")
+            or dispatch.get("dispatch") != "completed" or dispatch.get("input_started") is not True
+            or dispatch.get("action_executed") is not True or dispatch.get("artifact_is_authorization") is not False
+            or not isinstance(key, dict) or key.get("pressed") is not True or key.get("key") != "Enter"
+            or key.get("window_handle") != identity["handle"] or key.get("text_retyped") is not False
+            or key.get("key_dispatch") != dispatch):
+        return None
+    events = dispatch.get("events")
+    if not isinstance(events, list) or len(events) != 2:
+        return None
+    previous = 0
+    for event, state in zip(events, ("started", "completed")):
+        elapsed = event.get("elapsed_ms") if isinstance(event, dict) else None
+        if (not isinstance(event, dict) or event.get("status") != state
+                or type(elapsed) not in (int, float) or not isfinite(elapsed) or elapsed < previous):
+            return None
+        previous = elapsed
+    return submit
+
+
 def _focus_field_binding(located, receipt, target):
     """将刚派发的 UIA 推荐绑定到原识别截图；纯像素目标不伪造字段身份。"""
     from pathlib import Path
@@ -343,6 +377,17 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         result["completed_steps"].append(name)
         if not (result["observation"].get("capture") or {}).get("sha256"):
             raise InputSequenceInterrupted(name + "_observation_unavailable")
+        if name == "search" and "adaptive_wait" in result["observation"]:
+            from app.core.visual_submit_target import VisualSubmitTarget
+            from app.core.input_sequence_partial import _digest
+            execution_id = (action_review or {}).get("attempt_id")
+            if (type(grounding_target) is not VisualSubmitTarget
+                    or _completed_visual_submit(step, execution_id) is None):
+                raise InputSequenceInterrupted("input_sequence_adaptive_submit_invalid")
+            result["adaptive_submit"] = {"schema": "input_sequence_submit_observation.v1",
+                "sequence_id": group_id, "substep_index": len(result["steps"]) - 1,
+                "execution_request_id": execution_id, "local_step_id": step["step_id"],
+                "receipt_sha256": _digest(step)}
         checkpoint()
         return data
 

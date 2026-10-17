@@ -130,10 +130,11 @@ def _remaining(header):
     elapsed = (now_ns() - header["started_ns"]) / 1_000_000
     if elapsed < 0:
         raise ValueError("task_plan_observation_clock_changed")
-    return elapsed, max(0.0, (12000 - elapsed) / 1000)
+    budget_ms = (header["grace"]["budget_ms"] if header.get("mode") == "adaptive_grace" else 12000)
+    return elapsed, max(0.0, (budget_ms - elapsed) / 1000)
 
 
-def _guard(backend, state, ledger, service, target_reader):
+def _guard(backend, state, ledger, service, target_reader, *, allow_expired=False):
     assert_no_queued_plan_cancel(backend.session, state["run_id"])
     if (backend.session / "closing.json").exists():
         raise ValueError("task_plan_observation_session_closing")
@@ -158,7 +159,7 @@ def _guard(backend, state, ledger, service, target_reader):
     if not callable(target_reader) or target_reader() != header["target_identity"]:
         raise ValueError("task_plan_observation_window_changed")
     elapsed, remaining = _remaining(header)
-    if remaining <= 0:
+    if remaining <= 0 and not allow_expired:
         raise ValueError("task_plan_observation_budget_expired")
     return elapsed, remaining
 
@@ -343,7 +344,11 @@ def validate_observation(backend, state, observation, refs):
     return ledger
 
 
-def validate_decision_adoption(backend, state, ledger, frame, saved):
+def validate_decision_adoption(backend, state, ledger, frame, saved, *, service=None, target_reader=None):
+    if ledger.header().get("mode") == "adaptive_grace":
+        from .task_plan_adaptive_grace import validate_grace_adoption
+        return validate_grace_adoption(backend, state, ledger, frame, saved,
+            service=service, target_reader=target_reader)
     claims = [event["payload"] for event in ledger.read() if event["event"] == "assessment_claimed"]
     header = ledger.header()
     if not claims or len(claims) > 2 or ledger.finished()["reason"] != "authenticated_decision":
@@ -386,6 +391,12 @@ def validate_decision_adoption(backend, state, ledger, frame, saved):
 
 
 def assert_adoption_budget(ledger):
+    if ledger.header().get("mode") == "adaptive_grace":
+        # 原渲染宽限只约束等待；末帧截图和原规则判断不重开观察预算。
+        _remaining(ledger.header())
+        if any(event["event"] == "adoption_rejected" for event in ledger.read()):
+            raise ValueError("task_plan_observation_adoption_budget_invalid")
+        return
     if (any(event["event"] == "adoption_rejected" for event in ledger.read())
             or _remaining(ledger.header())[1] <= 0):
         raise ValueError("task_plan_observation_adoption_budget_invalid")

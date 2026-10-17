@@ -80,7 +80,8 @@ def _native_success(rule, effective, frame):
 
 
 def verify_task_plan_step(backend, *, session_dir, run_id, request_id, execution_id,
-                          decision_service=None, review=None, coordinator=None, target_identity=None, api_grounder=None):
+                          decision_service=None, review=None, coordinator=None, target_identity=None, api_grounder=None,
+                          grounding_prefetch=None):
     session = Path(session_dir).resolve()
     _identifier(request_id, "request_id")
     _identifier(execution_id, "execution_request_id")
@@ -163,6 +164,10 @@ def verify_task_plan_step(backend, *, session_dir, run_id, request_id, execution
     observed = _verified_observation(effective, session)
     capture = effective.get("observation") or (effective.get("result") or {}).get("capture")
     frame = decision_frame({**capture, **observed}, identity, role="after")
+    from .task_plan_adaptive_grace import adaptive_grace, semantic_nonpass
+    grace = (adaptive_grace(effective, frame) if source["plan"]["schema_version"] == "task_plan.v3"
+        and step["action"]["kind"] in {"click", "input_sequence"} and step["verification"]["kind"] == "agent_judgment"
+        and "wait_policy" not in step["verification"] else None)
     references.append(_reference(session, frame["image_path"]))
     # 后图只能来自原命令；有前图时还必须排除把前图改名当作后图。
     before = (effective.get("result") or {}).get("capture") or {}
@@ -186,7 +191,7 @@ def verify_task_plan_step(backend, *, session_dir, run_id, request_id, execution
                 saved = ledger.last_assessment()
                 assessment = saved["result"] if saved else None
                 policy = ledger.header()["policy_snapshot"]
-        if "wait_policy" in step["verification"]:
+        if "wait_policy" in step["verification"] or grace is not None:
             from .task_plan_observation import ObservationLedger
             ledger = ObservationLedger(backend, execution_id)
             if ledger.header() is not None:
@@ -301,11 +306,29 @@ def verify_task_plan_step(backend, *, session_dir, run_id, request_id, execution
                 from .task_result_annotation import task_result_click_action, task_result_decision_binding
                 binding = task_result_decision_binding(binding, task_result_click_action(step, effective, frame))
                 started = perf_counter_ns()
+                if grounding_prefetch is not None and v2 and not always_main:
+                    grounding_prefetch.begin(backend, state, step,
+                        {**deepcopy(capture), **deepcopy(observed), **deepcopy(frame)}, target_identity)
                 decision, valid_decision = assess(decision_service, binding, v2=v2)
                 _save_once(decision_path, {"binding": binding, "result": decision,
                     "validated": valid_decision,
                     **({"policy_snapshot": policy} if v2 else {}),
                     "measurement": {"started_ns": started, "ended_ns": perf_counter_ns()}})
+            if grounding_prefetch is not None and not (valid_decision and decision.get("adopted") is True
+                    and decision.get("verdict") == "success" and decision.get("disposition") == "continue"):
+                grounding_prefetch.discard("previous_assessment_nonpass", run_id=run_id)
+            if observation is None and grace is not None and semantic_nonpass(decision, valid_decision):
+                from .task_plan_adaptive_grace import complete_adaptive_grace
+                driven = complete_adaptive_grace(backend, state, step, frame,
+                    {**deepcopy(capture), **deepcopy(observed), **deepcopy(frame)}, references, decision_service,
+                    coordinator=coordinator, target_reader=target_identity, effective=effective,
+                    initial_path=decision_path)
+                if driven["pending"]:
+                    return {"status": "verification_required", "observation_pending": True}
+                decision = driven["decision"] or {"reason": driven["reason"]}
+                valid_decision = driven["valid"] and driven["reason"] == "authenticated_decision"
+                references[:] = driven["refs"]
+                observation, policy, observation_reason = driven["observation"], driven["policy"], driven["reason"]
             if observation is None:
                 references.append(_reference(session, decision_path))
             assessment = decision
@@ -346,8 +369,11 @@ def verify_task_plan_step(backend, *, session_dir, run_id, request_id, execution
         result["review_packet"] = make_packet(backend, state, step, result, frame,
             assessment=assessment, policy=policy)
     try:
-        return backend.record_verified_result(run_id, request_id, execution_id, result, decision_service=decision_service,
+        settled = backend.record_verified_result(run_id, request_id, execution_id, result, decision_service=decision_service,
             target_identity=target_identity)
+        if grounding_prefetch is not None:
+            grounding_prefetch.settled(backend, state, settled, result)
+        return settled
     except ValueError as error:
         if video_playback is not None and str(error) == "task_plan_video_budget_expired":
             from .video_playback_verification import VideoPlaybackLedger, now_ns

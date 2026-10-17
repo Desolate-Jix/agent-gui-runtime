@@ -116,24 +116,24 @@ class _CoordinatorProxy:
         route = resolve_recognition_route(manager.configuration, job.capabilities)
         if route.status != "eligible":
             raise AgentCommandError(route.code)
-        capture = manager.coordinator._owner.call(lambda: self._capture_before_grounding(request))
-        from app.core.local_step_no_dispatch import pre_capture_failure_verified
-        if pre_capture_failure_verified(capture, kwargs["operation"]):
+        prefetched = manager.task_grounding_prefetch.consume(job, goal)
+        if prefetched is not None:
+            pending = prefetched
+            request_id = pending["request_id"]
             with manager._condition:
-                manager._update(job, last_execution={"attempt_index": None,
-                    "operation": kwargs["operation"], "receipt": deepcopy(capture)},
-                    observation=deepcopy(capture["observation"]))
-            return capture
-        if not isinstance(capture, dict):
-            raise AgentCommandError("capture_invalid")
-        # 每次交接以新 ID 绑定不可复用的截图，旧定位不能用于下一步。
-        capture = deepcopy(capture)
-        capture["capture_id"] = "capture-" + uuid4().hex
-        request_id = "ag-" + uuid4().hex
-        pending = manager.store.prepare(request_id, goal=goal, capture=capture,
-            configuration=manager.configuration, capabilities=job.capabilities)
-        if manager.api_grounder is not None:
-            manager._resolve_api(job, pending)
+                if job.cancelled:
+                    manager.store.cancel(request_id)
+                    raise _Cancelled("agent_command_cancelled")
+                job.pending_id = request_id
+                job.execution_id = "api-" + uuid4().hex
+                job.resume_state = manager.store.claim_execution(request_id, job.execution_id)
+                manager._update(job, api_request={"request_id": request_id, "phase": "grounding_ready",
+                    "prefetched": True})
+        else:
+            pending = self._prepare_grounding(kwargs, goal)
+            if pending.get("contract_version") != "grounding_handoff.v1":
+                return pending
+            request_id = pending["request_id"]
         with manager._condition:
             if job.cancelled:
                 if job.resume_state is not None and manager.api_grounder is not None:
@@ -184,6 +184,33 @@ class _CoordinatorProxy:
             job.pending_id = None
             manager._update(job, status="running", pending_grounding=None,
                 observation={"status": "unavailable", "reason": "action_in_progress"})
+        return self._execute_grounded(kwargs, request_id, claimed, execution_id)
+
+    def _prepare_grounding(self, kwargs, goal):
+        job, manager = self._job, self._job.manager
+        request = kwargs.get("request") or {}
+        capture = manager.coordinator._owner.call(lambda: self._capture_before_grounding(request))
+        from app.core.local_step_no_dispatch import pre_capture_failure_verified
+        if pre_capture_failure_verified(capture, kwargs["operation"]):
+            with manager._condition:
+                manager._update(job, last_execution={"attempt_index": None,
+                    "operation": kwargs["operation"], "receipt": deepcopy(capture)},
+                    observation=deepcopy(capture["observation"]))
+            return capture
+        if not isinstance(capture, dict):
+            raise AgentCommandError("capture_invalid")
+        # 每次交接以新 ID 绑定不可复用的截图，旧定位不能用于下一步。
+        capture = deepcopy(capture)
+        capture["capture_id"] = "capture-" + uuid4().hex
+        request_id = "ag-" + uuid4().hex
+        pending = manager.store.prepare(request_id, goal=goal, capture=capture,
+            configuration=manager.configuration, capabilities=job.capabilities)
+        if manager.api_grounder is not None:
+            manager._resolve_api(job, pending)
+        return pending
+
+    def _execute_grounded(self, kwargs, request_id, claimed, execution_id):
+        job, manager = self._job, self._job.manager
         dispatch_started = False
         try:
             with manager._condition:
@@ -313,6 +340,7 @@ class _Job:
         self.measurement_changes = {}
         self.thread = None
         self.field_review_state = None
+        self.prefetch_checked = False
 
 
 class AgentCommandJobs(FieldReviewWait):
@@ -333,6 +361,8 @@ class AgentCommandJobs(FieldReviewWait):
         self._closed = False
         self._root = Path(store.session_root) / "agent-commands"
         self.field_review_plan_validator = None
+        from .task_grounding_prefetch import TaskGroundingPrefetch
+        self.task_grounding_prefetch = TaskGroundingPrefetch(self)
 
     def _resolve_api(self, job, pending):
         request_id = pending["request_id"]
@@ -753,7 +783,8 @@ class AgentCommandJobs(FieldReviewWait):
             active = self._active_id
         if active is not None:
             self.cancel(active)
+        prefetch_closed = self.task_grounding_prefetch.close(timeout=max(0, deadline - monotonic()))
         threads = [job.thread for job in self._jobs.values() if job.thread is not None]
         for thread in threads:
             thread.join(timeout=max(0, deadline - monotonic()))
-        return all(not thread.is_alive() for thread in threads)
+        return prefetch_closed and all(not thread.is_alive() for thread in threads)

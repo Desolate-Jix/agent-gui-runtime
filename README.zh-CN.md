@@ -14,7 +14,7 @@
 视觉模型定位目标，Decision 核验当前步骤。<br>
 通过后继续执行；未解决的问题交回原主 Agent。
 
-**[下载执行版 v0.1.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
+**[下载执行版 v0.1.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup-0.1.5-20261017-01.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
 
 **审核后，继续原输入命令。** 原规划 Agent（Main）可检查已结算的文字输入，明确续行同一命令，不重复输入。[独立验收状态与校验文件 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
@@ -22,7 +22,7 @@
 
 Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Agent 给出一份明确的线性计划，它就可以在应用中导航、点击目标、替换文字、按键和滚动。受支持的步骤在同一会话中执行并核验结果，减少每次成功操作后都返回主 Agent 的等待。
 
-**使用外部视觉 API，不需要本地模型权重或 GPU。** 你可以选择外部视觉 API、支持图像的 Agent，或者本地模型。**执行运行时 0.1.5** 为独立组件；**学习工作台 0.1.0-preview.3** 仍为可选组件，本次不更新。
+**使用外部视觉 API，不需要本地模型权重或 GPU。** 你可以选择外部视觉 API、支持图像的 Agent，或者本地模型。**执行运行时 0.1.5** 可独立安装使用。
 
 <a id="demos"></a>
 
@@ -86,7 +86,9 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 <a id="evaluation"></a>
 ## 工程验证与实测
 
-**0.1.5 已安装 Amadeus／Pi 路线：** 两项正常合成记事本任务完成六步、磁盘精确核对与收尾；无 Main 语义接管，外层自纠错仍保留。最终源码回归 **135 项通过**。最终安装包另经独立验收，三步记事本计划首次通过，**27.70 秒／10 次 API 请求**，文件内容与收尾通过。这是单个限定样本，总 token 数未知。[范围与限制 →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [发布说明与校验文件 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+**0.1.5 同版本更新（2026-10-17）：** Enter 后自适应观察，当前结果复核与下一步只读定位并行。小样本源码对照中，实际动作间隔中位数为 **记事本 5.803→5.597 秒、7-Zip 7.805→7.254 秒、Edge 10.786→9.280 秒**。新候选六个三步计划均自动完成，原图／磁盘核对及收尾通过；模型配置和通过规则不变。这些是源码测量，不是通用准确率，尚未达到四秒目标。[方法、完整任务时间、调用和限制 →](docs/verification/EXECUTION_015_REFRESH_20261017.md) · [日期安装包验收与摘要 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+
+**0.1.5 原构建的已安装 Amadeus／Pi 路线：** 两项正常合成记事本任务完成六步、磁盘精确核对与收尾；无 Main 语义接管，外层自纠错仍保留。最终源码回归 **135 项通过**。最终安装包另经独立验收，三步记事本计划首次通过，**27.70 秒／10 次 API 请求**，文件内容与收尾通过。这是单个限定样本，总 token 数未知。[范围与限制 →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [发布说明与校验文件 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 **0.1.4 历史安装态任务，浏览器之外：** 通过维护的视觉执行路线，在记事本和 7-Zip 中使用全新内容。
 
@@ -106,6 +108,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 0.1.3 历史提示词评测包含 **39 张真实界面截图、30 个场景族**。保留集三分类标签一致率由 **92.5% 提升至 95.0%**，Decision 输入 token 减少 **1.64%**。通过／不通过准确率仍为 95%；两级最终结果仍为 149/160，当前提示词下包含 7 次误放和 1 次误拒。标签由 AI 复核，**这些数据不等于通用 GUI 任务成功率**。[查看方法、数据划分与失败案例 →](docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md)
 
+
 <a id="architecture"></a>
 ## 如何运行
 
@@ -113,19 +116,13 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 视觉模型提供坐标，OpenAI Decisions API 通过 Choice 核验目标或当前步骤的结果。有效通过则继续；未通过时由普通 Luna 复核一次，仍未解决再交回原主 Agent。Decision 不替代主 Agent 规划任务。
 
-运行时将证据绑定到请求、窗口和截图，校验坐标与截图新鲜度。默认执行走视觉路线，UIA 留给学习模式和显式原生路线。持续复用同一会话，同一时间仅保留一个桌面输入执行者。
+运行时将证据绑定到请求、窗口和截图，校验坐标与截图新鲜度。默认执行走视觉路线，UIA 保留为显式原生路线。持续复用同一会话，同一时间仅保留一个桌面输入执行者。
 
 **0.1.3 的改进：** 复用观察结果、预装计划、保留 HTTP 连接，减少重复准备；安装版两轮任务减少了 10 次外层重复截图。主 Agent 可基于绑定证据审核已完成步骤并续行，无需重复该动作。
 
 **0.1.5 — Main 审核：** 已结算文字输入后的双模型非通过判断通过认证后，读取绑定原图，明确继续同一命令，不重复输入。余下提交动作仍保留 fresh-target 与结果核验门禁。旧 live04 在未发布载荷上使用显式 TEST 注入，不是自然误拒或性能结果。[合同 →](docs/development/MAIN_FIELD_REVIEW_RESUME.md) · [验收与限制 →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md)
 
 [详细执行流程 →](docs/EXECUTION_GUIDE.zh-CN.md#decision-和视觉模型如何配合) · [任务计划协议 →](docs/development/TASK_PLAN.md) · [Choice 协议 →](docs/development/DECISION_CHOICE.md)
-
-## 可选的学习工作台
-
-采集可复用界面和工作流，在复用前由人工审核、修改。**学习工作台 0.1.0-preview.3** 有独立安装器，执行模式不依赖它；本次执行版更新不包含学习版更新。
-
-[学习版快速开始](docs/LEARNING_PREVIEW_QUICKSTART.md) · [下载学习版](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3)
 
 ## 当前限制
 

@@ -689,7 +689,8 @@ class TaskPlanBackend:
                     source_id=state["plan_id"], source_sha256=state["plan_sha256"])
             if ledger is not None:
                 from .task_plan_observation import validate_decision_adoption
-                binding = validate_decision_adoption(self, state, ledger, frame, saved)
+                binding = validate_decision_adoption(self, state, ledger, frame, saved,
+                    service=decision_service, target_reader=target_identity)
             if video_ledger is not None:
                 from .video_playback_verification import validate_video_decision
                 binding = validate_video_decision(self, state, video_ledger, frame, saved)
@@ -711,7 +712,8 @@ class TaskPlanBackend:
                         or any(binding.get(key) != value for key, value in rebuilt.items())):
                     raise ValueError("task_plan_condition_adoption_binding_invalid")
             if ledger is not None:
-                validate_decision_adoption(self, state, ledger, frame, saved)
+                validate_decision_adoption(self, state, ledger, frame, saved,
+                    service=decision_service, target_reader=target_identity)
                 from .task_plan_cancellation import assert_no_queued_plan_cancel
                 assert_no_queued_plan_cancel(self.session, state["run_id"])
         elif judged_by == "agent":

@@ -39,6 +39,80 @@ class DecisionNotConnected(OSError):
     pass
 
 
+_PROVIDER_STAGES = ("preparation_ms", "queue_wait_ms", "client_setup_ms", "http_ms", "parse_ms")
+_TRANSPORT_SPANS = {"connection.connect_tcp", "connection.start_tls", *(
+    protocol + "." + stage for protocol in ("http11", "http2") for stage in (
+        "send_request_headers", "send_request_body", "receive_response_headers", "receive_response_body"))}
+
+
+@contextmanager
+def _measure_stage(timings, name):
+    started = perf_counter_ns()
+    try:
+        yield
+    finally:
+        timings[name] = (perf_counter_ns() - started) / 1_000_000
+
+
+class _ProviderTimings:
+    """本地阶段互斥；传输跨度嵌套在 HTTP 内，不能重复相加。"""
+    def __init__(self):
+        self.started = perf_counter_ns()
+        self.values = {"schema": "decision_provider_timings.v1", "client_created": False,
+            **{name: None for name in _PROVIDER_STAGES}}
+        self.active, self.stage_started = "preparation_ms", self.started
+        self.spans, self.pending = [], {}
+        self.lock = RLock()
+
+    def stage(self, name):
+        now = perf_counter_ns()
+        if self.active is not None:
+            self.values[self.active] = (now - self.stage_started) / 1_000_000
+        self.active, self.stage_started = name, now
+
+    async def trace(self, event, info):
+        # 只看固定事件名，不读取包含主机、凭据、正文或异常的 info。
+        name, _, status = event.rpartition(".")
+        if name not in _TRANSPORT_SPANS or status not in {"started", "complete", "failed"}:
+            return
+        now = perf_counter_ns()
+        with self.lock:
+            if status == "started":
+                self.pending[name] = now
+            elif name in self.pending:
+                started = self.pending.pop(name)
+                if len(self.spans) < 32:
+                    self.spans.append({"name": name, "status": status,
+                        "elapsed_ms": (now - started) / 1_000_000})
+
+    def snapshot(self):
+        self.stage(None)
+        with self.lock:
+            return {**self.values, "total_ms": (perf_counter_ns() - self.started) / 1_000_000,
+                "transport_spans": [dict(item) for item in self.spans]}
+
+
+def _validate_provider_timings(value):
+    fields = {"schema", "client_created", "total_ms", "transport_spans", *_PROVIDER_STAGES}
+    if (type(value) is not dict or set(value) != fields or value["schema"] != "decision_provider_timings.v1"
+            or type(value["client_created"]) is not bool or type(value["transport_spans"]) is not list
+            or len(value["transport_spans"]) > 32):
+        raise ValueError("decision_provider_timings_invalid")
+    for name in (*_PROVIDER_STAGES, "total_ms"):
+        number = value[name]
+        if number is None and name != "total_ms":
+            continue
+        if type(number) not in (int, float) or not math.isfinite(number) or number < 0:
+            raise ValueError("decision_provider_timings_invalid")
+    for span in value["transport_spans"]:
+        if (type(span) is not dict or set(span) != {"name", "status", "elapsed_ms"}
+                or span["name"] not in _TRANSPORT_SPANS or span["status"] not in {"complete", "failed"}
+                or type(span["elapsed_ms"]) not in (int, float)
+                or not math.isfinite(span["elapsed_ms"]) or span["elapsed_ms"] < 0):
+            raise ValueError("decision_provider_timings_invalid")
+    return {**value, "transport_spans": [dict(item) for item in value["transport_spans"]]}
+
+
 def _probability(value):
     if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1:
         raise ValueError("decision_probability_invalid")
@@ -307,6 +381,17 @@ class OpenAIDecisionsProvider:
             raise ValueError("ordinary_review_payload_invalid") from None
 
     def _judge(self, payload, *, ordinary_review=False):
+        timings = _ProviderTimings()
+        try:
+            answer = self._judge_impl(payload, ordinary_review=ordinary_review, timings=timings)
+        except (TimeoutError, OSError, ValueError, KeyError, TypeError) as error:
+            error.decision_timings = timings.snapshot()
+            raise
+        if not ordinary_review:
+            answer["provider_timings"] = timings.snapshot()
+        return answer
+
+    def _judge_impl(self, payload, *, ordinary_review, timings):
         preparation_started = perf_counter_ns()
         absolute_started = monotonic()
         selected_model = self.ordinary_review_model if ordinary_review else self.model_id
@@ -839,7 +924,9 @@ class OpenAIDecisionsProvider:
             request_timeout -= (perf_counter_ns() - preparation_started) / 1_000_000_000
             if request_timeout <= 0:
                 raise ProviderTimeout("decision_provider_budget_expired", phase="preparation")
+        timings.stage("queue_wait_ms")
         with self._request_slot(request_timeout) as remaining:
+            timings.stage("client_setup_ms")
             entered_slot = perf_counter_ns()
             if self._closed:
                 raise OSError("decision_provider_closed")
@@ -849,16 +936,21 @@ class OpenAIDecisionsProvider:
             if self._client is None:
                 self._client = httpx.Client(timeout=self.timeout_seconds, follow_redirects=False, trust_env=False,
                                             transport=DeadlineHTTPTransport(limits=httpx.Limits(keepalive_expiry=60.0)))
+                timings.values["client_created"] = True
             if request_timeout is not None:
                 remaining -= (perf_counter_ns() - entered_slot) / 1_000_000_000
                 if remaining <= 0:
                     raise ProviderTimeout("decision_provider_budget_expired", phase="preparation")
             started = perf_counter_ns()
+            timings.stage("http_ms")
+            async def transport_trace(event, info):
+                await timings.trace(event, info)
+
             try:
                 response = self._client.post(self.ordinary_review_endpoint if ordinary_review else self.endpoint, json=body, headers={"Authorization": "Bearer " + key,
                                              "Accept-Encoding": "identity"},
                                              timeout=remaining, follow_redirects=False,
-                                             extensions={"total_deadline": absolute_deadline})
+                                              extensions={"total_deadline": absolute_deadline, "trace": transport_trace})
                 provider_id = response.headers.get("x-request-id")
                 if provider_id is not None and key in provider_id:
                     provider_id = None
@@ -876,6 +968,7 @@ class OpenAIDecisionsProvider:
             finally:
                 key = None
             elapsed = (perf_counter_ns() - started) / 1_000_000
+            timings.stage("parse_ms")
             if response.status_code != 200:
                 raise OSError(f"decision_http_status_{response.status_code}")
             if len(response.content) > 64 * 1024:

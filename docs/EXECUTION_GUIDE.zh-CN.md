@@ -1,5 +1,7 @@
 # 执行模式 0.1.5 详细指南
 
+**0.1.5 同版本更新（2026-10-17）：** Enter 后自适应观察，当前结果复核与下一步只读定位并行。小样本源码对照中，实际动作间隔中位数为 **记事本 5.803→5.597 秒、7-Zip 7.805→7.254 秒、Edge 10.786→9.280 秒**。新候选六个三步计划均自动完成，原图／磁盘核对及收尾通过；模型配置和通过规则不变。这些是源码测量，不是通用准确率，尚未达到四秒目标。[方法、完整任务时间、调用和限制 →](verification/EXECUTION_015_REFRESH_20261017.md) · [日期安装包验收与摘要 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+
 [返回首页](../README.zh-CN.md) · [English](EXECUTION_GUIDE.md)
 
 ## 通过视觉核验执行 Windows 桌面任务
@@ -8,9 +10,9 @@ Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图�
 
 **执行版 0.1.5 新增 Main 审核后明确继续原文字输入命令。** 下方记录已安装 Amadeus／Pi 的正常任务证据；最终包的独立验收状态见 [0.1.5 发布说明](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)。旧测量与演示保留原版本归属。
 
-**历史执行版 0.1.4 已通过限定范围的记事本与 7-Zip 安装态流程，包括 Sol 独立验收。** Main 完成三个计划（3+3+6 步），Sol 完成两个全新计划（3+3 步），五个计划均自动完成。耗时、原始失败与安装验收边界见[多应用报告](verification/MULTI_APP_EXECUTION_20261015.md)。学习工作台仍为独立、可选的 **0.1.0-preview.3** 组件。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
+**历史执行版 0.1.4 已通过限定范围的记事本与 7-Zip 安装态流程，包括 Sol 独立验收。** Main 完成三个计划（3+3+6 步），Sol 完成两个全新计划（3+3 步），五个计划均自动完成。耗时、原始失败与安装验收边界见[多应用报告](verification/MULTI_APP_EXECUTION_20261015.md)。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
 
-[0.1.5 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup.exe) · [0.1.5 发布说明、校验文件与独立验收状态](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+[0.1.5 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup-0.1.5-20261017-01.exe) · [0.1.5 发布说明、校验文件与独立验收状态](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 **0.1.5 的服务配置：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
 
@@ -26,7 +28,7 @@ Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图�
 
 每个审核点只问一个当前步骤的问题；一个任务可能调用多次 API。Choice 的概率仅用于诊断，不再叠加概率阈值进行第二次否决；旧 predicate 配置仍保留其阈值语义。详见 [Choice 合同](development/DECISION_CHOICE.md)。
 
-目标审核使用裁剪、标注后的图片，必要时在同图保留概览和目标细节。输入核验在完整字段中比较规定内容。默认执行使用视觉，不依赖 UIA 整树或字段扫描；UIA 保留给学习模式和显式原生路线。精确匹配的 NVIDIA 录屏覆盖窗例外可避免矩形遮挡误报，同时保留截图证据和点位检查。
+目标审核使用裁剪、标注后的图片，必要时在同图保留概览和目标细节。输入核验在完整字段中比较规定内容。默认执行使用视觉，不依赖 UIA 整树或字段扫描；UIA 保留为显式原生路线。精确匹配的 NVIDIA 录屏覆盖窗例外可避免矩形遮挡误报，同时保留截图证据和点位检查。
 
 ```mermaid
 flowchart TD
@@ -149,19 +151,17 @@ flowchart TD
 
 去掉 `-WhatIf` 后才会实际准备本地环境。本地路线使用官方 [VISTA-4B](https://huggingface.co/inclusionAI/VISTA-4B) Transformers 权重；本地硬件要求只适用于该路线。另见 [外部视觉 API 配置](development/EXTERNAL_VISION_API.md)。
 
-## Agent 接入与可选学习工作台
+## Agent 接入
 
 MCP stdio 提供七个核心工具：`instant_start`、`instant_status`、`instant_run`、`instant_submit`、`instant_result`、`instant_image`、`instant_stop`，另有 `instant_recovery_preview` 和 `instant_recover_session` 两个恢复工具。
 
 保持同一会话、同一桌面输入所有者。支持单步动作、组合输入和线性计划。执行版 0.1.5 候选保留 0.1.4 的非空线性计划支持，不设固定步数上限；逐步校验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在明确升级前保留构建时协议。见[源码验证](verification/UNBOUNDED_TASK_PLANS_20261015.md)。等待到期不等于取消；应查询原请求 ID，避免重放输入。详见 [Agent 指南](../AGENT_GUIDE.md)、[任务计划](development/TASK_PLAN.md) 和 [Decision 配置](development/DECISION_API.md)。
 
-[学习工作台 0.1.0-preview.3](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3) 用于采集可复用界面和工作流，供人工审核、修改。它独立安装、可选使用，本次不更新。详见 [学习版快速开始](LEARNING_PREVIEW_QUICKSTART.md)。
-
 维护代码中，`app/execution` 负责计划与动作，`app/judgment` 负责 Decision，`app/core` 负责截图与输入，`app/vision` 负责视觉定位。部分执行共享依赖仍保留历史 `learning_memory` 名称，不意味着必须安装学习工作台。
 
 ## 发布边界与历史记录
 
-本指南将安装态 0.1.5 正常任务与历史 0.1.4 源码／安装结果及首次失败分开。最终包的独立验收由发布说明记录，不从源码成功推定。安装器未签名，使用已有 Python 环境的检查不能证明全新机器依赖 setup。2026-10-15 的 0.1.3 重打包首次加入独立服务配置；上文浏览器计时及提示词评测属于 0.1.3，记事本／7-Zip 演示与测量保留 0.1.4 归属，均非新的 0.1.5 性能结果。已有安装须明确升级。学习版不变，不承诺任意任务无人干预完成或完整角色／壁纸合成效果。
+本指南将安装态 0.1.5 正常任务与历史 0.1.4 源码／安装结果及首次失败分开。最终包的独立验收由发布说明记录，不从源码成功推定。安装器未签名，使用已有 Python 环境的检查不能证明全新机器依赖 setup。2026-10-15 的 0.1.3 重打包首次加入独立服务配置；上文浏览器计时及提示词评测属于 0.1.3，记事本／7-Zip 演示与测量保留 0.1.4 归属，均非新的 0.1.5 性能结果。已有安装须明确升级。不承诺任意任务无人干预完成或完整角色／壁纸合成效果。
 
 历史开发失败与结果保留在 [0.1.2 验收记录](verification/EXECUTION_STABLE_012_20261012.md)、[目标审核诊断](verification/DECISION_TARGET_USAGE_20261013.md) 和 [0.1.3 验证记录](verification/EXECUTION_SPEED_20261015.md)。历史检查点描述当时状态，不代表当前发布状态。
 

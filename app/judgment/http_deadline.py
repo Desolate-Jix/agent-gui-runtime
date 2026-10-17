@@ -1,10 +1,42 @@
 """同步调用外壳复用异步连接池，整次传输共用单调截止时间。"""
 import asyncio
+from collections import OrderedDict
+from hashlib import sha256
 import math
-from threading import Thread
+from pathlib import Path
+import ssl
+from threading import RLock, Thread
 from time import monotonic
 
+import certifi
 import httpx
+
+
+_DEFAULT_SSL_CONTEXTS = OrderedDict()
+_DEFAULT_SSL_LOCK = RLock()
+
+
+def _shared_default_ssl_context(options):
+    # 只复用当前默认验证策略；其他配置仍由 HTTPX 按原语义处理。
+    if (options.get("verify", True) is not True or options.get("trust_env", True) is not False
+            or options.get("cert") is not None or options.get("http1", True) is not True
+            or options.get("http2", False) is not False or options.get("proxy") is not None):
+        return None
+    with _DEFAULT_SSL_LOCK:
+        path = Path(certifi.where()).resolve(strict=True)
+        digest = sha256(path.read_bytes()).digest()
+        key = (str(path), digest)
+        context = _DEFAULT_SSL_CONTEXTS.get(key)
+        if context is None or not context.check_hostname or context.verify_mode != ssl.CERT_REQUIRED:
+            context = ssl.create_default_context(cafile=str(path))
+        # 文件不可读、损坏或载入期间变化时直接失败，不返回旧上下文。
+        if sha256(path.read_bytes()).digest() != digest:
+            raise OSError("decision_ca_bundle_changed")
+        _DEFAULT_SSL_CONTEXTS[key] = context
+        _DEFAULT_SSL_CONTEXTS.move_to_end(key)
+        while len(_DEFAULT_SSL_CONTEXTS) > 4:
+            _DEFAULT_SSL_CONTEXTS.popitem(last=False)
+        return context
 
 
 class DeadlineHTTPTransport(httpx.BaseTransport):
@@ -20,6 +52,9 @@ class DeadlineHTTPTransport(httpx.BaseTransport):
         options = {"retries": 0, "trust_env": False}
         if limits is not None:
             options["limits"] = limits
+        context = _shared_default_ssl_context(options)
+        if context is not None:
+            options["verify"] = context
         self._transport = httpx.AsyncHTTPTransport(**options)
         self._loop = asyncio.new_event_loop()
         self._thread = Thread(target=self._loop.run_forever, name=thread_name, daemon=True)

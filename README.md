@@ -14,7 +14,7 @@
 Visual grounding finds the target. Decision checks the current step.<br>
 Successful steps continue; unresolved cases return to your agent.
 
-**[Download execution v0.1.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
+**[Download execution v0.1.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup-0.1.5-20261017-01.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
 
 **Review, then continue the original input.** The original planning agent (Main) can inspect settled typed input and explicitly continue the same command without retyping. [Independent acceptance status and checksums →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
@@ -22,7 +22,7 @@ Successful steps continue; unresolved cases return to your agent.
 
 Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents. Give it an explicit linear plan to navigate an application, click targets, replace text, press keys or scroll. It executes supported steps in one session and checks their results, reducing the need to return to the main agent after every successful action.
 
-**API vision needs no local model weights or GPU.** Use an external vision API, your image-capable agent, or a local model. The **execution runtime 0.1.5** is a separate component; the **learning workbench 0.1.0-preview.3** remains optional and unchanged.
+**API vision needs no local model weights or GPU.** Use an external vision API, your image-capable agent, or a local model. The **execution runtime 0.1.5** installs as a standalone component.
 
 <a id="demos"></a>
 
@@ -86,7 +86,9 @@ Default visual input sequences require Decision in auto mode. Without Decision, 
 <a id="evaluation"></a>
 ## Engineering evidence
 
-**0.1.5 installed Amadeus/Pi route:** two normal synthetic Notepad tasks completed six steps, exact disk checks and cleanup; no Main semantic override was needed, and outer self-corrections remain recorded. Final source regression: **135 passed**. The final installer independently completed a three-step Notepad plan on its first attempt in **27.70 s / 10 API requests**, with exact disk output and cleanup. This is one scoped sample; total token usage is unknown. [Scope and limitations →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [Release and checksums →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+**0.1.5 refresh (2026-10-17):** adaptive observation after Enter and next-step read-only grounding alongside current-result verification. In a small source comparison, actual action-interval medians changed **5.803→5.597 s (Notepad), 7.805→7.254 s (7-Zip), 10.786→9.280 s (Edge)**. New-candidate six three-step plans completed automatically, with independent image/disk checks and cleanup. Model settings and acceptance rules are unchanged. These are source measurements, not general accuracy claims; the four-second objective is not yet reached. [Method, complete task times, calls and limitations →](docs/verification/EXECUTION_015_REFRESH_20261017.md) · [Dated installer acceptance and hashes →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+
+**Original 0.1.5 build, installed Amadeus/Pi route:** two normal synthetic Notepad tasks completed six steps, exact disk checks and cleanup; no Main semantic override was needed, and outer self-corrections remain recorded. Final source regression: **135 passed**. The final installer independently completed a three-step Notepad plan on its first attempt in **27.70 s / 10 API requests**, with exact disk output and cleanup. This is one scoped sample; total token usage is unknown. [Scope and limitations →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [Release and checksums →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 **Historical 0.1.4 installed tasks, beyond the browser:** fresh Notepad and 7-Zip tasks used the maintained visual execution route.
 
@@ -106,6 +108,7 @@ Separate historical 0.1.4 source02 evidence covers a **12-step plan plus 4-step 
 
 Historical 0.1.3 prompt evaluation used **39 real UI screenshots across 30 scenario families**. On the held-out set, three-way label agreement rose from **92.5% to 95.0%**, with **1.64% fewer Decision input tokens**. Pass/nonpass accuracy stayed at 95%; the two-stage result stayed at 149/160, including 7 false accepts and 1 false rejection with the adopted prompts. Labels were AI-reviewed: **these are not general GUI success rates**. [Method, split and failure cases →](docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md)
 
+
 <a id="architecture"></a>
 ## How it works
 
@@ -113,19 +116,13 @@ Historical 0.1.3 prompt evaluation used **39 real UI screenshots across 30 scena
 
 The vision model supplies coordinates. OpenAI's Decisions API checks the target or the current step's result using Choice. A valid pass continues the plan; a nonpass gets one ordinary Luna review before returning to the original main agent if unresolved. Decision does not replace the planner.
 
-The runtime binds evidence to the request, window and screenshot, and validates coordinates and freshness. Default execution uses the visual route; UIA is retained for learning and explicit native routes. Keep one persistent session and one desktop input owner.
+The runtime binds evidence to the request, window and screenshot, and validates coordinates and freshness. Default execution uses the visual route; UIA remains available through explicit native routes. Keep one persistent session and one desktop input owner.
 
 **In 0.1.3:** shared observations, preloaded plans and reused HTTP connections reduce repeated preparation. The installed two-round task avoided 10 redundant outer captures. Evidence-bound continuation lets the main agent review a completed step without repeating its action.
 
 **0.1.5 — Main review:** after authenticated dual-model nonpass on settled typed input, inspect the bound image and explicitly continue the same command without retyping. Remaining submit actions retain their fresh-target and verification gates. Earlier live04 recovery used explicit TEST injection on an unreleased payload; it is not a natural-error or performance result. [Contract →](docs/development/MAIN_FIELD_REVIEW_RESUME.md) · [Acceptance and limits →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md)
 
 [Detailed execution flow →](docs/EXECUTION_GUIDE.md#how-decision-and-the-vision-model-work-together) · [Task-plan contract →](docs/development/TASK_PLAN.md) · [Choice contract →](docs/development/DECISION_CHOICE.md)
-
-## Optional learning workbench
-
-Capture reusable interfaces and workflows, then review and edit them before reuse. The **learning workbench 0.1.0-preview.3** has its own installer and is not required for execution. This execution release does not update it.
-
-[Learning quick start](docs/LEARNING_PREVIEW_QUICKSTART.md) · [Learning download](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.3)
 
 ## Current limits
 

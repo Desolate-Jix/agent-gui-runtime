@@ -62,6 +62,8 @@ RESOURCES = (
     "docs/verification/UNBOUNDED_TASK_PLANS_20261015.md",
     "docs/verification/MULTI_APP_EXECUTION_20261015.md",
     "docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md",
+    "docs/verification/WAIT_AND_DECISION_LATENCY_20261017.md",
+    "docs/verification/EXECUTION_015_REFRESH_20261017.md",
     "docs/verification/DECISION_PROMPT_BENCHMARK_20261015.md",
     "docs/verification/GOOGLE_JAVA_FIXED_20261015.md",
     "docs/verification/TARGET_CHECK_PROMPT_20261014.md",

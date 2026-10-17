@@ -106,12 +106,13 @@ def _destination(root, observation_id, *, must_be_new=True):
 
 
 def capture_followup(coordinator, *, session_dir, target_identity, original_frame,
-                     observation_id, cancelled, remaining_seconds):
+                     observation_id, cancelled, remaining_seconds, wait_budget_exhausted=False):
     """预算只能拒绝同步调用的晚返回，不能硬中断底层截图或 COM。"""
     if (not isinstance(observation_id, str) or not _IDENTIFIER.fullmatch(observation_id)
             or observation_id.upper() in _RESERVED):
         raise FollowupObservationError("id_invalid")
-    if not callable(cancelled) or not callable(remaining_seconds):
+    if (not callable(cancelled) or not callable(remaining_seconds)
+            or type(wait_budget_exhausted) is not bool):
         raise FollowupObservationError("callbacks_invalid")
     started = monotonic()
     deadline = None
@@ -132,6 +133,11 @@ def capture_followup(coordinator, *, session_dir, target_identity, original_fram
             raise FollowupObservationError("budget_check_failed", error_type=type(error).__name__) from None
         if type(remaining) not in (int, float) or not isfinite(remaining):
             raise FollowupObservationError("budget_invalid")
+        # 末帧采集只在原等待截止后调用；不再等待，身份与取消检查仍完整执行。
+        if wait_budget_exhausted:
+            if remaining != 0:
+                raise FollowupObservationError("budget_invalid")
+            return
         if remaining <= 0:
             raise FollowupObservationError("timeout")
         if deadline is None:

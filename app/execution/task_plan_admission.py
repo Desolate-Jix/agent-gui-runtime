@@ -156,8 +156,12 @@ class TaskPlanRuntime(WorkflowRuntime):
                 request_id=request_id, execution_id=execution_id,
                 decision_service=getattr(self.coordinator, "_decision_service", None),
                 coordinator=self.coordinator, target_identity=self._target_identity,
-                api_grounder=getattr(self.agent_jobs, "api_grounder", None))
+                api_grounder=getattr(self.agent_jobs, "api_grounder", None),
+                grounding_prefetch=getattr(self.agent_jobs, "task_grounding_prefetch", None))
         except Exception as error:
+            prefetch = getattr(self.agent_jobs, "task_grounding_prefetch", None)
+            if prefetch is not None:
+                prefetch.discard("verification_interrupted", run_id=run_id)
             from .task_plan_cancellation import TaskPlanCancelPending
             if not isinstance(error, TaskPlanCancelPending):
                 from .task_plan_observation import abort_observation
@@ -374,6 +378,10 @@ class TaskPlanRuntime(WorkflowRuntime):
         request = validate_task_plan_request(request)
         _id(request_id, "request_id")
         action = request["action"]
+        if action in {"start", "cancel", "review", "recover", "resume_pre_dispatch"}:
+            prefetch = getattr(self.agent_jobs, "task_grounding_prefetch", None)
+            if prefetch is not None:
+                prefetch.discard("control_" + action, run_id=request.get("run_id"))
         self._control_id = request_id
         try:
             if action == "start":
@@ -440,6 +448,12 @@ class TaskPlanRuntime(WorkflowRuntime):
             return self._remember_active(self.runner.resume(run_id, request_id, request["wait_id"]))
         finally:
             self._control_id = None
+
+    def stop(self):
+        prefetch = getattr(self.agent_jobs, "task_grounding_prefetch", None)
+        if prefetch is not None:
+            prefetch.discard("runtime_stopped")
+        super().stop()
 
 
 __all__ = ["TaskPlanRuntime", "validate_task_plan_request"]

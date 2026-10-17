@@ -1,14 +1,8 @@
-> **执行 0.1.2 / Execution 0.1.2:** 当前正式版配置步骤以[首页](README.md#安装与配置--install-and-configure)为准。下方保留学习预览及早期执行包的安装说明，不代表本次更新学习工作台。默认视觉组合输入需要 Decision auto；无 Decision 使用显式原生组合输入或基础单步。 / Follow the current README for execution setup; historical learning/source-package sections remain for reference. Default visual sequences require Decision auto; explicit native sequences and basic actions remain available without it.
+> **执行 0.1.5 / Execution 0.1.5:** 当前安装和配置见[中文执行指南](docs/EXECUTION_GUIDE.zh-CN.md#安装与配置)或 [English guide](docs/EXECUTION_GUIDE.md#install-and-configure)。后文保留早期执行源码包说明。默认视觉组合输入需要 Decision auto；无 Decision 时使用显式原生组合输入或基础单步。 / Follow the linked execution guide for current setup. The sections below retain earlier execution source-package instructions. Default visual sequences require Decision auto; explicit native sequences and basic actions remain available without it.
 
-## 独立组件安装说明 / Independent component setup
+## 执行组件安装说明 / Execution component setup
 
-学习 `0.1.0-preview.2` 与兼容执行 `0.1.2-preview.2` 使用独立测试版安装器：[preview.2 下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.2)。执行可单独安装使用，学习工作台可选，可离线打开、审核、修改、保存和重开库，无需执行宿主或模型。本轮安装验证范围见[验收报告](docs/verification/DECISION_API_RELEASE_ACCEPTANCE_20261008.md)。 / Learning and compatible execution preview.2 use separate installers. Execution works independently; optional learning supports offline library management without a host or model. See the current report for installed validation scope.
-
-采集教学和运行工作流时，在运行页明确选择兼容执行安装与既有会话；第一版要求同一数据根和确切库。数据目录放在安装根之外，重开选择原数据根而非 memory-library 子目录。连接不等于输入授权，关闭学习工作台不停止外部执行宿主。 / Teaching and execution require explicit attachment to a compatible installation and existing session with the same data root/library. Connection is not input authorization, and closing the workbench does not stop an external host.
-
-执行 Setup 交付维护运行时源码，Agent/API 路线仍需按现有 setup/configure 配置用户环境，安装器不替代环境配置。本地源码 setup 使用 execution + vista 依赖组，不要求学习 Qt；本地模型可选。工作台支持设置中的简体中文/English 切换并记忆选择，保留用户内容和未保存编辑。 / Execution Setup delivers maintained source; Agent/API routes require the existing setup/configure environment. Local setup uses execution + vista without learning Qt; local models are optional. Settings supports remembered Chinese/English selection while preserving user content and unsaved edits.
-
-可下载的 [preview.1 历史发行](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1) 已于 2026-10-07 发布；该版本 Main 与独立 Sol 的限定连续验收及清理见 [历史验收](docs/verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)，不作为 preview.2 验收或速度收益。稳定 `instant-v0.1.1` 保留；旧便携包未知退出仍为历史未解决问题。 / The downloadable preview.1 was published on 2026-10-07. Its bounded installed acceptance is historical, not preview.2 acceptance or a speed result. Stable execution remains available; the old portable exit remains unexplained.
+执行 Setup 交付维护运行时源码，Agent/API 路线仍需按现有 setup/configure 配置用户环境，安装器不替代环境配置。本地源码 setup 使用 execution + vista 依赖组，不要求学习 Qt；本地模型可选。 / Execution Setup delivers maintained source; Agent/API routes require the existing setup/configure environment. Local setup uses execution + vista without learning Qt; local models are optional.
 
 ### 可选 Decision 配置 / Optional Decision configuration
 
@@ -16,27 +10,9 @@
 
 将执行安装内的 `configs/decision-profile.example.json` 复制到自己的配置目录；默认 `mode=shadow` 提供建议并保留审核。在你已审核的 `scripts/configure_instant_mcp.py` 命令中追加 `--decision-profile <绝对 JSON 路径>`，保持原视觉来源和输入授权参数，再按现有流程重连。PowerShell setup/configure 封装暂不提供该参数。Key 只放在配置指定且实际宿主可见的环境变量中，不写入 JSON 或命令参数；管理员宿主环境也须可见。 / Copy the execution installation's profile example, defaulting to shadow advice with review retained. Add an absolute --decision-profile path to your reviewed Python configurator command while keeping existing vision/input settings, then reconnect. The PowerShell wrappers do not expose this option. Supply the key only through the named environment variable visible to the actual host, including elevation.
 
-只有显式 `auto`、明确条件完全列入 `auto_conditions` 且原证据和回执有效时自动采用；学习步骤的 `decision_condition` 须审核。未知、缺失或错窗证据仍保留原请求，不自动重发输入。详见 [Decision 配置及限制](docs/development/DECISION_API.md)与 [使用说明](docs/LEARNING_PREVIEW_QUICKSTART.md)。 / Automatic adoption requires explicit auto, an exact allowlisted condition and valid original evidence/receipt; learned conditions require review. Uncertain or invalid evidence retains the original ticket without input replay. See the configuration guide and quickstart.
-
-以下便携及同根 runtime 说明属于历史候选。 / Portable and same-root runtime notes below describe historical candidates.
-
-## 历史 Windows 便携学习工作台候选 / Historical portable learning workbench candidate
-
-本地便携EXE候选已构建，29项启动/打包/收集回归及树外中文路径两次离屏打开、重开和正常关闭通过；包内真实入口依赖检查通过。包内宿主连接、实际目录选择器与桌面操作仍未验收，未发布。目录为 `AgentLearningWorkbench/AgentLearningWorkbench.exe`，旁边 `runtime/` 保留维护源码与GUI依赖共根；不是新的安装器或正式版本。 / The local executable builds and passes 29 focused checks plus two isolated offscreen startup/reopen/close runs in a Chinese path; real source dependency entrypoints pass. Package-host connection, the interactive picker and desktop input remain unaccepted; unpublished; the executable sits beside a runtime root containing maintained source and GUI dependencies.
-
-启动适配首次无参数启动用QFileDialog选择已存在、可写的Agent数据根，之后从 `%LOCALAPPDATA%/AgentGUIRuntime/learning-workbench.json` 记忆；取消不新建目录或内容。坏记忆或目录丢失须明确报错，可用 `--data-dir "<数据根>"` 显式打开；显式参数优先且不改记忆。`--session-dir "<已有会话目录>"` 可选。GUI只编辑和附着已有会话，不自动启动宿主/模型，不修改MCP。当前维护源码入口仍是 `scripts/run_learning_memory_workbench.py --data-dir ...`，其数据参数必填；新增scripts/start_learning_workbench.py→app.learning_memory.workbench_launch提供无参数选择与记忆适配；EXE离屏隔离已通过，包内连接与桌面仍待验证。 / Proposed first launch selects an existing writable Agent data root and remembers it locally; cancelling creates nothing. Invalid/missing remembered roots report an error. Explicit --data-dir takes precedence without changing memory; --session-dir is optional. The GUI neither starts a host/model nor changes MCP. The current source entry still requires --data-dir; scripts/start_learning_workbench.py delegates selection/memory to workbench_launch; isolated executable startup passes; package-host and desktop validation remain pending.
-
-Agent宿主必须从同一包的 `runtime/` 安装/配置，并使用与GUI完全相同的数据根；不要接旧安装目录的宿主或其他库。保留WorkflowRunClient对确切root、身份及同库的验证。以当前Agent路线为例，在便携目录中运行：
-```powershell
-.\runtime\scripts\setup_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentLearningData"
-# 已有包内环境时，仅重新生成配置：
-.\runtime\scripts\configure_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentLearningData"
-```
-setup需要已有uv并联网安装依赖，Agent路线使用包内 `runtime/.venv-agent`；configure也可用 `-Python "<该包内解释器>"`。两脚本按既有语义生成管理员MCP、本地真实输入启用配置；由操作者审阅生成的单个连接项、合并到Agent并重连，UAC由用户确认。它们不是GUI自动配置步骤，也不代表新安全策略。 / Install/configure the host under this same runtime root and use the exact same data root. Setup requires uv/network and creates runtime/.venv-agent; configure can take an explicit package-local Python. Existing scripts generate supervised administrator MCP/local-input configuration, which the operator reviews and merges before reconnecting and confirming UAC. The GUI does not perform these steps.
+只有显式 `auto`、明确条件完全列入 `auto_conditions` 且原证据和回执有效时自动采用。未知、缺失或错窗证据仍保留原请求，不自动重发输入。详见 [Decision 配置及限制](docs/development/DECISION_API.md)。 / Automatic adoption requires explicit auto, an exact allowlisted condition and valid original evidence/receipt. Uncertain or invalid evidence retains the original ticket without input replay. See the configuration guide.
 
 现有脚本有效 `-RecognitionSource` 值为 `agent_current|agent_delegate|external_api|local`。`agent_delegate` 另需 `-DelegateProfile`，`external_api` 另需 `-ApiProfile`；local另需 `-ModelDirectory`，setup按需才加 `-DownloadModel`，本地模型可选。已有API/委派/本地路由沿用，真实供应商连通与准确率未在本轮验收。 / Supported script routes are agent_current, agent_delegate, external_api and local, with their existing profile/model flags. Local models are optional;  No live-provider or accuracy validation is claimed.
-
-空库可打开“任务步骤”中的“运行”页签，选择“连接当前Agent会话”；会话仍由原Agent建立，未连接时执行按钮禁用。真实教学、审核、保存及复用见下方既有工作台说明；该候选仍需按批准范围进行桌面验收。 / In an empty library, open the Run tab within Task Steps and connect the current Agent session. The Agent establishes that session; disconnected execution stays disabled. Approved desktop acceptance remains required.
 
 > **2026-09-27 后续源码，未发布 / Unreleased source follow-up:** `external_api` 已接入现有执行链；配置完整 API 端点、视觉模型和密钥环境变量名后，可用原有单步与组合命令，API 自动定位，执行仍走公共检查。已发布 test.8 ZIP 仍仅预留 API 适配器，不能按本段当成已更新。 / External API grounding is now wired into the common execution path in source. The published test.8 ZIP remains adapter-only and has not been replaced.
 
@@ -159,9 +135,9 @@ Install uv from its official instructions, reopen PowerShell, enter the extracte
 - 官方仓库目前使用单个 `model.safetensors`。本包也支持既有的合法分片目录（索引加全部分片），**不需要手工把官方权重拆分**。GGUF／量化模型不能直接替换此路径。
 - 下载中断可以重复同一下载命令继续检查缺失文件；**这不等于允许重复发送 GUI 动作**。
 - 为便于复现，保存下载时官方页面的提交版本；需要固定版本时可为下载命令增加 `--revision <完整提交SHA>`，替换成真实 SHA，不要原样复制占位符。
-- 不需要额外下载 Qwen、OmniParser 等学习模式候选模型。OCR 运行依赖由锁定环境安装；真实模型准备能否成功仍要在你的设备上验证。
+- 本路线不需要下载其他候选模型。OCR 运行依赖由锁定环境安装；真实模型准备能否成功仍要在你的设备上验证。
 
-Download the official Transformers assets, not GGUF. Keep the configuration, tokenizer, processor and chat template alongside the weights. A single official `model.safetensors` and complete indexed shards are supported; no manual sharding is needed. Record the repository commit for reproducibility, or pin a real full commit with `--revision`. Other learning-mode candidate models are unnecessary for this trial.
+Download the official Transformers assets, not GGUF. Keep the configuration, tokenizer, processor and chat template alongside the weights. A single official `model.safetensors` and complete indexed shards are supported; no manual sharding is needed. Record the repository commit for reproducibility, or pin a real full commit with `--revision`. Other candidate models are unnecessary for this route.
 
 Repeat `--include` for each pattern. With the locked CLI, additional bare patterns become explicit filenames and override the include filters.
 

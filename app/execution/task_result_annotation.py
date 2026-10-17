@@ -1,6 +1,7 @@
 """仅投影已验证普通单次点击的原回执，历史后验绑定不重新解释。"""
 from copy import deepcopy
 from pathlib import Path
+from PIL import Image
 
 from app.judgment.executed_click_annotation import executed_click_reference, executed_click_metadata
 from .decision_check import decision_frame
@@ -78,3 +79,23 @@ def task_result_decision_binding(binding, action, *, saved_binding=None):
     if action is not None and saved_binding in (binding, {**binding, "action": None}):
         return deepcopy(saved_binding)
     raise ValueError("task_plan_decision_binding_changed")
+
+
+def task_result_followup_click_action(step, effective, original_frame, current_frame):
+    """原点击只认证一次事实；同几何末帧用自己的图像摘要重建标注。"""
+    action = task_result_click_action(step, effective, original_frame)
+    if action is None:
+        return None
+    invalid = "task_result_followup_click_binding_invalid"
+    if (current_frame.get("role") != "after" or current_frame.get("window_identity") != original_frame.get("window_identity")
+            or current_frame.get("capture_id") == original_frame.get("capture_id")
+            or Path(current_frame["image_path"]).resolve() == Path(original_frame["image_path"]).resolve()
+            or decision_frame(current_frame, original_frame["window_identity"], role="after") != current_frame):
+        raise ValueError(invalid)
+    with Image.open(current_frame["image_path"]) as image:
+        if image.format != "PNG":
+            raise ValueError(invalid)
+        dimensions = image.size
+        image.verify()
+    executed_click_metadata(current_frame, dimensions, action)
+    return action

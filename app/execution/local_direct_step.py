@@ -278,6 +278,25 @@ class LocalDirectStepMixin:
                     if include_observation else 0)
                 timing_context["observation_condition"] = validate_condition(
                     observation_condition, timing_context["observation_wait_ms"])
+                review_step = (next(step for step in action_review["plan"]["steps"]
+                    if step["step_id"] == action_review["step_id"]) if action_review is not None else None)
+                submitted_visual = bool(review_step is not None
+                    and review_step["action"]["kind"] == "input_sequence"
+                    and review_step["action"].get("submit_search") is True
+                    and type(grounding_target) is VisualSubmitTarget
+                    and grounding_target._context == action_review)
+                timing_context["adaptive_observation"] = bool(
+                    observation_wait_ms is None and timing_context["observation_wait_ms"] >= 400
+                    and observation_condition is None and action_review is not None
+                    and action_review["plan"]["schema_version"] == "task_plan.v3"
+                    and (review_step["action"]["kind"] == "click" or submitted_visual)
+                    and review_step["verification"]["kind"] == "agent_judgment"
+                    and "wait_policy" not in review_step["verification"]
+                    and learning_context is None and memory_target is None
+                    and not any(request.get(key) is not None for key in
+                                ("capture_roi", "target_memory", "selection_intent")))
+                if submitted_visual and timing_context["adaptive_observation"]:
+                    timing_context["adaptive_submit_target"] = grounding_target
             with timer.step("coordinator_begin"):
                 self._begin("idle")
             configuration = None
@@ -556,17 +575,35 @@ class LocalDirectStepMixin:
                     try:
                         wait_ms = timing_context.get("observation_wait_ms", 0)
                         condition_result = None
+                        adaptive_result = None
                         if condition is not None:
                             after, condition_result = observe_until_condition(probe,
                                 lambda: _capture_observation(manager, reader, identity, handle, pid, output, roi),
                                 baseline, timeout_ms=wait_ms, cancel=self._cancel_wait, clock=perf_counter)
                             condition_result["expected"] = condition
+                        elif timing_context.get("adaptive_observation") and report["phase"] == "returned":
+                            from .adaptive_observation import observe_after_transition
+                            submit_target = timing_context.get("adaptive_submit_target")
+                            if submit_target is not None:
+                                from .input_sequence import _completed_visual_submit
+                                submit = _completed_visual_submit(report, timing_context["action_review"]["attempt_id"])
+                                value = submit_target._value
+                                if (not submit_target._performed or submit is None
+                                        or submit.get("value_request_sha256") != value["assessment"]["request_sha256"]
+                                        or submit.get("input_receipt_sha256") != value["request"]["action"]["input_receipt_sha256"]):
+                                    raise ValueError("input_sequence_adaptive_submit_invalid")
+                            after, adaptive_result = observe_after_transition(
+                                lambda: _capture_observation(manager, reader, identity, handle, pid, output, roi),
+                                before=report["capture"], timeout_ms=wait_ms, cancel=self._cancel_wait,
+                                clock=perf_counter, cancelled=cancelled)
                         else:
                             if wait_ms and self._cancel_wait.wait(wait_ms / 1000):
                                 raise ValueError("post-action observation cancelled")
                             after = _capture_observation(manager, reader, identity, handle, pid, output, roi)
                         after = {**after, "frame_id": "after_settled",
-                            "observation_stage": "after_condition_wait" if condition else "after_render_wait", "render_grace_ms": wait_ms,
+                            "observation_stage": ("after_condition_wait" if condition else
+                                "after_transition_observation" if adaptive_result is not None else "after_render_wait"),
+                            "render_grace_ms": wait_ms,
                             "render_completion_verified": False}
                         report["observation"] = {"status": "captured", "capture": after,
                             "source": "post_action", "authorizes_action": False,
@@ -574,6 +611,8 @@ class LocalDirectStepMixin:
                             "automatic_retry_allowed": False}
                         if condition_result is not None:
                             report["observation"].update(condition=condition_result, readiness=condition_result["status"])
+                        if adaptive_result is not None:
+                            report["observation"]["adaptive_wait"] = adaptive_result
                     except Exception as error:
                         if report["phase"] == "returned":
                             report["phase"] = "returned_observation_unavailable"

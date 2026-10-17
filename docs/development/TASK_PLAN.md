@@ -1,8 +1,30 @@
 ## Current availability / 当前可用状态
 
-**0.1.5 frozen release code:** `6fa3c487da5710f1e86d7a93f484226c94b96c70`. Main can review authenticated nonpass evidence after settled typing and explicitly continue the original command without retyping; original IDs, images and submit-suffix gates remain required. The final installed independent check passed on its first attempt: **3 steps / 27.70161 s / 10 HTTP (7 Decision + 3 grounding)**, no Main override and full cleanup. Total tokens remain unknown because one usage record is opaque. [Final acceptance and limits](../verification/AMADEUS_PI_MAIN_REVIEW_20261015.md#final-independent-installed-acceptance--最终独立安装态验收); publication/checksums are handled in the [release notes](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5).
+## 2026-10-17 Execution 0.1.5 refresh / 执行版 0.1.5 更新
 
-**0.1.5 冻结发布源码：** `6fa3c487da5710f1e86d7a93f484226c94b96c70`。已结算输入后的认证非通过证据可由 Main 审核并明确续行原命令，不重复输入；原 ID、原图与提交后缀门禁继续有效。最终安装态独立检查首次通过：**3 步／27.70161 秒／10 次 HTTP（7 Decision＋3 grounding）**，无 Main override，完整收尾通过；一项用量不可读，因此总 tokens 仍未知。[最终验收及限制](../verification/AMADEUS_PI_MAIN_REVIEW_20261015.md#final-independent-installed-acceptance--最终独立安装态验收)，发布及校验值由[发布说明](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)承接。
+The dated 0.1.5 refresh keeps the version number and existing model, prompts and action gates. For default v3 visual clicks, and authenticated completed visual Enter submissions within `input_sequence`, observation may finish before the original two-second deadline after a substantial change and three stable samples spanning at least 200 ms, with at least 400 ms elapsed overall. Focus/type waits remain zero. Stability only selects an observation; the same semantic verification must still pass. A semantic nonpass retains one read-only final observation at the original absolute deadline. An unchanged image reuses its assessment; changed evidence follows the existing Decision → ordinary vision review → Main path. No repeated input, new wait budget or HTTP/protocol retry is introduced.
+
+本次日期构建更新沿用 0.1.5，模型、提示词和动作门禁不变。默认 v3 视觉点击，以及 `input_sequence` 中有完整真实 Enter 回执的视觉提交，在充分变化、三次稳定采样、稳定跨度至少 200ms 且总观察至少 400ms 后可以提前采图。聚焦／键入的默认等待仍为零。稳定只决定采图时机，结果仍需语义核验通过。语义非通过保留原绝对两秒截止后的单次只读末帧；同图复用原判断，变化图按原 Decision → 普通视觉复核 → Main 路线处理，不重放输入、不追加等待预算、不重试 HTTP／协议错误。
+
+The Enter path binds the whole command, completed input proof, sequence ID, parent execution ID, final submit child ID/hash and after-frame geometry. A bare input-sequence kind or reanchor click cannot opt in. Explicit waits, native conditions, temporal content, learning/memory and nonvisual submit paths retain their contracts. Receipts expose `adaptive_wait` and, for Enter, `adaptive_submit` as evidence rather than action authorization.
+
+Enter 路线绑定原完整命令、已完成输入证明、序列 ID、父执行 ID、最后提交子步 ID／摘要及后图几何。仅声明输入序列或回锚点击不能启用。显式等待、原生条件、动态内容、学习／记忆及非视觉提交保留原合同。`adaptive_wait` 和 Enter 的 `adaptive_submit` 是证据，不授予动作权限。
+
+For eligible `external_api` v3 linear plans, the current result assessment may overlap exactly one next-step read-only grounding request using the same frozen after-frame. `TaskGroundingPrefetch` prepares and resolves grounding only: it cannot claim input, advance the plan or change windows. Only persisted predecessor success releases the result. The next job consumes it once through the existing claim, target freshness and action checks. Input sequences consume it only for their initial field target; subsequent reanchor/Enter phases cannot reuse it.
+
+符合条件的 `external_api` v3 线性计划，在当前结果核验期间可用同一冻结后图并行定位下一步，最多预取一步。`TaskGroundingPrefetch` 只准备／解析定位，不申请输入、不推进计划、不切窗。前一步成功落账后才允许后一步消费；仍经过原有单次 claim、新鲜度和动作核验。输入序列仅首个输入框目标可消费，后续回锚／Enter 不复用。
+
+Prefetch binds the process/owner, plan hash, predecessor, exact next command/attempt, source capture/hash and provider configuration. Cancellation, manual handoff, changed evidence, wrong identity, restart or shutdown invalidates it. Failed calls are retained and do not trigger a hidden retry. Discarded requests still count toward API usage. The host stores their request, provider usage, disposition and timing under `task-grounding-prefetch`; adopted requests also appear in the job's recognition calls and must be deduplicated in aggregate reports.
+
+预取绑定进程／所有者、计划摘要、前步、后步完整命令／尝试、源图 ID／摘要及服务配置。取消、Main 接管、换图、身份变化、重启或关闭会使预取失效；错误保留，不隐式重试。被弃用的请求仍计入 API 消耗。宿主在 `task-grounding-prefetch` 保存请求、供应商用量、去向和计时；被消费的请求也出现在后续 job 定位记录中，汇总时按请求身份去重。
+
+Source checks and multi-application continuous runs passed. Dated installer acceptance is recorded in the release notes; historical click-only measurements are not new Enter/prefetch performance evidence. [Measured scope and limits](../verification/EXECUTION_015_REFRESH_20261017.md) · [Implementation plan](../superpowers/plans/2026-10-17-execution-015-refresh.md) · [Earlier baseline](../verification/WAIT_AND_DECISION_LATENCY_20261017.md).
+
+源码检查和多应用连续运行已通过，日期安装包验收由发布说明记录；旧普通点击测量不当作新 Enter／预取的性能证明，见上方实测范围、计划及历史基线。
+
+**Original 0.1.5 frozen release code:** `6fa3c487da5710f1e86d7a93f484226c94b96c70`. Main can review authenticated nonpass evidence after settled typing and explicitly continue the original command without retyping; original IDs, images and submit-suffix gates remain required. The final installed independent check passed on its first attempt: **3 steps / 27.70161 s / 10 HTTP (7 Decision + 3 grounding)**, no Main override and full cleanup. Total tokens remain unknown because one usage record is opaque. [Final acceptance and limits](../verification/AMADEUS_PI_MAIN_REVIEW_20261015.md#final-independent-installed-acceptance--最终独立安装态验收); publication/checksums are handled in the [release notes](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5).
+
+**原始 0.1.5 冻结发布源码：** `6fa3c487da5710f1e86d7a93f484226c94b96c70`。已结算输入后的认证非通过证据可由 Main 审核并明确续行原命令，不重复输入；原 ID、原图与提交后缀门禁继续有效。最终安装态独立检查首次通过：**3 步／27.70161 秒／10 次 HTTP（7 Decision＋3 grounding）**，无 Main override，完整收尾通过；一项用量不可读，因此总 tokens 仍未知。[最终验收及限制](../verification/AMADEUS_PI_MAIN_REVIEW_20261015.md#final-independent-installed-acceptance--最终独立安装态验收)，发布及校验值由[发布说明](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)承接。
 
 ### Historical candidate checkpoint / 历史候选检查点
 
