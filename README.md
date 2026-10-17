@@ -86,7 +86,21 @@ Default visual input sequences require Decision in auto mode. Without Decision, 
 <a id="evaluation"></a>
 ## Engineering evidence
 
-**0.1.5 refresh (2026-10-17):** adaptive observation after Enter and next-step read-only grounding alongside current-result verification. In a small source comparison, actual action-interval medians changed **5.803→5.597 s (Notepad), 7.805→7.254 s (7-Zip), 10.786→9.280 s (Edge)**. New-candidate six three-step plans completed automatically, with independent image/disk checks and cleanup. Model settings and acceptance rules are unchanged. These are source measurements, not general accuracy claims; the four-second objective is not yet reached. [Method, complete task times, calls and limitations →](docs/verification/EXECUTION_015_REFRESH_20261017.md) · [Dated installer acceptance and hashes →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+**0.1.5 refresh — build 20261017-01:** adaptive observation after Enter and next-step read-only grounding alongside current-result verification. The refreshed installer completed the following tasks on the same frozen payload:
+
+| Installed task | Round 1 | Round 2 | API requests, both rounds | Reported tokens, both rounds |
+| --- | ---: | ---: | ---: | ---: |
+| Notepad: edit → File → Save | **20.744 s** | **18.191 s** | 21 | 37,482 |
+| Edge: Bing → search → Wikipedia article | **27.043 s** | **27.430 s** | 27 | 42,111 |
+| 7-Zip: folder / prepared-ZIP navigation | **25.918 s** | **24.324 s** | 18 | 47,585 |
+
+**Six plans / 18 steps completed automatically on their first attempt.** Main checked Notepad and Edge; independent Sol checked 7-Zip. Original screenshots, exact Notepad disk contents and owned-window/host cleanup passed. Each run above is a complete three-step plan including visual verification; launch, between-round inspection and cleanup are excluded from its time. 7-Zip compression/extraction was not tested.
+
+The installed runs used **66 API requests: 18 grounding + 46 Decision + 2 ordinary review; 127,178 reported tokens**, with no missing usage. Consumed prefetch copies are counted once; Main/worker subscription usage is excluded. These scoped passes do not establish a general success rate.
+
+**Measured action intervals, source A → B:** **5.803→5.597 s (Notepad), 7.805→7.254 s (7-Zip), 10.786→9.280 s (Edge)**. These are medians from the first physical mouse-down of one logical step to the next, four matched intervals per application/arm. A already includes the earlier ordinary-click/SSL changes; B adds Enter observation and overlap. This is not a direct old-installer/new-installer comparison. One Edge B plan was slower than A; model/network/cache variation was uncontrolled. **The four-second interval objective is not yet reached.** Models, prompts and acceptance rules are unchanged.
+
+**Verification:** 395 affected checks passed; after race fixes, 82 overlapping checks passed (not added as unique tests). All **659 installed payload hashes** matched before/after acceptance. A new isolated Python 3.11 environment installed **45 locked API-route dependencies** and passed functional-entrypoint checks. [Full measurements, source-comparison usage and limits →](docs/verification/EXECUTION_015_REFRESH_20261017.md) · [Dated installer and checksums →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 **Original 0.1.5 build, installed Amadeus/Pi route:** two normal synthetic Notepad tasks completed six steps, exact disk checks and cleanup; no Main semantic override was needed, and outer self-corrections remain recorded. Final source regression: **135 passed**. The final installer independently completed a three-step Notepad plan on its first attempt in **27.70 s / 10 API requests**, with exact disk output and cleanup. This is one scoped sample; total token usage is unknown. [Scope and limitations →](docs/verification/AMADEUS_PI_MAIN_REVIEW_20261015.md) · [Release and checksums →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
@@ -129,7 +143,7 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 - **Since 0.1.4, linear plans:** nonempty plans have no fixed step-count cap. Unique step IDs, per-step verification, context-size limits, evidence checks, cancellation and API/time budgets remain. Existing 0.1.3 installations retain their build-time contract until upgraded. [Source checks](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
 
 - Models can reject correct evidence or accept incorrect evidence. A primary false pass skips secondary review; this remains a known limitation. Arbitrary unattended tasks are not guaranteed.
-- The installer is unsigned. Acceptance used an existing Python environment; first-time dependency setup on a clean machine is not yet verified. [Release scope and history](docs/EXECUTION_GUIDE.md#release-boundaries-and-history)
+- The installer is unsigned. This refresh verified a new isolated Python environment; clean-machine dependency setup and normal OS registry/shortcut integration were not newly verified. [Release scope and history](docs/EXECUTION_GUIDE.md#release-boundaries-and-history)
 
 ## Documentation
 
