@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 import pytest
 
-from app.main import app
+from app.api.application import create_runtime_app
+
+app = create_runtime_app()
 from app.api import vision as vision_api
 
 
@@ -1095,7 +1097,8 @@ def test_vision_recognition_plan_uses_path_graph_candidate_roi_for_vista(tmp_pat
     )
     monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
 
-    def fake_endpoint(self, request_image_path, prompt, max_tokens=32, request_timeout_seconds=None):
+    def fake_endpoint(self, request_image_path, prompt, *, max_tokens=32, temperature=0.1, request_timeout_seconds=None):
+        assert temperature == 0.0
         calls.append(
             {
                 "image_path": Path(request_image_path),
@@ -2307,7 +2310,20 @@ def test_vista_pixel_point_outside_inference_image_is_not_clamped() -> None:
         vision_api._vista_point_to_original_pixel(parsed, image_size=vision_api.ImageSize(width=640, height=480))
 
 
+def _stub_vista_local_ocr(monkeypatch, text="Start"):
+    from modules.ocr.contracts import OCRResult, OCRTextMatch, OCRBoundingBox
+    def scan(path):
+        with Image.open(path) as crop:
+            width, height = crop.size
+        return OCRResult(image_path=path, matches=[OCRTextMatch(
+            text=text, score=0.99,
+            bbox=OCRBoundingBox(x=width // 2 - 12, y=height // 2 - 8, width=24, height=16),
+        )])
+    monkeypatch.setattr(vision_api.ocr_service, "scan_image", scan)
+
+
 def test_execute_recognition_plan_uses_vista_direct_grounding_without_path_graph(tmp_path, monkeypatch) -> None:
+    _stub_vista_local_ocr(monkeypatch)
     image_path = tmp_path / "capture.png"
     Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
     calls: list[dict] = []
@@ -2378,10 +2394,13 @@ def test_execute_recognition_plan_uses_vista_direct_grounding_without_path_graph
     candidate = result["candidate_result"]["candidates"][0]
     assert candidate["candidate_id"].startswith("vista_direct_")
     assert candidate["element"]["sources"] == ["vista_point_v1_direct"]
-    assert result["narrow_search_result"]["results"][0]["reasons"] == ["vista_direct_point_grounding"]
+    local = result["narrow_search_result"]["results"][0]
+    assert local["matched_text"] == "Start"
+    assert "vista_point_matches_local_ocr" in local["reasons"]
 
 
 def test_execute_recognition_plan_builds_fast_inventory_from_uia_for_vista_direct(tmp_path, monkeypatch) -> None:
+    _stub_vista_local_ocr(monkeypatch)
     image_path = tmp_path / "capture.png"
     Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
 
@@ -2493,6 +2512,7 @@ def test_execute_recognition_plan_blocks_vista_direct_when_exact_uia_target_disa
     tmp_path,
     monkeypatch,
 ) -> None:
+    _stub_vista_local_ocr(monkeypatch)
     image_path = tmp_path / "capture.png"
     Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
 
@@ -2575,18 +2595,25 @@ def test_execute_recognition_plan_blocks_vista_direct_when_exact_uia_target_disa
     assert response.status_code == 200
     result = response.json()["data"]["result"]
     assert result["pre_click_decision"]["allowed"] is False
+    assert result["pre_click_decision"]["candidate_decisions"] == []
+    assert result["candidate_result"]["candidates"] == []
+    assert result["execution_path"]["action_executed"] is False
     direct_decision = next(
         item
-        for item in result["pre_click_decision"]["candidate_decisions"]
+        for item in result["candidate_result"]["rejected"]
         if item["candidate_id"].startswith("vista_direct_")
     )
     assert "vista_direct_conflicts_with_exact_uia_candidate_bbox" in direct_decision["reasons"]
+    assert "vista_direct_uia_conflict_blocks_fallback" in direct_decision["reasons"]
+    assert direct_decision["eligible"] is False
+    assert direct_decision["element"]["interaction_policy"]["allowed"] is False
 
 
 def test_execute_recognition_plan_does_not_treat_context_labels_as_explicit_target(
     tmp_path,
     monkeypatch,
 ) -> None:
+    _stub_vista_local_ocr(monkeypatch)
     image_path = tmp_path / "capture.png"
     Image.new("RGB", (500, 260), color=(255, 255, 255)).save(image_path)
 
@@ -2813,6 +2840,7 @@ def test_execute_recognition_plan_blocks_vista_direct_point_in_browser_chrome(tm
 
 
 def test_execute_recognition_plan_resizes_vista_direct_image_and_maps_point(tmp_path, monkeypatch) -> None:
+    _stub_vista_local_ocr(monkeypatch)
     image_path = tmp_path / "large_capture.png"
     Image.new("RGB", (1265, 1380), color=(255, 255, 255)).save(image_path)
     calls: list[dict] = []
@@ -2835,7 +2863,8 @@ def test_execute_recognition_plan_resizes_vista_direct_image_and_maps_point(tmp_
     )
     monkeypatch.setattr("app.api.vision.VisionProviderFactory.create", lambda mode=None, config=None: object())
 
-    def fake_endpoint(self, request_image_path, prompt, max_tokens=32, request_timeout_seconds=None):
+    def fake_endpoint(self, request_image_path, prompt, *, max_tokens=32, temperature=0.1, request_timeout_seconds=None):
+        assert temperature == 0.0
         calls.append(
             {
                 "image_path": Path(request_image_path),

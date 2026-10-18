@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.execute_observation import build_seek_execute_observation
+from app.application_profiles.seek.execute_observation import build_seek_execute_observation
 
 
 def test_seek_execute_observation_detects_review_submit_danger() -> None:

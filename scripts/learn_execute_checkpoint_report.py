@@ -14,8 +14,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from fastapi.testclient import TestClient
 
+from app.api.application import create_runtime_app
 from app.learn.skill_matrix import build_learned_skill_matrix
-from app.main import app
 from scripts.seek_application_flow_replay_report import build_seek_application_flow_replay_report
 
 
@@ -44,7 +44,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def run_seek_safe_validation(graph: dict[str, Any]) -> dict[str, Any]:
-    client = TestClient(app)
+    client = TestClient(create_runtime_app())
     safety = {"forbid_final_submit": True, "allow_apply_entry": False, "allow_safe_fill": False}
     checks: list[dict[str, Any]] = []
     timeline: list[dict[str, Any]] = []

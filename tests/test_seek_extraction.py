@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.extraction import extract_seek_job_cards, extract_seek_job_detail, infer_results_list_bbox_from_inventory
+from app.application_profiles.seek.extraction import extract_seek_job_cards, extract_seek_job_detail, infer_results_list_bbox_from_inventory
 
 
 def test_extract_seek_job_cards_from_screen_inventory() -> None:

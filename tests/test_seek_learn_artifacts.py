@@ -11,7 +11,7 @@ from app.operation.visual_asset_matching import match_visual_asset
 from app.learn.interface_map import build_learned_interface_map, merge_visual_asset_match_evidence
 from app.learn.path_graph_artifacts import build_seek_runtime_path_graph_export
 from app.learn.visual_asset_crops import build_visual_asset_crop_export
-from app.seek.learn_artifacts import build_seek_learn_artifacts
+from app.application_profiles.seek.learn_artifacts import build_seek_learn_artifacts
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "seek_export_learn_artifacts.py"

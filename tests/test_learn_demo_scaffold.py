@@ -3,10 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from app.learn.draft_review import load_learning_draft_review
-from app.main import app
 from scripts import build_learn_demo_scaffold as scaffold_module
 from scripts.build_learn_demo_scaffold import build_learn_demo_scaffold
 
@@ -387,21 +384,14 @@ def test_model_provenance_follows_page_detail_source_path_to_actual_trial(tmp_pa
     assert audit["evidence"][1]["path"] == str(trial.relative_to(tmp_path)).replace("\\", "/")
 
 
-def test_learning_demo_scaffold_endpoint_is_review_only(tmp_path: Path, monkeypatch) -> None:
-    import app.api.panel as panel_api
-
+def test_learning_demo_scaffold_is_review_only(tmp_path: Path) -> None:
     candidate = _candidate_fixture(tmp_path)
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/create_learning_demo_scaffold",
-        json={"source_path": str(candidate.relative_to(tmp_path))},
+    data = build_learn_demo_scaffold(
+        source_path=candidate,
+        out_dir=candidate.parent,
+        project_root=tmp_path,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    data = payload["data"]
     assert data["contract_version"] == "learn_mode_demo_scaffold_v1"
     assert data["summary"]["artifact_count"] == 5
     assert data["summary"]["model_generated_pathgraph_preview_status"] == "model_generated_preview_ready"
@@ -409,12 +399,9 @@ def test_learning_demo_scaffold_endpoint_is_review_only(tmp_path: Path, monkeypa
     assert data["safety"]["live_clicks"] == 0
     assert data["safety"]["execute_binding_enabled"] is False
     assert data["safety"]["runtime_pathgraph_promotion"] is False
-    assert data["trace_path"]
 
 
-def test_learning_demo_scaffold_endpoint_accepts_page_detail_candidate(tmp_path: Path, monkeypatch) -> None:
-    import app.api.panel as panel_api
-
+def test_learning_demo_scaffold_accepts_page_detail_candidate(tmp_path: Path) -> None:
     page_detail = _write_json(
         tmp_path / "logs" / "benchmarks" / "page_detail" / "learn_page_detail_candidate.json",
         {
@@ -446,17 +433,12 @@ def test_learning_demo_scaffold_endpoint_accepts_page_detail_candidate(tmp_path:
             "artifact_is_authorization": False,
         },
     )
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/create_learning_demo_scaffold",
-        json={"source_path": str(page_detail.relative_to(tmp_path))},
+    data = build_learn_demo_scaffold(
+        source_path=page_detail,
+        out_dir=page_detail.parent,
+        project_root=tmp_path,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    data = payload["data"]
     assert data["summary"]["failure_count"] == 0
     assert data["summary"]["page_detail_section_count"] == 1
     assert data["display_readiness"]["pathgraph_detail_can_show_page_detail"] is True

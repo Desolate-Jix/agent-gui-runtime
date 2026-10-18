@@ -11,7 +11,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from app.agent.profile.cv import build_candidate_profile_from_cv_text, extract_cv_text
-from app.seek.profile import assess_candidate_profile_readiness
+from app.application_profiles.seek.profile import assess_candidate_profile_readiness
 
 
 def build_profile_from_cv(*, cv_path: str | Path) -> dict:

@@ -1,0 +1,13 @@
+.venv/
+.python/
+.setup-cache/
+.cache/
+__pycache__/
+*.py[cod]
+/models/
+runtime_state/
+runtime-output/
+logs/
+mcp-config.local.*
+*.zip
+*.zip.sha256

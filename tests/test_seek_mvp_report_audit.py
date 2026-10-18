@@ -4,7 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 
-from app.seek.audit import audit_seek_mvp_run
+from app.application_profiles.seek.audit import audit_seek_mvp_run
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "seek_mvp_report_audit.py"

@@ -9,8 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.api import panel as panel_api
-from app.main import app
+from app.api.application import create_runtime_app
+from app.learn.interface_workflow_service import save_interface_workflow_review_transaction
+from app.learn.learning_draft_review_service import load_interface_workflow_review_transaction
+from app.learn.workflow_store import learning_workflow_run_store
 from app.learn import interface_workflow_review as workflow_review_module
 from app.learn.draft_review import load_learning_draft_review
 from app.learn.interface_workflow_review import (
@@ -350,9 +352,8 @@ def test_runtime_click_coordinates_are_not_persisted() -> None:
     assert result["safety"]["runtime_requires_fresh_grounding"] is True
 
 
-def test_panel_loads_generic_interface_workflow_review(
+def test_loads_generic_interface_workflow_review(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     for name, signature in (("first", "list"), ("second", "detail")):
         source_path = tmp_path / "artifacts" / "learning" / f"{name}.json"
@@ -372,32 +373,27 @@ def test_panel_loads_generic_interface_workflow_review(
             ),
             encoding="utf-8",
         )
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/load_interface_workflow_review",
-        json={
-            "goal": "Open an item",
-            "application_identity": {"name": "ExampleApp"},
-            "draft_source_paths": [
-                "artifacts/learning/first.json",
-                "artifacts/learning/second.json",
-            ],
-        },
+    result = load_interface_workflow_review_transaction(
+        draft_source_paths=[
+            "artifacts/learning/first.json",
+            "artifacts/learning/second.json",
+        ],
+        workflow_run_ids_by_source={},
+        discover_related_sidecars=True,
+        goal="Open an item",
+        application_identity={"name": "ExampleApp"},
+        project_root=tmp_path,
+        workflow_store=learning_workflow_run_store,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert payload["data"]["contract_version"] == "single_application_workflow_review_v1"
-    assert len(payload["data"]["nodes"]) == 2
-    assert len(payload["data"]["edges"]) == 1
-    assert payload["data"]["artifact_is_authorization"] is False
+    assert result["contract_version"] == "single_application_workflow_review_v1"
+    assert len(result["nodes"]) == 2
+    assert len(result["edges"]) == 1
+    assert result["artifact_is_authorization"] is False
 
 
-def test_panel_reports_invalid_workflow_review_source_without_failing_valid_nodes(
+def test_reports_invalid_workflow_review_source_without_failing_valid_nodes(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     valid_path = tmp_path / "artifacts" / "learning" / "valid.json"
     valid_path.parent.mkdir(parents=True, exist_ok=True)
@@ -414,27 +410,26 @@ def test_panel_reports_invalid_workflow_review_source_without_failing_valid_node
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
+    result = load_interface_workflow_review_transaction(
+        draft_source_paths=[
+            "artifacts/learning/valid.json",
+            "../outside-project.json",
+        ],
+        workflow_run_ids_by_source={},
+        discover_related_sidecars=True,
+        goal="Review screens",
+        application_identity={"name": "ExampleApp"},
+        project_root=tmp_path,
+        workflow_store=learning_workflow_run_store,
+    )
 
-    payload = TestClient(app).post(
-        "/panel/load_interface_workflow_review",
-        json={
-            "goal": "Review screens",
-            "application_identity": {"name": "ExampleApp"},
-            "draft_source_paths": [
-                "artifacts/learning/valid.json",
-                "../outside-project.json",
-            ],
-        },
-    ).json()
-
-    assert payload["success"] is True
-    assert len(payload["data"]["nodes"]) == 1
-    assert payload["data"]["invalid_sources"][0]["source_path"] == "../outside-project.json"
-    assert payload["data"]["invalid_sources"][0]["failure_category"] == "invalid_review_source"
+    assert len(result["nodes"]) == 1
+    assert result["invalid_sources"][0]["source_path"] == "../outside-project.json"
+    assert result["invalid_sources"][0]["failure_category"] == "invalid_review_source"
 
 
-def test_panel_workflow_review_can_skip_related_sidecar_discovery(
+def test_workflow_review_can_skip_related_sidecar_discovery(
+    tmp_path: Path,
     monkeypatch,
 ) -> None:
     calls: list[dict[str, object]] = []
@@ -458,26 +453,27 @@ def test_panel_workflow_review_can_skip_related_sidecar_discovery(
             summary=Path(source_path).stem,
         )
 
+    from app.learn import learning_draft_review_service as review_service
+
     monkeypatch.setattr(
-        panel_api,
+        review_service,
         "load_learning_draft_review",
         fake_load_learning_draft_review,
     )
 
-    payload = TestClient(app).post(
-        "/panel/load_interface_workflow_review",
-        json={
-            "goal": "Refresh known workflow evidence",
-            "application_identity": {"name": "ExampleApp"},
-            "draft_source_paths": [
-                "artifacts/learning/first.json",
-                "artifacts/learning/second.json",
-            ],
-            "discover_related_sidecars": False,
-        },
-    ).json()
+    result = load_interface_workflow_review_transaction(
+        draft_source_paths=[
+            "artifacts/learning/first.json",
+            "artifacts/learning/second.json",
+        ],
+        workflow_run_ids_by_source={},
+        discover_related_sidecars=False,
+        goal="Refresh known workflow evidence",
+        application_identity={"name": "ExampleApp"},
+        project_root=tmp_path,
+        workflow_store=learning_workflow_run_store,
+    )
 
-    assert payload["success"] is True
     assert [call["discover_related_sidecars"] for call in calls] == [False, False]
 
 
@@ -1287,7 +1283,7 @@ def test_blocked_interface_does_not_expose_actionable_evidence() -> None:
 
 
 def test_agent_facing_workflow_registry_route_is_available() -> None:
-    response = TestClient(app).get("/memory/interface_workflows/registry")
+    response = TestClient(create_runtime_app()).get("/memory/interface_workflows/registry")
 
     assert response.status_code == 200
     payload = response.json()
@@ -1499,9 +1495,8 @@ def test_stale_human_review_fact_is_revoked_after_semantic_edit(tmp_path: Path) 
     assert len(persisted["current_revision_hash"]) == 64
 
 
-def test_panel_projection_uses_normalized_review_not_raw_human_label(
+def test_save_transaction_uses_normalized_review_not_raw_human_label(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     source = _review(
         source_path="artifacts/learning/label-only.json",
@@ -1525,21 +1520,17 @@ def test_panel_projection_uses_normalized_review_not_raw_human_label(
     node["review_status"] = "human_approved"
     node["reviewed_by_human"] = True
     node.pop("human_review_confirmation", None)
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/save_interface_workflow_review",
-        json={"review": review},
+    body = save_interface_workflow_review_transaction(
+        review,
+        project_root=tmp_path,
+        out_dir=None,
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["success"] is True, body
-    projection = body["data"]["interface_asset_projection"]
+    projection = body["interface_asset_projection"]
     assert projection["agent_evidence_projection"]["agent_usable_count"] == 0
     assert projection["agent_evidence_projection"]["needs_human_review_count"] == 1
     saved_review = json.loads(
-        Path(body["data"]["path"]).read_text(encoding="utf-8")
+        Path(body["path"]).read_text(encoding="utf-8")
     )
     assert saved_review["nodes"][0]["reviewed_by_human"] is False
     asset_path = tmp_path / projection["interface_results"][0]["asset_path"]
@@ -1548,9 +1539,8 @@ def test_panel_projection_uses_normalized_review_not_raw_human_label(
     assert asset["review"]["reviewed_revision_hash"] == ""
 
 
-def test_panel_save_persists_client_confirmed_review_with_confirmed_point_metadata(
+def test_save_transaction_persists_client_confirmed_review_with_confirmed_point_metadata(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     source = _review(
         source_path="artifacts/learning/confirmed-point.json",
@@ -1585,22 +1575,18 @@ def test_panel_save_persists_client_confirmed_review_with_confirmed_point_metada
         "contract_version": "interface_node_human_review_confirmation_v1",
         "revision": client_revision,
     }
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/save_interface_workflow_review",
-        json={"review": review},
+    body = save_interface_workflow_review_transaction(
+        review,
+        project_root=tmp_path,
+        out_dir=None,
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["success"] is True, body
-    saved_path = Path(body["data"]["path"])
+    saved_path = Path(body["path"])
     saved = json.loads(saved_path.read_text(encoding="utf-8"))
-    assert body["data"]["saved_review"] == saved
+    assert body["saved_review"] == saved
     persisted_node = saved["nodes"][0]
     registry = load_interface_workflow_library_registry(project_root=tmp_path)
-    record = registry["workflows"][body["data"]["workflow_id"]]
+    record = registry["workflows"][body["workflow_id"]]
     context = load_interface_workflow_agent_context(
         project_root=tmp_path,
         application_identity_key="web:confirmed-point.example.test",
@@ -1615,7 +1601,7 @@ def test_panel_save_persists_client_confirmed_review_with_confirmed_point_metada
     assert record["reviewed_node_evidence_sha256"][persisted_node["node_id"]]
     assert context["agent_ready"] is True
     assert context["agent_usable_interfaces"] == [{
-        "workflow_id": body["data"]["workflow_id"],
+        "workflow_id": body["workflow_id"],
         "interface_id": persisted_node["node_id"],
         "display_name": "Confirmed point metadata",
         "agent_usable": True,
@@ -1707,9 +1693,8 @@ def test_save_revalidates_human_confirmation_after_evidence_materialization(
     assert persisted["nodes"][0]["reviewed_revision_hash"] == ""
 
 
-def test_tampered_evidence_stays_blocked_after_panel_save_refresh(
+def test_tampered_evidence_stays_blocked_after_save_transaction_refresh(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     saved, persisted = _save_durably_confirmed_workflow(
         tmp_path,
@@ -1718,17 +1703,13 @@ def test_tampered_evidence_stays_blocked_after_panel_save_refresh(
     node = persisted["nodes"][0]
     evidence_path = tmp_path / node["evidence"]["source_screenshot_path"]
     evidence_path.write_bytes(b"tampered-after-persisted-human-approval")
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/save_interface_workflow_review",
-        json={"review": persisted},
+    body = save_interface_workflow_review_transaction(
+        persisted,
+        project_root=tmp_path,
+        out_dir=None,
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["success"] is True, body
-    refreshed = json.loads(Path(body["data"]["path"]).read_text(encoding="utf-8"))
+    refreshed = json.loads(Path(body["path"]).read_text(encoding="utf-8"))
     context = load_interface_workflow_agent_context(
         project_root=tmp_path,
         application_identity_key="web:refresh-tampered.example.test",
@@ -1845,7 +1826,7 @@ def test_save_workflow_review_candidate_rejects_unknown_contract(
 ) -> None:
     try:
         save_interface_workflow_review_candidate(
-            {"contract_version": "unknown_contract"},
+            {"contract_version": "unknown_contract", "workflow": {"workflow_id": "unknown-contract-case"}},
             project_root=tmp_path,
         )
     except ValueError as exc:
@@ -1854,9 +1835,16 @@ def test_save_workflow_review_candidate_rejects_unknown_contract(
         raise AssertionError("unknown workflow review contract must be rejected")
 
 
-def test_panel_saves_reviewed_workflow_without_publishing_memory(
+def test_save_workflow_review_candidate_rejects_missing_workflow_before_contract(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="must contain a workflow object"):
+        save_interface_workflow_review_candidate(
+            {"contract_version": "unknown_contract"}, project_root=tmp_path,
+        )
+    assert not (tmp_path / "artifacts" / "interface-workflow-reviews").exists()
+
+
+def test_save_transaction_saves_reviewed_workflow_without_publishing_memory(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     review = build_interface_workflow_review(
         goal="Review settings",
@@ -1870,49 +1858,40 @@ def test_panel_saves_reviewed_workflow_without_publishing_memory(
             )
         ],
     )
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/save_interface_workflow_review",
-        json={"review": review},
+    payload = save_interface_workflow_review_transaction(
+        review,
+        project_root=tmp_path,
+        out_dir=None,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert Path(payload["data"]["path"]).exists()
-    assert payload["data"]["published"] is False
-    assert payload["data"]["artifact_is_authorization"] is False
-    assert payload["data"]["interface_asset_projection"]["status"] == "saved"
-    assert payload["data"]["interface_asset_projection"]["saved_interface_count"] == 1
+    assert Path(payload["path"]).exists()
+    assert payload["published"] is False
+    assert payload["artifact_is_authorization"] is False
+    assert payload["interface_asset_projection"]["status"] == "saved"
+    assert payload["interface_asset_projection"]["saved_interface_count"] == 1
     assert Path(
         tmp_path,
-        payload["data"]["interface_asset_projection"]["graph_result"]["graph_path"],
+        payload["interface_asset_projection"]["graph_result"]["graph_path"],
     ).is_file()
 
 
-def test_panel_saves_empty_workflow_before_first_interface_is_attached(
+def test_save_transaction_saves_empty_workflow_before_first_interface_is_attached(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     review = build_interface_workflow_review(
         goal="学习新闻网站流程",
         application_identity={"url": "https://www.example.test"},
         draft_sources=[],
     )
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/save_interface_workflow_review",
-        json={"review": review},
+    payload = save_interface_workflow_review_transaction(
+        review,
+        project_root=tmp_path,
+        out_dir=None,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert Path(payload["data"]["path"]).exists()
-    assert payload["data"]["node_count"] == 0
-    assert payload["data"]["interface_asset_projection"] == {
+    assert Path(payload["path"]).exists()
+    assert payload["node_count"] == 0
+    assert payload["interface_asset_projection"] == {
         "status": "not_covered",
         "reason": "workflow_has_no_interface_nodes",
         "saved_interface_count": 0,
@@ -2027,31 +2006,23 @@ def test_delete_interface_workflow_keeps_shared_single_interface_evidence(
     assert application["workflow_ids"] == ["workflow-two"]
 
 
-def test_panel_delete_learning_evidence_endpoint_returns_auditable_result(
+def test_delete_learning_evidence_returns_auditable_result(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     evidence_path = tmp_path / "artifacts" / "learning-runs" / "run-1" / "trial_result.json"
     evidence_path.parent.mkdir(parents=True)
     evidence_path.write_text('{"contract_version":"learning_trial_v1"}\n', encoding="utf-8")
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/delete_learning_evidence",
-        json={"source_path": str(evidence_path)},
+    result = workflow_review_module.delete_learning_evidence(
+        project_root=tmp_path,
+        source_path=str(evidence_path),
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert payload["data"]["deleted"] is True
-    assert payload["data"]["artifact_is_authorization"] is False
-    assert payload["data"]["trace_path"]
+    assert result["deleted"] is True
+    assert result["artifact_is_authorization"] is False
 
 
-def test_panel_delete_interface_workflow_endpoint_preserves_evidence(
+def test_delete_interface_workflow_preserves_evidence(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     evidence_path = tmp_path / "artifacts" / "learning-runs" / "run-1" / "trial_result.json"
     evidence_path.parent.mkdir(parents=True)
@@ -2070,17 +2041,12 @@ def test_panel_delete_interface_workflow_endpoint_preserves_evidence(
     )
     review["workflow"]["workflow_id"] = "workflow-to-delete"
     save_interface_workflow_review_candidate(review, project_root=tmp_path)
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/delete_interface_workflow",
-        json={"workflow_id": "workflow-to-delete"},
+    result = workflow_review_module.delete_interface_workflow_review_candidate(
+        project_root=tmp_path,
+        workflow_id="workflow-to-delete",
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert payload["data"]["single_interface_evidence_deleted"] is False
+    assert result["single_interface_evidence_deleted"] is False
     assert evidence_path.exists()
 
 

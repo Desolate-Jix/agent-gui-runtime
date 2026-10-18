@@ -1842,6 +1842,7 @@ def test_panel_learning_draft_review_fast_load_skips_related_sidecar_discovery(
     monkeypatch,
 ) -> None:
     import app.api.panel as panel_api
+    from app.learn import learning_draft_review_service as review_service
 
     calls: list[dict[str, object]] = []
 
@@ -1864,9 +1865,9 @@ def test_panel_learning_draft_review_fast_load_skips_related_sidecar_discovery(
             "draft": {"regions": [], "action_templates": []},
         }
 
-    monkeypatch.setattr(panel_api, "load_learning_draft_review", fake_load_learning_draft_review)
+    monkeypatch.setattr(review_service, "load_learning_draft_review", fake_load_learning_draft_review)
     monkeypatch.setattr(panel_api, "write_trace", lambda **_kwargs: "logs/traces/fast-load.json")
-    monkeypatch.setattr(panel_api, "prepare_learning_selection_review_replay", lambda **_kwargs: None)
+    monkeypatch.setattr(review_service, "prepare_learning_selection_review_replay", lambda **_kwargs: None)
 
     response = panel_api.load_learning_draft_review_endpoint(
         panel_api.PanelLoadLearningDraftReviewRequest(

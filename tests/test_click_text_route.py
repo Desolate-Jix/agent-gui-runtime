@@ -275,7 +275,7 @@ def test_scroll_dispatches_and_verifies(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(action_api, "write_trace", lambda **kwargs: "logs/traces/actions/scroll.json")
-    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None: {"image_path": "before.png"})
+    monkeypatch.setattr(action_api.verifier, "capture_pre_action_state", lambda action_name=None, **kwargs: {"image_path": "before.png", "capture_status": "observed"})
     monkeypatch.setattr(
         action_api.verifier,
         "verify_action",

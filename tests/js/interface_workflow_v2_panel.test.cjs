@@ -285,3 +285,14 @@ test("deferred A load cannot complete after selection switches to B", () => {
   assert.equal(harness.completeLoad(aKey), false);
   assert.equal(harness.state(), null);
 });
+
+test("selection-derived workflow entry preserves its latest source through save then server-bound compile and publish", () => {
+  const source = fs.readFileSync(panelPath, "utf8");
+  assert.match(source, /function interfaceWorkflowSelectionReplayProvenance\(node\)/);
+  assert.match(source, /选择来源：\$\{origin\}/);
+  assert.match(source, /draft_source_paths: paths/);
+  assert.match(source, /"\/panel\/save_interface_workflow_review"/);
+  assert.match(source, /"\/panel\/compile_reviewed_workflow_asset"/);
+  assert.match(source, /"\/panel\/publish_reviewed_workflow_asset"/);
+  assert.match(source, /expected_source_workflow_sha256: binding\.expected_source_workflow_sha256/);
+});

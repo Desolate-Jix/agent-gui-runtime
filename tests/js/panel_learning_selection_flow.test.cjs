@@ -229,6 +229,11 @@ test("selection review summary separates candidate boxes from audited semantic l
     contract_version: "precise_understanding_summary_v1", candidate_only: true,
     candidate_count: 56, region_count: 1,
     region_count_scope: "semantically_reviewed_selected_candidates",
+    learning_state: "ready_for_learning", state_count: 0, action_template_count: 0,
+    artifact_is_authorization: false, execute_binding_enabled: false,
+    final_submit_forbidden: true, bbox_region_count: 1,
+    action_click_point_count: 0, open_detail_transition_hint_count: 0,
+    blocker_count: 0, verification_rule_count: 0, semantic_actions: [],
   } };
 
   context.renderLearningDraftReview(review);
@@ -236,4 +241,51 @@ test("selection review summary separates candidate boxes from audited semantic l
   assert.match(summaryHost.innerHTML, /候选框数量: 56/);
   assert.match(summaryHost.innerHTML, /已具备语义的学习区域: 1/);
   assert.doesNotMatch(summaryHost.innerHTML, /区域: 56/);
+  assert.match(summaryHost.innerHTML, /区域语义已齐全/);
+  assert.match(summaryHost.innerHTML, /状态和动作尚未学习/);
+  assert.match(summaryHost.innerHTML, /未授权 Agent 执行/);
+  assert.match(summaryHost.innerHTML, /重载不等于 Agent 重跑/);
+
+  // 旧投影的初始状态不能覆盖服务端从审核 ledger 重算的学习状态。
+  review.hybrid_review_projection.learning_state = "needs_semantic_review";
+  context.renderLearningDraftReview(review);
+  assert.match(summaryHost.innerHTML, /区域语义已齐全/);
+
+  review.audit.precise_understanding_summary.learning_state = "compile_rejected";
+  review.audit.precise_understanding_summary.region_count = 0;
+  review.audit.precise_understanding_summary.bbox_region_count = 0;
+  context.renderLearningDraftReview(review);
+  assert.match(summaryHost.innerHTML, /未选定目标或缺少区域语义/);
+  assert.doesNotMatch(summaryHost.innerHTML, /区域语义已齐全/);
+
+  review.audit.precise_understanding_summary.learning_state = "ready_for_learning";
+  review.audit.precise_understanding_summary.region_count = 1;
+  review.audit.precise_understanding_summary.bbox_region_count = 1;
+  for (const invalid of [
+    { candidate_count: 55 }, { region_count: 57 }, { region_count: 0 },
+    { execute_binding_enabled: true }, { state_count: 1 },
+    { action_template_count: 1 }, { learning_state: "published" },
+    { final_submit_forbidden: false }, { bbox_region_count: 0 },
+    { action_click_point_count: 1 }, { open_detail_transition_hint_count: 1 },
+    { blocker_count: 1 }, { verification_rule_count: 1 }, { semantic_actions: ["click"] },
+  ]) {
+    const valid = { ...review.audit.precise_understanding_summary };
+    Object.assign(review.audit.precise_understanding_summary, invalid);
+    context.renderLearningDraftReview(review);
+    assert.match(summaryHost.innerHTML, /区域学习状态未核验/);
+    assert.doesNotMatch(summaryHost.innerHTML, /区域语义已齐全/);
+    review.audit.precise_understanding_summary = valid;
+  }
+  review.execute_binding_enabled = true;
+  context.renderLearningDraftReview(review);
+  assert.match(summaryHost.innerHTML, /区域学习状态未核验/);
+  review.execute_binding_enabled = false;
+
+  context.currentLanguage = "en-US";
+  context.renderLearningDraftReview(review);
+  assert.match(summaryHost.innerHTML, /Region semantics supplied/);
+  assert.match(summaryHost.innerHTML, /not authorized for Agent execution/);
+
+  context.renderLearningDraftReview({ draft: {} });
+  assert.doesNotMatch(summaryHost.innerHTML, /Region semantics|区域学习|Agent execution/);
 });

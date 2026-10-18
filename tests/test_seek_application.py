@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.application import (
+from app.application_profiles.seek.application import (
     assess_seek_application_flow_state,
     build_seek_application_final_review_audit,
     build_seek_apply_flow_decision,

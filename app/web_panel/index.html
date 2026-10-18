@@ -26,13 +26,16 @@
         <div class="workspace-switch">
           <span data-i18n="workspace_switch">Workspace</span>
           <div class="workspace-toggle" role="group" aria-label="Workspace">
-            <button id="agentModeLearnBtn" type="button" class="workspace-option active" data-mode="learn" data-i18n="learn_mode">Learn Mode</button>
-            <button id="agentModeExecuteBtn" type="button" class="workspace-option" data-mode="execute" data-i18n="execute_mode">Execute Mode</button>
+            <button id="agentModeLearnBtn" type="button" class="workspace-option stage active" data-mode="learn" data-stage="learn_interface" data-i18n="primary_learning">学习</button>
+            <button id="workflowLibraryBtn" type="button" class="workspace-option stage" data-stage="workflow_library" data-i18n="primary_library">工作流库</button>
+            <button id="agentModeExecuteBtn" type="button" class="workspace-option stage" data-mode="execute" data-stage="agent_runtime" data-i18n="primary_run">运行</button>
           </div>
           <p class="workspace-hint workspace-hint-learn" data-i18n="workspace_hint_learn">Build and calibrate the map</p>
           <p class="workspace-hint workspace-hint-execute" data-i18n="workspace_hint_execute">Locate, gate, act, verify</p>
         </div>
-        <nav class="stage-nav" aria-label="Workflow workspaces">
+        <details id="advancedNavigation">
+        <summary data-i18n="advanced_navigation">高级工具（保留原有入口）</summary>
+        <nav class="stage-nav" aria-label="Advanced workflow tools">
           <div class="nav-group nav-group-system" data-workflow="system">
             <div class="nav-group-title" data-i18n="nav_group_system">Session / System</div>
             <button class="stage" data-stage="open_bind" data-step="1" data-i18n="nav_open_bind">Open / Bind</button>
@@ -42,6 +45,7 @@
             <div class="nav-group-title" data-i18n="nav_group_learn">Learn Mode</div>
             <p class="nav-group-subtitle" data-i18n="nav_group_learn_flow">Recognize one interface, review it, then connect it to the software workflow</p>
             <button class="stage active" data-stage="learn_interface" data-step="1" data-i18n="nav_learn_interface">Learning workspace</button>
+            <button class="stage" data-stage="template_display" data-step="2" data-i18n="advanced_templates">模板 / Profile / Prompt / 旧回放</button>
           </div>
           <div class="nav-group nav-group-execute" data-workflow="execute">
             <div class="nav-group-title" data-i18n="nav_group_execute">Execute Mode</div>
@@ -50,9 +54,12 @@
             <button class="stage" data-stage="execute_locate" data-step="2" data-i18n="nav_execute_locate">Precise Locate</button>
             <button class="stage" data-stage="execute" data-step="3" data-i18n="nav_execute_gate">Click Gate</button>
             <button class="stage" data-stage="input" data-step="4" data-i18n="nav_execute_input">Input</button>
+            <button class="stage" data-stage="execute_task_run" data-step="5" data-i18n="nav_execute_task_run">PathGraph Task Run</button>
           </div>
         </nav>
+        </details>
         <div class="settings-entry">
+          <button id="diagnosticsBtn" type="button" class="stage" data-stage="trace" data-i18n="primary_diagnostics">诊断 / Trace</button>
           <button id="settingsBtn" type="button" class="settings-gear" aria-label="Settings" title="Settings">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path>
@@ -1384,6 +1391,23 @@
               </details>
             </section>
 
+            <section class="panel stage-page" data-page="agent_runtime">
+              <h3 data-i18n="stage_agent_runtime_title">运行已审核工作流</h3>
+              <p class="mode-help" data-i18n="agent_runtime_boundary">显式创建会话才读取当前绑定窗口。服务端必须能唯一确定已发布资产；这里不覆盖资产路径或窗口身份。批准后可能执行一次真实 Gate 动作，不是模拟按钮。最终提交始终禁止。</p>
+              <p data-i18n="agent_runtime_single_step">仅支持 open_apply_flow 单步及停止边界；进入申请页后 SAFE_STOP，不自动填写、上传、继续或重试。切换页面不会取消服务端会话；结果不确定时查看诊断，不要重新发起。</p>
+              <div class="button-row">
+                <button id="agentRuntimeStartBtn" type="button" disabled data-i18n="agent_runtime_start">创建会话并读取观测</button>
+                <button id="agentRuntimeStepBtn" type="button" disabled data-i18n="agent_runtime_step">请求一个步骤（尚不执行）</button>
+                <button id="agentRuntimeApproveBtn" type="button" disabled data-i18n="agent_runtime_approve">批准本次确认并执行一步</button>
+                <button id="agentRuntimeDenyBtn" type="button" disabled data-i18n="agent_runtime_deny">拒绝本次确认</button>
+              </div>
+              <p id="agentRuntimeStatus" role="status" aria-live="polite">尚未创建运行会话。</p>
+              <h4 data-i18n="agent_runtime_observation">服务端当前观测与资产身份</h4>
+              <pre id="agentRuntimeObservation" class="json-output"></pre>
+              <h4 data-i18n="agent_runtime_result">确认 / 结果 / 回执</h4>
+              <pre id="agentRuntimeResult" class="json-output"></pre>
+            </section>
+
             <section class="panel stage-page" data-page="execute_task_run">
               <h3 data-i18n="execute_task_run_title">PathGraph Task Run</h3>
               <div class="mode-help mode-help-execute" data-mode-scope="execute" data-i18n="execute_task_run_hint">A test harness that simulates an agent loop. Each step still calls Execute Mode once; input demo is dry-run only.</div>
@@ -1894,6 +1918,7 @@
     <script src="/panel/assets/learning_draft_editor.js?v=20260729-box-editor-status-1"></script>
     <script src="/panel/assets/learning_workflow_review.js?v=20260810-review-pages-4"></script>
     <script src="/panel/assets/interface_workflow_graph.js?v=20260815-workflow-layout-bounds-1"></script>
-    <script src="/panel/assets/panel.js?v=20260821-reviewed-workflow-v2-panel-1"></script>
+    <script src="/panel/assets/agent_runtime_panel.js?v=20260906-explicit-single-step-1"></script>
+    <script src="/panel/assets/panel.js?v=20260906-agent-runtime-navigation-1"></script>
   </body>
 </html>

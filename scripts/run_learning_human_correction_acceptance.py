@@ -14,9 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from fastapi.testclient import TestClient
-
-from app.main import app
+from app.core.runtime_artifacts import pinned_runtime_output_root, write_trace
+from app.learn.learning_draft_review_service import (
+    load_learning_draft_review_transaction,
+    save_learning_draft_review_transaction,
+)
+from app.learn.workflow_store import LearningWorkflowRunStore
 
 
 def bounded_bbox_adjustment(bbox: dict[str, Any], *, image_size: dict[str, int]) -> dict[str, int]:
@@ -119,11 +122,14 @@ def run_human_correction_acceptance(
     source_path: str,
     out_dir: Path,
     target_region_id: str = "",
-    client: TestClient | None = None,
 ) -> dict[str, Any]:
-    client = client or TestClient(app)
-    before_response = _post(client, "/panel/load_learning_draft_review", {"source_path": source_path})
-    before = before_response["data"]
+    workflow_store = LearningWorkflowRunStore(state_path=None)
+    load_request = {"source_path": source_path, "discover_related_sidecars": True, "workflow_run_id": None}
+    before = _trace_review_result(
+        load_learning_draft_review_transaction(
+            **load_request, project_root=ROOT, workflow_store=workflow_store,
+        ), request=load_request, step="load", out_dir=out_dir,
+    )
     draft = before.get("draft") if isinstance(before.get("draft"), dict) else {}
     screen = (draft.get("page_details") or {}).get("screen") or {}
     source_image_value = str(screen.get("source_image_path") or screen.get("image_path") or "").strip()
@@ -162,21 +168,25 @@ def run_human_correction_acceptance(
             }
         ],
     }
-    save_response = _post(
-        client,
-        "/panel/save_learning_draft_review",
-        {"source_path": source_path, "review_patch": patch},
+    save_request = {"source_path": source_path, "review_patch": patch}
+    save_result = _trace_review_result(
+        save_learning_draft_review_transaction(
+            **save_request, project_root=ROOT, workflow_store=workflow_store,
+        ), request=save_request, step="save", out_dir=out_dir,
     )
-    save_result = save_response["data"]
     reload_path = str(
         save_result.get("pathgraph_candidate_path")
         or save_result.get("reviewed_template_candidate_path")
         or ""
     ).strip()
     if not reload_path:
-        raise ValueError("panel save did not return a reloadable candidate path")
-    reloaded_response = _post(client, "/panel/load_learning_draft_review", {"source_path": reload_path})
-    reloaded = reloaded_response["data"]
+        raise ValueError("review save did not return a reloadable candidate path")
+    reload_request = {"source_path": reload_path, "discover_related_sidecars": True, "workflow_run_id": None}
+    reloaded = _trace_review_result(
+        load_learning_draft_review_transaction(
+            **reload_request, project_root=ROOT, workflow_store=workflow_store,
+        ), request=reload_request, step="reload", out_dir=out_dir,
+    )
     overlay = _resolve_path(str(save_result.get("reviewed_overlay_path") or ""))
     audit = audit_human_correction_acceptance(
         source_image_path=source_image,
@@ -214,19 +224,29 @@ def run_human_correction_acceptance(
             "execute_binding_enabled": False,
             "runtime_pathgraph_promotion": False,
         },
-        "interpretation": "Panel API human-correction replay only; no model call and no GUI action authorization.",
+        "verification_backend": "maintained_service_v1",
+        "interpretation": "Maintained-service human-correction replay only; no model call and no GUI action authorization.",
     }
     report["report_path"] = str(report_path)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report
 
 
-def _post(client: TestClient, route: str, payload: dict[str, Any]) -> dict[str, Any]:
-    response = client.post(route, json=payload).json()
-    if response.get("success") is not True or not isinstance(response.get("data"), dict):
-        error = response.get("error") if isinstance(response.get("error"), dict) else {}
-        raise RuntimeError(f"{route} failed: {error.get('details') or response.get('message')}")
-    return response
+def _trace_review_result(
+    result: dict[str, Any], *, request: dict[str, Any], step: str, out_dir: Path,
+) -> dict[str, Any]:
+    # 只绑定日志写入范围，不改变审核事务的产物归属。
+    with pinned_runtime_output_root(out_dir.resolve()):
+        trace_path = write_trace(
+            category="human-correction",
+            operation="save-learning-draft-review" if step == "save" else "load-learning-draft-review",
+            payload={
+                "contract_version": "learning_human_correction_service_trace_v1",
+                "step": step, "success": True, "request": request, "result": result,
+            },
+            name_hint="reviewed_template_candidate" if step == "save" else "learning_draft_review",
+        )
+    return {**result, "trace_path": trace_path}
 
 
 def _resolve_path(value: str) -> Path:
@@ -252,7 +272,7 @@ def _image_size(path: Path) -> dict[str, int]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run one read-only panel human-correction acceptance replay.")
+    parser = argparse.ArgumentParser(description="Run one read-only maintained-service human-correction acceptance replay.")
     parser.add_argument(
         "--source",
         default="logs/benchmarks/learn_three_interface_scaffold_20260711/applemusic/learn_mode_demo_scaffold.json",

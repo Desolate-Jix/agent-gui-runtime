@@ -1258,6 +1258,8 @@ def test_resolver_rejects_missing_stale_ambiguous_and_malformed_current_evidence
 
 
 def test_factory_wires_internal_existing_windows_runtime_without_route(tmp_path: Path) -> None:
+    from tests.test_native_vision_configuration import _config
+    _config(tmp_path / "configs/vision.json")
     from app.agent.desktop_backend import ExistingWindowsBackendAdapter
     from app.agent.live_controller import LiveController, ServerWorkflowBinding
     from app.agent.reviewed_workflow_asset import ReviewedWorkflowAssetStore
@@ -1303,6 +1305,8 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     case: str,
 ) -> None:
+    from tests.test_native_vision_configuration import _config
+    _config(tmp_path / "configs/vision.json")
     import app.agent.live_runtime_composition as composition
     import app.core.screenshot as screenshot_module
     import app.core.window_manager as window_module
@@ -1340,7 +1344,7 @@ def test_factory_graph_checks_freshness_after_gate_before_dispatch(
     monkeypatch.setattr(
         composition,
         "_run_existing_read_only_recognition",
-        runner,
+        lambda vision_configuration, **kwargs: runner(**kwargs),
     )
     monkeypatch.setattr(composition, "ExistingWindowsBackendAdapter", lambda: backend)
     monkeypatch.setattr(composition, "ExistingWindowManagerVisibilityChecker", _Visibility)
@@ -1404,6 +1408,8 @@ def test_default_recognition_wrapper_is_read_only_unseeded_and_exact_image_bound
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.vision.configuration import load_formal_vision_configuration
+    from tests.test_native_vision_configuration import _config
     import app.agent.live_runtime_composition as composition
     import app.api.vision as vision_api
 
@@ -1439,8 +1445,9 @@ def test_default_recognition_wrapper_is_read_only_unseeded_and_exact_image_bound
     result = composition._run_existing_read_only_recognition(
         image_path=str(image_path),
         goal="Quick Apply",
-        provider_mode="test-provider",
+        provider_mode="local",
         uia_snapshot=pinned_snapshot,
+        vision_configuration=load_formal_vision_configuration(_config(tmp_path / "configs/vision.json")),
     )
 
     assert result["image_path"] == str(image_path)

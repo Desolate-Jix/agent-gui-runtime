@@ -12,13 +12,14 @@ from fastapi import APIRouter
 
 from app.core.runtime_artifacts import RuntimeTimer, write_trace
 from app.core.window_manager import window_manager
+from app.core.application_launch import launch_process
 from app.api.models.request import OpenAppRequest
 from app.api.models.response import APIResponse, ErrorModel
 from app.operation.runtime_context import build_operation_runtime_context, operation_trace_link
 
 router = APIRouter(prefix="/apps", tags=["apps"])
 
-APP_CATALOG_PATH = Path("configs/app_catalog.json")
+APP_CATALOG_PATH = Path(__file__).resolve().parents[2] / "configs/app_catalog.json"
 
 DEFAULT_APP_CATALOG = {
     "contract_version": "app_catalog_v1",
@@ -129,7 +130,7 @@ def open_app(request: OpenAppRequest) -> APIResponse:
             with timer.step("list_visible_windows_before_open"):
                 before_windows = window_manager.list_visible_windows()
         with timer.step("launch_process", executable=command[0] if command else None):
-            process = subprocess.Popen(command)
+            process = launch_process(command)
         wait_seconds = float(request.wait_seconds)
         with timer.step("wait_after_open", wait_seconds=wait_seconds, requested_wait_seconds=request.wait_seconds):
             time.sleep(wait_seconds)

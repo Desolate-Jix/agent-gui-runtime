@@ -26,6 +26,7 @@ _SCOPE_NAME_RE = re.compile(
 _BENCHMARK_SCOPE_NAME_RE = re.compile(
     r"\ALocal\\AgentGuiBenchmarkWorker(?:Test)?-[0-9a-f]{64}\Z"
 )
+_NATIVE_MODEL_SCOPE_NAME_RE = re.compile(r"\ALocal\\AgentGuiNativeModel-[0-9a-f]{64}\Z")
 _BENCHMARK_CONTROLLER_NAME_RE = re.compile(
     r"\ALocal\\AgentGuiBenchmarkWorkerController(?:Test)?-[0-9a-f]{64}\Z"
 )
@@ -43,6 +44,15 @@ except ImportError:  # pragma: no cover
 
 class HybridProcessScopeError(RuntimeError):
     pass
+
+
+class HybridProcessScopeHandleCleanupError(HybridProcessScopeError):
+    """初始化未完成时只保留句柄关闭权，不赋予终止既有 Job 的权力。"""
+
+    def __init__(self, cleanup_owner: Any, close_error: BaseException) -> None:
+        self.cleanup_owner = cleanup_owner
+        self.close_error = close_error
+        super().__init__("process scope handle close failed")
 
 
 def windows_process_scope_available() -> bool:
@@ -130,28 +140,38 @@ class WindowsProcessScope:
             raise HybridProcessScopeError("Windows Job Object authority is unavailable")
         self.name = _owned_scope_name(name)
         if create:
-            self._handle = win32job.CreateJobObject(None, self.name)
-            if int(win32api.GetLastError()) == 183:
-                win32api.CloseHandle(self._handle)
-                raise HybridProcessScopeError(
-                    "Hybrid process scope identity already exists"
+            handle = win32job.CreateJobObject(None, self.name)
+            try:
+                if int(win32api.GetLastError()) == 183:
+                    raise HybridProcessScopeError(
+                        "Hybrid process scope identity already exists"
+                    )
+                information = win32job.QueryInformationJobObject(
+                    handle, win32job.JobObjectExtendedLimitInformation
                 )
-            information = win32job.QueryInformationJobObject(
-                self._handle, win32job.JobObjectExtendedLimitInformation
-            )
-            basic = dict(information.get("BasicLimitInformation") or {})
-            breakaway_flags = int(win32job.JOB_OBJECT_LIMIT_BREAKAWAY_OK) | int(
-                win32job.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
-            )
-            basic["LimitFlags"] = (
-                int(basic.get("LimitFlags") or 0) & ~breakaway_flags
-            ) | int(win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
-            information["BasicLimitInformation"] = basic
-            win32job.SetInformationJobObject(
-                self._handle,
-                win32job.JobObjectExtendedLimitInformation,
-                information,
-            )
+                basic = dict(information.get("BasicLimitInformation") or {})
+                breakaway_flags = int(win32job.JOB_OBJECT_LIMIT_BREAKAWAY_OK) | int(
+                    win32job.JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
+                )
+                basic["LimitFlags"] = (
+                    int(basic.get("LimitFlags") or 0) & ~breakaway_flags
+                ) | int(win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+                information["BasicLimitInformation"] = basic
+                win32job.SetInformationJobObject(
+                    handle,
+                    win32job.JobObjectExtendedLimitInformation,
+                    information,
+                )
+            except BaseException as error:
+                if handle is not None:
+                    try:
+                        win32api.CloseHandle(handle)
+                    except BaseException as close_error:
+                        self._handle = handle
+                        self._closed = False
+                        raise HybridProcessScopeHandleCleanupError(self, close_error) from error
+                raise
+            self._handle = handle
         else:
             access = (
                 win32job.JOB_OBJECT_QUERY
@@ -443,6 +463,7 @@ def observe_process_scope_cleanup(
     remove_owned_pid_file: bool = False,
     stable_zero_observations: int = 3,
     interval_seconds: float = 0.02,
+    retained_process_identities: Sequence[Mapping[str, int]] = (),
 ) -> dict[str, Any]:
     if stable_zero_observations < 2:
         raise ValueError("Hybrid process scope requires multiple stable-zero observations")
@@ -457,28 +478,46 @@ def observe_process_scope_cleanup(
         else:
             return _indeterminate_scope(scope_name, error)
     try:
-        if scope is not None:
-            observed_before = scope.pids()
-            if terminate and observed_before:
+        observed_identities_before: list[dict[str, int]] = []
+        tracked = {(item["pid"], item["create_time_ns"]) for item in retained_process_identities}
+        try:
+            observed_before = [] if scope is None else scope.pids()
+            # Job 先清空而内核进程仍在收尾时，必须保留终止前的身份继续观察。
+            observed_identities_before = _identities_for_pids(observed_before)
+            tracked = {(item["pid"], item["create_time_ns"])
+                       for item in (*retained_process_identities, *observed_identities_before)}
+            if scope is not None and terminate and observed_before:
                 scope.terminate()
-        observed_identities_before = _identities_for_pids(observed_before)
+        except BaseException as error:
+            return {**_indeterminate_scope(scope_name, error),
+                    "observed_member_identities_before": observed_identities_before,
+                    "remaining_owned_process_identities": [
+                        {"pid": pid, "create_time_ns": created} for pid, created in sorted(tracked)]}
         zero_rounds = 0
         samples: list[dict[str, Any]] = []
         final_pids: list[int] = []
         final_listeners: list[dict[str, int]] = []
+        remaining_owned: list[dict[str, int]] = []
         for _ in range(max(stable_zero_observations * 3, 6)):
             try:
                 final_pids = [] if scope is None else scope.pids()
                 final_identities = _identities_for_pids(final_pids)
                 final_listeners = _listeners(listener_ports)
+                # PID 被复用不属于原进程，不等待或终止新占用者。
+                remaining_owned = [item for item in _identities_for_pids(sorted({pid for pid, _ in tracked}))
+                                   if (item["pid"], item["create_time_ns"]) in tracked]
             except BaseException as error:
-                return _indeterminate_scope(scope_name, error)
+                return {**_indeterminate_scope(scope_name, error),
+                        "observed_member_identities_before": observed_identities_before,
+                        "remaining_owned_process_identities": [
+                            {"pid": pid, "create_time_ns": created} for pid, created in sorted(tracked)]}
             samples.append({
                 "pids": final_pids,
                 "process_identities": final_identities,
                 "listeners": final_listeners,
+                "remaining_owned_process_identities": remaining_owned,
             })
-            if not final_pids and not final_listeners:
+            if not final_pids and not final_listeners and not remaining_owned:
                 zero_rounds += 1
                 if zero_rounds >= stable_zero_observations:
                     break
@@ -501,6 +540,7 @@ def observe_process_scope_cleanup(
             zero_rounds >= stable_zero_observations
             and not final_pids
             and not final_listeners
+            and not remaining_owned
             and not pid_file_remaining
         )
         return {
@@ -513,6 +553,7 @@ def observe_process_scope_cleanup(
             "observed_member_identities_before": observed_identities_before,
             "member_pids_after": final_pids,
             "member_identities_after": final_identities,
+            "remaining_owned_process_identities": remaining_owned,
             "active_listeners_after": final_listeners,
             "pid_file_after": str(pid_path) if pid_file_remaining else None,
             "stable_zero_observations": zero_rounds,
@@ -817,6 +858,7 @@ def _owned_scope_name(value: str) -> str:
     if (
         _SCOPE_NAME_RE.fullmatch(normalized) is None
         and _BENCHMARK_SCOPE_NAME_RE.fullmatch(normalized) is None
+        and _NATIVE_MODEL_SCOPE_NAME_RE.fullmatch(normalized) is None
     ):
         raise ValueError("Hybrid process scope name is invalid")
     return normalized

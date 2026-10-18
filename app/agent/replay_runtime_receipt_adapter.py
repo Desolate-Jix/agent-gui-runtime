@@ -11,6 +11,7 @@ from typing import Any
 
 from app.agent.reviewed_workflow_asset import validate_reviewed_workflow_asset
 from app.agent.reviewed_workflow_replay import verify_transition_result
+from app.agent.native_identity import asset_application_identity_key
 from app.agent.runtime_contracts import (
     AgentIntentV1,
     AgentObservationV1,
@@ -68,18 +69,15 @@ def _require_reviewed_asset_application(
     application = _mapping(asset.get("application"), "reviewed asset application")
     kind = application.get("kind")
     _require(kind in {"web", "native"}, "reviewed asset application kind is invalid")
-    if kind == "web":
-        identity = application.get("canonical_domain")
-        origin = application.get("canonical_origin")
-        _require(isinstance(identity, str) and identity, "reviewed asset application identity is invalid")
-        _require(isinstance(origin, str) and origin, "reviewed asset application origin is invalid")
-    else:
-        identity = application.get("product_identity") or application.get("executable")
-        origin = None
-        _require(isinstance(identity, str) and identity, "reviewed asset application identity is invalid")
+    # 旧回执没有前置进程事实，不能证明原生操作前后的实例连续性。
+    _require(kind == "web", "native replay receipt unsupported without a pre-action identity contract")
+    identity_key = asset_application_identity_key(application)
+    origin = application.get("canonical_origin")
+    _require(bool(identity_key), "reviewed asset application identity is invalid")
+    _require(isinstance(origin, str) and origin, "reviewed asset application origin is invalid")
     _require(observation.application.kind == kind, "reviewed asset application kind mismatch")
     _require(
-        observation.application.identity_ref == f"application:{kind}:{identity}",
+        observation.application.identity_ref == f"application:{identity_key}",
         "reviewed asset application identity mismatch",
     )
     return kind, origin

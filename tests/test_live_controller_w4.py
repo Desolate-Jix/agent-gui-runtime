@@ -1253,6 +1253,10 @@ def test_window_manager_visibility_adapter_returns_facts_not_authority() -> None
             self.calls.append((bound.handle, x, y))
             return {"allowed": True, "reason": "target_point_owned_by_bound_window"}
 
+        def validate_bound_region_visibility(self, *, bound, bbox) -> dict:
+            assert bound.handle == 4949 and bbox == (100.0, 200.0, 300.0, 80.0)
+            return {"allowed": True, "reason": "target_region_visible"}
+
     manager = WindowManager()
     checker = ExistingWindowManagerVisibilityChecker(window_manager=manager)
 
@@ -1270,6 +1274,7 @@ def test_window_manager_visibility_adapter_returns_facts_not_authority() -> None
 
     assert facts == {
         "bound_window_handle": 4949,
+        "region_visibility": {"allowed": True, "reason": "target_region_visible"},
         "point_visibility": {
             "allowed": True,
             "reason": "target_point_owned_by_bound_window",

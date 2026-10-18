@@ -37,6 +37,8 @@ tmp_*.ps1
 logs/*.log
 logs/*.json
 *.png
+!docs/images/native-review-node.png
+!docs/images/native-review-edge.png
 !docs/media/private-prototype-learn-mode.png
 !docs/media/private-prototype-execute-mode.png
 !docs/media/private-prototype-seek-results.png

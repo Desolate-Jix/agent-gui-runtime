@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.gate.candidates import attach_candidate_freshness, validate_action_candidate_freshness
 from app.gate.contracts import build_gate_contract_catalog, list_gate_contracts
 from app.gate.scroll import build_scroll_effect_validation, build_scroll_precondition_decision, build_scroll_safe_point
 from app.gate.window import validate_bound_window_for_app
-from app.main import app
+from app.api.application import create_runtime_app
+
+app = create_runtime_app()
 from app.operation.skills import build_operation_skill_catalog, list_operation_skills
 from app.operation.mousetester import should_verify_mouse_tester_semantics, target_bbox_from_recommended
 from app.operation import region_click as region_click_module
@@ -16,6 +19,16 @@ from app.operation.region_click import run_region_click
 from app.runtime_architecture.contracts import TraceEvent
 from app.trace.actions import execute_trace_enabled, execute_trace_operation, write_execute_trace_if_enabled
 from app.trace.recorder import record_trace_event
+
+
+@pytest.fixture
+def legacy_seek_profile_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    fixture = Path(__file__).parent / "fixtures" / "legacy_seek_app_profile_v1.json"
+    profile_path = tmp_path / "artifacts" / "app_profiles" / "seek_app_profile_v1.json"
+    profile_path.parent.mkdir(parents=True)
+    profile_path.write_bytes(fixture.read_bytes())
+    monkeypatch.chdir(tmp_path)
+    return profile_path
 
 
 def test_gate_layer_exposes_candidate_freshness_contract() -> None:
@@ -58,7 +71,7 @@ def test_gate_layer_validates_bound_window_aliases() -> None:
     assert custom["reason"] == "unmapped_app_name_not_enforced"
 
 
-def test_operation_layer_catalog_maps_seek_profile_skills() -> None:
+def test_operation_layer_catalog_maps_seek_profile_skills(legacy_seek_profile_cwd: Path) -> None:
     catalog = build_operation_skill_catalog("seek")
     skills = {item["skill_id"]: item for item in catalog["skills"]}
 
@@ -176,7 +189,7 @@ def test_operation_layer_exposes_mousetester_semantic_helpers() -> None:
     assert target_bbox_from_recommended(plan["recommended_target"]) == {"x": 10, "y": 20, "width": 30, "height": 40}
 
 
-def test_gate_contract_catalog_maps_seek_profile_contracts() -> None:
+def test_gate_contract_catalog_maps_seek_profile_contracts(legacy_seek_profile_cwd: Path) -> None:
     catalog = build_gate_contract_catalog("seek")
     contracts = {item["contract_id"]: item for item in catalog["contracts"]}
 
@@ -213,8 +226,8 @@ def test_gate_layer_builds_scroll_precondition_and_effect_contracts() -> None:
     assert precondition["contract_version"] == "scroll_precondition_decision_v1"
     assert precondition["decision"] == "ALLOW"
     assert "point_inside_container" in precondition["reasons"]
-    assert effect["contract_version"] == "scroll_effect_validation_v1"
-    assert effect["status"] == "moved"
+    assert effect["contract_version"] == "scroll_effect_validation_v2"
+    assert effect["status"] == "unknown"
     assert effect["target_container_id"] == "seek:job_detail"
 
 
@@ -280,7 +293,7 @@ def test_trace_layer_controls_execute_action_trace_writes() -> None:
     ]
 
 
-def test_runtime_architecture_and_operation_skill_routes() -> None:
+def test_runtime_architecture_and_operation_skill_routes(legacy_seek_profile_cwd: Path) -> None:
     client = TestClient(app)
 
     arch_response = client.get("/runtime/architecture")

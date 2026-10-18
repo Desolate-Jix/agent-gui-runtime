@@ -110,7 +110,7 @@ def test_runner_can_open_app_before_execute(tmp_path, monkeypatch) -> None:
                 "app": {
                     "app_name": "edge",
                     "app_id": "edge",
-                    "url": "file:///D:/agent-gui-runtime/app/web_panel/seek_resume_fixture.html",
+                    "url": "file:///D:/agent-gui-runtime/tests/fixtures/smoke/seek_resume_fixture.html",
                     "window_title_contains": "SEEK Resume Screening Fixture",
                     "open_before": True,
                     "wait_seconds": 0,

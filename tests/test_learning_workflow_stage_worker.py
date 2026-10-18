@@ -6165,23 +6165,6 @@ def test_worker_dispatches_managed_hybrid_fusion_without_model_acquisition(
     assert "panel_learning_hybrid_fusion" not in workflow_worker._MODEL_STAGE_BY_TASK_KIND
 
 
-def test_panel_request_contract_accepts_managed_hybrid_fusion() -> None:
-    from app.api.panel import PanelStartLearningStageWorkerRequest
-
-    request = PanelStartLearningStageWorkerRequest.model_validate(
-        {
-            "run_id": "run-fusion",
-            "expected_revision": 1,
-            "stage": "fusion",
-            "operation_id": "operation-fusion",
-            "task_kind": "panel_learning_hybrid_fusion",
-            "payload": {},
-        }
-    )
-
-    assert request.task_kind == "panel_learning_hybrid_fusion"
-
-
 def test_managed_hybrid_fusion_enforces_sealed_full_producer_boundary() -> None:
     from app.learn.recognition.uei.canonical import seal_immutable
     from tests.test_learn_hybrid_fusion import _inputs

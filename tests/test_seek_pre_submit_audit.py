@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.pre_submit_audit import build_seek_final_submit_decision
+from app.application_profiles.seek.pre_submit_audit import build_seek_final_submit_decision
 
 
 def test_seek_final_submit_decision_blocks_unreviewed_non_auckland_contract_with_unsupported_yes() -> None:

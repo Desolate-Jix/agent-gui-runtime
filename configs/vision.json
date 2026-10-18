@@ -12,7 +12,7 @@
       "provider_mode": "local_grounding",
       "input_format": "openai_compatible_vision",
       "supports_ocr_anchors": false,
-      "model_path": "models/vista-4b-safetensors"
+      "model_path": "models/vista-4b-safetensors-sharded"
     },
     "local_understanding": {
       "model_name": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
@@ -32,7 +32,7 @@
       "provider_mode": "local_grounding",
       "input_format": "openai_compatible_vision",
       "supports_ocr_anchors": false,
-      "model_path": "models/vista-4b-safetensors"
+      "model_path": "models/vista-4b-safetensors-sharded"
     },
     "api": {
       "provider": "api_stub",

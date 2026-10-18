@@ -16,7 +16,7 @@ from app.learn.interface_map import build_learned_interface_map, merge_visual_as
 from app.learn.path_graph_artifacts import build_seek_runtime_path_graph_export
 from app.learn.visual_asset_calibration import calibrate_interface_map_visual_assets
 from app.learn.visual_asset_crops import build_visual_asset_crop_export
-from app.seek.learn_artifacts import build_seek_learn_artifacts
+from app.application_profiles.seek.learn_artifacts import build_seek_learn_artifacts
 
 
 def main(argv: list[str] | None = None) -> int:

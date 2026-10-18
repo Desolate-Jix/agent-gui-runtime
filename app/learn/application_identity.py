@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import PureWindowsPath
 from typing import Any
 from urllib.parse import urlparse
 
@@ -21,17 +22,27 @@ def normalize_application_identity(value: dict[str, Any] | None) -> dict[str, An
 
     source = value if isinstance(value, dict) else {}
     name = _text(source.get("display_name") or source.get("name"))
-    process = _normalize_executable(
-        source.get("executable_identity")
+    raw_executable = (
+        source.get("executable_path")
+        or source.get("executable_identity")
         or source.get("process")
         or source.get("executable")
     )
-    product_name = _text(
-        source.get("product")
-        or source.get("product_name")
-        or source.get("app_name")
-        or name
+    process = _normalize_executable(raw_executable)
+    executable_path = _normalize_windows_executable_path(raw_executable)
+    canonical_native = (
+        source.get("contract_version") == APPLICATION_IDENTITY_CONTRACT
+        and source.get("kind") == "native"
+        and "product_identity" in source
     )
+    # 已规范身份不能再次把显示标题当产品；否则每次保存/编译都会改身份键。
+    product_name = _text(source.get("product_identity")) if canonical_native else _text(
+        source.get("product") or source.get("product_name") or source.get("app_name") or name
+    )
+    product_provided = bool(product_name)
+    source_evidence = source.get("source_evidence")
+    if canonical_native and isinstance(source_evidence, dict) and isinstance(source_evidence.get("product_provided"), bool):
+        product_provided = source_evidence["product_provided"]
     url_value = _text(
         source.get("url")
         or source.get("origin")
@@ -84,9 +95,11 @@ def normalize_application_identity(value: dict[str, Any] | None) -> dict[str, An
         "canonical_origin": None,
         "executable_identity": executable_identity,
         "product_identity": product_identity or None,
+        **({"executable_path": executable_path} if executable_path else {}),
         "source_evidence": {
             "executable_provided": bool(process),
-            "product_provided": bool(product_name),
+            "executable_path_provided": bool(executable_path),
+            "product_provided": product_provided,
         },
         "artifact_is_authorization": False,
     }
@@ -105,8 +118,7 @@ def _canonical_web_location(raw_value: str) -> tuple[str | None, str | None]:
         hostname = hostname.encode("idna").decode("ascii")
     except UnicodeError:
         return None, None
-    if hostname.startswith("www."):
-        hostname = hostname[4:]
+    # www 与裸域名不是同源，分组身份也必须保留真实主机名。
     port = parsed.port
     host_with_port = (
         f"{hostname}:{port}"
@@ -120,6 +132,16 @@ def _canonical_web_location(raw_value: str) -> tuple[str | None, str | None]:
 def _normalize_executable(value: Any) -> str:
     text = _text(value).replace("\\", "/").rsplit("/", 1)[-1].lower()
     return text
+
+
+def _normalize_windows_executable_path(value: Any) -> str | None:
+    text = _text(value).replace("/", "\\")
+    if not text:
+        return None
+    path = PureWindowsPath(text)
+    if not path.is_absolute() or not path.drive:
+        return None
+    return str(path).casefold()
 
 
 def _slug(value: Any) -> str:

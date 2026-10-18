@@ -187,6 +187,7 @@ class ExecuteRecognitionPlanRequest(BaseModel):
     """Request model for executing a gated recognition plan against a bound window."""
 
     goal: str = Field(min_length=1)
+    click_kind: Literal["single", "double", "right"] = "single"
     approved_plan_id: Optional[str] = None
     learned_instruction_id: Optional[str] = None
     interface_memory_id: Optional[str] = None
@@ -210,6 +211,27 @@ class ExecuteRecognitionPlanRequest(BaseModel):
     max_execution_attempts: int = Field(default=2, ge=1, le=3)
     dry_run: bool = False
     operation_context: OperationRuntimeContextModel = Field(default_factory=OperationRuntimeContextModel)
+
+    @model_validator(mode="after")
+    def require_fresh_non_single_click(self) -> "ExecuteRecognitionPlanRequest":
+        # 学习资产尚无点击种类契约，不能把旧单击证据冒充双击/右键。
+        if self.click_kind != "single":
+            if (self.agent_mode != "execute" or self.learning_mode or self.approved_plan_id
+                    or self.learned_instruction_id or self.interface_memory_id or self.interface_memory_action_id
+                    or not self.capture_live or self.image_path or self.observe_trace_path
+                    or self.auto_observe_learning_artifacts or self.allow_saved_image_execution
+                    or self.write_policy.path_graph or self.write_policy.element_memory):
+                raise ValueError("non-single clicks currently require fresh non-learning execution")
+            self.max_execution_attempts = 1
+        return self
+
+    @property
+    def click_options(self) -> dict[str, Any]:
+        if self.click_kind == "right":
+            return {"button": "right"}
+        if self.click_kind == "double":
+            return {"click_count": 2}
+        return {}
 
 
 class AvailableActionsRequest(BaseModel):

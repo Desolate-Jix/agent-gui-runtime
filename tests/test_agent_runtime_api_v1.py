@@ -438,7 +438,9 @@ def test_routes_are_registered() -> None:
 
 
 def test_routes_are_registered_on_main_app() -> None:
-    from app.main import app
+    from app.api.application import create_runtime_app
+
+    app = create_runtime_app()
 
     paths = {route.path for route in app.routes}
     assert "/runtime/agent/session/start" in paths
@@ -712,11 +714,57 @@ def test_wrong_intent_identity_is_rejected_without_consuming(field: str, value: 
     assert accepted.status_code == 200
 
 
-def test_intent_requires_open_apply_flow_semantic_action_not_only_matching_id() -> None:
+@pytest.mark.parametrize(
+    "semantic_action", ["safe_stop", "final_submit", "send", "confirm", "payment", "unknown_action"]
+)
+def test_intent_requires_reviewed_semantic_action_not_only_matching_id(semantic_action: str) -> None:
     service, _, controllers, _ = _callsite(semantic_action="open_detail")
     client = _client(service)
     _start(client)
+    # 模拟服务端观测损坏，证明合法动作 ID 不能替禁用语义取得权限。
+    observation = service._observation
+    action = observation.available_actions[0].model_copy(update={"semantic_action": semantic_action})
+    service._observation = observation.model_copy(update={"available_actions": [action]})
     response = client.post("/runtime/agent/intent/submit", json=_intent_payload())
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "agent_runtime_invalid_intent"
+    assert controllers[0].submissions == []
+
+
+@pytest.mark.parametrize("semantic_action", ["open_detail", "back", "close_modal"])
+def test_supported_navigation_reaches_controller_without_bypassing_confirmation(semantic_action: str) -> None:
+    service, claims, controllers, _ = _callsite(
+        semantic_action=semantic_action, requires_confirmation=True,
+    )
+    client = _client(service)
+    observation = _start(client)
+    response = client.post("/runtime/agent/intent/submit", json=_intent_payload())
+    assert observation["available_actions"][0]["semantic_action"] == semantic_action
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "NEEDS_REVIEW"
+    assert response.json()["data"]["reason_code"] == "human_confirmation_required"
+    assert response.json()["data"]["confirmation_id"] == claims.claim.confirmation.confirmation_id
+    assert claims.claim.phase == "confirmation_pending"
+    assert claims.claim.confirmation.decision is None
+    assert controllers[0].attempts == 0
+
+
+@pytest.mark.parametrize("semantic_action", ["final_submit", "send", "confirm", "payment", "unknown_action"])
+def test_observation_schema_rejects_forbidden_semantics_even_with_reviewed_id(semantic_action: str) -> None:
+    payload = _observation().model_dump(mode="json")
+    payload["available_actions"][0]["semantic_action"] = semantic_action
+    with pytest.raises(ValueError, match="semantic_action"):
+        validate_agent_observation_v1(payload)
+
+
+def test_runtime_safe_stop_is_not_a_dispatch_intent() -> None:
+    service, _, controllers, _ = _callsite()
+    client = _client(service)
+    _start(client)
+    response = client.post(
+        "/runtime/agent/intent/submit",
+        json=_intent_payload() | {"action_id": "runtime.safe_stop"},
+    )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "agent_runtime_invalid_intent"
     assert controllers[0].submissions == []
@@ -994,12 +1042,18 @@ def test_opaque_reviewed_transition_id_is_accepted_and_preserved_through_restart
     assert sum(controller.attempts for controller in controllers) == 1
 
 
-def test_restart_confirmation_approve_rejects_persisted_semantic_action_bypass_before_runtime_dependencies() -> None:
+@pytest.mark.parametrize(
+    "semantic_action", ["safe_stop", "final_submit", "send", "confirm", "payment", "unknown_action"]
+)
+def test_restart_confirmation_approve_rejects_persisted_semantic_action_bypass_before_runtime_dependencies(semantic_action: str) -> None:
     assets = _Assets()
     observation = _observation(
         workflow=_workflow(asset=assets.assets["portfolio.seek"]),
         semantic_action="open_detail",
     )
+    # 绕过构造校验注入损坏记录，单独验证恢复入口先拒绝再接触运行时。
+    action = observation.available_actions[0].model_copy(update={"semantic_action": semantic_action})
+    observation = observation.model_copy(update={"available_actions": [action]})
     intent = AgentIntentV1.model_validate(
         {
             "contract_version": "agent_intent_v1",
@@ -1125,7 +1179,8 @@ def test_default_production_factory_can_be_replaced_without_physical_input(
     created: list[ServerWorkflowBinding] = []
     assets = _Assets()
 
-    def fake_composition(project_root, binding):
+    def fake_composition(project_root, binding, *, intent_claim_store):
+        assert intent_claim_store is claims
         created.append(binding)
         return _Controller(
             claims,

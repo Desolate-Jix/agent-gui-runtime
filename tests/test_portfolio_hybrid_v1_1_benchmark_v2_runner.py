@@ -249,6 +249,19 @@ class _DeterministicRuntime:
             "available_slots": 72,
         }
 
+    def reserve_attempt(
+        self, *, attempt_ref: Mapping[str, object], attempt_dir: Path
+    ) -> None:
+        self.calls.append(
+            (
+                "reserve_attempt",
+                {
+                    "attempt_ref": dict(attempt_ref),
+                    "attempt_dir": Path(attempt_dir),
+                },
+            )
+        )
+
     def prepare_screen_groups(
         self,
         *,
@@ -2901,6 +2914,14 @@ def test_holdout_h2_first_claim_creates_exact_attempt_and_reopens_opened_chain(
         }
         return [deepcopy(expected_envelope)]
 
+    class _ReservationRuntime:
+        def reserve_attempt(
+            self, *, attempt_ref: Mapping[str, object], attempt_dir: Path
+        ) -> None:
+            calls.append("reserve")
+            assert dict(attempt_ref) == expected_ref
+            assert Path(attempt_dir) == expected_dir
+
     monkeypatch.setattr(runner, "claim_holdout_once", claim)
     monkeypatch.setattr(runner, "append_holdout_attempt_opened", append)
     monkeypatch.setattr(runner, "validate_holdout_attempt_events", reopen)
@@ -2910,15 +2931,71 @@ def test_holdout_h2_first_claim_creates_exact_attempt_and_reopens_opened_chain(
         lambda: (_ for _ in ()).throw(AssertionError("H2 acquired Runtime")),
     )
 
-    opened = runner._open_holdout_actual_models_attempt(validated)
+    opened = runner._open_holdout_actual_models_attempt(
+        validated, runtime=_ReservationRuntime()
+    )
 
-    assert calls == ["claim", "append", "reopen"]
+    assert calls == ["claim", "reserve", "append", "reopen"]
     assert opened.validated is validated
     assert opened.attempt_ref == expected_ref
     assert opened.attempt_dir == expected_dir
     assert sorted(path.name for path in paths["output_root"].iterdir()) == [
         expected_attempt_id
     ]
+
+
+def test_holdout_h2_reservation_failure_does_not_append_opened(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    argv, native_ref, paths = _holdout_h2_input_fixture(monkeypatch, tmp_path)
+    validated = runner._validate_holdout_actual_models_input(argv)
+    claim_id = hashlib.sha256(_canonical(runner.IDENTITY)).hexdigest()
+    claim_ref = {"id": f"holdout-claim/{claim_id}", "envelope_sha256": "b" * 64}
+    expected_attempt_id, expected_ref, _ = _expected_holdout_h2_open(
+        authorization_ref=native_ref,
+        claim_id=claim_id,
+        claim_ref=claim_ref,
+        attempt_dir=paths["output_root"] / hashlib.sha256(
+            (
+                "benchmark-v2-holdout-attempt\0"
+                + claim_id
+                + "\0"
+                + native_ref["envelope_sha256"]
+            ).encode("utf-8")
+        ).hexdigest(),
+    )
+    appended: list[object] = []
+    monkeypatch.setattr(
+        runner,
+        "claim_holdout_once",
+        lambda **_kwargs: {
+            "state": "consumed",
+            "claim_id": claim_id,
+            "attempt_id": expected_attempt_id,
+            "claim_ref": claim_ref,
+            "newly_created": True,
+            "safety": runner.HOLDOUT_SAFETY,
+        },
+    )
+    monkeypatch.setattr(
+        runner, "append_holdout_attempt_opened", lambda **kwargs: appended.append(kwargs)
+    )
+
+    class _InterruptedReservationRuntime:
+        def reserve_attempt(
+            self, *, attempt_ref: Mapping[str, object], attempt_dir: Path
+        ) -> None:
+            assert dict(attempt_ref) == expected_ref
+            assert Path(attempt_dir).name == expected_attempt_id
+            raise RuntimeError("interrupted before opened")
+
+    with pytest.raises(RuntimeError, match="before opened"):
+        runner._open_holdout_actual_models_attempt(
+            validated, runtime=_InterruptedReservationRuntime()
+        )
+
+    assert appended == []
+    assert (paths["output_root"] / expected_attempt_id).is_dir()
 
 
 @pytest.mark.parametrize(
@@ -2968,7 +3045,9 @@ def test_holdout_h2_nonunique_or_mismatched_claim_fails_before_mkdir_and_append(
     )
 
     with pytest.raises(ValueError, match="claim"):
-        runner._open_holdout_actual_models_attempt(validated)
+        runner._open_holdout_actual_models_attempt(
+            validated, runtime=_DeterministicRuntime()
+        )
 
     assert appended == []
     assert not paths["output_root"].exists()
@@ -3025,7 +3104,9 @@ def test_holdout_h2_append_or_reopen_mismatch_fails_closed_without_runtime(
     )
 
     with pytest.raises(ValueError, match="opened"):
-        runner._open_holdout_actual_models_attempt(validated)
+        runner._open_holdout_actual_models_attempt(
+            validated, runtime=_DeterministicRuntime()
+        )
 
 
 class _HoldoutH3Runtime(_DeterministicRuntime):

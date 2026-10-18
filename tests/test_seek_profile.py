@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.profile import assess_candidate_profile_readiness
+from app.application_profiles.seek.profile import assess_candidate_profile_readiness
 
 
 def test_profile_readiness_blocks_smoke_profile() -> None:

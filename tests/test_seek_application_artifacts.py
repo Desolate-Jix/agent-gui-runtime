@@ -4,7 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 
-from app.seek.application_artifacts import build_seek_application_flow_artifact
+from app.application_profiles.seek.application_artifacts import build_seek_application_flow_artifact
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "seek_export_application_flow_artifact.py"

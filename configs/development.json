@@ -1,0 +1,5 @@
+{
+  "ports": [8000, 8765],
+  "log_path": "../logs/test-panel-runtime.log",
+  "startup_timeout_seconds": 30
+}

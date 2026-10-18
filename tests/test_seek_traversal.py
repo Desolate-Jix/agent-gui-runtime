@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.traversal import (
+from app.application_profiles.seek.traversal import (
     assess_seek_job_detail_completeness,
     build_seek_mvp_accuracy_summary,
     build_seek_mvp_run_report,

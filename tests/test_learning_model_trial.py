@@ -10,7 +10,9 @@ from app.learn.model_trial import (
     build_learning_model_trial,
     score_learning_template_draft,
 )
-from app.main import app
+from app.api.application import create_runtime_app
+
+app = create_runtime_app()
 
 
 def _image(path: Path) -> Path:

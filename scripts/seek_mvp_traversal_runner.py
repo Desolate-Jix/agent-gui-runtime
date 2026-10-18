@@ -18,12 +18,12 @@ if str(REPO_ROOT) not in sys.path:
 from app.core.runtime_artifacts import write_trace
 from app.gate.ocr import canonicalize_short_ocr_token, ocr_contextual_match
 from app.operation.visual_asset_matching import match_visual_asset
-from app.seek.application import assess_seek_application_flow_state, build_seek_apply_flow_decision
-from app.seek.answer_plan import build_application_answer_plan
-from app.seek.cover_letter import build_cover_letter_draft
-from app.seek.extraction import extract_seek_job_cards, extract_seek_job_detail
-from app.seek.learn_artifacts import action_metadata, scroll_target_for_action
-from app.seek.matching import (
+from app.application_profiles.seek.application import assess_seek_application_flow_state, build_seek_apply_flow_decision
+from app.application_profiles.seek.answer_plan import build_application_answer_plan
+from app.application_profiles.seek.cover_letter import build_cover_letter_draft
+from app.application_profiles.seek.extraction import extract_seek_job_cards, extract_seek_job_detail
+from app.application_profiles.seek.learn_artifacts import action_metadata, scroll_target_for_action
+from app.application_profiles.seek.matching import (
     apply_agent_suitability_review,
     find_agent_suitability_review,
     load_agent_suitability_reviews,
@@ -32,8 +32,8 @@ from app.seek.matching import (
     save_suitable_job_record,
     score_seek_job,
 )
-from app.seek.profile import assess_candidate_profile_readiness
-from app.seek.traversal import (
+from app.application_profiles.seek.profile import assess_candidate_profile_readiness
+from app.application_profiles.seek.traversal import (
     assess_seek_job_detail_completeness,
     build_seek_mvp_accuracy_summary,
     build_seek_mvp_run_report,

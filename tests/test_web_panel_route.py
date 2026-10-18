@@ -382,7 +382,11 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'id="agentModeSystemBtn"' not in response.text
     assert 'id="settingsBtn"' in response.text
     assert 'class="settings-gear"' in response.text
-    assert 'class="workspace-option active"' in response.text
+    assert 'class="workspace-option stage active"' in response.text
+    assert 'id="workflowLibraryBtn"' in response.text
+    assert 'data-stage="workflow_library"' in response.text
+    assert 'data-stage="agent_runtime"' in response.text
+    assert 'id="advancedNavigation"' in response.text
     assert 'class="mode-group"' not in response.text
     assert 'data-i18n="nav_group_system"' in response.text
     assert 'data-i18n="nav_group_learn"' in response.text
@@ -390,10 +394,10 @@ def test_web_panel_serves_browser_control_surface() -> None:
     assert 'data-i18n="nav_group_learn_flow"' in response.text
     assert 'data-i18n="nav_group_execute_flow"' in response.text
     assert 'data-stage="learn_interface"' in response.text
-    assert 'data-stage="template_display"' not in response.text
+    assert 'data-stage="template_display"' in response.text
     assert 'data-stage="learn_validation"' not in response.text
     assert 'data-stage="execute_actions"' in response.text
-    assert 'data-stage="execute_task_run"' not in response.text
+    assert 'data-stage="execute_task_run"' in response.text
     assert 'data-stage="execute_locate"' in response.text
     assert 'data-i18n="nav_group_replay"' not in response.text
     assert 'data-i18n="nav_group_replay_flow"' not in response.text
@@ -955,6 +959,11 @@ def test_saved_workflow_status_counts_formal_interface_nodes() -> None:
 
 def test_web_panel_serves_static_assets() -> None:
     client = TestClient(app)
+
+    runtime_module = client.get("/panel/assets/agent_runtime_panel.js")
+    assert runtime_module.status_code == 200
+    assert "mountAgentRuntimePanel" in runtime_module.text
+    assert runtime_module.headers["cache-control"] == "no-store, max-age=0"
 
     response = client.get("/panel/assets/panel.js")
 
@@ -5482,7 +5491,9 @@ def test_concurrent_changed_save_cannot_be_overwritten_by_stale_approved_refresh
     changed_started = threading.Event()
     unchanged_started = threading.Event()
     changed_saved = threading.Event()
-    real_save = panel_api.save_interface_workflow_review_candidate
+    from app.learn import interface_workflow_service as workflow_service
+
+    real_save = workflow_service.save_interface_workflow_review_candidate
 
     def ordered_save(review, *, project_root, out_dir=None):
         changed = review["nodes"][0]["display_name"] == "Changed concurrently"
@@ -5498,7 +5509,7 @@ def test_concurrent_changed_save_cannot_be_overwritten_by_stale_approved_refresh
         return real_save(review, project_root=project_root, out_dir=out_dir)
 
     monkeypatch.setattr(
-        panel_api,
+        workflow_service,
         "save_interface_workflow_review_candidate",
         ordered_save,
     )

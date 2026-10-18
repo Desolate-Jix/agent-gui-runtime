@@ -9,7 +9,9 @@ from app.api import runtime as runtime_api
 from app.core import model_server
 from app.core.model_server import profile_for_stage
 from app.api.models.request import ModelServerRequest, RuntimePrepareRequest
-from app.main import app
+from app.api.application import create_runtime_app
+
+app = create_runtime_app()
 
 
 def test_model_status_reports_profiles(monkeypatch) -> None:
@@ -193,7 +195,7 @@ def test_start_model_server_passes_transformers_profile_args(monkeypatch) -> Non
         {
             "profile_id": "vista_4b_transformers",
             "model_name": "inclusionAI/VISTA-4B",
-            "model_path": "models/vista-4b-safetensors",
+            "model_path": "models/vista-4b-safetensors-sharded",
             "start_script": "scripts/model_servers/start_transformers_vision_server.ps1",
             "pid_file": "logs/test-vista-transformers.pid",
             "host": "127.0.0.1",
@@ -302,7 +304,7 @@ def test_start_model_server_rejects_immediate_script_exit(monkeypatch) -> None:
         model_server.start_model_server(
             {
                 "profile_id": "vista_4b_transformers",
-                "model_path": "models/vista-4b-safetensors",
+                "model_path": "models/vista-4b-safetensors-sharded",
                 "start_script": "scripts/model_servers/start_transformers_vision_server.ps1",
                 "pid_file": "logs/test-vista-transformers-failed.pid",
                 "port": 13244,

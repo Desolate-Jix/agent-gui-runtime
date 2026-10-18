@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.final_review import build_seek_final_review_extraction
+from app.application_profiles.seek.final_review import build_seek_final_review_extraction
 
 
 def test_final_review_accepts_seek_answered_count_summary_for_employer_questions() -> None:

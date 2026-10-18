@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.cover_letter import build_cover_letter_draft
+from app.application_profiles.seek.cover_letter import build_cover_letter_draft
 
 
 def _detail() -> dict:

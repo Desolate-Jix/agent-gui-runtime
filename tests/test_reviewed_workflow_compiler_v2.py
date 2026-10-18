@@ -486,7 +486,7 @@ def test_blocks_non_mvp_action_missing_semantic_success_and_unknown_element(tmp_
         review = _base_review()
         edge = review["edges"][0]
         if case == "action":
-            edge["action_type"] = "fill_field"
+            edge["action_type"] = "continue_next_step"
         elif case == "success":
             edge["success_conditions"] = []
         else:
@@ -727,7 +727,6 @@ def test_element_reference_must_belong_to_edge_source_node(tmp_path: Path) -> No
 @pytest.mark.parametrize(
     "action",
     [
-        "fill_field",
         "continue_next_step",
         "select_option",
         "read",
@@ -756,6 +755,22 @@ def test_blocks_every_disallowed_action(tmp_path: Path, action: str) -> None:
     assert "semantic_action_not_mvp_executable" in {
         item["code"] for item in result["blocked_reasons"]
     }
+
+
+def test_changed_text_action_requires_new_human_review_before_compile(tmp_path: Path) -> None:
+    source, _ = _persist_reviewed_workflow(tmp_path)
+    review = json.loads(source.read_text(encoding="utf-8"))
+    review["edges"][0]["action_type"] = "fill_field"
+    source.write_text(json.dumps(review, ensure_ascii=False), encoding="utf-8")
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    _rebind_registry_source_sha(tmp_path, digest)
+
+    result = _run_compile(tmp_path, source, digest)
+
+    assert result["status"] == "blocked"
+    assert "edge_approval_invalid" in {item["code"] for item in result["blocked_reasons"]}
+    assert result["asset"] is None
+    assert not (tmp_path / "runtime_state" / "reviewed-workflow-assets-v2").exists()
 
 
 @pytest.mark.parametrize(

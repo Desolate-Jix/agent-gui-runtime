@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from app.agent.profile.cv import build_candidate_profile_from_cv_text, extract_cv_text
-from app.seek.profile import assess_candidate_profile_readiness
+from app.application_profiles.seek.profile import assess_candidate_profile_readiness
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "candidate_profile_from_cv.py"

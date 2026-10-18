@@ -6,6 +6,8 @@ from typing import Any, Iterable
 
 from app.operation.page_structure.schemas import InteractionPolicy, PageElement, PageText, VerificationHints
 from app.operation.recognition.schemas import CandidateRankRequest, CandidateRankResult, RecognitionCandidate, ScoreBreakdown
+from app.operation.recognition.control_target import control_target_matches, validate_control_target
+from app.operation.recognition.text_match import explicit_target_label
 from app.vision.schemas import BBox, ImageSize
 
 
@@ -26,17 +28,26 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
     )
     elements_to_rank = [*request.page_structure.elements, *virtual_elements]
 
+    target = validate_control_target(request.control_target) if request.control_target is not None else None
     for element in elements_to_rank:
         screen_evidence = _screen_evidence_for_element(element, screen_index)
         breakdown, reasons, eligible = _score_element(
             element,
-            goal=request.goal,
+            goal=target["label"] if target is not None else request.goal,
             state_hint=request.state_hint,
             screen_evidence=screen_evidence,
         )
+        if target is not None and not control_target_matches(element.label, element.role, target):
+            candidate = RecognitionCandidate(candidate_id=_candidate_id(element), rank=0,
+                element_id=element.element_id, label=element.label, role=element.role,
+                text=element.text, score=breakdown.total(), eligible=False,
+                reasons=[*reasons, "control_target_label_or_role_mismatch"],
+                score_breakdown=breakdown, element=element)
+            rejected.append(candidate)
+            continue
         refined_bbox, bbox_refine_reason = _refined_bbox_from_source_texts(
             element,
-            goal=request.goal,
+            goal=target["label"] if target is not None else request.goal,
             texts_by_id=texts_by_id,
             image_size=request.page_structure.image_size,
         )
@@ -62,6 +73,13 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
         else:
             rejected.append(candidate)
 
+    if target is not None and len(ranked) > 1:
+        # 同名同类候选在截断前拒绝，不能把 top_k=1 当作唯一性证明。
+        for candidate in ranked:
+            candidate.eligible = False
+            candidate.reasons.append("control_target_ambiguous_before_top_k")
+        rejected.extend(ranked)
+        ranked = []
     ranked.sort(
         key=lambda item: (
             item.score,
@@ -92,6 +110,7 @@ def rank_candidates(request: CandidateRankRequest) -> CandidateRankResult:
         recommended_candidate_id=selected[0].candidate_id if selected else None,
         margin_to_second=margin,
         summary={
+            **({"control_target": target} if target is not None else {}),
             "element_count": len(request.page_structure.elements),
             "ranked_element_count": len(elements_to_rank),
             "screen_inventory_virtual_element_count": len(virtual_elements),
@@ -165,11 +184,15 @@ def _score_element(
 
     if goal_action_terms:
         if element_action_terms & goal_action_terms:
-            text_similarity = max(text_similarity, 0.95)
-            role_score = max(role_score, 0.95)
-            policy_score = max(policy_score, 0.85)
-            screen_reading_score = max(screen_reading_score, 0.65)
-            reasons.append("explicit_action_target_match")
+            # 同类动作词只表明能力相关，必须由未否定的真实标签确认目标才能提升身份分。
+            if not negated_label_match and _goal_explicitly_requests_action_label(goal, element):
+                text_similarity = max(text_similarity, 0.95)
+                role_score = max(role_score, 0.95)
+                policy_score = max(policy_score, 0.85)
+                screen_reading_score = max(screen_reading_score, 0.65)
+                reasons.append("explicit_action_target_match")
+            else:
+                reasons.append("related_action_term_without_explicit_target")
         else:
             text_similarity = min(text_similarity, 0.36)
             screen_reading_score = min(screen_reading_score, 0.35)
@@ -279,7 +302,10 @@ def _goal_requests_text_entry(goal: str) -> bool:
 
 
 def _explicit_goal_action_terms(goal: str) -> set[str]:
-    goal_text = _normalize_text(goal)
+    target_label = explicit_target_label(goal)
+    if target_label and _goal_label_match(goal, [target_label], negated=True):
+        return set()
+    goal_text = _normalize_text(target_label or goal)
     term_groups = {
         "apply": ["apply", "quick apply", "申请"],
         "continue": ["continue", "next", "下一步", "继续"],
@@ -325,6 +351,22 @@ def _element_action_terms(element: PageElement) -> set[str]:
         if any(_normalize_text(value) in text for value in values):
             terms.add(canonical)
     return terms
+
+
+def _goal_explicitly_requests_action_label(goal: str, element: PageElement) -> bool:
+    if explicit_target_label(goal) is not None:
+        return _goal_label_match(goal, [element.label, element.text], negated=False)
+    goal_text = _normalize_text(goal)
+    for label in (element.label, element.text):
+        label_text = _normalize_text(label)
+        # 短中文动作标签只在完整词边界和已识别动作语义下匹配，不放宽全局模糊阈值。
+        if not label_text or (len(label_text) < 3 and not _explicit_goal_action_terms(label)):
+            continue
+        matches = list(re.finditer(rf"(?<!\w){re.escape(label_text)}(?!\w)", goal_text))
+        if matches and not any(_negates_next_click_target(
+                goal_text[max(0, match.start() - 40):match.start()].strip()) for match in matches):
+            return True
+    return False
 
 
 def _is_text_entry_element(element: PageElement) -> bool:
@@ -410,7 +452,7 @@ def _screen_reading_text_values(screen_evidence: dict[str, Any] | None) -> list[
 
 
 def _best_text_similarity(goal: str, candidates: Iterable[str]) -> float:
-    normalized_goal = _normalize_text(goal)
+    normalized_goal = _normalize_text(explicit_target_label(goal) or goal)
     if not normalized_goal:
         return 0.0
     return round(max((_text_similarity(normalized_goal, _normalize_text(item)) for item in candidates), default=0.0), 4)
@@ -450,11 +492,24 @@ def _goal_negates_element_label(goal: str, element: PageElement) -> bool:
 
 
 def _goal_label_match(goal: str, labels: Iterable[str], *, negated: bool) -> bool:
+    target_label = explicit_target_label(goal)
+    if target_label is not None:
+        # 候选须包含完整目标词段；允许 UIA 名称附带网址，但不反向匹配短词。
+        from app.operation.recognition.text_match import explicit_target_marker
+        marker = explicit_target_marker(goal)
+        is_negated = _negates_next_click_target(_normalize_text(goal[:marker.start()]))
+        target_text = _normalize_text(target_label)
+        return bool(target_text) and is_negated is negated and any(
+            re.search(rf"(?<!\w){re.escape(target_text)}(?!\w)", _normalize_text(label))
+            for label in labels)
     goal_text = _normalize_text(goal)
     if not goal_text:
         return False
     for label in labels:
         label_text = _normalize_text(label)
+        # 完全相等的短标签也有明确身份；长度阈值仍限制句中模糊命中。
+        if label_text == goal_text:
+            return not negated
         if len(label_text) < 3:
             continue
         for match in re.finditer(rf"(?<!\w){re.escape(label_text)}(?!\w)", goal_text):

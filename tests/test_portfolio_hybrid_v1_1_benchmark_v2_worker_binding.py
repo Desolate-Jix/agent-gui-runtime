@@ -287,8 +287,8 @@ def _install_downstream_zero_guard(
         _forbid_downstream("b1_prepare"),
     )
     monkeypatch.setattr(
-        workflow_service_module,
-        "transition_learning_workflow_run",
+        workflow_service_module.LearningWorkflowRunStore,
+        "transition",
         _forbid_downstream("workflow_store_cas"),
     )
     monkeypatch.setattr(

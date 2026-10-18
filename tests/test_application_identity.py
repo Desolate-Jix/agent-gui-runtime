@@ -1,6 +1,17 @@
 from __future__ import annotations
 
 from app.learn.application_identity import normalize_application_identity
+import pytest
+
+
+@pytest.mark.parametrize('origin', [
+    'https://www.google.com', 'https://google.com', 'http://www.google.com',
+    'https://www.google.com:8443', 'https://maps.google.com',
+])
+def test_web_identity_preserves_exact_execution_origin(origin):
+    identity = normalize_application_identity({'kind': 'web', 'url': origin + '/page?q=test'})
+    assert identity['canonical_origin'] == origin
+    assert normalize_application_identity(identity) == identity
 
 
 def test_browser_identity_uses_canonical_domain_instead_of_edge_process() -> None:
@@ -13,8 +24,9 @@ def test_browser_identity_uses_canonical_domain_instead_of_edge_process() -> Non
     )
 
     assert identity["kind"] == "web"
-    assert identity["identity_key"] == "web:seek.co.nz"
-    assert identity["canonical_domain"] == "seek.co.nz"
+    assert identity["identity_key"] == "web:www.seek.co.nz"
+    assert identity["canonical_domain"] == "www.seek.co.nz"
+    assert identity["canonical_origin"] == "https://www.seek.co.nz"
     assert identity["identity_status"] == "resolved"
     assert identity["executable_identity"] == "msedge.exe"
 

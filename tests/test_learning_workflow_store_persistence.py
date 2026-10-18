@@ -2,18 +2,19 @@ from __future__ import annotations
 
 import json
 
-from fastapi.testclient import TestClient
 import pytest
 
-from app.api import panel as panel_api
 from app.learn.workflow_state import LearningWorkflowTransitionError
-from app.learn.workflow_service import project_learning_workflow_runtime_attachment
+from app.learn.workflow_service import (
+    compose_test_learning_workflow_service,
+    project_guarded_learning_workflow_runtime_attachment,
+    project_learning_workflow_runtime_attachment,
+)
 from app.learn.workflow_store import (
     LearningWorkflowRunStore,
     resolve_learning_workflow_store_path,
 )
 from app.learn.workflow_worker import LearningStageWorkerRegistry
-from app.main import app
 
 
 def test_workflow_store_recovers_committed_state_after_restart(tmp_path) -> None:
@@ -498,9 +499,8 @@ def test_restarted_adopted_worker_result_projects_continuation_required() -> Non
     assert attachment["result_adopted"] is True
 
 
-def test_workflow_state_endpoint_exposes_runtime_attachment(
+def test_workflow_state_maintained_owner_exposes_runtime_attachment(
     tmp_path,
-    monkeypatch,
 ) -> None:
     store = LearningWorkflowRunStore()
     state = store.transition(
@@ -531,22 +531,20 @@ def test_workflow_state_endpoint_exposes_runtime_attachment(
             }
         },
     )
-    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
-    monkeypatch.setattr(
-        panel_api,
-        "learning_stage_worker_registry",
-        LearningStageWorkerRegistry(result_root=tmp_path / "worker-results"),
+    composition = compose_test_learning_workflow_service(
+        store=store,
+        worker_registry=LearningStageWorkerRegistry(
+            result_root=tmp_path / "worker-results"
+        ),
+        project_root=tmp_path,
     )
 
-    response = TestClient(app).get(
-        "/panel/learning_workflow_state/endpoint-detached-run"
+    workflow_state = composition.store.get("endpoint-detached-run")
+    runtime_attachment = project_guarded_learning_workflow_runtime_attachment(
+        composition=composition,
+        workflow_state=workflow_state,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert payload["data"]["runtime_attachment"]["status"] == "running_detached"
-    assert (
-        payload["data"]["runtime_attachment"]["recovery_status"]
-        == "recovery_required"
-    )
+    assert workflow_state["run_id"] == "endpoint-detached-run"
+    assert runtime_attachment["status"] == "running_detached"
+    assert runtime_attachment["recovery_status"] == "recovery_required"

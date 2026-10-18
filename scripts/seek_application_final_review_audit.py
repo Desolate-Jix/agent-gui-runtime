@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.seek.application import build_seek_application_final_review_audit
+from app.application_profiles.seek.application import build_seek_application_final_review_audit
 
 
 def _read_json(path: Path) -> dict[str, Any]:

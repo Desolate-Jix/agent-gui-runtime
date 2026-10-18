@@ -30,7 +30,9 @@ from app.learn.interface_workflow_review import (
     load_interface_workflow_agent_context,
     save_interface_workflow_review_candidate,
 )
-from app.main import app
+from app.api.application import create_runtime_app
+
+app = create_runtime_app()
 
 
 APPLICATION = {

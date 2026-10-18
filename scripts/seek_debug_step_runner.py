@@ -36,20 +36,20 @@ from seek_mvp_traversal_runner import (  # noqa: E402
     _trace_apply_entry_summary,
     _write_json,
 )
-from app.seek.application import _collect_visible_items, assess_seek_application_flow_state, build_seek_apply_flow_decision  # noqa: E402
-from app.seek.answer_plan import build_application_answer_plan  # noqa: E402
-from app.seek.cover_letter import build_cover_letter_draft  # noqa: E402
-from app.seek.employer_questions import (  # noqa: E402
+from app.application_profiles.seek.application import _collect_visible_items, assess_seek_application_flow_state, build_seek_apply_flow_decision  # noqa: E402
+from app.application_profiles.seek.answer_plan import build_application_answer_plan  # noqa: E402
+from app.application_profiles.seek.cover_letter import build_cover_letter_draft  # noqa: E402
+from app.application_profiles.seek.employer_questions import (  # noqa: E402
     build_employer_question_answer_plan,
     build_employer_question_answer_preview,
     build_employer_question_inventory,
 )
-from app.seek.extraction import extract_seek_job_cards, extract_seek_job_detail, _trim_seek_detail_texts  # noqa: E402
-from app.seek.execute_observation import build_seek_execute_observation  # noqa: E402
-from app.seek.final_review import build_seek_final_review_extraction  # noqa: E402
-from app.seek.form_inventory import build_seek_form_field_inventory  # noqa: E402
-from app.seek.learn_artifacts import scroll_target_for_action  # noqa: E402
-from app.seek.matching import (  # noqa: E402
+from app.application_profiles.seek.extraction import extract_seek_job_cards, extract_seek_job_detail, _trim_seek_detail_texts  # noqa: E402
+from app.application_profiles.seek.execute_observation import build_seek_execute_observation  # noqa: E402
+from app.application_profiles.seek.final_review import build_seek_final_review_extraction  # noqa: E402
+from app.application_profiles.seek.form_inventory import build_seek_form_field_inventory  # noqa: E402
+from app.application_profiles.seek.learn_artifacts import scroll_target_for_action  # noqa: E402
+from app.application_profiles.seek.matching import (  # noqa: E402
     apply_agent_suitability_review,
     find_agent_suitability_review,
     load_agent_suitability_reviews,
@@ -57,7 +57,7 @@ from app.seek.matching import (  # noqa: E402
     save_suitable_job_record,
     score_seek_job,
 )
-from app.seek.scroll_containers import SEEK_JOB_DETAIL, discover_seek_scroll_containers, get_scroll_container  # noqa: E402
+from app.application_profiles.seek.scroll_containers import SEEK_JOB_DETAIL, discover_seek_scroll_containers, get_scroll_container  # noqa: E402
 from app.operation.reading import build_read_region_batch_report  # noqa: E402
 from app.gate.scroll import build_scroll_scope_invariant  # noqa: E402
 from app.gate.dataflow import (  # noqa: E402

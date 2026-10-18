@@ -237,15 +237,25 @@ def test_managed_hybrid_save_survives_real_restart_and_publishes_once(
 
 
 def test_hand_written_fixture_is_explicit_no_publish_negative_control(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """捕获把手写 fixture 冒充 managed E2E 或意外写入发布 registry。"""
 
     from scripts.prove_portfolio_hybrid_v1_1_persistence import (
         run_fixture_negative_control,
     )
+    from app.api import reviewed_workflows
+    import scripts.prove_portfolio_hybrid_v1_1_persistence as proof_module
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("invalid source must not reach compile or publish")
+
+    monkeypatch.setattr(proof_module, "_worker_compile", forbidden)
+    monkeypatch.setattr(reviewed_workflows, "compile_reviewed_workflow_asset_endpoint", forbidden)
+    monkeypatch.setattr(reviewed_workflows, "publish_reviewed_workflow_asset_endpoint", forbidden)
 
     fixture = Path("tests/fixtures/portfolio_hybrid_v1_1/reviewed_hybrid_source.json")
+    fixture_before = fixture.read_bytes()
     proof = run_fixture_negative_control(
         project_root=tmp_path,
         fixture_path=fixture,
@@ -255,7 +265,14 @@ def test_hand_written_fixture_is_explicit_no_publish_negative_control(
     assert proof["proof_mode"] == "fixture_negative_control_only"
     assert proof["publish_attempted"] is False
     assert proof["registry_exists"] is False
-    assert proof["compiled_status"] == "compiled"
+    assert proof["compiled_status"] == "not_attempted"
+    assert proof["compile_attempted"] is False
+    assert proof["source_rejection"] == "selection replay source is missing or corrupt"
+    assert proof["review_business_files_unchanged"] is True
+    assert fixture.read_bytes() == fixture_before
+    assert proof["fixture_sha256"] == hashlib.sha256(fixture_before).hexdigest()
+    assert not (tmp_path / "artifacts/interface-workflow-reviews/registry.json").exists()
+    assert not (tmp_path / "artifacts/interface-workflow-reviews/portfolio_hybrid_fixture_negative_control").exists()
     assert proof["compiled_runtime_point_fields"] == []
     assert proof["fixture_contains_non_authorizing_proposals"] is True
 

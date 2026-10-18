@@ -94,8 +94,59 @@ def _copy_exact(source: Path, destination: Path, expected: str) -> None:
         return
     destination.parent.mkdir(parents=True, exist_ok=True); destination.write_bytes(raw)
 
+_LEGACY_FIXED25_WORKTREE = (".worktrees", "simple-provider-protocol-v1")
+_FIXED25_REGRESSION_ROOT = Path("tests") / "fixtures" / "portfolio_hybrid_v1_1" / "corpus" / "regression"
+_FIXED25_REGRESSION_CASES = frozenset(f"case-{index:03d}.png" for index in range(1, 6))
+_REPARSE_POINT_ATTRIBUTE = 0x400
+
+
+def _legacy_fixed25_case_name(source: Path) -> str | None:
+    parts = tuple(part.casefold() for part in source.parts)
+    marker = tuple(part.casefold() for part in _LEGACY_FIXED25_WORKTREE)
+    try:
+        marker_index = next(index for index in range(len(parts)) if parts[index:index + len(marker)] == marker)
+    except StopIteration:
+        return None
+    suffix = parts[marker_index + len(marker):]
+    expected_root = tuple(part.casefold() for part in _FIXED25_REGRESSION_ROOT.parts)
+    if len(suffix) != len(expected_root) + 1 or suffix[:-1] != expected_root or suffix[-1] not in _FIXED25_REGRESSION_CASES:
+        raise ValueError("legacy fixed25 image path is outside the exact regression namespace")
+    return suffix[-1]
+
+
+def _reject_maintained_input_reparse(path: Path) -> None:
+    root = ROOT.resolve()
+    try:
+        relative = path.relative_to(root)
+    except ValueError as error:
+        raise ValueError("maintained fixed25 input escapes project root") from error
+    current = root
+    for part in (Path("."), *relative.parts):
+        if part != Path("."):
+            current = current / part
+        attributes = int(getattr(current.stat(follow_symlinks=False), "st_file_attributes", 0))
+        if attributes & _REPARSE_POINT_ATTRIBUTE:
+            raise ValueError("maintained fixed25 input cannot traverse a reparse point")
+
+
+def _catalog_image_input(row: Mapping[str, Any]) -> Path:
+    source = Path(str(row["image_path"]))
+    case_name = _legacy_fixed25_case_name(source)
+    if case_name is None:
+        return source
+    if row.get("suite") != "fixed25":
+        raise ValueError("legacy fixed25 image path is not allowed outside fixed25")
+    if row.get("case_id") != case_name.removesuffix(".png"):
+        raise ValueError("legacy fixed25 image path does not match the catalog case id")
+    maintained = ROOT / _FIXED25_REGRESSION_ROOT / case_name
+    if not maintained.is_file():
+        raise FileNotFoundError("maintained fixed25 input is unavailable")
+    _reject_maintained_input_reparse(maintained)
+    return maintained
+
+
 def _static(row: Mapping[str, Any], run_id: str) -> tuple[Path, dict[str, Any]]:
-    source = Path(str(row["image_path"])); digest = str(row["image_sha256"])
+    source = _catalog_image_input(row); digest = str(row["image_sha256"])
     image = ROOT / "artifacts/screenshots/learning-selection-acceptance" / (digest + (source.suffix.lower() or ".png"))
     _copy_exact(source, image, digest)
     if row["suite"] == "fixed25":

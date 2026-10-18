@@ -31,7 +31,10 @@ from app.learn.workflow_continuation import (
 from app.learn.workflow_contracts import normalize_learning_pipeline_mode
 from app.learn.workflow_evidence import verify_learning_workflow_completion_evidence
 from app.learn.workflow_store import LearningWorkflowRunStore
-from app.learn.workflow_state import LearningWorkflowTransitionError
+from app.learn.workflow_state import (
+    LEARNING_WORKFLOW_STAGES,
+    LearningWorkflowTransitionError,
+)
 from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
 
 
@@ -63,6 +66,13 @@ _NEXT_MANAGED_STAGE: dict[str, tuple[str, str, str]] = {
         "backend continuation · fused learning draft",
     ),
 }
+MANAGED_LEARNING_WORKFLOW_OPERATION_STAGES = frozenset({
+    "screen_understanding",
+    "numbered_map",
+    "precise_calibration",
+    "review_repair",
+    "fusion",
+})
 _BACKEND_CONTINUATION_LEASE_SECONDS = 1800
 
 
@@ -416,6 +426,10 @@ def get_production_learning_workflow_service_composition(
 
 class LearningWorkflowStageOperationError(ValueError):
     """学习阶段运行租约无效，拒绝接收过期或越权结果。"""
+
+
+class LearningWorkflowManagedStageOperationRequiredError(LearningWorkflowStageOperationError):
+    """受管阶段只能通过签发、续租和完成等专用操作推进。"""
 
 
 _BENCHMARK_V2_C2_UNAVAILABLE = (
@@ -918,7 +932,72 @@ def project_learning_workflow_runtime_attachment(
     return result
 
 
+def _direct_transition_requires_managed_operation(
+    *,
+    current: dict[str, Any] | None,
+    expected_revision: int,
+    stage: str,
+    outcome: str,
+) -> bool:
+    """只读判断可达的受管迁移；无效请求仍由原校验链解释。"""
+
+    if (
+        stage not in MANAGED_LEARNING_WORKFLOW_OPERATION_STAGES
+        or not isinstance(expected_revision, int)
+        or expected_revision < 0
+        or not isinstance(current, dict)
+        or current.get("revision") != expected_revision
+        or current.get("terminal") is True
+    ):
+        return False
+    current_stage = current.get("current_stage")
+    current_status = current.get("stages", {}).get(current_stage, {}).get("status")
+    if current_stage == stage:
+        return current_status == "running" and outcome in {
+            "running", "completed", "failed", "safe_stopped"
+        }
+    return (
+        current_stage in LEARNING_WORKFLOW_STAGES
+        and LEARNING_WORKFLOW_STAGES.index(stage)
+        == LEARNING_WORKFLOW_STAGES.index(current_stage) + 1
+        and current_status == "completed"
+        and outcome == "running"
+    )
+
+
 def transition_learning_workflow_run(
+    *,
+    store: LearningWorkflowRunStore,
+    project_root: str | Path,
+    run_id: str,
+    expected_revision: int,
+    stage: str,
+    outcome: str,
+    reason: str = "",
+    evidence_refs: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """公开迁移入口：受管策略在任何证据或状态写入之前执行。"""
+
+    if stage in MANAGED_LEARNING_WORKFLOW_OPERATION_STAGES:
+        try:
+            current = store.get(run_id)
+        except LearningWorkflowTransitionError:
+            current = None
+        if _direct_transition_requires_managed_operation(
+            current=current, expected_revision=expected_revision,
+            stage=stage, outcome=outcome,
+        ):
+            raise LearningWorkflowManagedStageOperationRequiredError(
+                f"{stage} must use a managed workflow stage operation"
+            )
+    return _transition_learning_workflow_run_internal(
+        store=store, project_root=project_root, run_id=run_id,
+        expected_revision=expected_revision, stage=stage, outcome=outcome,
+        reason=reason, evidence_refs=evidence_refs,
+    )
+
+
+def _transition_learning_workflow_run_internal(
     *,
     store: LearningWorkflowRunStore,
     project_root: str | Path,
@@ -984,7 +1063,7 @@ def start_learning_workflow_stage_operation(
     }
     if pipeline_mode in {"hybrid_v1_1", "hybrid_v1_2"}:
         stage_execution["learning_pipeline_mode"] = pipeline_mode
-    state = transition_learning_workflow_run(
+    state = _transition_learning_workflow_run_internal(
         store=store,
         project_root=project_root,
         run_id=run_id,
@@ -1064,7 +1143,7 @@ def heartbeat_learning_workflow_stage_operation(
         }
     )
     stage_record = current["stages"][stage]
-    state = transition_learning_workflow_run(
+    state = _transition_learning_workflow_run_internal(
         store=store,
         project_root=project_root,
         run_id=run_id,
@@ -1180,7 +1259,7 @@ def cancel_learning_workflow_stage_operation(
             "cancellation": cancellation,
         }
     )
-    state = transition_learning_workflow_run(
+    state = _transition_learning_workflow_run_internal(
         store=store,
         project_root=project_root,
         run_id=run_id,
@@ -1346,7 +1425,7 @@ def _persist_benchmark_v2_incumbent_operation(
         else {}
     )
     evidence_refs["stage_execution"] = stage_execution
-    state = transition_learning_workflow_run(
+    state = _transition_learning_workflow_run_internal(
         store=composition.store,
         project_root=composition.project_root,
         run_id=str(workflow_state.get("run_id") or ""),
@@ -3910,7 +3989,7 @@ def _recover_benchmark_v2_incumbent_pre_reservation_workflow_service(
                 "recovery_status": "pre_reservation_start_failed",
             }
         )
-        recovered = transition_learning_workflow_run(
+        recovered = _transition_learning_workflow_run_internal(
             store=composition.store,
             project_root=composition.project_root,
             run_id=run_id,
@@ -5093,7 +5172,7 @@ def _ensure_benchmark_v2_incumbent_child_workflow_run(
     except LearningWorkflowTransitionError as error:
         if str(error) != "workflow run not found":
             raise
-        current = transition_learning_workflow_run(
+        current = _transition_learning_workflow_run_internal(
             store=composition.store,
             project_root=composition.project_root,
             run_id=run_id,
@@ -5115,7 +5194,7 @@ def _ensure_benchmark_v2_incumbent_child_workflow_run(
                 "benchmark_v2 incumbent child run start intent is stale"
             )
         if record.get("status") == "running":
-            current = transition_learning_workflow_run(
+            current = _transition_learning_workflow_run_internal(
                 store=composition.store,
                 project_root=composition.project_root,
                 run_id=run_id,
@@ -6424,7 +6503,7 @@ def _persist_benchmark_v2_hybrid_service_binding(
         else {}
     )
     evidence_refs["stage_execution"] = stage_execution
-    return transition_learning_workflow_run(
+    return _transition_learning_workflow_run_internal(
         store=composition.store,
         project_root=composition.project_root,
         run_id=str(workflow_state["run_id"]),
@@ -8251,7 +8330,7 @@ def _ensure_benchmark_v2_hybrid_workflow_run(
     except LearningWorkflowTransitionError as error:
         if str(error) != "workflow run not found":
             raise
-        current = transition_learning_workflow_run(
+        current = _transition_learning_workflow_run_internal(
             store=composition.store,
             project_root=composition.project_root,
             run_id=run_id,
@@ -8275,7 +8354,7 @@ def _ensure_benchmark_v2_hybrid_workflow_run(
                 "benchmark_v2 hybrid run start intent is stale"
             )
         if record.get("status") == "running":
-            current = transition_learning_workflow_run(
+            current = _transition_learning_workflow_run_internal(
                 store=composition.store,
                 project_root=composition.project_root,
                 run_id=run_id,
@@ -9327,7 +9406,7 @@ def finish_learning_workflow_stage_operation(
         deepcopy(evidence_refs) if isinstance(evidence_refs, dict) else {}
     )
     structured_evidence["stage_execution"] = finished_execution
-    state = transition_learning_workflow_run(
+    state = _transition_learning_workflow_run_internal(
         store=store,
         project_root=project_root,
         run_id=run_id,
@@ -10758,7 +10837,7 @@ def recover_expired_learning_workflow_stage_operation(
             "recovery_status": "expired_operation_failed",
         }
     )
-    state = transition_learning_workflow_run(
+    state = _transition_learning_workflow_run_internal(
         store=store,
         project_root=project_root,
         run_id=run_id,

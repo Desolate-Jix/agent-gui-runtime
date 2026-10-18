@@ -1,4 +1,4 @@
-"""通过既有 API 验证实际选择草稿；测试修订不是用户最终确认。"""
+"""通过维护中的审核事务验证实际选择草稿；测试修订不是用户最终确认。"""
 from __future__ import annotations
 
 import argparse
@@ -24,33 +24,47 @@ def main() -> None:
     if not output.is_relative_to(ROOT):
         raise ValueError("verification output escaped project root")
     output.mkdir(parents=True, exist_ok=False)
-    from fastapi.testclient import TestClient
-    from app.main import app
+    from app.learn.learning_draft_review_service import (
+        load_learning_draft_review_transaction,
+        save_learning_draft_review_transaction,
+    )
+    from app.learn.workflow_store import LearningWorkflowRunStore
 
-    client = TestClient(app)
-    def post(endpoint, payload, name):
-        response = client.post(endpoint, json=payload)
-        response.raise_for_status()
-        value = response.json()
+    # 本工具只审核指定来源，不读取或改写用户的持久工作流存储。
+    workflow_store = LearningWorkflowRunStore(state_path=None)
+
+    def record(value, name):
         (output / (name + ".json")).write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-        if not value.get("success"):
-            raise ValueError(f"{endpoint}: {value.get('error')}")
-        return value["data"]
+        return value
 
-    loaded = post("/panel/load_learning_draft_review", {"source_path": args.trial, "discover_related_sidecars": False}, "loaded")
+    def load(source_path, name):
+        return record(load_learning_draft_review_transaction(
+            source_path=source_path, workflow_run_id=None,
+            discover_related_sidecars=False, project_root=ROOT,
+            workflow_store=workflow_store,
+        ), name)
+
+    def save(source_path, review_patch, name):
+        return record(save_learning_draft_review_transaction(
+            source_path=source_path, review_patch=review_patch,
+            project_root=ROOT, workflow_store=workflow_store,
+        ), name)
+
+    loaded = load(args.trial, "loaded")
     projection = loaded["hybrid_review_projection"]
     assert projection["execution_origin"] == "actual_model"
     selected = next(item for item in projection["candidates"] if item["selection"] is not None)
     original = deepcopy(selected["model_proposal"])
     report = {"model_origin": "actual_model", "trial_path": args.trial, "initial_state": projection["learning_state"],
               "automated_review_simulation": args.simulate_review, "user_confirmed": False,
-              "artifact_is_authorization": False, "execute_binding_enabled": False}
+              "artifact_is_authorization": False, "execute_binding_enabled": False,
+              "evidence_schema": "learning_selection_verification_service_v1"}
     if args.simulate_review:
         if not args.label.strip():
             raise ValueError("simulation label is required")
         expected = loaded["hybrid_review_projection_ref"]
-        pending = post("/panel/save_learning_draft_review", {"source_path": args.trial, "review_patch": {
-            "hybrid_review_decisions": [], "expected_hybrid_review_projection_ref": expected}}, "pending-save")
+        pending = save(args.trial, {
+            "hybrid_review_decisions": [], "expected_hybrid_review_projection_ref": expected}, "pending-save")
         assert pending["validation_status"] == "blocked_missing_semantics"
         assert not pending.get("runtime_path_graph_candidate_path")
         x1, y1, x2, y2 = selected["model_proposal"]["bbox_original"]
@@ -60,10 +74,10 @@ def main() -> None:
             {"decision_id": "decision/automated-roundtrip/semantic", "decision_type": "semantic_edit", "candidate_id": selected["candidate_id"],
              "semantics": {"role": "button", "label": args.label, "description": "自动化验收模拟修订；不是用户最终确认"}},
         ]
-        saved = post("/panel/save_learning_draft_review", {"source_path": args.trial, "review_patch": {
-            "hybrid_review_decisions": decisions, "expected_hybrid_review_projection_ref": expected}}, "reviewed-save")
+        saved = save(args.trial, {
+            "hybrid_review_decisions": decisions, "expected_hybrid_review_projection_ref": expected}, "reviewed-save")
         path = saved["reviewed_template_candidate_path"]
-        reloaded = post("/panel/load_learning_draft_review", {"source_path": path, "discover_related_sidecars": False}, "reloaded")
+        reloaded = load(path, "reloaded")
         after = reloaded["hybrid_review_projection"]
         updated = next(item for item in after["candidates"] if item["candidate_id"] == selected["candidate_id"])
         assert updated["model_proposal"] == original

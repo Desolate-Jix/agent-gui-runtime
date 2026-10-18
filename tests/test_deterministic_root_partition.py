@@ -12,7 +12,6 @@ from app.learn.recognition.root_partition import (
     build_deterministic_root_partition,
     validate_root_partition,
 )
-from app.api.panel import PanelRunLearningTwoStageUnderstandingRequest
 from app.learn.recognition.pipeline import build_learning_recognition_trial
 from app.learn.recognition import two_stage as two_stage_module
 from app.learn.recognition.two_stage import (
@@ -1289,7 +1288,6 @@ def test_stage1_override_rejects_authorizing_or_empty_payload() -> None:
 
 
 def test_production_entry_has_one_root_partition_path() -> None:
-    assert "stage1_region_strategy" not in PanelRunLearningTwoStageUnderstandingRequest.model_fields
     assert "stage1_region_strategy" not in inspect.signature(build_learning_recognition_trial).parameters
     assert "stage1_region_strategy" not in inspect.signature(build_two_stage_screen_understanding).parameters
     assert "stage1_region_strategy" not in inspect.signature(build_stage1_region_localization_report).parameters

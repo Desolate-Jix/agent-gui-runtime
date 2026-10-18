@@ -575,7 +575,7 @@ def _validate_holdout_cleanup_only_input(
 
 
 def _open_holdout_actual_models_attempt(
-    validated: _ValidatedHoldoutActualModelsInput,
+    validated: _ValidatedHoldoutActualModelsInput, *, runtime: object
 ) -> _OpenedHoldoutActualModelsAttempt:
     if not isinstance(validated, _ValidatedHoldoutActualModelsInput):
         raise ValueError("holdout attempt requires already validated inputs")
@@ -695,6 +695,10 @@ def _open_holdout_actual_models_attempt(
         "event": opened_event,
         "event_sha256": hashlib.sha256(_canonical_bytes(opened_event)).hexdigest(),
     }
+    runtime.reserve_attempt(
+        attempt_ref=deepcopy(attempt_ref),
+        attempt_dir=attempt_dir,
+    )
     appended = append_holdout_attempt_opened(
         ledger_root=validated.ledger_root,
         authorization_ref=validated.authorization_ref,
@@ -2033,7 +2037,7 @@ def _run_holdout_actual_models(
     provider_corpus_ref = manifest.get("provider_corpus_ref")
     if not isinstance(provider_corpus_ref, Mapping):
         raise ValueError("holdout provider manifest corpus lineage is unavailable")
-    opened = _open_holdout_actual_models_attempt(validated)
+    opened = _open_holdout_actual_models_attempt(validated, runtime=runtime)
     primary: BaseException | None = None
     body: dict[str, object] | None = None
     body_ref: dict[str, str] | None = None

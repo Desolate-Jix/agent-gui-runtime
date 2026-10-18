@@ -22,7 +22,7 @@ from app.operation.reading import (
     build_read_region_batch_report,
     verify_collection_scroll,
 )
-from app.seek.application import assess_seek_application_flow_state
+from app.application_profiles.seek.application import assess_seek_application_flow_state
 from app.operation.recognition.schemas import LocalGroundingCandidateResult, LocalGroundingResult
 from app.vision.schemas import ImageSize
 

@@ -483,7 +483,8 @@ def test_memory_api_publishes_loads_and_exposes_agent_context(
     from fastapi.testclient import TestClient
 
     from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
-    from app.main import app
+    from app.api.application import create_runtime_app
+    app = create_runtime_app()
     import app.api.memory as memory_api
 
     source_path = _write_reviewed_candidate(tmp_path)
@@ -524,7 +525,8 @@ def test_memory_api_reports_stale_registry_revision_as_structured_error(
     from fastapi.testclient import TestClient
 
     from app.agent.reviewed_interface_memory import ReviewedInterfaceMemoryStore
-    from app.main import app
+    from app.api.application import create_runtime_app
+    app = create_runtime_app()
     import app.api.memory as memory_api
 
     source_path = _write_reviewed_candidate(tmp_path)

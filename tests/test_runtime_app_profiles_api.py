@@ -1,12 +1,25 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.api.application import create_runtime_app
 from app.runtime_architecture.profiles import get_app_profile, list_app_profiles
+from tests.runtime_catalog_fixture_support import write_synthetic_app_profile_catalog
+
+app = create_runtime_app()
 
 
-def test_list_app_profiles_includes_seek_profile() -> None:
+def _use_synthetic_profile_catalog(tmp_path: Path, monkeypatch) -> None:
+    catalog_root = tmp_path / "synthetic-runtime-catalog"
+    assert not (catalog_root / "artifacts").exists()
+    write_synthetic_app_profile_catalog(catalog_root)
+    monkeypatch.chdir(catalog_root)
+
+
+def test_list_app_profiles_includes_seek_profile(tmp_path: Path, monkeypatch) -> None:
+    _use_synthetic_profile_catalog(tmp_path, monkeypatch)
     profiles = list_app_profiles()
 
     seek = next(item for item in profiles if item.get("app_id") == "seek")
@@ -17,7 +30,8 @@ def test_list_app_profiles_includes_seek_profile() -> None:
     assert seek["learned_pattern_count"] == 6
 
 
-def test_get_app_profile_loads_seek_profile() -> None:
+def test_get_app_profile_loads_seek_profile(tmp_path: Path, monkeypatch) -> None:
+    _use_synthetic_profile_catalog(tmp_path, monkeypatch)
     profile, path = get_app_profile("seek")
 
     assert path.as_posix().endswith("artifacts/app_profiles/seek_app_profile_v1.json")
@@ -36,7 +50,8 @@ def test_get_app_profile_loads_seek_profile() -> None:
     }
 
 
-def test_runtime_app_profiles_routes() -> None:
+def test_runtime_app_profiles_routes(tmp_path: Path, monkeypatch) -> None:
+    _use_synthetic_profile_catalog(tmp_path, monkeypatch)
     client = TestClient(app)
 
     list_response = client.get("/runtime/app_profiles")
@@ -56,7 +71,8 @@ def test_runtime_app_profiles_routes() -> None:
     assert len(seek_payload["data"]["profile"]["learned_patterns"]) == 6
 
 
-def test_runtime_app_profile_missing_is_structured_error() -> None:
+def test_runtime_app_profile_missing_is_structured_error(tmp_path: Path, monkeypatch) -> None:
+    _use_synthetic_profile_catalog(tmp_path, monkeypatch)
     client = TestClient(app)
 
     response = client.get("/runtime/app_profiles/not_real")

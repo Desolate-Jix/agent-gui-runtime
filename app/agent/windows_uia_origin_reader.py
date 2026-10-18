@@ -77,14 +77,15 @@ class WindowsUIAOriginReader:
                 error=exc,
             )
 
-        controls: list[Any] = []
+        inspected_count = 0
         origin: str | None = None
         source: str | None = None
         scan_error: Exception | None = None
         try:
             root = desktop.window(handle=target_handle)
-            controls = list(root.descendants(control_type="Edit"))
-            for control in controls:
+            # 条件 TreeWalker 按原顺序惰性读取；每次重读实时值，不缓存地址事实。
+            for control in root.iter_descendants(control_type="Edit"):
+                inspected_count += 1
                 origin, source = self._origin_from_control(control)
                 if origin is not None:
                     break
@@ -97,7 +98,7 @@ class WindowsUIAOriginReader:
             return self._unavailable(
                 target_handle,
                 process_id=process_id,
-                edit_control_count=len(controls),
+                edit_control_count=inspected_count,
                 reason="post_read_binding_failed",
                 message="The server-owned window binding could not be revalidated after UIA inspection.",
                 error=exc,
@@ -115,7 +116,7 @@ class WindowsUIAOriginReader:
             return self._unavailable(
                 target_handle,
                 process_id=process_id,
-                edit_control_count=len(controls),
+                edit_control_count=inspected_count,
                 reason="bound_window_drift",
                 message="The bound window or process changed during UIA inspection.",
             )
@@ -123,7 +124,7 @@ class WindowsUIAOriginReader:
             return self._unavailable(
                 target_handle,
                 process_id=process_id,
-                edit_control_count=len(controls),
+                edit_control_count=inspected_count,
                 reason="uia_read_failed",
                 message="The exact bound window could not be inspected through Windows UIA.",
                 error=scan_error,
@@ -132,7 +133,7 @@ class WindowsUIAOriginReader:
             return self._unavailable(
                 target_handle,
                 process_id=process_id,
-                edit_control_count=len(controls),
+                edit_control_count=inspected_count,
                 reason="no_http_origin",
                 message="No valid HTTP or HTTPS origin was observed in bound-window Edit controls.",
             )
@@ -144,7 +145,8 @@ class WindowsUIAOriginReader:
             "bound_process_id": process_id,
             "origin": origin,
             "source": source,
-            "edit_control_count": len(controls),
+            "edit_control_count": inspected_count,
+            "edit_control_count_scope": "inspected_prefix",
         }
 
     def _create_desktop(self) -> Any:
@@ -257,6 +259,7 @@ class WindowsUIAOriginReader:
             "origin": None,
             "source": None,
             "edit_control_count": edit_control_count,
+            "edit_control_count_scope": "inspected_prefix",
             "reason": reason,
             "message": message,
         }

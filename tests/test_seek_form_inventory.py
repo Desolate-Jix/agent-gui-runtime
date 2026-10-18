@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.form_inventory import build_seek_form_field_inventory
+from app.application_profiles.seek.form_inventory import build_seek_form_field_inventory
 
 
 def test_seek_form_inventory_exports_cover_letter_and_question_fields() -> None:

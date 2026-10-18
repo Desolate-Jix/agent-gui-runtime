@@ -1,0 +1,181 @@
+{
+  "artifact_is_authorization": false,
+  "content_sha256": "e6dfd185f5a9910a27091e69b25c75ef709d99bc3f2383e0055d1056199357b6",
+  "contract_version": "grounded_action_preview_v1",
+  "current_observation": {
+    "application": {
+      "display_name": "nz.seek.com",
+      "identity_ref": "application:web:nz.seek.com",
+      "kind": "web"
+    },
+    "artifact_is_authorization": false,
+    "available_actions": [
+      {
+        "action_id": "open_detail",
+        "description": "Open the reviewed job detail.",
+        "expected_effect": "Reach the reviewed detail state.",
+        "requires_user_confirmation": false,
+        "risk_level": "low",
+        "semantic_action": "open_detail",
+        "target_state_id": "detail",
+        "verification_rule_refs": [
+          "workflow-rule:detail-visible"
+        ]
+      },
+      {
+        "action_id": "runtime.safe_stop",
+        "description": "Stop without dispatch.",
+        "expected_effect": "Stop without dispatch.",
+        "requires_user_confirmation": false,
+        "risk_level": "low",
+        "semantic_action": "safe_stop",
+        "target_state_id": null,
+        "verification_rule_refs": []
+      }
+    ],
+    "blockers": [],
+    "contract_version": "agent_observation_v1",
+    "current_capture": {
+      "capture_id": "capture-native-grounded-preview",
+      "evidence_ref": "capture:capture-native-grounded-preview",
+      "screenshot_sha256": "7dd9fabfbe8cf93ea7ec1e1b8689574302337d534cd4d2a0fb5ef998db4a110f"
+    },
+    "evidence_refs": [
+      "state-resolution:capture-native-grounded-preview",
+      "capture:capture-native-grounded-preview"
+    ],
+    "observation_id": "observation-capture-native-grounded-preview",
+    "safe_stop": {
+      "reason_code": "none",
+      "required": false
+    },
+    "semantic_facts": [],
+    "session_id": "session.a80ab7ee89f34d80a9663bbd4274847b",
+    "state": {
+      "display_name": "Homepage",
+      "resolution_sha256": "4547c7327649442671a03151d3c7c58e59ed08ac6c6bba95d2cc4ac12bb30b92",
+      "responsibility": "Open a reviewed job detail.",
+      "source_interface_id": "interface.homepage",
+      "state_availability": "reviewed",
+      "state_id": "homepage",
+      "status": "matched",
+      "surface_type": "web_page"
+    },
+    "state_resolution_ref": "state-resolution:capture-native-grounded-preview",
+    "workflow": {
+      "asset_content_sha256": "b475a09c308fb6fa71e7fda4dc814c5c55002672a2ae503211b210eb2c0e4e57",
+      "asset_id": "seek_homepage_quick_apply",
+      "reviewed_revision_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source_workflow_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "workflow_id": "workflow.seek.portfolio"
+    }
+  },
+  "execute_binding_enabled": false,
+  "grants_action_authority": false,
+  "grounding_preview": {
+    "artifact_is_authorization": false,
+    "asset_content_sha256": "b475a09c308fb6fa71e7fda4dc814c5c55002672a2ae503211b210eb2c0e4e57",
+    "asset_id": "seek_homepage_quick_apply",
+    "bbox": {
+      "h": 80,
+      "w": 300,
+      "x": 100,
+      "y": 200
+    },
+    "candidate_id": "candidate-current",
+    "canonical_origin": "https://nz.seek.com",
+    "capture_lineage": {
+      "capture_id": "capture-native-grounded-preview",
+      "screenshot_sha256": "7dd9fabfbe8cf93ea7ec1e1b8689574302337d534cd4d2a0fb5ef998db4a110f",
+      "viewport_size": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    "click_point": {
+      "x": 220,
+      "y": 240
+    },
+    "confidence": 0.95,
+    "contract_version": "review_grounding_preview_v1",
+    "element_ref": "job_card",
+    "evidence_refs": [
+      "gate:capture-native-grounded-preview",
+      "grounding:capture-native-grounded-preview:job-card"
+    ],
+    "execute_binding_enabled": false,
+    "gate_decision_ref": "gate:capture-native-grounded-preview",
+    "gate_evidence_refs": [
+      "gate:capture-native-grounded-preview"
+    ],
+    "gate_selection_sha256": "2abeb54104c110b0d6a77bacdaf256efe950b2fb9bf2199937b17b51ac557276",
+    "grants_action_authority": false,
+    "grounding_evidence_refs": [
+      "grounding:capture-native-grounded-preview:job-card"
+    ],
+    "preview_sha256": "c0f7fe05ffdc6417b9cd0e6554fa458a3f399ad15bacb56a9505cc3d71f9823a",
+    "review_only": true,
+    "review_selection_sha256": "2abeb54104c110b0d6a77bacdaf256efe950b2fb9bf2199937b17b51ac557276",
+    "reviewed_revision_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "score_margin": 0.4,
+    "semantic_action": "open_detail",
+    "source_state_id": "homepage",
+    "source_workflow_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": "validated",
+    "target_state_id": "detail",
+    "transition_id": "open_detail"
+  },
+  "intent_id": "intent.open-detail",
+  "observation_id": "observation-initial",
+  "review_only": true,
+  "review_selection": {
+    "artifact_is_authorization": false,
+    "asset_content_sha256": "b475a09c308fb6fa71e7fda4dc814c5c55002672a2ae503211b210eb2c0e4e57",
+    "asset_id": "seek_homepage_quick_apply",
+    "canonical_origin": "https://nz.seek.com",
+    "capture_lineage": {
+      "capture_id": "capture-native-grounded-preview",
+      "screenshot_sha256": "7dd9fabfbe8cf93ea7ec1e1b8689574302337d534cd4d2a0fb5ef998db4a110f",
+      "viewport_size": {
+        "height": 900,
+        "width": 1440
+      }
+    },
+    "contract_version": "review_transition_selection_v1",
+    "element_ref": "job_card",
+    "execute_binding_enabled": false,
+    "grants_action_authority": false,
+    "requirements": {
+      "current_capture_required": true,
+      "fresh_grounding_required": true,
+      "gate_endpoint": "POST /action/execute_recognition_plan",
+      "gate_required": true,
+      "post_action_verification_required": true,
+      "semantic_success_rule_ids": [
+        "detail_identity"
+      ]
+    },
+    "requires_user_confirmation": false,
+    "review_only": true,
+    "review_selection_sha256": "2abeb54104c110b0d6a77bacdaf256efe950b2fb9bf2199937b17b51ac557276",
+    "reviewed_revision_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "selection_sha256": "2abeb54104c110b0d6a77bacdaf256efe950b2fb9bf2199937b17b51ac557276",
+    "semantic_action": "open_detail",
+    "source_state_id": "homepage",
+    "source_workflow_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": "selected",
+    "target_state_id": "detail",
+    "transition_id": "open_detail"
+  },
+  "session_id": "session.a80ab7ee89f34d80a9663bbd4274847b",
+  "status": "prepared",
+  "target_process_id": 9001,
+  "target_window_handle": 5000,
+  "workflow": {
+    "asset_content_sha256": "b475a09c308fb6fa71e7fda4dc814c5c55002672a2ae503211b210eb2c0e4e57",
+    "asset_id": "seek_homepage_quick_apply",
+    "reviewed_revision_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "source_workflow_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "workflow_id": "workflow.seek.portfolio"
+  }
+}

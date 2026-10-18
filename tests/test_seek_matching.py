@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.seek.matching import (
+from app.application_profiles.seek.matching import (
     apply_agent_suitability_review,
     find_agent_suitability_review,
     load_candidate_profile,

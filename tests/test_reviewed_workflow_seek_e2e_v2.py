@@ -6,16 +6,8 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from tests.test_reviewed_workflow_compiler_v2 import _base_review, _persist_reviewed_workflow
-
-
-@pytest.fixture(autouse=True)
-def _panel_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.api.panel as panel_api
-
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
 
 
 def _observation(asset: dict, content_sha256: str, capture_id: str, *anchor_ids: str, origin: str = "https://nz.seek.com") -> dict:
@@ -240,55 +232,62 @@ def test_synthetic_seek_three_state_review_compile_publish_preview_and_verified_
         validate_current_grounding,
         verify_transition_result,
     )
-    from app.main import app
+    from app.api import reviewed_workflows
 
     review = _base_review()
     review["workflow"]["application_identity"] = {"url": "https://nz.seek.com"}
     source, source_sha = _persist_reviewed_workflow(tmp_path, review)
     assert source.exists()
 
-    with TestClient(app) as client:
-        compile_response = client.post("/panel/compile_reviewed_workflow_asset", json={
-            "application_identity_key": "web:nz.seek.com",
-            "workflow_id": "seek_home_to_apply",
-            "expected_source_workflow_sha256": source_sha,
-        })
-        assert compile_response.status_code == 200
-        compiled = compile_response.json()
-        assert compiled["success"] is True
-        assert compiled["data"]["artifact_is_authorization"] is False
-        assert compiled["data"]["execute_binding_enabled"] is False
+    compile_response = reviewed_workflows.compile_reviewed_workflow_asset_endpoint(
+        reviewed_workflows.PanelCompileReviewedWorkflowAssetRequest(
+            application_identity_key="web:nz.seek.com",
+            workflow_id="seek_home_to_apply",
+            expected_source_workflow_sha256=source_sha,
+        ),
+        project_root=tmp_path,
+    )
+    compiled = compile_response.model_dump(mode="json")
+    assert compiled["success"] is True
+    assert compiled["data"]["artifact_is_authorization"] is False
+    assert compiled["data"]["execute_binding_enabled"] is False
 
-        publish_response = client.post("/panel/publish_reviewed_workflow_asset", json={
-            "application_identity_key": "web:nz.seek.com",
-            "workflow_id": "seek_home_to_apply",
-            "expected_source_workflow_sha256": source_sha,
-            "expected_registry_revision": compiled["data"]["registry_revision"],
-        })
-        assert publish_response.status_code == 200
-        published = publish_response.json()
-        assert published["success"] is True
-        assert published["data"]["artifact_is_authorization"] is False
-        assert published["data"]["execute_binding_enabled"] is False
-        asset = published["data"]["compile_result"]["asset"]
-        content_sha256 = published["data"]["publish_result"]["content_sha256"]
-        assert asset["application"]["canonical_origin"] == "https://nz.seek.com"
-        assert [state["availability"] for state in asset["states"]] == ["stop_boundary", "reviewed", "reviewed"]
-        assert {item["semantic_action"] for item in asset["transitions"]} == {"open_detail", "open_apply_flow"}
-        serialized_asset = json.dumps(asset, ensure_ascii=False)
-        assert '"x"' not in serialized_asset and "hwnd" not in serialized_asset and "pid" not in serialized_asset
+    publish_response = reviewed_workflows.publish_reviewed_workflow_asset_endpoint(
+        reviewed_workflows.PanelPublishReviewedWorkflowAssetRequest(
+            application_identity_key="web:nz.seek.com",
+            workflow_id="seek_home_to_apply",
+            expected_source_workflow_sha256=source_sha,
+            expected_registry_revision=compiled["data"]["registry_revision"],
+        ),
+        project_root=tmp_path,
+    )
+    published = publish_response.model_dump(mode="json")
+    assert published["success"] is True
+    assert published["data"]["artifact_is_authorization"] is False
+    assert published["data"]["execute_binding_enabled"] is False
+    asset = published["data"]["compile_result"]["asset"]
+    content_sha256 = published["data"]["publish_result"]["content_sha256"]
+    assert asset["application"]["canonical_origin"] == "https://nz.seek.com"
+    assert [state["availability"] for state in asset["states"]] == ["stop_boundary", "reviewed", "reviewed"]
+    assert {item["semantic_action"] for item in asset["transitions"]} == {"open_detail", "open_apply_flow"}
+    serialized_asset = json.dumps(asset, ensure_ascii=False)
+    assert '"x"' not in serialized_asset and "hwnd" not in serialized_asset and "pid" not in serialized_asset
 
-        home = _observation(asset, content_sha256, "capture-home", *_anchors_for(asset, "home"))
-        preview = client.post("/panel/preview_reviewed_workflow_replay", json={
-            "asset_id": asset["asset_id"],
-            "expected_content_sha256": content_sha256,
-            "current_observation": home,
-        }).json()
-        assert preview["success"] is True, preview["data"]["state_resolution"].get("failure_code")
-        assert preview["data"]["mode"] == "read_only_preview"
-        assert preview["data"]["would_call_action_api"] is False
-        assert preview["data"]["execution_authorized"] is False
-        assert preview["data"]["state_resolution"]["status"] == "resolved"
+    home = _observation(asset, content_sha256, "capture-home", *_anchors_for(asset, "home"))
+    preview_response = reviewed_workflows.preview_reviewed_workflow_replay_endpoint(
+        reviewed_workflows.PanelPreviewReviewedWorkflowReplayRequest(
+            asset_id=asset["asset_id"],
+            expected_content_sha256=content_sha256,
+            current_observation=home,
+        ),
+        project_root=tmp_path,
+    )
+    preview = preview_response.model_dump(mode="json")
+    assert preview["success"] is True, preview["data"]["state_resolution"].get("failure_code")
+    assert preview["data"]["mode"] == "read_only_preview"
+    assert preview["data"]["would_call_action_api"] is False
+    assert preview["data"]["execution_authorized"] is False
+    assert preview["data"]["state_resolution"]["status"] == "resolved"
 
     home_resolution = resolve_current_state(asset, home)
     home_selection = select_verified_transition(asset, home_resolution, semantic_action="open_detail", current_observation=home)

@@ -227,6 +227,116 @@ def test_recomputes_verified_reviewed_target_and_binds_next_observation() -> Non
     assert receipt.evidence.verification_ref.startswith("verification:")
 
 
+def test_legacy_receipt_rejects_native_process_replacement_without_pre_action_identity_contract() -> None:
+    raw_asset = _asset()
+    raw_asset["application"] = {
+        "identity_status": "resolved",
+        "kind": "native",
+        "allow_external_sites": False,
+        "executable": "lonlife_acc.exe",
+        "product_identity": "lonlife",
+        "executable_path": r"d:\lonlife\lonlife_acc.exe",
+    }
+    asset = validate_reviewed_workflow_asset(raw_asset)
+
+    def native_observation(
+        capture_id: str,
+        screenshot_sha256: str,
+        *anchors: str,
+        process_create_time: float,
+    ) -> dict:
+        value = _observation(asset, capture_id, screenshot_sha256, *anchors)
+        value["contract_version"] = "reviewed_workflow_current_observation_v2"
+        value["origin"] = ""
+        value["native_identity"] = {
+            "contract_version": "windows_native_identity_observation_v1",
+            "provider": "windows_native_identity",
+            "status": "observed",
+            "target_window_handle": 4242,
+            "process_id": 9001,
+            "process_create_time": process_create_time,
+            "executable_path": r"d:\lonlife\lonlife_acc.exe",
+        }
+        return value
+
+    before = native_observation(
+        "capture-1", "a" * 64, "anchor_homepage", "job_card",
+        process_create_time=1000.5,
+    )
+    post = native_observation(
+        "capture-2", "b" * 64, "anchor_detail", "quick_apply",
+        process_create_time=2000.5,
+    )
+    resolution = resolve_current_state(asset, before)
+    selection = select_verified_transition(
+        asset,
+        resolution,
+        transition_id="open_detail",
+        current_observation=before,
+    )
+    operation = _operation(selection)
+    operation["evidence_refs"] = ["candidate:1", "gate:1", "backend:1", "trace:1"]
+    workflow = _workflow(asset)
+    action = next(item for item in asset["transitions"] if item["transition_id"] == "open_detail")
+    observation = _runtime_observation(
+        asset=asset,
+        workflow=workflow,
+        observation_id="observation-1",
+        capture_id="capture-1",
+        screenshot_sha256="a" * 64,
+        state_id=action["source_state_id"],
+        availability="reviewed",
+        resolution_sha256=resolution["resolution_sha256"],
+        available_transition=action,
+    )
+    native_application = observation.application.model_copy(
+        update={
+            "identity_ref": "application:native:lonlife_acc.exe:lonlife",
+            "kind": "native",
+            "display_name": "lonlife",
+        }
+    )
+    observation = observation.model_copy(update={"application": native_application})
+    intent = validate_agent_intent_v1(
+        {
+            "contract_version": "agent_intent_v1",
+            "intent_id": "intent-1",
+            "session_id": "session-1",
+            "observation_id": "observation-1",
+            "workflow": workflow,
+            "action_id": "open_detail",
+        },
+        observation=observation,
+    )
+    post_resolution = resolve_current_state(asset, post)
+    next_action = next(
+        item for item in asset["transitions"]
+        if item["source_state_id"] == post_resolution["state_id"]
+    )
+    next_observation = _runtime_observation(
+        asset=asset,
+        workflow=workflow,
+        observation_id="observation-2",
+        capture_id="capture-2",
+        screenshot_sha256="b" * 64,
+        state_id=post_resolution["state_id"],
+        availability=post_resolution["state_availability"],
+        resolution_sha256=post_resolution["resolution_sha256"],
+        available_transition=next_action,
+    ).model_copy(update={"application": native_application})
+
+    with pytest.raises(ValueError, match=r"native.*(?:pre-action identity|unsupported)"):
+        _adapt(
+            reviewed_asset=asset,
+            observation=observation,
+            intent=intent,
+            selection=selection,
+            operation_result=operation,
+            post_observation=post,
+            next_observation=next_observation,
+        )
+
+
 def test_recomputes_stop_boundary_as_dispatched_safe_stop_with_honest_fixture() -> None:
     receipt = _adapt(transition_id="open_apply_flow")
     assert receipt.outcome == "SAFE_STOP"

@@ -251,6 +251,29 @@ const PAGE_REGISTRY = {
     sideEffectKey: "side_effect_observe_only",
     showPipeline: false,
     learnReplaySubview: "draft",
+    interfaceAssetPage: "library",
+  },
+  workflow_library: {
+    page: "learn_replay",
+    group: "learn",
+    agentMode: "learn",
+    titleKey: "primary_library",
+    subtitleKey: "workflow_library_subtitle",
+    api: "/panel/load_interface_workflow_review, /panel/save_interface_workflow_review, /panel/compile_reviewed_workflow_asset, /panel/publish_reviewed_workflow_asset",
+    sideEffectKey: "side_effect_no_page_action",
+    showPipeline: false,
+    learnReplaySubview: "draft",
+    interfaceAssetPage: "workflow",
+  },
+  agent_runtime: {
+    page: "agent_runtime",
+    group: "execute",
+    agentMode: "execute",
+    titleKey: "stage_agent_runtime_title",
+    subtitleKey: "stage_agent_runtime_subtitle",
+    api: "/runtime/agent/session/start, /runtime/agent/intent/submit, /runtime/agent/confirmation/decide",
+    sideEffectKey: "side_effect_agent_confirmation",
+    showPipeline: false,
   },
   template_display: {
     page: "learn_replay",
@@ -391,6 +414,25 @@ function pageMetaForStage(stage) {
 
 const translations = {
   "zh-CN": {
+    primary_learning: "学习",
+    primary_library: "工作流库",
+    primary_run: "运行",
+    primary_diagnostics: "诊断 / Trace",
+    advanced_navigation: "高级工具（保留原有入口）",
+    advanced_templates: "模板 / Profile / Prompt / 旧回放",
+    workflow_library_subtitle: "复用已审核流程编辑器：保存、校验、显式发布；资产不是执行授权",
+    stage_agent_runtime_title: "运行已审核工作流",
+    stage_agent_runtime_subtitle: "新会话 → 当前观测 → 单步意图 → 独立确认 → 回执 / 安全停止",
+    side_effect_agent_confirmation: "明确批准后可能真实执行一步；最终提交禁止",
+    agent_runtime_boundary: "显式创建会话才读取当前绑定窗口。服务端必须能唯一确定已发布资产；这里不覆盖资产路径或窗口身份。批准后可能执行一次真实 Gate 动作，不是模拟按钮。最终提交始终禁止。",
+    agent_runtime_single_step: "仅支持 open_apply_flow 单步及停止边界；进入申请页后 SAFE_STOP，不自动填写、上传、继续或重试。切换页面不会取消服务端会话；结果不确定时查看诊断，不要重新发起。",
+    agent_runtime_start: "创建会话并读取观测",
+    agent_runtime_step: "请求一个步骤（尚不执行）",
+    agent_runtime_approve: "批准本次确认并执行一步",
+    agent_runtime_deny: "拒绝本次确认",
+    agent_runtime_idle: "尚未创建运行会话。",
+    agent_runtime_observation: "服务端当前观测与资产身份",
+    agent_runtime_result: "确认 / 结果 / 回执",
     language: "语言",
     nav_open_bind: "打开 / 绑定",
     nav_capture: "截图",
@@ -1044,6 +1086,25 @@ const translations = {
     codex_browser_reserved_for_gpt: "Codex 内置浏览器默认仅用于 ChatGPT 沟通；测试目标请绑定外部浏览器或应用窗口。"
   },
   "en-US": {
+    primary_learning: "Learn",
+    primary_library: "Workflow library",
+    primary_run: "Run",
+    primary_diagnostics: "Diagnostics / Trace",
+    advanced_navigation: "Advanced tools (existing entries preserved)",
+    advanced_templates: "Templates / Profile / Prompt / Legacy replay",
+    workflow_library_subtitle: "Existing reviewed editor: save, validate and explicitly publish; assets do not authorize execution",
+    stage_agent_runtime_title: "Run reviewed workflow",
+    stage_agent_runtime_subtitle: "New session → current observation → one intent → separate confirmation → receipt / safe stop",
+    side_effect_agent_confirmation: "Approval may execute one real gated action; final submission forbidden",
+    agent_runtime_boundary: "Only explicit session creation reads the bound window. The server must uniquely resolve a published asset; this page cannot override asset paths or window identity. Approval may execute one real gated action, not a simulation. Final submission is always forbidden.",
+    agent_runtime_single_step: "Only open_apply_flow and the stop boundary are supported. SAFE_STOP at application entry; no automatic fill, upload, continue or retry. Navigation does not cancel server sessions. Inspect diagnostics instead of starting over after an uncertain result.",
+    agent_runtime_start: "Create session and read observation",
+    agent_runtime_step: "Request one step (no execution yet)",
+    agent_runtime_approve: "Approve this confirmation and execute one step",
+    agent_runtime_deny: "Deny this confirmation",
+    agent_runtime_idle: "No runtime session has been created.",
+    agent_runtime_observation: "Current server observation and asset identity",
+    agent_runtime_result: "Confirmation / result / receipt",
     language: "Language",
     nav_open_bind: "Open / Bind",
     nav_capture: "Capture",
@@ -2013,6 +2074,9 @@ function showStage(stage) {
     setLearnReplaySubview(meta.learnReplaySubview);
     syncLearningInterfacePrepFromSharedControls();
   }
+  if (page === "learn_replay" && meta.interfaceAssetPage) {
+    showInterfaceAssetPage(meta.interfaceAssetPage);
+  }
   const [fallbackTitleKey, fallbackSubtitleKey] = stageMeta[page] || stageMeta.open_bind;
   $("stageTitle").textContent = t(meta.titleKey || fallbackTitleKey);
   $("stageSubtitle").textContent = t(meta.subtitleKey || fallbackSubtitleKey);
@@ -2028,7 +2092,7 @@ function showStage(stage) {
   const needsPreview = new Set(["capture", "observe", "locate", "execute"]);
   const needsResponse = new Set(["open_bind", "capture", "observe", "locate", "execute_actions", "learn_replay", "learn_validation", "execute_task_run", "execute", "input"]);
   const showsPipeline = meta.showPipeline === true;
-  const singleColumn = page === "trace" || page === "model_test" || page === "input";
+  const singleColumn = page === "trace" || page === "model_test" || page === "input" || page === "agent_runtime";
   const pathFocused = ["execute_actions", "learn_replay", "learn_validation", "execute_task_run"].includes(page);
   const pathVisible = setSharedPathSurfaceVisibility(page);
   if (page === "observe") enterScreenUnderstandingStage();
@@ -2039,7 +2103,7 @@ function showStage(stage) {
   if (contentGrid) contentGrid.classList.toggle("single-column", singleColumn);
   if (contentGrid) contentGrid.classList.toggle("path-focused", pathFocused);
   document.body.classList.toggle("learn-fast-clean-stage", page === "observe");
-  if (responseSurface) responseSurface.style.display = page === "model_test" ? "none" : "";
+  if (responseSurface) responseSurface.style.display = page === "model_test" || page === "agent_runtime" ? "none" : "";
   applyLearnReplaySubviewChrome(page);
   syncStageLearningControls(stage);
 
@@ -19339,6 +19403,17 @@ function interfaceWorkflowInspectorBlock(title, items, fallback = "none") {
     </section>`;
 }
 
+function interfaceWorkflowSelectionReplayProvenance(node) {
+  const provenance = node?.selection_replay_provenance;
+  if (!provenance || typeof provenance !== "object") return "选择来源：无";
+  const origin = String(provenance.execution_origin || "unknown").trim();
+  const simulated = provenance.simulated_offline === true ? "模拟/离线" : "非模拟";
+  const reference = provenance.projection_ref && typeof provenance.projection_ref === "object"
+    ? String(provenance.projection_ref.id || "missing-ref").trim()
+    : "missing-ref";
+  return `选择来源：${origin} · ${simulated} · ${reference}`;
+}
+
 function renderInterfaceWorkflowInspector(view) {
   const target = $("interfaceWorkflowInspector");
   if (!target) return;
@@ -19362,6 +19437,7 @@ function renderInterfaceWorkflowInspector(view) {
         <span class="interface-workflow-chip">${escapeHtml(node.surface_type || "unknown_surface")}</span>
         <span class="interface-workflow-chip">${escapeHtml(node.review_status || "needs_human_review")}</span>
         <span class="interface-workflow-chip">observations=${escapeHtml(String(node.observation_count || 1))}</span>
+        <span class="interface-workflow-chip">${escapeHtml(interfaceWorkflowSelectionReplayProvenance(node))}</span>
       </div>
     </section>
     ${interfaceWorkflowInspectorBlock(t("learning_draft_regions"), node.regions, "no regions")}
@@ -19834,6 +19910,7 @@ function interfaceWorkflowConditionLines(elementId) {
 
 function interfaceWorkflowOperationPatch() {
   const targetId = String($("interfaceWorkflowOperationTargetControl")?.value || "").trim();
+  const actionType = String($("interfaceWorkflowOperationType")?.value || "read").trim();
   const node = interfaceWorkflowReviewState?.current()?.node;
   const controlMatches = (Array.isArray(node?.controls) ? node.controls : []).filter(
     (item) => String(item?.control_id || "").trim() === targetId,
@@ -19844,7 +19921,7 @@ function interfaceWorkflowOperationPatch() {
   return {
     display_name: String($("interfaceWorkflowOperationLabel")?.value || "").trim(),
     agent_description: String($("interfaceWorkflowOperationDescription")?.value || "").trim(),
-    action_type: String($("interfaceWorkflowOperationType")?.value || "read").trim(),
+    action_type: actionType,
     action_template_id: String($("interfaceWorkflowOperationActionCandidate")?.value || "").trim(),
     target_control_id: targetId && controlMatches.length === 1 && regionMatches.length === 0 ? targetId : "",
     target_region_id: targetId && regionMatches.length === 1 && controlMatches.length === 0 ? targetId : "",
@@ -20975,11 +21052,45 @@ function selectionReviewSummaryCounts(review) {
     && Number.isInteger(precise.candidate_count)
     && precise.candidate_count === candidates.length
     && Number.isInteger(precise.region_count)
-    && precise.region_count >= 0;
+    && precise.region_count >= 0
+    && precise.region_count <= candidates.length;
+  // 区域学习状态只读服务端复验摘要，不使用旧投影的初始审核状态。
+  const learningStateVerified = auditMatchesProjection
+    && [review, projection, precise].every((item) => item.artifact_is_authorization === false
+      && item.execute_binding_enabled === false && item.final_submit_forbidden === true)
+    && precise.bbox_region_count === precise.region_count
+    && ["state_count", "action_template_count", "action_click_point_count",
+      "open_detail_transition_hint_count", "blocker_count", "verification_rule_count"]
+      .every((key) => precise[key] === 0)
+    && Array.isArray(precise.semantic_actions) && precise.semantic_actions.length === 0
+    && (precise.learning_state === "compile_rejected"
+      || (precise.learning_state === "ready_for_learning" && precise.region_count > 0));
   return {
     candidate_box_count: candidates.length,
     semantically_reviewed_region_count: auditMatchesProjection ? precise.region_count : null,
+    region_learning_state: learningStateVerified ? precise.learning_state : null,
   };
+}
+
+function selectionReviewReadinessText(counts) {
+  if (!counts) return "";
+  const english = typeof currentLanguage !== "undefined" && currentLanguage === "en-US";
+  const states = english ? {
+    ready_for_learning: "Region semantics supplied by review; not final human approval.",
+    compile_rejected: "No selected target or missing region semantics; region compilation blocked.",
+  } : {
+    ready_for_learning: "区域语义已齐全（来自审核修订），不代表用户最终确认。",
+    compile_rejected: "未选定目标或缺少区域语义，区域学习编译已阻止。",
+  };
+  const status = states[counts.region_learning_state] || (english
+    ? "Region learning status unverified; reload the current review result."
+    : "区域学习状态未核验，请重新加载当前审核结果。");
+  const workflow = counts.region_learning_state ? (english
+    ? " Workflow states/actions are not learned."
+    : " 状态和动作尚未学习。") : "";
+  return status + workflow + (english
+    ? " This asset is not authorized for Agent execution. Reload is not Agent replay."
+    : " 此资产未授权 Agent 执行。重载不等于 Agent 重跑。");
 }
 
 function renderLearningDraftReview(review) {
@@ -21016,6 +21127,7 @@ function renderLearningDraftReview(review) {
     $("learningDraftReviewSummary").innerHTML = `
       <strong>${escapeHtml(t("learning_draft_summary"))}</strong>
       <span>${escapeHtml([stateGuess, counts].filter(Boolean).join(" · "))}</span>
+      ${selectionCounts ? `<span>${escapeHtml(selectionReviewReadinessText(selectionCounts))}</span>` : ""}
       ${summary ? `<span>${escapeHtml(summary)}</span>` : ""}`;
   }
   if ($("learningDraftReviewStates")) $("learningDraftReviewStates").innerHTML = renderLearningReviewItems(states, "state");
@@ -23792,15 +23904,30 @@ function on(id, eventName, handler) {
   if (el) el.addEventListener(eventName, handler);
 }
 
+let agentRuntimePanel = null;
+
+function initializeAgentRuntimePanel() {
+  if (agentRuntimePanel) return;
+  if (!globalThis.AgentRuntimePanel) {
+    if ($("agentRuntimeStatus")) $("agentRuntimeStatus").textContent = "agent_runtime_panel_module_unavailable";
+    return;
+  }
+  agentRuntimePanel = globalThis.AgentRuntimePanel.mountAgentRuntimePanel({
+    document,
+    request: (method, path, payload) => api(method, path, payload, {
+      skipRender: true, workflowStep: "agent_runtime", summary: "Agent runtime",
+    }),
+  });
+}
+
 function bindEvents() {
+  initializeAgentRuntimePanel();
   document.querySelectorAll(".stage").forEach((button) => {
     button.addEventListener("click", () => showStage(button.dataset.stage));
   });
   document.querySelectorAll(".language-option").forEach((button) => {
     button.addEventListener("click", () => applyLanguage(button.dataset.language));
   });
-  on("agentModeLearnBtn", "click", () => showStage("learn_interface"));
-  on("agentModeExecuteBtn", "click", () => showStage("execute_actions"));
   on("settingsBtn", "click", () => showStage("model_test"));
   on("resetLayoutBtn", "click", resetCardLayout);
   on("healthBtn", "click", () => api("GET", "/health"));

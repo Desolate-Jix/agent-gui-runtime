@@ -11,8 +11,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.seek.matching import load_candidate_profile
-from app.seek.profile import assess_candidate_profile_readiness
+from app.application_profiles.seek.matching import load_candidate_profile
+from app.application_profiles.seek.profile import assess_candidate_profile_readiness
 
 
 DEFAULT_TEMPLATE: dict[str, Any] = {

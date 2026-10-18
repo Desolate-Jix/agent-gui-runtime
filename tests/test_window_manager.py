@@ -119,13 +119,39 @@ def test_candidate_window_filter_accepts_visible_top_level_titled_window(monkeyp
             return True
 
         @staticmethod
-        def GetParent(handle):
-            return 0
+        def GetAncestor(handle, flag):
+            return handle
 
     monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
     monkeypatch.setattr(window_manager_module, "win32gui", FakeWin32Gui)
 
     assert manager._is_candidate_window(Wrapper()) is True
+
+
+def test_point_visibility_accepts_only_same_process_owned_popup(monkeypatch):
+    manager = WindowManager()
+    bound = BoundWindow(handle=100, title="Browser", process_id=10, process_name="msedge.exe",
+        rect=WindowRect(left=0, top=0, right=1000, bottom=700), is_active=True)
+    class PopupGui:
+        WindowFromPoint = staticmethod(lambda point: 900)
+        IsChild = staticmethod(lambda parent, child: False)
+        GetAncestor = staticmethod(lambda handle, flag: 100 if flag == 3 else 900)
+        GetWindowText = staticmethod(lambda handle: "")
+    monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
+    monkeypatch.setattr(window_manager_module, "win32gui", PopupGui)
+    monkeypatch.setattr(manager, "_get_process_name", lambda pid: "msedge.exe")
+    for pid, expected in [(10, True), (99, False), (None, False)]:
+        monkeypatch.setattr(manager, "_get_process_id", lambda handle: pid)
+        result = manager.validate_bound_point_visibility(bound=bound, x=465, y=378, expected_owned_popup_handle=900)
+        assert result["allowed"] is expected
+        if expected:
+            assert result["reason"] == "target_point_owned_by_bound_popup"
+    PopupGui.GetAncestor = staticmethod(lambda handle, flag: 901 if flag == 3 else 900)
+    monkeypatch.setattr(manager, "_get_process_id", lambda handle: 10)
+    assert manager.validate_bound_point_visibility(bound=bound, x=465, y=378, expected_owned_popup_handle=900)["allowed"] is False
+    for root in (100, 901):
+        PopupGui.GetAncestor = staticmethod(lambda handle, flag: 100 if flag == 3 else root)
+        assert manager.validate_bound_point_visibility(bound=bound, x=465, y=378, expected_owned_popup_handle=900)["allowed"] is False
 
 
 def test_candidate_window_filter_rejects_hidden_child_or_untitled(monkeypatch) -> None:
@@ -146,8 +172,8 @@ def test_candidate_window_filter_rejects_hidden_child_or_untitled(monkeypatch) -
             return False
 
         @staticmethod
-        def GetParent(handle):
-            return 0
+        def GetAncestor(handle, flag):
+            return handle
 
     class ChildWin32Gui:
         @staticmethod
@@ -155,7 +181,7 @@ def test_candidate_window_filter_rejects_hidden_child_or_untitled(monkeypatch) -
             return True
 
         @staticmethod
-        def GetParent(handle):
+        def GetAncestor(handle, flag):
             return 99
 
     class VisibleWin32Gui:
@@ -164,8 +190,8 @@ def test_candidate_window_filter_rejects_hidden_child_or_untitled(monkeypatch) -
             return True
 
         @staticmethod
-        def GetParent(handle):
-            return 0
+        def GetAncestor(handle, flag):
+            return handle
 
     monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
     monkeypatch.setattr(window_manager_module, "win32gui", HiddenWin32Gui)
@@ -199,8 +225,8 @@ def test_get_bound_window_clears_binding_when_handle_is_invalid(monkeypatch) -> 
             return True
 
         @staticmethod
-        def GetParent(handle):
-            return 0
+        def GetAncestor(handle, flag):
+            return handle
 
     monkeypatch.setattr(window_manager_module, "WINDOWS_BACKEND_AVAILABLE", True)
     monkeypatch.setattr(window_manager_module, "win32gui", InvalidWin32Gui)
@@ -230,8 +256,8 @@ def test_get_bound_window_clears_binding_when_refresh_fails(monkeypatch) -> None
             return True
 
         @staticmethod
-        def GetParent(handle):
-            return 0
+        def GetAncestor(handle, flag):
+            return handle
 
     def failing_wrapper(handle):
         raise RuntimeError("window handle disappeared")
@@ -401,12 +427,20 @@ def test_focus_bound_window_preserves_non_minimized_window_state(monkeypatch) ->
             return True
 
         @staticmethod
-        def GetParent(handle):
-            return 0
+        def GetAncestor(handle, flag):
+            return handle
 
         @staticmethod
         def GetWindowRect(handle):
             return (-8, -8, 2568, 1408)
+
+        @staticmethod
+        def GetClientRect(handle):
+            return (0, 0, 2576, 1416)
+
+        @staticmethod
+        def ClientToScreen(handle, point):
+            return point[0] - 8, point[1] - 8
 
         @staticmethod
         def GetForegroundWindow():
@@ -481,12 +515,20 @@ def test_focus_bound_window_restores_minimized_window(monkeypatch) -> None:
             return True
 
         @staticmethod
-        def GetParent(handle):
-            return 0
+        def GetAncestor(handle, flag):
+            return handle
 
         @staticmethod
         def GetWindowRect(handle):
             return (0, 0, 800, 600)
+
+        @staticmethod
+        def GetClientRect(handle):
+            return (0, 0, 800, 600)
+
+        @staticmethod
+        def ClientToScreen(handle, point):
+            return point
 
         @staticmethod
         def GetForegroundWindow():

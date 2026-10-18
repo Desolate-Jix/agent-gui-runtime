@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -10,9 +9,28 @@ from app.operation.path_graph import build_available_actions
 from app.operation.step import build_execute_step_plan
 from app.learn.path_graph_artifacts import build_seek_runtime_path_graph_export
 from app.learn.path_graph_resolver import resolve_runtime_path_graph
-from app.main import app
+from app.api.application import create_runtime_app
+from app.core.runtime_artifacts import pinned_runtime_output_root
+from tests.runtime_path_graph_fixture_support import runtime_graph_fixture
+
 from app.api.models.response import APIResponse
-from app.seek.learn_artifacts import build_seek_learn_artifacts
+from app.application_profiles.seek.learn_artifacts import build_seek_learn_artifacts
+
+
+app = create_runtime_app()
+
+
+@pytest.fixture(autouse=True)
+def isolated_contract_test(tmp_path, monkeypatch):
+    # 未被单个用例明确替换的底层操作全部拒绝，防止测试碰到用户桌面。
+    def reject_dispatch(*args, **kwargs):
+        pytest.fail("A contract test attempted an unstubbed low-level action")
+
+    for name in ("dispatch_recognition_plan", "dispatch_scroll", "dispatch_type_text"):
+        monkeypatch.setattr(execute_api, name, reject_dispatch)
+    monkeypatch.chdir(tmp_path)
+    with pinned_runtime_output_root(tmp_path):
+        yield
 
 
 def _event(index: int) -> dict:
@@ -305,7 +323,7 @@ def test_execute_step_plan_uses_page_scroll_for_generic_page_container() -> None
 
 
 def test_github_issues_graph_available_actions_and_page_scroll_plan() -> None:
-    graph = json.loads(Path("artifacts/github/runtime_path_graph_github_issues_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('github_issues')
 
     available = build_available_actions(graph, current_state_id="github_issue_detail")
     actions = {item["action_template_id"]: item for item in available["actions"]}
@@ -331,7 +349,7 @@ def test_github_issues_graph_available_actions_and_page_scroll_plan() -> None:
 
 
 def test_python_docs_search_available_actions_by_state() -> None:
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
 
     search_page = build_available_actions(graph, current_state_id="docs:search_page")
     results_page = build_available_actions(graph, current_state_id="docs:search_results")
@@ -353,7 +371,7 @@ def test_python_docs_search_available_actions_by_state() -> None:
 
 
 def test_python_docs_search_execute_step_plans_input_and_page_scroll_dry_run() -> None:
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
     available = build_available_actions(graph, current_state_id="docs:search_page")
     input_action = next(item for item in available["actions"] if item["action_template_id"] == "type_public_search_query")
     input_action["input_text"] = "list comprehension"
@@ -393,7 +411,7 @@ def test_python_docs_search_execute_step_plans_input_and_page_scroll_dry_run() -
 
 
 def test_table_directory_graph_available_actions_and_step_plans() -> None:
-    graph = json.loads(Path("artifacts/table_directory/runtime_path_graph_table_directory_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('table_directory')
 
     list_page = build_available_actions(graph, current_state_id="table:list_page")
     filtered_page = build_available_actions(graph, current_state_id="table:list_filtered")
@@ -572,7 +590,7 @@ def test_execute_step_dispatches_input_through_type_text(monkeypatch) -> None:
 
 def test_execute_step_blocks_live_input_without_explicit_public_input_permission() -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
     selected_action = {
         "action_template_id": "type_public_search_query",
         "action_id": "type_public_search_query",
@@ -603,7 +621,7 @@ def test_execute_step_blocks_live_input_without_explicit_public_input_permission
 
 def test_execute_step_allows_live_public_search_input_when_explicitly_enabled(monkeypatch) -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
     selected_action = {
         "action_template_id": "type_public_search_query",
         "action_id": "type_public_search_query",
@@ -652,7 +670,7 @@ def test_execute_step_allows_live_public_search_input_when_explicitly_enabled(mo
 
 def test_execute_step_resolves_requested_input_action_from_path_graph(monkeypatch) -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
 
     def fake_type_text(request):
         assert request.text == "list comprehension"
@@ -703,7 +721,7 @@ def test_execute_step_resolves_requested_input_action_from_path_graph(monkeypatc
 
 def test_execute_step_uses_path_graph_input_target_point_without_override(monkeypatch) -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
 
     def fake_type_text(request):
         assert request.text == "list comprehension"
@@ -746,7 +764,7 @@ def test_execute_step_uses_path_graph_input_target_point_without_override(monkey
 
 def test_execute_step_resolves_requested_scroll_action_from_path_graph(monkeypatch) -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
 
     def fake_scroll(request):
         assert request.scroll_scope == "page"
@@ -785,7 +803,7 @@ def test_execute_step_resolves_requested_scroll_action_from_path_graph(monkeypat
 
 def test_execute_step_passes_approved_plan_id_for_click_reuse(monkeypatch) -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
 
     def fake_recognition_plan(request):
         assert request.approved_plan_id == "approved-search-button-plan"
@@ -822,7 +840,7 @@ def test_execute_step_passes_approved_plan_id_for_click_reuse(monkeypatch) -> No
 
 def test_execute_step_passes_path_graph_seeded_candidate_for_click(monkeypatch) -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
 
     def fake_recognition_plan(request):
         seeded = request.metadata["seeded_candidate"]
@@ -866,7 +884,7 @@ def test_execute_step_passes_path_graph_seeded_candidate_for_click(monkeypatch) 
 
 def test_execute_step_passes_path_graph_seeded_candidate_for_search_result(monkeypatch) -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
 
     def fake_recognition_plan(request):
         seeded = request.metadata["seeded_candidate"]
@@ -904,7 +922,7 @@ def test_execute_step_passes_path_graph_seeded_candidate_for_search_result(monke
 
 def test_execute_step_allows_explicit_public_search_submit(monkeypatch) -> None:
     client = TestClient(app)
-    graph = json.loads(Path("artifacts/docs_search/runtime_path_graph_python_docs_search_v1.json").read_text(encoding="utf-8"))
+    graph = runtime_graph_fixture('python_docs_search')
 
     def fake_type_text(request):
         assert request.text == "list comprehension"

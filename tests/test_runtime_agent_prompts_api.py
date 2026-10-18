@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.api.application import create_runtime_app
+from tests.runtime_catalog_fixture_support import write_synthetic_agent_prompt_catalog
+
+app = create_runtime_app()
 
 
-def test_runtime_agent_prompts_routes_list_and_load() -> None:
+def _use_synthetic_prompt_catalog(tmp_path: Path, monkeypatch) -> None:
+    catalog_root = tmp_path / "synthetic-runtime-catalog"
+    assert not (catalog_root / "artifacts").exists()
+    write_synthetic_agent_prompt_catalog(catalog_root)
+    monkeypatch.chdir(catalog_root)
+
+
+def test_runtime_agent_prompts_routes_list_and_load(tmp_path: Path, monkeypatch) -> None:
+    _use_synthetic_prompt_catalog(tmp_path, monkeypatch)
     client = TestClient(app)
 
     list_response = client.get("/runtime/agent_prompts")
@@ -48,7 +61,8 @@ def test_runtime_agent_prompts_routes_list_and_load() -> None:
     assert diff_payload["data"]["changed"] is False
 
 
-def test_runtime_agent_prompt_missing_is_structured_error() -> None:
+def test_runtime_agent_prompt_missing_is_structured_error(tmp_path: Path, monkeypatch) -> None:
+    _use_synthetic_prompt_catalog(tmp_path, monkeypatch)
     client = TestClient(app)
 
     response = client.get("/runtime/agent_prompts/not_real")

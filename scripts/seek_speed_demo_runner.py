@@ -43,7 +43,7 @@ from app.core.model_server import check_model_server, profile_for_stage  # noqa:
 from app.learn.continuous_workflow_projection import (  # noqa: E402
     persist_continuous_session_workflow_candidate,
 )
-from app.seek.application_artifacts import build_seek_application_flow_artifact  # noqa: E402
+from app.application_profiles.seek.application_artifacts import build_seek_application_flow_artifact  # noqa: E402
 from seek_demo_readiness_report import build_demo_readiness_report, load_step_reports  # noqa: E402
 
 

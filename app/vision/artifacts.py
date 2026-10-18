@@ -7,11 +7,11 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from app.core.runtime_artifacts import runtime_output_directory
 from app.vision.schemas import VisionAnalyzeResponse, VisionRegion
 
 
 ARTIFACTS_DIR = Path("artifacts/vision-regions")
-ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _safe_name(value: str, *, fallback: str) -> str:
@@ -81,7 +81,7 @@ def save_region_artifacts(image_path: str | Path, response: VisionAnalyzeRespons
     source_path = Path(image_path)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     stem = _safe_name(source_path.stem, fallback="capture")
-    bundle_dir = ARTIFACTS_DIR / f"{timestamp}-{stem}"
+    bundle_dir = runtime_output_directory("artifacts/vision-regions", legacy_path=ARTIFACTS_DIR, create=True) / f"{timestamp}-{stem}"
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     with Image.open(source_path) as image:

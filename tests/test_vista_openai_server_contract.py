@@ -1,6 +1,6 @@
 import threading
 
-from scripts.model_servers.vista_openai_server import (
+from app.vision.model_workers.vista_openai_server import (
     _activate_request,
     _cancel_active_request,
     _clear_active_request,

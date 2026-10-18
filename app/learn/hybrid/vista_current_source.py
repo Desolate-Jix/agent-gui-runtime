@@ -22,7 +22,7 @@ import psutil
 VISTA_PROVIDER = "vista_4b"
 VISTA_MODEL_NAME = "inclusionAI/VISTA-4B"
 VISTA_PROFILE_PATH = "configs/model_profiles/vista_4b_transformers.json"
-VISTA_SERVER_PATH = "scripts/model_servers/vista_openai_server.py"
+VISTA_SERVER_PATH = "app/vision/model_workers/vista_openai_server.py"
 VISTA_RUNTIME = Path("D:/agent-gui-runtime/.venv/Scripts/python.exe")
 DEFAULT_MODEL_PATH = Path("D:/agent-gui-runtime/models/vista-4b-safetensors-sharded")
 DEFAULT_TIMEOUT_SECONDS = 180

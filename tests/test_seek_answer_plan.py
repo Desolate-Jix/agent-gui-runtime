@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from app.seek.answer_plan import build_application_answer_plan
+from app.application_profiles.seek.answer_plan import build_application_answer_plan
 
 
 def _flow_state() -> dict:

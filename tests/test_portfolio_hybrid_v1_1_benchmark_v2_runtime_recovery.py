@@ -695,6 +695,7 @@ def test_u2_runtime_public_probe_surface_is_exact() -> None:
     )
 
     expected = {
+        "reserve_attempt": ["self", "attempt_ref", "attempt_dir"],
         "begin_probe": [
             "self",
             "provider_id",
@@ -719,20 +720,282 @@ def test_u2_runtime_public_probe_surface_is_exact() -> None:
         ) == parameters
 
 
+def test_reserve_attempt_is_metadata_only_idempotent_and_cleanup_recoverable(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        read_benchmark_v2_attempt_journal,
+    )
+
+    runtime = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+    attempt = _sealed({"attempt_id": "attempt-reservation-only"})
+    attempt_dir = (tmp_path / "attempt-reservation-only").resolve()
+    attempt_dir.mkdir()
+    journal_path = runtime_module._benchmark_v2_attempt_journal_path(
+        project_root=tmp_path,
+        attempt_ref=attempt,
+    )
+
+    runtime.reserve_attempt(attempt_ref=attempt, attempt_dir=attempt_dir)
+    first = journal_path.read_bytes()
+    runtime.reserve_attempt(attempt_ref=attempt, attempt_dir=attempt_dir)
+
+    assert journal_path.read_bytes() == first
+    assert [
+        event["event_kind"]
+        for event in read_benchmark_v2_attempt_journal(
+            journal_path=journal_path,
+            attempt_ref=attempt,
+        )
+    ] == ["attempt_prepared"]
+    assert runtime.resource_counts() == {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+
+    receipt = runtime.cleanup_attempt(
+        attempt=attempt,
+        reason="interrupted_after_outer_opened",
+    )
+
+    assert receipt["cleanup_status"] == "stable_zero"
+    assert [
+        event["event_kind"]
+        for event in read_benchmark_v2_attempt_journal(
+            journal_path=journal_path,
+            attempt_ref=attempt,
+        )
+    ] == ["attempt_prepared", "attempt_cleanup_prepared", "attempt_terminal"]
+
+
+@pytest.mark.parametrize("raw", [None, b'{"partial":'])
+def test_cleanup_rejects_missing_or_partial_reservation_journal(
+    tmp_path: Path, raw: bytes | None
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+
+    runtime = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+    attempt = _sealed({"attempt_id": "attempt-reservation-missing"})
+    journal_path = runtime_module._benchmark_v2_attempt_journal_path(
+        project_root=tmp_path,
+        attempt_ref=attempt,
+    )
+    if raw is not None:
+        journal_path.parent.mkdir(parents=True)
+        journal_path.write_bytes(raw)
+
+    with pytest.raises(ValueError, match="journal"):
+        runtime.cleanup_attempt(attempt=attempt, reason="missing_reservation")
+
+    assert runtime.resource_counts() == {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+
+
+def test_reserve_attempt_accepts_only_the_existing_initial_reservation(
+    tmp_path: Path,
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        append_benchmark_v2_attempt_event,
+        read_benchmark_v2_attempt_journal,
+    )
+
+    runtime = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+    attempt = _sealed({"attempt_id": "attempt-reservation-later-event"})
+    attempt_dir = (tmp_path / "attempt-reservation-later-event").resolve()
+    attempt_dir.mkdir()
+    journal_path = runtime_module._benchmark_v2_attempt_journal_path(
+        project_root=tmp_path,
+        attempt_ref=attempt,
+    )
+    runtime.reserve_attempt(attempt_ref=attempt, attempt_dir=attempt_dir)
+    append_benchmark_v2_attempt_event(
+        journal_path=journal_path,
+        attempt_ref=attempt,
+        phase="prepared",
+        event_kind="window_owned",
+        resource_ref=_sealed({"kind": "later-event"}),
+    )
+    before = journal_path.read_bytes()
+
+    runtime.reserve_attempt(attempt_ref=attempt, attempt_dir=attempt_dir)
+
+    assert journal_path.read_bytes() == before
+    assert [
+        event["event_kind"]
+        for event in read_benchmark_v2_attempt_journal(
+            journal_path=journal_path,
+            attempt_ref=attempt,
+        )
+    ] == ["attempt_prepared", "window_owned"]
+    assert runtime.resource_counts() == {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+
+
+def test_prepare_screen_groups_rejects_nonreservation_journal_before_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        append_benchmark_v2_attempt_event,
+    )
+    from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
+
+    _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
+    attempt = _sealed({"attempt_id": "attempt-reservation-running"})
+    attempt_dir = (tmp_path / "attempt-reservation-running").resolve()
+    attempt_dir.mkdir()
+    journal_path = runtime_module._benchmark_v2_attempt_journal_path(
+        project_root=tmp_path,
+        attempt_ref=attempt,
+    )
+    runtime.reserve_attempt(attempt_ref=attempt, attempt_dir=attempt_dir)
+    append_benchmark_v2_attempt_event(
+        journal_path=journal_path,
+        attempt_ref=attempt,
+        phase="prepared",
+        event_kind="window_owned",
+        resource_ref=_sealed({"kind": "already-running"}),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_partition_groups",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("allocated groups")),
+    )
+
+    with pytest.raises(ValueError, match="reservation-only"):
+        runtime.prepare_screen_groups(
+            provider_manifest=manifest,
+            partition="regression",
+            attempt_ref=attempt,
+            attempt_dir=attempt_dir,
+        )
+
+    assert windows.active == 0
+    assert runtime.resource_counts() == {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+
+
+@pytest.mark.parametrize("seed", ["missing", "conflicting", "duplicate", "partial"])
+def test_reserve_attempt_rejects_nonempty_invalid_reservation(
+    tmp_path: Path, seed: str
+) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
+    from app.learn.hybrid.benchmark_v2_lifecycle import (
+        append_benchmark_v2_attempt_event,
+    )
+
+    runtime = runtime_module._BenchmarkV2ProductionRuntime(
+        project_root=tmp_path,
+        authority_root=tmp_path / "runtime_state" / "binding-authority",
+    )
+    attempt = _sealed({"attempt_id": f"attempt-reservation-{seed}"})
+    attempt_dir = (tmp_path / f"attempt-reservation-{seed}").resolve()
+    attempt_dir.mkdir()
+    journal_path = runtime_module._benchmark_v2_attempt_journal_path(
+        project_root=tmp_path,
+        attempt_ref=attempt,
+    )
+    conflicting_resource = runtime_module._runtime_resource_ref(
+        "attempt_directory",
+        {"attempt_dir": str((tmp_path / "different-attempt").resolve())},
+    )
+    if seed == "partial":
+        journal_path.parent.mkdir(parents=True)
+        journal_path.write_bytes(b'{"partial":')
+    elif seed == "missing":
+        append_benchmark_v2_attempt_event(
+            journal_path=journal_path,
+            attempt_ref=attempt,
+            phase="prepared",
+            event_kind="window_owned",
+            resource_ref=_sealed({"kind": "missing-reservation"}),
+        )
+    elif seed == "conflicting":
+        append_benchmark_v2_attempt_event(
+            journal_path=journal_path,
+            attempt_ref=attempt,
+            phase="prepared",
+            event_kind="attempt_prepared",
+            resource_ref=conflicting_resource,
+        )
+    else:
+        runtime.reserve_attempt(attempt_ref=attempt, attempt_dir=attempt_dir)
+        append_benchmark_v2_attempt_event(
+            journal_path=journal_path,
+            attempt_ref=attempt,
+            phase="prepared",
+            event_kind="attempt_prepared",
+            resource_ref=conflicting_resource,
+        )
+    before = journal_path.read_bytes()
+
+    with pytest.raises(
+        ValueError, match="journal" if seed == "partial" else "reservation"
+    ):
+        runtime.reserve_attempt(attempt_ref=attempt, attempt_dir=attempt_dir)
+
+    assert journal_path.read_bytes() == before
+    assert runtime.resource_counts() == {
+        "service_operations": 0,
+        "windows": 0,
+        "providers": 0,
+        "listeners": 0,
+        "leases": 0,
+    }
+
+
 def test_prepared_attempt_without_window_cleans_to_stable_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.learn.hybrid import benchmark_v2_runtime as runtime_module
     from test_portfolio_hybrid_v1_1_benchmark_v2_runtime import _runtime
 
     _, runtime, manifest, _, windows, _ = _runtime(monkeypatch, tmp_path)
     attempt = _sealed({"attempt_id": "attempt-prepared-only"})
+    attempt_dir = (tmp_path / "attempt-prepared-only").resolve()
+    journal_path = runtime_module._benchmark_v2_attempt_journal_path(
+        project_root=tmp_path,
+        attempt_ref=attempt,
+    )
+    runtime.reserve_attempt(attempt_ref=attempt, attempt_dir=attempt_dir)
+    reserved = journal_path.read_bytes()
     iterator = runtime.prepare_screen_groups(
         provider_manifest=manifest,
         partition="regression",
         attempt_ref=attempt,
-        attempt_dir=(tmp_path / "attempt-prepared-only").resolve(),
+        attempt_dir=attempt_dir,
     )
+    assert journal_path.read_bytes() == reserved
     receipt = runtime.cleanup_attempt(attempt=attempt, reason="crash_before_window")
     assert receipt["cleanup_status"] == "stable_zero"
     assert windows.active == 0

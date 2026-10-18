@@ -5,7 +5,9 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
-from app.main import app
+from app.api.application import create_runtime_app
+
+app = create_runtime_app()
 
 
 def test_execute_observe_seek_detects_review_and_submit_danger() -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.final_review import build_seek_final_review_extraction
+from app.application_profiles.seek.final_review import build_seek_final_review_extraction
 from scripts.seek_debug_step_runner import _merge_review_observations
 
 

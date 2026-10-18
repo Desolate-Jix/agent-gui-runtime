@@ -3,10 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from app.learn.draft_review import load_learning_draft_review
-from app.main import app
 from scripts.build_learn_page_detail_candidate import build_learn_page_detail_candidate
 from scripts.render_learn_page_detail_candidate_preview import render_page_detail_candidate_preview
 
@@ -1318,9 +1315,7 @@ def test_page_detail_candidate_clips_overlapping_sibling_display_panels(tmp_path
     assert any(item["bbox"] == text_bbox for item in section["regions"])
 
 
-def test_page_detail_candidate_endpoint_is_no_execute(tmp_path: Path, monkeypatch) -> None:
-    import app.api.panel as panel_api
-
+def test_page_detail_candidate_is_no_execute(tmp_path: Path) -> None:
     precise = _write_json(
         tmp_path / "artifacts" / "candidate" / "learn_precise_understanding_candidate.json",
         {
@@ -1342,24 +1337,18 @@ def test_page_detail_candidate_endpoint_is_no_execute(tmp_path: Path, monkeypatc
             "artifact_is_authorization": False,
         },
     )
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/create_page_detail_candidate",
-        json={"source_path": str(precise.relative_to(tmp_path))},
+    data = build_learn_page_detail_candidate(
+        source_path=precise,
+        out_dir=precise.parent,
+        project_root=tmp_path,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    data = payload["data"]
     assert data["contract_version"] == "learn_page_detail_candidate_v1"
     assert data["summary"]["region_count"] == 1
     assert data["safety"]["model_started"] is False
     assert data["safety"]["live_clicks"] == 0
     assert data["safety"]["execute_binding_enabled"] is False
     assert data["safety"]["runtime_pathgraph_promotion"] is False
-    assert data["trace_path"]
 
 
 def test_page_detail_candidate_sidecar_loads_with_pathgraph_review(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
 import hashlib
 import json
@@ -395,17 +395,12 @@ def fake_qwen_runner(**kwargs: Any) -> dict[str, Any]:
             {
                 "candidate_id": candidate["candidate_id"],
                 "role": "button",
-                "label": "申请职位",
-                "description": "打开申请流程",
-                "semantic_confidence": 0.94,
-                "task_relevance": 0.9,
-                "relation": "primary_action",
-                "ambiguity": None,
+                "label": "apply position",
+                "binding_status": "BOUND",
+                "confidence": 0.94,
             }
             for candidate in request["candidates"]
         ],
-        "ambiguity_sets": [],
-        "orphan_semantics": [],
     }
 
 
@@ -660,37 +655,41 @@ def _negative_control_direct_workflow_state(
 
 
 @contextmanager
-def _negative_control_static_panel_http_boundary(
+def _negative_control_direct_owner_boundary(
     root: Path,
     *,
     workflow_state: dict[str, Any] | None = None,
 ) -> Iterator[Any]:
-    os.environ.setdefault("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
-    os.environ.setdefault("AGENT_GUI_LEARNING_WORKFLOW_STORE_PATH", ":memory:")
-    from fastapi.testclient import TestClient
-    from app.api import panel as panel_api
-    from app.main import app
+    from app.learn.learning_draft_review_service import (
+        load_learning_draft_review_transaction,
+        save_learning_draft_review_transaction,
+    )
 
-    previous_root = panel_api.ROOT_DIR
-    previous_trace = panel_api.write_trace
-    previous_store = panel_api.learning_workflow_run_store
-    panel_api.ROOT_DIR = root
-    panel_api.write_trace = lambda **_kwargs: "managed-proof-trace.json"
-    if workflow_state is not None:
-        class _NegativeControlStaticWorkflowStore:
-            def get(self, run_id: str) -> dict[str, Any]:
-                if run_id != workflow_state["run_id"]:
-                    raise ValueError("learning workflow run not found")
-                return deepcopy(workflow_state)
+    class _NegativeControlWorkflowStore:
+        def get(self, run_id: str) -> dict[str, Any]:
+            if workflow_state is None or run_id != workflow_state["run_id"]:
+                raise ValueError("learning workflow run not found")
+            return deepcopy(workflow_state)
 
-        panel_api.learning_workflow_run_store = _NegativeControlStaticWorkflowStore()
-    try:
-        with TestClient(app) as client:
-            yield client
-    finally:
-        panel_api.ROOT_DIR = previous_root
-        panel_api.write_trace = previous_trace
-        panel_api.learning_workflow_run_store = previous_store
+    class _DirectDraftReviewOwner:
+        def load(self, *, source_path: str, workflow_run_id: str | None) -> dict[str, Any]:
+            return load_learning_draft_review_transaction(
+                source_path=source_path,
+                workflow_run_id=workflow_run_id,
+                discover_related_sidecars=True,
+                project_root=root,
+                workflow_store=_NegativeControlWorkflowStore(),
+            )
+
+        def save(self, *, source_path: str, review_patch: dict[str, Any]) -> dict[str, Any]:
+            return save_learning_draft_review_transaction(
+                source_path=source_path,
+                review_patch=review_patch,
+                project_root=root,
+                workflow_store=_NegativeControlWorkflowStore(),
+            )
+
+    yield _DirectDraftReviewOwner()
 
 
 def _post_success(client: Any, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -744,22 +743,15 @@ def _negative_control_save_large_review(
             "xy": [80, 40],
         },
     }
-    with _negative_control_static_panel_http_boundary(
+    with _negative_control_direct_owner_boundary(
         root,
         workflow_state=state,
-    ) as client:
-        loaded = _post_success(
-            client,
-            "/panel/load_learning_draft_review",
-            {"source_path": relative_trial, "workflow_run_id": run_id},
-        )
+    ) as owner:
+        loaded = owner.load(source_path=relative_trial, workflow_run_id=run_id)
         loaded_screen = loaded["draft"]["page_details"]["screen"]
-        saved = _post_success(
-            client,
-            "/panel/save_learning_draft_review",
-            {
-                "source_path": relative_trial,
-                "review_patch": {
+        saved = owner.save(
+            source_path=relative_trial,
+            review_patch={
                     "_hybrid_workflow_run_id": run_id,
                     "contract_version": "human_review_patch_v1",
                     "screenshot_path": loaded_screen["source_image_path"],
@@ -769,7 +761,6 @@ def _negative_control_save_large_review(
                     "source_after_review": "mixed",
                     "hybrid_review_decisions": [human_decision],
                 },
-            },
         )
     reviewed_path = root / saved["reviewed_template_candidate_path"]
     reviewed = json.loads(reviewed_path.read_text(encoding="utf-8"))
@@ -920,7 +911,7 @@ def _fake_model_lease(task_kind: str) -> dict[str, Any] | None:
 
 
 @contextmanager
-def _managed_panel_http_boundary(
+def _managed_proof_owner_context(
     root: Path,
     *,
     workflow_store_path: Path,
@@ -934,10 +925,8 @@ def _managed_panel_http_boundary(
     config_path.write_bytes(
         (REPOSITORY_ROOT / "configs" / "learn_hybrid_v1_1.json").read_bytes()
     )
-    from fastapi.testclient import TestClient
-    from app.api import panel as panel_api
     from app.core import model_server
-    from app.learn import workflow_worker
+    from app.learn import workflow_service, workflow_worker
     from app.learn.hybrid.capture import load_and_verify_hybrid_capture_bundle
     from app.learn.hybrid.omni_candidates import (
         build_omni_candidate_ledger,
@@ -950,7 +939,6 @@ def _managed_panel_http_boundary(
     from app.learn.workflow_store import LearningWorkflowRunStore
     from app.learn.workflow_tasks import hybrid_qwen as qwen_task_module
     from app.learn.workflow_worker import LearningStageWorkerRegistry
-    from app.main import app
 
     store = LearningWorkflowRunStore(state_path=workflow_store_path)
     registry = LearningStageWorkerRegistry(
@@ -1091,10 +1079,6 @@ def _managed_panel_http_boundary(
         }
 
     previous = {
-        "panel_root": panel_api.ROOT_DIR,
-        "panel_trace": panel_api.write_trace,
-        "panel_store": panel_api.learning_workflow_run_store,
-        "panel_registry": panel_api.learning_stage_worker_registry,
         "worker_root": workflow_worker._PROJECT_ROOT,
         "qwen_root": qwen_task_module._PROJECT_ROOT,
         "omni_handler": workflow_worker.run_hybrid_omni_task,
@@ -1106,10 +1090,6 @@ def _managed_panel_http_boundary(
         "qwen_observer": model_server.observe_hybrid_qwen_cleanup,
         "provider_reconcile": workflow_worker._reconcile_hybrid_provider_scope_record,
     }
-    panel_api.ROOT_DIR = root
-    panel_api.write_trace = lambda **_kwargs: "managed-proof-trace.json"
-    panel_api.learning_workflow_run_store = store
-    panel_api.learning_stage_worker_registry = registry
     workflow_worker._PROJECT_ROOT = root
     qwen_task_module._PROJECT_ROOT = root
     workflow_worker.run_hybrid_omni_task = proof_omni_task
@@ -1145,14 +1125,14 @@ def _managed_panel_http_boundary(
     workflow_worker._reconcile_hybrid_provider_scope_record = (
         proof_reconcile_provider_record
     )
+    composition = workflow_service.compose_test_learning_workflow_service(
+        store=store,
+        worker_registry=registry,
+        project_root=root,
+    )
     try:
-        with TestClient(app) as client:
-            yield client, store, registry
+        yield composition, store, registry
     finally:
-        panel_api.ROOT_DIR = previous["panel_root"]
-        panel_api.write_trace = previous["panel_trace"]
-        panel_api.learning_workflow_run_store = previous["panel_store"]
-        panel_api.learning_stage_worker_registry = previous["panel_registry"]
         workflow_worker._PROJECT_ROOT = previous["worker_root"]
         qwen_task_module._PROJECT_ROOT = previous["qwen_root"]
         workflow_worker.run_hybrid_omni_task = previous["omni_handler"]
@@ -1181,139 +1161,91 @@ def _post_success(client: Any, path: str, payload: dict[str, Any]) -> dict[str, 
 def _run_public_managed_hybrid_lifecycle(
     root: Path,
     *,
-    client: Any,
+    composition: Any,
+    store: Any,
 ) -> dict[str, Any]:
     from app.learn.hybrid.contracts import load_hybrid_config
-    from app.learn.workflow_service import build_learning_pipeline_initial_worker_request
+    from app.learn.workflow_service import (
+        adopt_guarded_learning_stage_worker_result,
+        build_learning_pipeline_initial_worker_request,
+        continue_guarded_learning_stage_worker_result,
+        start_guarded_learning_stage_worker,
+        start_learning_workflow_stage_operation,
+        status_guarded_learning_stage_worker,
+        transition_learning_workflow_run,
+    )
 
     run_id = "run-portfolio-hybrid-managed-proof"
     image_path = _create_capture_image(root)
-    started_run = _post_success(
-        client,
-        "/panel/transition_learning_workflow_state",
-        {
-            "run_id": run_id,
-            "expected_revision": 0,
-            "stage": "bind_capture",
-            "outcome": "running",
-            "reason": "managed proof capture",
-            "evidence_refs": {},
-        },
-    )["workflow_state"]
-    bound = _post_success(
-        client,
-        "/panel/transition_learning_workflow_state",
-        {
-            "run_id": run_id,
-            "expected_revision": started_run["revision"],
-            "stage": "bind_capture",
-            "outcome": "completed",
-            "reason": "managed proof capture bound",
-            "evidence_refs": {
-                "image_path": image_path.relative_to(root).as_posix(),
-            },
-        },
-    )["workflow_state"]
-    operation = _post_success(
-        client,
-        "/panel/start_learning_workflow_stage_operation",
-        {
-            "run_id": run_id,
-            "expected_revision": bound["revision"],
-            "stage": "screen_understanding",
-            "reason": "managed Hybrid proof",
-            "lease_seconds": 600,
-            "learning_pipeline_mode": "hybrid_v1_1",
-        },
+    started_run = transition_learning_workflow_run(
+        store=store, project_root=root, run_id=run_id, expected_revision=0,
+        stage="bind_capture", outcome="running", reason="managed proof capture",
+        evidence_refs={},
+    )
+    bound = transition_learning_workflow_run(
+        store=store, project_root=root, run_id=run_id,
+        expected_revision=started_run["revision"], stage="bind_capture",
+        outcome="completed", reason="managed proof capture bound",
+        evidence_refs={"image_path": image_path.relative_to(root).as_posix()},
+    )
+    operation = start_learning_workflow_stage_operation(
+        store=store, project_root=root, run_id=run_id,
+        expected_revision=bound["revision"], stage="screen_understanding",
+        reason="managed Hybrid proof", lease_seconds=600,
+        learning_pipeline_mode="hybrid_v1_1",
     )
     workflow_revision = operation["workflow_state"]["revision"]
-    bundle = _build_capture(
-        root,
-        image_path=image_path,
-        run_id=run_id,
-        revision=workflow_revision,
-    )
+    bundle = _build_capture(root, image_path=image_path, run_id=run_id, revision=workflow_revision)
     generic_ref = {"id": "proof/ref", "content_sha256": "9" * 64}
     initial = build_learning_pipeline_initial_worker_request(
         learning_pipeline_mode="hybrid_v1_1",
         payload={
-            "run_id": run_id,
-            "workflow_revision": workflow_revision,
+            "run_id": run_id, "workflow_revision": workflow_revision,
             "hybrid_capture_bundle_ref": deepcopy(bundle["bundle_ref"]),
-            "request_ref": deepcopy(generic_ref),
-            "registration_ref": deepcopy(generic_ref),
+            "request_ref": deepcopy(generic_ref), "registration_ref": deepcopy(generic_ref),
             "manifest_ref": deepcopy(generic_ref),
             "capture_image_path": image_path.relative_to(root).as_posix(),
-            "hybrid_config": load_hybrid_config(root),
-            "capture_bundle": deepcopy(bundle),
+            "hybrid_config": load_hybrid_config(root), "capture_bundle": deepcopy(bundle),
         },
     )
-    worker = _post_success(
-        client,
-        "/panel/start_learning_stage_worker",
-        {
-            "run_id": run_id,
-            "expected_revision": workflow_revision,
-            "stage": "screen_understanding",
-            "operation_id": operation["operation_id"],
-            "task_kind": initial["task_kind"],
-            "payload": initial["payload"],
-        },
+    worker = start_guarded_learning_stage_worker(
+        composition=composition, run_id=run_id, expected_revision=workflow_revision,
+        stage="screen_understanding", operation_id=operation["operation_id"],
+        task_kind=initial["task_kind"], payload=initial["payload"],
     )
     receipts: list[dict[str, Any]] = []
     final_projection: dict[str, Any] | None = None
     final_state: dict[str, Any] | None = None
     for _ in range(8):
         worker_id = worker["worker_id"]
-        status_body = client.get(
-            f"/panel/learning_stage_worker/{worker_id}",
-            params={"run_id": run_id, "operation_id": operation["operation_id"]},
-        ).json()
-        if status_body.get("success") is not True:
-            raise RuntimeError(f"worker status failed: {status_body}")
-        status = status_body["data"]
+        status = status_guarded_learning_stage_worker(
+            composition=composition, worker_id=worker_id, run_id=run_id,
+            operation_id=operation["operation_id"],
+        )
         if status.get("status") != "completed":
             raise RuntimeError(f"managed proof worker did not complete: {status}")
-        adopted = _post_success(
-            client,
-            "/panel/adopt_learning_stage_worker_result",
-            {
-                "run_id": run_id,
-                "expected_revision": workflow_revision,
-                "stage": "screen_understanding",
-                "operation_id": operation["operation_id"],
-                "worker_id": worker_id,
-            },
+        adopted = adopt_guarded_learning_stage_worker_result(
+            composition=composition, worker_id=worker_id, run_id=run_id,
+            expected_revision=workflow_revision, stage="screen_understanding",
+            operation_id=operation["operation_id"],
         )
-        continued = _post_success(
-            client,
-            "/panel/continue_learning_stage_worker_result",
-            {
-                "run_id": run_id,
-                "expected_revision": workflow_revision,
-                "stage": "screen_understanding",
-                "operation_id": operation["operation_id"],
-                "worker_id": worker_id,
-            },
+        continued = continue_guarded_learning_stage_worker_result(
+            composition=composition, run_id=run_id, expected_revision=workflow_revision,
+            stage="screen_understanding", operation_id=operation["operation_id"],
+            worker_id=worker_id,
         )
         adoption_receipt = adopted["receipt"]
         managed_response = adopted["response"]
         lifecycle_evidence = deepcopy(managed_response.get("lifecycle_evidence") or {})
-        receipts.append(
-            {
-                "operation_id": operation["operation_id"],
-                "worker_id": worker_id,
-                "task_kind": adoption_receipt["task_kind"],
-                "worker_status": status["status"],
-                "result_sha256": adoption_receipt["result_sha256"],
-                "adoption_status": adopted["status"],
-                "continuation_status": continued["continuation_status"],
-                "lifecycle_evidence": lifecycle_evidence,
-                "predecessor_lineage": deepcopy(
-                    managed_response.get("orchestration") or {}
-                ),
-            }
-        )
+        receipts.append({
+            "operation_id": operation["operation_id"], "worker_id": worker_id,
+            "task_kind": adoption_receipt["task_kind"], "worker_status": status["status"],
+            "result_sha256": adoption_receipt["result_sha256"],
+            "adoption_status": adopted["status"],
+            "continuation_status": continued["continuation_status"],
+            "lifecycle_evidence": lifecycle_evidence,
+            "predecessor_lineage": deepcopy(managed_response.get("orchestration") or {}),
+        })
         if continued.get("stage_finished") is True:
             final_projection = deepcopy(continued["response"]["result"])
             final_state = deepcopy(continued["workflow_state"])
@@ -1323,9 +1255,7 @@ def _run_public_managed_hybrid_lifecycle(
             raise RuntimeError("managed continuation did not start the next worker")
     if final_projection is None or final_state is None:
         raise RuntimeError("managed lifecycle did not emit a review projection")
-    state_projection = final_state["stages"]["screen_understanding"]["evidence_refs"][
-        "hybrid_review_projection"
-    ]
+    state_projection = final_state["stages"]["screen_understanding"]["evidence_refs"]["hybrid_review_projection"]
     if _canonical_bytes(final_projection) != _canonical_bytes(state_projection):
         raise RuntimeError("managed returned projection differs from durable state")
     task_trace = [receipt["task_kind"] for receipt in receipts]
@@ -1337,28 +1267,26 @@ def _run_public_managed_hybrid_lifecycle(
         "panel_learning_hybrid_review_projection": "review",
     }
     return {
-        "image_path": image_path,
-        "projection": final_projection,
-        "workflow_state": final_state,
-        "workflow_run_id": run_id,
-        "workflow_revision": final_state["revision"],
-        "operation_id": operation["operation_id"],
-        "managed_lifecycle_receipts": receipts,
-        "managed_lifecycle_task_trace": task_trace,
+        "image_path": image_path, "projection": final_projection,
+        "workflow_state": final_state, "workflow_run_id": run_id,
+        "workflow_revision": final_state["revision"], "operation_id": operation["operation_id"],
+        "managed_lifecycle_receipts": receipts, "managed_lifecycle_task_trace": task_trace,
         "provider_boundary_trace": [provider_by_task[item] for item in task_trace],
         "managed_review_projection_receipt": deepcopy(receipts[-1]),
-        "managed_review_trial_path": final_state["stages"][
-            "screen_understanding"
-        ]["evidence_refs"]["trial_path"],
+        "managed_review_trial_path": final_state["stages"]["screen_understanding"]["evidence_refs"]["trial_path"],
     }
 
 
 def _save_public_large_review(
     root: Path,
     *,
-    client: Any,
+    workflow_store: Any,
     lifecycle: Mapping[str, Any],
 ) -> dict[str, Any]:
+    from app.learn.learning_draft_review_service import (
+        load_learning_draft_review_transaction,
+        save_learning_draft_review_transaction,
+    )
     projection = deepcopy(lifecycle["projection"])
     run_id = str(lifecycle["workflow_run_id"])
     relative_trial = str(lifecycle["managed_review_trial_path"])
@@ -1366,96 +1294,73 @@ def _save_public_large_review(
     if not trial_path.is_file() or root not in trial_path.parents:
         raise RuntimeError("managed lifecycle did not persist its review trial")
     trial = json.loads(trial_path.read_text(encoding="utf-8-sig"))
-    if _canonical_bytes(trial.get("managed_hybrid_review_projection")) != _canonical_bytes(
-        projection
-    ):
+    if _canonical_bytes(trial.get("managed_hybrid_review_projection")) != _canonical_bytes(projection):
         raise RuntimeError("managed trial differs from its server projection")
     task8_projection = trial.get("hybrid_review_projection")
-    loaded = _post_success(
-        client,
-        "/panel/load_learning_draft_review",
-        {"source_path": relative_trial, "workflow_run_id": run_id},
+    loaded = load_learning_draft_review_transaction(
+        source_path=relative_trial, workflow_run_id=run_id,
+        discover_related_sidecars=True, project_root=root, workflow_store=workflow_store,
     )
-    if _canonical_bytes(loaded["hybrid_review_projection"]) != _canonical_bytes(
-        task8_projection
-    ):
+    if _canonical_bytes(loaded["hybrid_review_projection"]) != _canonical_bytes(task8_projection):
         raise RuntimeError("Task 8 load did not return the managed projection")
     candidate_id = task8_projection["candidates"][0]["candidate_id"]
     loaded_screen = loaded["draft"]["page_details"]["screen"]
-    saved = _post_success(
-        client,
-        "/panel/save_learning_draft_review",
-        {
-            "source_path": relative_trial,
-            "review_patch": {
-                "_hybrid_workflow_run_id": run_id,
-                "contract_version": "human_review_patch_v1",
-                "screenshot_path": loaded_screen["source_image_path"],
-                "screenshot_sha256": loaded_screen["source_image_sha256"],
-                "operations": [],
-                "review_status": "needs_human_review",
-                "source_after_review": "mixed",
-                "hybrid_review_decisions": [
-                    {
-                        "decision_id": "decision/managed-proof-human-point",
-                        "decision_type": "human_point",
-                        "candidate_id": candidate_id,
-                        "human_point_proposal": {
-                            "coordinate_space": "capture_pixel_xyxy",
-                            "xy": [80, 40],
-                        },
-                    }
-                ],
-            },
-        },
+    saved = save_learning_draft_review_transaction(
+        source_path=relative_trial,
+        review_patch={
+            "_hybrid_workflow_run_id": run_id,
+            "contract_version": "human_review_patch_v1",
+            "screenshot_path": loaded_screen["source_image_path"],
+            "screenshot_sha256": loaded_screen["source_image_sha256"],
+            "operations": [], "review_status": "needs_human_review",
+            "source_after_review": "mixed",
+            "hybrid_review_decisions": [{
+                "decision_id": "decision/managed-proof-human-point", "decision_type": "human_point",
+                "candidate_id": candidate_id,
+                "human_point_proposal": {"coordinate_space": "capture_pixel_xyxy", "xy": [80, 40]},
+            }],
+        }, project_root=root, workflow_store=workflow_store,
     )
     reviewed_path = root / saved["reviewed_template_candidate_path"]
     reviewed_bytes = reviewed_path.read_bytes()
     reviewed = json.loads(reviewed_bytes.decode("utf-8-sig"))
-    reloaded = _post_success(
-        client,
-        "/panel/load_learning_draft_review",
-        {
-            "source_path": reviewed_path.relative_to(root).as_posix(),
-            "workflow_run_id": run_id,
-            "discover_related_sidecars": False,
-        },
+    reloaded = load_learning_draft_review_transaction(
+        source_path=reviewed_path.relative_to(root).as_posix(), workflow_run_id=run_id,
+        discover_related_sidecars=False, project_root=root, workflow_store=workflow_store,
     )
     has_vista, has_human = _contains_proposals(reviewed)
     if not has_vista or not has_human:
         raise RuntimeError("Large Review save lost Hybrid proposal evidence")
-    return {
-        "status": "saved",
-        "reviewed_candidate_path": str(reviewed_path.resolve()),
-        "reviewed_candidate_sha256": _sha256_bytes(reviewed_bytes),
-        "reviewed_candidate_contains_vista_proposal": has_vista,
-        "reviewed_candidate_contains_human_proposal": has_human,
-        "managed_review_trial_path": str(trial_path),
-        "managed_review_trial_sha256": _sha256_bytes(trial_path.read_bytes()),
-        "workflow_run_id": run_id,
-        "workflow_revision": lifecycle["workflow_revision"],
-        "reviewed_candidate": reviewed,
-        "public_reload": reloaded,
-    }
+    return {"status":"saved","reviewed_candidate_path":str(reviewed_path.resolve()),
+        "reviewed_candidate_sha256":_sha256_bytes(reviewed_bytes),
+        "reviewed_candidate_contains_vista_proposal":has_vista,
+        "reviewed_candidate_contains_human_proposal":has_human,
+        "managed_review_trial_path":str(trial_path),
+        "managed_review_trial_sha256":_sha256_bytes(trial_path.read_bytes()),
+        "workflow_run_id":run_id,"workflow_revision":lifecycle["workflow_revision"],
+        "reviewed_candidate":reviewed,"public_reload":reloaded}
 
 
 def _base_workflow_review(
     *,
     workflow_id: str,
     reviewed_candidate_path: str,
+    reviewed_candidate_sha256: str,
     reviewed_candidate: Mapping[str, Any],
+    maintained_home_regions: list[dict[str, Any]],
+    maintained_home_provenance: dict[str, Any],
 ) -> dict[str, Any]:
-    projection = reviewed_candidate["draft"]["hybrid_review_projection"]
-    hybrid_region = deepcopy(projection["candidates"][0])
-    hybrid_region.update(
-        {
-            "region_id": "hybrid_apply_region",
-            "label": "Hybrid apply proposal",
-            "display_only": True,
-            "artifact_is_authorization": False,
-            "execute_binding_enabled": False,
-        }
-    )
+    projection = deepcopy(reviewed_candidate["draft"]["hybrid_review_projection"])
+    hybrid_evidence = {
+        "contract_version": "hybrid_review_evidence_v2",
+        "source_path": reviewed_candidate_path,
+        "source_sha256": reviewed_candidate_sha256,
+        "candidate": deepcopy(projection["candidates"][0]),
+        "projection": projection,
+        "display_only": True,
+        "artifact_is_authorization": False,
+        "execute_binding_enabled": False,
+    }
     return {
         "contract_version": "single_application_workflow_review_v1",
         "display_only": True,
@@ -1477,9 +1382,10 @@ def _base_workflow_review(
                 "surface_type": "results",
                 "state_signature": "managed-hybrid-home",
                 "source_paths": [reviewed_candidate_path],
-                "evidence": {},
+                "evidence": {"hybrid_review_evidence": hybrid_evidence},
                 "controls": [{"control_id": "job_card", "label": "Managed result"}],
-                "regions": [hybrid_region],
+                "regions": deepcopy(maintained_home_regions),
+                "hybrid_review_source_provenance": deepcopy(maintained_home_provenance),
                 "action_candidates": [
                     {
                         "action_template_id": "open_job_detail",
@@ -1623,37 +1529,22 @@ def _approve_workflow_review(review: dict[str, Any]) -> dict[str, Any]:
     return approved
 
 
-def _persist_approved_workflow_via_api(
+def _persist_approved_workflow_via_owner(
     root: Path,
     review: dict[str, Any],
-    *,
-    client: Any,
 ) -> dict[str, Any]:
-    first = _post_success(
-        client,
-        "/panel/save_interface_workflow_review",
-        {"review": review},
-    )
+    from app.learn.interface_workflow_service import save_interface_workflow_review_transaction
+    first = save_interface_workflow_review_transaction(review, project_root=root, out_dir=None)
     approved = _approve_workflow_review(first["saved_review"])
-    second = _post_success(
-        client,
-        "/panel/save_interface_workflow_review",
-        {"review": approved},
-    )
+    second = save_interface_workflow_review_transaction(approved, project_root=root, out_dir=None)
     source = Path(second["path"])
     source_bytes = source.read_bytes()
     persisted = json.loads(source_bytes.decode("utf-8-sig"))
     has_vista, has_human = _contains_proposals(persisted)
-    return {
-        "source_path": str(source.resolve()),
-        "source_relative_path": source.relative_to(root).as_posix(),
-        "source_sha256": _sha256_bytes(source_bytes),
-        "source_bytes": source_bytes,
-        "workflow_id": second["workflow_id"],
-        "application_identity_key": second["application_identity_key"],
-        "review_contains_vista_proposal": has_vista,
-        "review_contains_human_proposal": has_human,
-    }
+    return {"source_path":str(source.resolve()),"source_relative_path":source.relative_to(root).as_posix(),
+        "source_sha256":_sha256_bytes(source_bytes),"source_bytes":source_bytes,
+        "workflow_id":second["workflow_id"],"application_identity_key":second["application_identity_key"],
+        "review_contains_vista_proposal":has_vista,"review_contains_human_proposal":has_human}
 
 
 def build_managed_hybrid_review_source(
@@ -1668,30 +1559,52 @@ def build_managed_hybrid_review_source(
     root = Path(project_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     workflow_store_path = root / "runtime_state" / "learning-workflow-runs.json"
-    with _managed_panel_http_boundary(
+    with _managed_proof_owner_context(
         root,
         workflow_store_path=workflow_store_path,
         omni_runner=omni_runner,
         qwen_runner=qwen_runner,
         vista_runner=vista_runner,
-    ) as (client, _store, _registry):
-        lifecycle = _run_public_managed_hybrid_lifecycle(root, client=client)
-        large_review = _save_public_large_review(
-            root,
-            client=client,
-            lifecycle=lifecycle,
+    ) as (composition, store, _registry):
+        lifecycle = _run_public_managed_hybrid_lifecycle(
+            root, composition=composition, store=store
         )
+        large_review = _save_public_large_review(
+            root, workflow_store=store, lifecycle=lifecycle
+        )
+        from app.learn.learning_draft_review_service import load_interface_workflow_review_transaction
+
         candidate_path = Path(large_review["reviewed_candidate_path"])
+        reviewed_candidate_path = candidate_path.relative_to(root).as_posix()
+        maintained_review = load_interface_workflow_review_transaction(
+            draft_source_paths=[reviewed_candidate_path],
+            workflow_run_ids_by_source={reviewed_candidate_path: lifecycle["workflow_run_id"]},
+            discover_related_sidecars=False,
+            goal="Open a detail and stop at the application entry boundary.",
+            application_identity={"url": "https://managed.example.test/jobs"},
+            project_root=root,
+            workflow_store=store,
+        )
+        if maintained_review.get("invalid_sources"):
+            raise RuntimeError("maintained interface workflow builder rejected the reviewed source")
+        maintained_nodes = maintained_review.get("nodes")
+        if not isinstance(maintained_nodes, list) or len(maintained_nodes) != 1:
+            raise RuntimeError("maintained interface workflow builder did not yield one source node")
+        maintained_home_regions = maintained_nodes[0].get("regions")
+        if not isinstance(maintained_home_regions, list):
+            raise RuntimeError("maintained interface workflow builder returned invalid source regions")
+        maintained_home_provenance = maintained_nodes[0].get("hybrid_review_source_provenance")
+        if not isinstance(maintained_home_provenance, dict) or not maintained_home_provenance:
+            raise RuntimeError("maintained interface workflow builder returned missing hybrid source provenance")
         workflow = _base_workflow_review(
             workflow_id="portfolio_hybrid_v1_1_managed",
-            reviewed_candidate_path=candidate_path.relative_to(root).as_posix(),
+            reviewed_candidate_path=reviewed_candidate_path,
+            reviewed_candidate_sha256=large_review["reviewed_candidate_sha256"],
             reviewed_candidate=large_review["reviewed_candidate"],
+            maintained_home_regions=maintained_home_regions,
+            maintained_home_provenance=maintained_home_provenance,
         )
-        persisted = _persist_approved_workflow_via_api(
-            root,
-            workflow,
-            client=client,
-        )
+        persisted = _persist_approved_workflow_via_owner(root, workflow)
     if not persisted["review_contains_vista_proposal"] or not persisted[
         "review_contains_human_proposal"
     ]:
@@ -1734,21 +1647,20 @@ def _worker_compile(
 ) -> dict[str, Any]:
     os.environ.setdefault("AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER", "1")
     os.environ.setdefault("AGENT_GUI_LEARNING_WORKFLOW_STORE_PATH", ":memory:")
-    from app.api import panel as panel_api
+    from app.api import reviewed_workflows as reviewed_workflows
 
-    panel_api.ROOT_DIR = root
     source = root / source_relative
     source_bytes = source.read_bytes()
     source_sha = _sha256_bytes(source_bytes)
     if source_sha != expected_sha:
         raise RuntimeError("worker reloaded source bytes do not match expected SHA-256")
-    compile_request = panel_api.PanelCompileReviewedWorkflowAssetRequest(
+    compile_request = reviewed_workflows.PanelCompileReviewedWorkflowAssetRequest(
         application_identity_key=application_identity_key,
         workflow_id=workflow_id,
         expected_source_workflow_sha256=expected_sha,
     )
     compile_envelope = _api_payload(
-        panel_api.compile_reviewed_workflow_asset_endpoint(compile_request),
+        reviewed_workflows.compile_reviewed_workflow_asset_endpoint(compile_request, project_root=root),
         operation="compile_without_publish",
     )
     compile_data = compile_envelope.get("result")
@@ -1780,18 +1692,18 @@ def _worker_compile(
 
     store = ReviewedWorkflowAssetStore(project_root=root)
     before = store.registry()
-    publish_request = panel_api.PanelPublishReviewedWorkflowAssetRequest(
+    publish_request = reviewed_workflows.PanelPublishReviewedWorkflowAssetRequest(
         application_identity_key=application_identity_key,
         workflow_id=workflow_id,
         expected_source_workflow_sha256=expected_sha,
         expected_registry_revision=before["registry_revision"],
     )
     first = _api_payload(
-        panel_api.publish_reviewed_workflow_asset_endpoint(publish_request),
+        reviewed_workflows.publish_reviewed_workflow_asset_endpoint(publish_request, project_root=root),
         operation="publish_once",
     )
     duplicate = _api_payload(
-        panel_api.publish_reviewed_workflow_asset_endpoint(publish_request),
+        reviewed_workflows.publish_reviewed_workflow_asset_endpoint(publish_request, project_root=root),
         operation="duplicate_publish",
     )
     after = store.registry()
@@ -1909,20 +1821,95 @@ def _free_tcp_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def _create_proof_app(*, root: Path, workflow_store_path: Path) -> Any:
+    """构造仅供持久化证明使用的维护所有者 HTTP 绑定。"""
+    from fastapi import Body, FastAPI
+    from app.api.models.response import APIResponse, ErrorModel
+    from app.api.reviewed_workflows import (
+        PanelCompileReviewedWorkflowAssetRequest,
+        PanelPublishReviewedWorkflowAssetRequest,
+        compile_reviewed_workflow_asset_endpoint,
+        publish_reviewed_workflow_asset_endpoint,
+    )
+    from app.learn.learning_draft_review_service import load_learning_draft_review_transaction
+    from app.learn.workflow_store import LearningWorkflowRunStore
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> Iterator[None]:
+        store = LearningWorkflowRunStore(state_path=workflow_store_path)
+        application.state.workflow_store = store
+        try:
+            yield
+        finally:
+            store.close()
+
+    application = FastAPI(title="hybrid-proof-owner-boundary", lifespan=lifespan)
+
+    def compile_asset(request: Any) -> Any:
+        return compile_reviewed_workflow_asset_endpoint(request, project_root=root)
+
+    compile_asset.__annotations__ = {
+        "request": PanelCompileReviewedWorkflowAssetRequest,
+        "return": APIResponse,
+    }
+    application.post("/_proof/reviewed-workflow/compile", response_model=APIResponse)(compile_asset)
+
+    def publish_asset(request: Any) -> Any:
+        return publish_reviewed_workflow_asset_endpoint(request, project_root=root)
+
+    publish_asset.__annotations__ = {
+        "request": PanelPublishReviewedWorkflowAssetRequest,
+        "return": APIResponse,
+    }
+    application.post("/_proof/reviewed-workflow/publish", response_model=APIResponse)(publish_asset)
+
+    def load_draft_review(
+        source_path: Any = Body(...),
+        workflow_run_id: Any = Body(None),
+        discover_related_sidecars: Any = Body(True),
+    ) -> Any:
+        try:
+            result = load_learning_draft_review_transaction(
+                source_path=source_path,
+                workflow_run_id=workflow_run_id,
+                discover_related_sidecars=discover_related_sidecars,
+                project_root=root,
+                workflow_store=application.state.workflow_store,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            return APIResponse(
+                success=False,
+                message="Proof draft review load failed",
+                data=None,
+                error=ErrorModel(code="proof_draft_review_load_failed", details=str(error)),
+            )
+        return APIResponse(
+            success=True,
+            message="Proof draft review loaded",
+            data=result,
+            error=None,
+        )
+
+    load_draft_review.__annotations__ = {
+        "source_path": str,
+        "workflow_run_id": str | None,
+        "discover_related_sidecars": bool,
+        "return": APIResponse,
+    }
+    application.post("/_proof/learning-draft-review/load", response_model=APIResponse)(load_draft_review)
+    return application
+
+
 def _serve_proof_app(
     *, root: Path, workflow_store_path: Path, port: int, stop_file: Path
 ) -> int:
     os.environ["AGENT_GUI_TEST_DENY_REAL_MODEL_WRAPPER"] = "1"
-    os.environ["AGENT_GUI_LEARNING_WORKFLOW_STORE_PATH"] = str(workflow_store_path)
-    from app.api import panel as panel_api
-    from app.main import app
+    os.environ["AGENT_GUI_LEARNING_WORKFLOW_STORE_PATH"] = ":memory:"
     import uvicorn
 
-    panel_api.ROOT_DIR = root
-    panel_api.write_trace = lambda **_kwargs: "managed-proof-server-trace.json"
     server = uvicorn.Server(
         uvicorn.Config(
-            app,
+            _create_proof_app(root=root, workflow_store_path=workflow_store_path),
             host="127.0.0.1",
             port=port,
             log_level="warning",
@@ -2217,7 +2204,7 @@ def run_managed_two_process_persistence_proof(
         server_pid_a = server_a["process"].pid
         compile_a_envelope = _http_api_data(
             server_a["base_url"],
-            "/panel/compile_reviewed_workflow_asset",
+            "/_proof/reviewed-workflow/compile",
             compile_payload,
         )
         compile_a = compile_a_envelope.get("result")
@@ -2239,7 +2226,7 @@ def run_managed_two_process_persistence_proof(
         server_pid_b = server_b["process"].pid
         reload_b = _http_api_data(
             server_b["base_url"],
-            "/panel/load_learning_draft_review",
+            "/_proof/learning-draft-review/load",
             {
                 "source_path": reviewed_relative,
                 "workflow_run_id": managed["large_review_save"]["workflow_run_id"],
@@ -2277,7 +2264,7 @@ def run_managed_two_process_persistence_proof(
         )
         compile_b_envelope = _http_api_data(
             server_b["base_url"],
-            "/panel/compile_reviewed_workflow_asset",
+            "/_proof/reviewed-workflow/compile",
             compile_payload,
         )
         compile_b = compile_b_envelope.get("result")
@@ -2290,13 +2277,13 @@ def run_managed_two_process_persistence_proof(
         }
         first_publish = _http_api_data(
             server_b["base_url"],
-            "/panel/publish_reviewed_workflow_asset",
+            "/_proof/reviewed-workflow/publish",
             publish_payload,
         )
         cas_after_publish = _cas_snapshot(root, relevant_paths=read_only_paths)
         duplicate_publish = _http_api_data(
             server_b["base_url"],
-            "/panel/publish_reviewed_workflow_asset",
+            "/_proof/reviewed-workflow/publish",
             publish_payload,
         )
         cas_after_duplicate = _cas_snapshot(root, relevant_paths=read_only_paths)
@@ -2521,37 +2508,49 @@ def run_managed_two_process_persistence_proof(
 def run_fixture_negative_control(
     *, project_root: str | Path, fixture_path: str | Path
 ) -> dict[str, Any]:
+    from app.learn.interface_workflow_service import save_interface_workflow_review_transaction
+
     root = Path(project_root).resolve()
     fixture = Path(fixture_path).resolve()
-    raw = json.loads(fixture.read_text(encoding="utf-8-sig"))
-    with _managed_panel_http_boundary(
-        root,
-        workflow_store_path=root
-        / "runtime_state"
-        / "learning-workflow-runs.json",
-        omni_runner=fake_omni_runner,
-        qwen_runner=fake_qwen_runner,
-        vista_runner=fake_bounded_vista_runner,
-    ) as (client, _store, _registry):
-        workflow = _persist_approved_workflow_via_api(root, raw, client=client)
-    worker = _worker_compile(
-        root=root,
-        source_relative=workflow["source_relative_path"],
-        expected_sha=workflow["source_sha256"],
-        application_identity_key=workflow["application_identity_key"],
-        workflow_id=workflow["workflow_id"],
-        publish=False,
-    )
+    fixture_bytes = fixture.read_bytes()
+    raw = json.loads(fixture_bytes.decode("utf-8-sig"))
+    review_root = root / "artifacts" / "interface-workflow-reviews"
+
+    def business_files() -> dict[str, str]:
+        # 写锁文件不是审核产物；其它既有业务文件必须保持原字节。
+        return {
+            path.relative_to(review_root).as_posix(): _sha256_bytes(path.read_bytes())
+            for path in review_root.rglob("*")
+            if path.is_file() and path != review_root / ".review-write.lock"
+        }
+
+    review_before = business_files()
+    cas_before = _cas_snapshot(root)
+    try:
+        save_interface_workflow_review_transaction(raw, project_root=root, out_dir=None)
+    except ValueError as exc:
+        if str(exc) != "selection replay source is missing or corrupt":
+            raise
+        source_rejection = str(exc)
+    else:
+        raise RuntimeError("unbound fixture unexpectedly passed review source validation")
+    if review_before != business_files() or cas_before != _cas_snapshot(root):
+        raise RuntimeError("rejected fixture changed review or publication business files")
+    if fixture.read_bytes() != fixture_bytes:
+        raise RuntimeError("negative-control fixture changed during validation")
     has_vista, has_human = _contains_proposals(raw)
     return {
         "contract_version": PROOF_CONTRACT,
         "proof_mode": "fixture_negative_control_only",
         "fixture_path": str(fixture),
-        "fixture_sha256": _sha256_bytes(fixture.read_bytes()),
+        "fixture_sha256": _sha256_bytes(fixture_bytes),
         "fixture_contains_non_authorizing_proposals": has_vista and has_human,
-        "compiled_status": worker["compile_status"],
-        "compiled_asset_sha256": worker["compiled_asset_sha256"],
-        "compiled_runtime_point_fields": worker["compiled_runtime_point_fields"],
+        "source_rejection": source_rejection,
+        "review_business_files_unchanged": True,
+        "compile_attempted": False,
+        "compiled_status": "not_attempted",
+        "compiled_asset_sha256": None,
+        "compiled_runtime_point_fields": [],
         "publish_attempted": False,
         "registry_exists": (
             root / "runtime_state" / "reviewed-workflow-assets-v2" / "registry.json"

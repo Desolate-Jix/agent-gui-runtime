@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.seek.scroll_containers import SEEK_JOB_DETAIL, SEEK_RESULTS_LIST, discover_seek_scroll_containers
+from app.application_profiles.seek.scroll_containers import SEEK_JOB_DETAIL, SEEK_RESULTS_LIST, discover_seek_scroll_containers
 
 
 def _container(payload: dict, container_id: str) -> dict:

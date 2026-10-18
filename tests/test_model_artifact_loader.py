@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.api.application import create_runtime_app
+from app.learn.model_artifact_loader import load_model_learning_artifact
 
 
 def _write_trial(path: Path) -> None:
@@ -108,45 +109,34 @@ def test_model_artifact_loader_creates_readonly_runtime_artifacts(tmp_path: Path
     assert interface_map["states"][0]["region_refs"] == ["r1"]
 
 
-def test_panel_loads_model_artifact_into_replay_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import app.api.panel as panel_api
-
+def test_loads_model_artifact_into_replay_paths(tmp_path: Path) -> None:
     trial_path = tmp_path / "artifacts" / "learning-runs" / "sample" / "trial_result.json"
     _write_trial(trial_path)
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    client = TestClient(app)
-    response = client.post(
-        "/panel/load_model_artifact",
-        json={"trial_path": "artifacts/learning-runs/sample/trial_result.json"},
+    result = load_model_learning_artifact(
+        "artifacts/learning-runs/sample/trial_result.json",
+        project_root=tmp_path,
     )
-    payload = response.json()
 
-    assert response.status_code == 200
-    assert payload["success"] is True
-    assert payload["data"]["contract_version"] == "model_learning_artifact_load_v1"
-    assert payload["data"]["source"]["readonly"] is True
-    assert payload["data"]["runtime_graph_path"].endswith("runtime_path_graph.json")
-    assert payload["data"]["interface_map_path"].endswith("interface_map.json")
+    assert result["contract_version"] == "model_learning_artifact_load_v1"
+    assert result["source"]["readonly"] is True
+    assert result["runtime_graph_path"].endswith("runtime_path_graph.json")
+    assert result["interface_map_path"].endswith("interface_map.json")
 
 
 def test_model_artifact_can_drive_complete_dry_run_execute_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import app.api.execute as execute_api
-    import app.api.panel as panel_api
 
     trial_path = tmp_path / "artifacts" / "learning-runs" / "sample" / "trial_result.json"
     _write_trial(trial_path)
     source_hash_before = hashlib.sha256(trial_path.read_bytes()).hexdigest()
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
     monkeypatch.setattr(execute_api, "ROOT_DIR", tmp_path)
 
-    client = TestClient(app)
-    load_payload = client.post(
-        "/panel/load_model_artifact",
-        json={"trial_path": "artifacts/learning-runs/sample/trial_result.json"},
-    ).json()
-    assert load_payload["success"] is True
-    graph_path = load_payload["data"]["runtime_graph_path"]
+    client = TestClient(create_runtime_app())
+    load_payload = load_model_learning_artifact(
+        "artifacts/learning-runs/sample/trial_result.json",
+        project_root=tmp_path,
+    )
+    graph_path = load_payload["runtime_graph_path"]
 
     actions_payload = client.post(
         "/execute/available_actions",

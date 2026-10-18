@@ -93,6 +93,10 @@ def build_screen_inventory(screen_reading: dict[str, Any] | None, *, goal: str |
         [_action_from_element(item, source_index=index) for index, item in enumerate(ui_elements) if _element_is_action(item)]
         + [_action_from_uia(control, source_index=index) for index, control in enumerate(uia_controls) if _uia_is_action(control)]
     )
+    # UIA 可能返回客户区外的标题栏；保留原证据，不把越界框钳到截图内冒充控件。
+    actionable = [item for item in available_actions if _action_inside_capture(item, screen.get("image_size"))]
+    excluded_outside_capture = len(available_actions) - len(actionable)
+    available_actions = actionable
     page_elements = _dedupe_items(
         [_page_element_from_text(item, source_index=index) for index, item in enumerate(texts)]
         + [_page_element_from_element(item, source_index=index) for index, item in enumerate(ui_elements) if not _element_is_action(item)]
@@ -109,6 +113,7 @@ def build_screen_inventory(screen_reading: dict[str, Any] | None, *, goal: str |
         "goal": goal,
         "summary": {
             "available_action_count": len(available_actions),
+            "excluded_outside_capture_count": excluded_outside_capture,
             "page_element_count": len(page_elements),
             "card_count": len(cards),
             "action_ids_in_cards": len(action_ids_in_cards),
@@ -125,6 +130,19 @@ def build_screen_inventory(screen_reading: dict[str, Any] | None, *, goal: str |
             "sources": _source_counts(available_actions + page_elements),
         },
     }
+
+
+def _action_inside_capture(action: dict[str, Any], image_size: Any) -> bool:
+    bbox, point = action["bbox"], action["click_point"]
+    x, y, w, h = (bbox[key] for key in ("x", "y", "w", "h"))
+    if (x < 0 or y < 0 or w <= 0 or h <= 0
+            or not x <= point["x"] < x + w or not y <= point["y"] < y + h):
+        return False
+    if isinstance(image_size, dict):
+        width, height = image_size.get("width"), image_size.get("height")
+        if type(width) is int and type(height) is int:
+            return x + w <= width and y + h <= height
+    return True
 
 
 def _action_from_element(element: dict[str, Any], *, source_index: int) -> dict[str, Any]:

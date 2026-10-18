@@ -45,6 +45,7 @@ from app.learn.hybrid.benchmark_v2_lifecycle import (
     compose_benchmark_v2_lifecycle_probe_receipt_v2,
     compose_benchmark_v2_probe_stable_zero_evidence_v1,
     read_benchmark_v2_attempt_journal,
+    reserve_benchmark_v2_attempt,
     validate_benchmark_v2_lifecycle_probe_receipt_v2,
     validate_benchmark_v2_probe_stable_zero_evidence_v1,
 )
@@ -223,6 +224,10 @@ class BenchmarkV2ProductionRuntimePort(Protocol):
     def load_provider_manifest(self, *, path: Path) -> Mapping[str, object]: ...
 
     def workflow_store_capacity(self) -> Mapping[str, object]: ...
+
+    def reserve_attempt(
+        self, *, attempt_ref: Mapping[str, object], attempt_dir: Path
+    ) -> None: ...
 
     def prepare_screen_groups(
         self,
@@ -1061,6 +1066,27 @@ class _BenchmarkV2ProductionRuntime:
 
         return learning_workflow_run_store.capacity_snapshot()
 
+    def reserve_attempt(
+        self, *, attempt_ref: Mapping[str, object], attempt_dir: Path
+    ) -> None:
+        attempt = _sealed_parent(attempt_ref, name="attempt ref")
+        directory = Path(attempt_dir)
+        if not directory.is_absolute():
+            directory = directory.resolve()
+        if directory != directory.resolve():
+            raise ValueError("benchmark attempt directory must be canonical")
+        reserve_benchmark_v2_attempt(
+            journal_path=_benchmark_v2_attempt_journal_path(
+                project_root=self._project_root,
+                attempt_ref=attempt,
+            ),
+            attempt_ref=attempt,
+            resource_ref=_runtime_resource_ref(
+                "attempt_directory",
+                {"attempt_dir": str(directory)},
+            ),
+        )
+
     def prepare_screen_groups(
         self,
         *,
@@ -1078,19 +1104,20 @@ class _BenchmarkV2ProductionRuntime:
             directory = directory.resolve()
         if directory != directory.resolve():
             raise ValueError("benchmark attempt directory must be canonical")
-        append_benchmark_v2_attempt_event(
-            journal_path=_benchmark_v2_attempt_journal_path(
-                project_root=self._project_root,
-                attempt_ref=attempt,
-            ),
+        journal_path = _benchmark_v2_attempt_journal_path(
+            project_root=self._project_root,
             attempt_ref=attempt,
-            phase="prepared",
-            event_kind="attempt_prepared",
-            resource_ref=_runtime_resource_ref(
-                "attempt_directory",
-                {"attempt_dir": str(directory)},
-            ),
         )
+        self.reserve_attempt(
+            attempt_ref=attempt,
+            attempt_dir=directory,
+        )
+        events = read_benchmark_v2_attempt_journal(
+            journal_path=journal_path,
+            attempt_ref=attempt,
+        )
+        if len(events) != 1 or events[0].get("event_kind") != "attempt_prepared":
+            raise ValueError("benchmark attempt is not reservation-only")
         groups = _partition_groups(loaded, partition=partition)
         owner_token = object()
 

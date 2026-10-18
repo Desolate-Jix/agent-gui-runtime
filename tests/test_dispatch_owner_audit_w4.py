@@ -365,7 +365,7 @@ def test_only_live_controller_mints_execution_authority() -> None:
         REPO_ROOT,
         "_mint_execution_authority",
     ) == [
-        ("app/agent/live_controller.py", "LiveController", "_execute_accepted_intent")
+        ("app/agent/live_controller.py", "LiveController", "_dispatch_validated_grounding")
     ]
 
 

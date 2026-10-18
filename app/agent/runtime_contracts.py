@@ -13,6 +13,9 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.agent.action_semantics import CONFIRMATION_REQUIRED_ACTIONS
+from app.agent.action_parameters import reviewed_action_parameter_fields, validate_reviewed_action_grounding_geometry
+
 
 StableId = Annotated[
     str,
@@ -38,6 +41,10 @@ SemanticActionV1 = Literal[
     "open_apply_flow",
     "back",
     "close_modal",
+    "start_activity",
+    "stop_activity",
+    "scroll_region",
+    "fill_field",
     "safe_stop",
 ]
 RuntimeOutcomeV1 = Literal[
@@ -70,6 +77,13 @@ RuntimeReasonCodeV1 = Literal[
     "backend_result_lost",
     "post_capture_not_new",
     "post_action_failure",
+    "scroll_no_visual_change",
+    "scroll_non_target_visual_change",
+    "scroll_unknown",
+    "text_field_unavailable",
+    "text_field_identity_changed",
+    "text_field_read_not_new",
+    "text_value_mismatch",
     "destination_mismatch",
     "safe_stop_boundary",
     "needs_human_review",
@@ -258,6 +272,8 @@ class AgentAvailableActionV1(_StrictContractModel):
     verification_rule_refs: Annotated[list[OpaqueRef], Field(max_length=32)]
     risk_level: Literal["low", "medium", "high"]
     requires_user_confirmation: bool
+    scroll_parameters: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    text_parameters_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("description")
     @classmethod
@@ -268,6 +284,7 @@ class AgentAvailableActionV1(_StrictContractModel):
 
     @model_validator(mode="after")
     def _validate_action_shape(self) -> "AgentAvailableActionV1":
+        reviewed_action_parameter_fields(self.model_dump(mode="json"))
         _require(
             len(self.verification_rule_refs) == len(set(self.verification_rule_refs)),
             "verification_rule_refs must be unique",
@@ -296,14 +313,14 @@ class AgentAvailableActionV1(_StrictContractModel):
                 self.verification_rule_refs,
                 "non-safe action requires a verification rule",
             )
-        if self.semantic_action == "open_apply_flow":
+        if self.semantic_action in CONFIRMATION_REQUIRED_ACTIONS:
             _require(
                 self.requires_user_confirmation is True,
-                "open_apply_flow requires user confirmation",
+                f"{self.semantic_action} requires user confirmation",
             )
             _require(
                 self.risk_level in {"medium", "high"},
-                "open_apply_flow risk must be medium or high",
+                f"{self.semantic_action} risk must be medium or high",
             )
         return self
 
@@ -506,6 +523,13 @@ class AgentIntentV1(_StrictContractModel):
 class RuntimeReceiptActionV1(_StrictContractModel):
     action_id: StableId
     semantic_action: SemanticActionV1
+    scroll_parameters: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+    text_parameters_ref: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def _validate_parameters(self) -> "RuntimeReceiptActionV1":
+        reviewed_action_parameter_fields(self.model_dump(mode="json"))
+        return self
 
 
 class RuntimeReceiptEvidenceV1(_StrictContractModel):
@@ -737,7 +761,7 @@ class RuntimeResultReceiptV1(_StrictContractModel):
 
     def _require_verification_failed(self) -> None:
         _require(
-            self.reason_code in {"post_capture_not_new", "post_action_failure", "destination_mismatch"},
+            self.reason_code in {"post_capture_not_new", "post_action_failure", "destination_mismatch", "scroll_no_visual_change", "scroll_non_target_visual_change", "scroll_unknown", "text_field_unavailable", "text_field_identity_changed", "text_field_read_not_new", "text_value_mismatch"},
             "VERIFICATION_FAILED reason is invalid",
         )
         _require(self.attempt_count == 1, "VERIFICATION_FAILED requires one attempt")

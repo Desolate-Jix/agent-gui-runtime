@@ -1,7 +1,8 @@
 """纯离线的 Reviewed Workflow Replay v2 协调合同。
 
-当前观察必须使用 ``reviewed_workflow_current_observation_v1``，并绑定 asset_id、
-asset content SHA、capture_id、截图 SHA、viewport、origin 和严格 anchor evidence。
+网页观察使用 ``reviewed_workflow_current_observation_v1``，原生观察使用严格 V2 并携带
+当前进程身份；都绑定 asset_id、asset content SHA、capture_id、截图 SHA、viewport、
+origin 和严格 anchor evidence。
 当前 grounding 必须使用 ``reviewed_workflow_current_grounding_v1``，Gate 必须使用
 ``pre_click_decision_v1``，两者都绑定同一 selection/capture/candidate。Operation 必须是
 由服务端补入 ``replay_context`` 的可信 adapter envelope；原始 adapter 返回值不能直接
@@ -11,6 +12,10 @@ trace_path/interface_id/surface_type/contract_version。本模块不调用 GUI/A
 """
 
 from __future__ import annotations
+
+from app.agent.action_semantics import READ_ONLY_REVIEW_ACTIONS, REVIEWED_SINGLE_STEP_ACTIONS
+from app.agent.action_parameters import reviewed_action_parameter_fields, validate_reviewed_action_grounding_geometry
+from app.agent.scroll_parameters import SCROLL_SEMANTIC_ACTION
 
 import hashlib
 import json
@@ -25,10 +30,16 @@ from app.agent.reviewed_workflow_asset import (
     content_sha256,
     validate_reviewed_workflow_asset,
 )
+from app.agent.native_identity import (
+    require_reviewed_native_executable_path,
+    validate_native_identity_fact,
+)
 
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
-_MVP_ACTIONS = {"open_detail", "open_apply_flow", "back", "close_modal"}
+_MVP_ACTIONS = REVIEWED_SINGLE_STEP_ACTIONS
+_READ_ONLY_ACTIONS = READ_ONLY_REVIEW_ACTIONS
+_REVIEW_ACTIONS = _READ_ONLY_ACTIONS
 _ANCHOR_EVIDENCE_KEYS = {"anchor_id", "matched", "confidence", "evidence_ref"}
 _CAPTURE_LINEAGE_KEYS = {"capture_id", "screenshot_sha256", "viewport_size"}
 _VIEWPORT_KEYS = {"width", "height"}
@@ -36,6 +47,7 @@ _OBSERVATION_KEYS = {
     "contract_version", "asset_id", "expected_asset_content_sha256", "capture_id",
     "screenshot_sha256", "viewport_size", "origin", "observed_anchor_evidence",
 }
+_NATIVE_OBSERVATION_KEYS = _OBSERVATION_KEYS | {"native_identity"}
 _GROUNDING_KEYS = {
     "contract_version", "asset_content_sha256", "transition_id", "source_state_id",
     "capture_id", "screenshot_sha256", "viewport_size", "element_ref", "candidate_id",
@@ -61,6 +73,17 @@ _SELECTION_KEYS = {
     "element_ref", "capture_lineage", "requirements", "requires_user_confirmation",
     "human_confirmation_evidence_ref", "selection_sha256",
 }
+_REVIEW_SELECTION_KEYS = {
+    "contract_version", "status", "artifact_is_authorization", "execute_binding_enabled",
+    "grants_action_authority", "review_only", "asset_id", "asset_content_sha256",
+    "source_workflow_sha256", "reviewed_revision_hash", "canonical_origin", "transition_id",
+    "source_state_id", "target_state_id", "semantic_action", "element_ref", "capture_lineage",
+    "requirements", "requires_user_confirmation", "review_selection_sha256", "selection_sha256",
+}
+
+
+def _review_selection_field_keys(selection: Mapping[str, Any]) -> set[str]:
+    return _REVIEW_SELECTION_KEYS | set(reviewed_action_parameter_fields(selection))
 
 
 def _text(value: Any) -> str:
@@ -148,6 +171,15 @@ def _result(contract_version: str, *, status: str, **payload: Any) -> dict[str, 
 
 
 def _failure(contract_version: str, failure_code: str, **payload: Any) -> dict[str, Any]:
+    if contract_version in {
+        "review_transition_selection_v1",
+        "review_grounding_preview_v1",
+    }:
+        payload = {
+            **payload,
+            "grants_action_authority": False,
+            "review_only": True,
+        }
     return _result(contract_version, status="blocked", failure_code=failure_code, **payload)
 
 
@@ -173,12 +205,22 @@ def _asset_context(asset: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, 
     return canonical, context
 
 
+def current_observation_contract_matches(observation: Mapping[str, Any], application_kind: str) -> bool:
+    if application_kind not in {"web", "native"}:
+        return False
+    is_web = application_kind == "web"
+    expected_keys = _OBSERVATION_KEYS if is_web else _NATIVE_OBSERVATION_KEYS
+    expected_contract = "reviewed_workflow_current_observation_v1" if is_web else "reviewed_workflow_current_observation_v2"
+    return set(observation) == expected_keys and observation.get("contract_version") == expected_contract
+
+
 def _validate_observation(
     canonical: Mapping[str, Any],
     context: Mapping[str, str],
     observation: Mapping[str, Any],
 ) -> tuple[dict[str, Any] | None, str | None, str | None]:
-    if set(observation) != _OBSERVATION_KEYS or observation.get("contract_version") != "reviewed_workflow_current_observation_v1":
+    application = canonical["application"]
+    if not current_observation_contract_matches(observation, application.get("kind")):
         return None, None, "invalid_observation_contract"
     if _text(observation.get("asset_id")) != context["asset_id"]:
         return None, None, "asset_lineage_mismatch"
@@ -188,13 +230,26 @@ def _validate_observation(
     if lineage is None:
         return None, None, "capture_missing"
     normalized_origin: str | None = None
-    application = canonical["application"]
     if application.get("kind") == "web":
         normalized_origin = _normalize_origin(observation.get("origin"))
         if normalized_origin is None:
             return None, None, "unexpected_origin"
         if application.get("allow_external_sites") is not True and normalized_origin != context["canonical_origin"]:
             return None, normalized_origin, "unexpected_origin"
+    else:
+        try:
+            expected_path = require_reviewed_native_executable_path(application)
+        except ValueError:
+            return None, None, "native_identity_unavailable"
+        native_fact = observation.get("native_identity")
+        if not isinstance(native_fact, Mapping) or type(native_fact.get("target_window_handle")) is not int:
+            return None, None, "native_identity_unavailable"
+        if validate_native_identity_fact(
+            native_fact,
+            target_window_handle=native_fact["target_window_handle"],
+            expected_executable_path=expected_path,
+        ) is None:
+            return None, None, "native_identity_mismatch"
     return lineage, normalized_origin, None
 
 
@@ -258,7 +313,13 @@ def resolve_current_state(asset: Mapping[str, Any], observation: Mapping[str, An
             for anchor_id in (_text(anchor.get("anchor_id")) for anchor in state["identity_anchors"])
             if anchor_id in evidence_by_anchor
         ]
-        if records:
+        # 输入字段只能补充当前状态证据，不能单独代替所属界面身份。
+        identity_anchor_ids = {
+            _text(anchor.get("anchor_id"))
+            for anchor in state["identity_anchors"]
+            if not anchor.get("text_field_id")
+        }
+        if records and any(record["anchor_id"] in identity_anchor_ids for record in records):
             matches.append({"state": state, "score": sum(record["confidence"] for record in records), "evidence": records})
     if not matches:
         return _failure("current_state_resolution_v1", "current_state_unresolved", capture_lineage=lineage, evidence_refs=[], **context)
@@ -274,6 +335,15 @@ def resolve_current_state(asset: Mapping[str, Any], observation: Mapping[str, An
             **context,
         )
     selected = best[0]
+    evidence_refs = sorted(record["evidence_ref"] for record in selected["evidence"])
+    if canonical["application"].get("kind") == "native":
+        native_identity = observation.get("native_identity")
+        evidence_refs.append(
+            "native-identity:"
+            + hashlib.sha256(
+                json.dumps(native_identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+        )
     result = _result(
         "current_state_resolution_v1",
         status="resolved",
@@ -283,7 +353,7 @@ def resolve_current_state(asset: Mapping[str, Any], observation: Mapping[str, An
         capture_lineage=lineage,
         observed_origin=normalized_origin or "",
         matched_anchor_ids=sorted(record["anchor_id"] for record in selected["evidence"]),
-        evidence_refs=sorted(record["evidence_ref"] for record in selected["evidence"]),
+        evidence_refs=sorted(evidence_refs),
         **context,
     )
     result["resolution_sha256"] = _semantic_hash(result, excluded={"resolution_sha256"})
@@ -310,8 +380,163 @@ def _selection_hash(payload: Mapping[str, Any]) -> str:
         "capture_lineage", "requirements", "requires_user_confirmation", "human_confirmation_evidence_ref",
     )
     binding = {key: payload.get(key) for key in binding_keys}
+    binding.update(reviewed_action_parameter_fields(payload))
     serialized = json.dumps(binding, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return hashlib.sha256(serialized).hexdigest()
+
+
+def _review_selection_hash(payload: Mapping[str, Any]) -> str:
+    return _semantic_hash(
+        payload,
+        excluded={"review_selection_sha256", "selection_sha256"},
+    )
+
+
+def _transition_selection_core(
+    asset: Mapping[str, Any],
+    state_resolution: Mapping[str, Any],
+    *,
+    semantic_action: str | None,
+    transition_id: str | None,
+    current_observation: Mapping[str, Any],
+    contract_version: str,
+) -> tuple[
+    dict[str, Any] | None,
+    dict[str, str],
+    Mapping[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+]:
+    canonical, context = _asset_context(asset)
+    authoritative_resolution = resolve_current_state(canonical, current_observation)
+    if (
+        state_resolution.get("contract_version") != "current_state_resolution_v1"
+        or state_resolution.get("status") != "resolved"
+        or set(state_resolution) != _RESOLUTION_KEYS
+        or _canonical_sha(state_resolution.get("resolution_sha256"))
+        != _semantic_hash(state_resolution, excluded={"resolution_sha256"})
+        or dict(state_resolution) != authoritative_resolution
+    ):
+        return None, context, None, None, _failure(
+            contract_version, "invalid_state_resolution", **context
+        )
+    for key in (
+        "asset_id",
+        "asset_content_sha256",
+        "source_workflow_sha256",
+        "reviewed_revision_hash",
+        "canonical_origin",
+    ):
+        if state_resolution.get(key) != context[key]:
+            return None, context, None, None, _failure(
+                contract_version, "asset_lineage_mismatch", **context
+            )
+    lineage = _capture_lineage(
+        state_resolution.get("capture_lineage")
+        if isinstance(state_resolution.get("capture_lineage"), Mapping)
+        else {}
+    )
+    if lineage is None:
+        return None, context, None, None, _failure(
+            contract_version, "capture_missing", **context
+        )
+    state_id = _text(state_resolution.get("state_id"))
+    source = _state_by_id(canonical, state_id)
+    if source is None:
+        return None, context, None, None, _failure(
+            contract_version, "invalid_state_resolution", **context
+        )
+    if source.get("availability") != "reviewed":
+        return None, context, None, None, _failure(
+            contract_version, "stop_boundary", source_state_id=state_id, **context
+        )
+    allowed_ids = {_text(item) for item in source.get("allowed_transition_ids", [])}
+    candidates = [
+        item
+        for item in canonical["transitions"]
+        if item.get("source_state_id") == state_id
+        and _text(item.get("transition_id")) in allowed_ids
+        and _text(item.get("semantic_action")) in (
+            _REVIEW_ACTIONS if contract_version == "review_transition_selection_v1" else _MVP_ACTIONS
+        )
+    ]
+    if transition_id is not None:
+        candidates = [item for item in candidates if item.get("transition_id") == transition_id]
+    if semantic_action is not None:
+        candidates = [item for item in candidates if item.get("semantic_action") == semantic_action]
+    if not candidates:
+        return None, context, None, None, _failure(
+            contract_version,
+            "transition_not_available",
+            source_state_id=state_id,
+            **context,
+        )
+    if len(candidates) != 1:
+        return None, context, None, None, _failure(
+            contract_version,
+            "transition_ambiguous",
+            candidate_transition_ids=sorted(
+                _text(item.get("transition_id")) for item in candidates
+            ),
+            source_state_id=state_id,
+            **context,
+        )
+    transition = candidates[0]
+    return canonical, context, transition, lineage, None
+
+
+def select_transition_for_review(
+    asset: Mapping[str, Any],
+    state_resolution: Mapping[str, Any],
+    *,
+    semantic_action: str | None = None,
+    transition_id: str | None = None,
+    current_observation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """选择当前真实 transition，仅生成不可执行的人审投影。"""
+    _, context, transition, lineage, failure = _transition_selection_core(
+        asset,
+        state_resolution,
+        semantic_action=semantic_action,
+        transition_id=transition_id,
+        current_observation=current_observation,
+        contract_version="review_transition_selection_v1",
+    )
+    if failure is not None or transition is None or lineage is None:
+        return failure or _failure(
+            "review_transition_selection_v1", "transition_not_available", **context
+        )
+    target_ref = _transition_target_ref(transition)
+    if not target_ref:
+        return _failure(
+            "review_transition_selection_v1",
+            "target_unresolved",
+            transition_id=transition["transition_id"],
+            **context,
+        )
+    payload = _result(
+        "review_transition_selection_v1",
+        status="selected",
+        grants_action_authority=False,
+        review_only=True,
+        **context,
+        transition_id=transition["transition_id"],
+        source_state_id=transition["source_state_id"],
+        target_state_id=transition["target_state_id"],
+        semantic_action=transition["semantic_action"],
+        element_ref=target_ref,
+        capture_lineage=deepcopy(lineage),
+        requirements=_selection_requirements(transition),
+        requires_user_confirmation=(
+            transition["risk_policy"].get("requires_user_confirmation") is True
+        ),
+        **reviewed_action_parameter_fields(transition),
+    )
+    review_hash = _review_selection_hash(payload)
+    payload["review_selection_sha256"] = review_hash
+    # 既有 Gate 字段仍绑定独立 review hash，但不改变执行 selection 合同。
+    payload["selection_sha256"] = review_hash
+    return payload
 
 
 def select_verified_transition(
@@ -361,6 +586,63 @@ def _select_server_confirmed_transition(
     )
 
 
+def _select_grounded_confirmed_transition(
+    asset: Mapping[str, Any],
+    state_resolution: Mapping[str, Any],
+    *,
+    transition_id: str,
+    grounded_evidence: object,
+    current_observation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """仅消费 store-sealed grounded 批准与 fresh 预览证明。"""
+    from app.agent.runtime_intent_claim_store import _unwrap_grounded_execution_evidence
+
+    evidence = _unwrap_grounded_execution_evidence(grounded_evidence)
+    canonical, context, transition, lineage, failure = _transition_selection_core(
+        asset,
+        state_resolution,
+        semantic_action=None,
+        transition_id=transition_id,
+        current_observation=current_observation,
+        contract_version="verified_transition_selection_v1",
+    )
+    if (
+        failure is not None
+        or canonical is None
+        or transition is None
+        or lineage is None
+        or evidence is None
+        or evidence.transition_id != transition_id
+        or evidence.fresh_capture_id != lineage["capture_id"]
+    ):
+        return failure or _failure(
+            "verified_transition_selection_v1", "human_review_required", **context
+        )
+    target_ref = _transition_target_ref(transition)
+    if not target_ref:
+        return _failure(
+            "verified_transition_selection_v1",
+            "target_unresolved",
+            transition_id=transition_id,
+            **context,
+        )
+    payload = {
+        **context,
+        "transition_id": transition["transition_id"],
+        "source_state_id": transition["source_state_id"],
+        "target_state_id": transition["target_state_id"],
+        "semantic_action": transition["semantic_action"],
+        "element_ref": target_ref,
+        "capture_lineage": deepcopy(lineage),
+        "requirements": _selection_requirements(transition),
+        "requires_user_confirmation": transition["risk_policy"].get("requires_user_confirmation") is True,
+        "human_confirmation_evidence_ref": evidence.evidence_ref,
+        **reviewed_action_parameter_fields(transition),
+    }
+    payload["selection_sha256"] = _selection_hash(payload)
+    return _result("verified_transition_selection_v1", status="selected", **payload)
+
+
 def _select_verified_transition_impl(
     asset: Mapping[str, Any],
     state_resolution: Mapping[str, Any],
@@ -371,57 +653,18 @@ def _select_verified_transition_impl(
     current_observation: Mapping[str, Any],
 ) -> dict[str, Any]:
     """从严格 resolution 选择双向声明 transition；结果不含任何坐标。"""
-    canonical, context = _asset_context(asset)
-    authoritative_resolution = resolve_current_state(canonical, current_observation)
-    if (
-        state_resolution.get("contract_version") != "current_state_resolution_v1"
-        or state_resolution.get("status") != "resolved"
-        or set(state_resolution) != _RESOLUTION_KEYS
-        or _canonical_sha(state_resolution.get("resolution_sha256"))
-        != _semantic_hash(state_resolution, excluded={"resolution_sha256"})
-        or dict(state_resolution) != authoritative_resolution
-    ):
-        return _failure("verified_transition_selection_v1", "invalid_state_resolution", **context)
-    for key in (
-        "asset_id",
-        "asset_content_sha256",
-        "source_workflow_sha256",
-        "reviewed_revision_hash",
-        "canonical_origin",
-    ):
-        if state_resolution.get(key) != context[key]:
-            return _failure("verified_transition_selection_v1", "asset_lineage_mismatch", **context)
-    lineage = _capture_lineage(state_resolution.get("capture_lineage") if isinstance(state_resolution.get("capture_lineage"), Mapping) else {})
-    if lineage is None:
-        return _failure("verified_transition_selection_v1", "capture_missing", **context)
-    state_id = _text(state_resolution.get("state_id"))
-    source = _state_by_id(canonical, state_id)
-    if source is None:
-        return _failure("verified_transition_selection_v1", "invalid_state_resolution", **context)
-    if source.get("availability") != "reviewed":
-        return _failure("verified_transition_selection_v1", "stop_boundary", source_state_id=state_id, **context)
-    allowed_ids = {_text(item) for item in source.get("allowed_transition_ids", [])}
-    candidates = [
-        item for item in canonical["transitions"]
-        if item.get("source_state_id") == state_id
-        and _text(item.get("transition_id")) in allowed_ids
-        and _text(item.get("semantic_action")) in _MVP_ACTIONS
-    ]
-    if transition_id is not None:
-        candidates = [item for item in candidates if item.get("transition_id") == transition_id]
-    if semantic_action is not None:
-        candidates = [item for item in candidates if item.get("semantic_action") == semantic_action]
-    if not candidates:
-        return _failure("verified_transition_selection_v1", "transition_not_available", source_state_id=state_id, **context)
-    if len(candidates) != 1:
-        return _failure(
-            "verified_transition_selection_v1",
-            "transition_ambiguous",
-            candidate_transition_ids=sorted(_text(item.get("transition_id")) for item in candidates),
-            source_state_id=state_id,
-            **context,
+    _, context, transition, lineage, failure = _transition_selection_core(
+        asset,
+        state_resolution,
+        semantic_action=semantic_action,
+        transition_id=transition_id,
+        current_observation=current_observation,
+        contract_version="verified_transition_selection_v1",
+    )
+    if failure is not None or transition is None or lineage is None:
+        return failure or _failure(
+            "verified_transition_selection_v1", "transition_not_available", **context
         )
-    transition = candidates[0]
     confirmation_ref = ""
     if transition["risk_policy"].get("requires_user_confirmation") is True:
         try:
@@ -457,6 +700,7 @@ def _select_verified_transition_impl(
         "requirements": _selection_requirements(transition),
         "requires_user_confirmation": transition["risk_policy"].get("requires_user_confirmation") is True,
         "human_confirmation_evidence_ref": confirmation_ref,
+        **reviewed_action_parameter_fields(transition),
     }
     payload["selection_sha256"] = _selection_hash(payload)
     return _result("verified_transition_selection_v1", status="selected", **payload)
@@ -467,10 +711,15 @@ def _validated_selection(
     selection: Mapping[str, Any],
     *,
     expected_confirmation_evidence_ref: str | None = None,
+    allow_grounded_confirmation_ref: bool = False,
 ) -> tuple[dict[str, Any] | None, Mapping[str, Any] | None, str | None]:
     canonical, context = _asset_context(asset)
+    try:
+        parameter_fields = reviewed_action_parameter_fields(selection)
+    except ValueError:
+        return None, None, "selection_lineage_mismatch"
     if (
-        set(selection) != _SELECTION_KEYS
+        set(selection) != _SELECTION_KEYS | parameter_fields.keys()
         or selection.get("contract_version") != "verified_transition_selection_v1"
         or selection.get("status") != "selected"
         or selection.get("artifact_is_authorization") is not False
@@ -501,6 +750,7 @@ def _validated_selection(
         "element_ref": target_ref,
         "requirements": _selection_requirements(transition),
         "requires_user_confirmation": transition["risk_policy"].get("requires_user_confirmation") is True,
+        **reviewed_action_parameter_fields(transition),
     }
     if any(selection.get(key) != value for key, value in expected.items()):
         return None, None, "selection_lineage_mismatch"
@@ -509,11 +759,322 @@ def _validated_selection(
         require_exact=True,
     ) is None:
         return None, None, "selection_lineage_mismatch"
-    if not requires_confirmation and confirmation_ref != "":
+    if (
+        not requires_confirmation
+        and confirmation_ref != ""
+        and not (
+            allow_grounded_confirmation_ref
+            and isinstance(expected_confirmation_evidence_ref, str)
+            and confirmation_ref == expected_confirmation_evidence_ref
+        )
+    ):
         return None, None, "selection_lineage_mismatch"
     if _canonical_sha(selection.get("selection_sha256")) != _selection_hash(selection):
         return None, None, "selection_lineage_mismatch"
     return canonical, transition, None
+
+
+def _validated_review_selection(
+    asset: Mapping[str, Any],
+    selection: Mapping[str, Any],
+) -> tuple[dict[str, Any] | None, Mapping[str, Any] | None, str | None]:
+    canonical, context = _asset_context(asset)
+    try:
+        expected_keys = _review_selection_field_keys(selection)
+    except ValueError:
+        return None, None, "selection_lineage_mismatch"
+    if (
+        set(selection) != expected_keys
+        or selection.get("contract_version") != "review_transition_selection_v1"
+        or selection.get("status") != "selected"
+        or selection.get("artifact_is_authorization") is not False
+        or selection.get("execute_binding_enabled") is not False
+        or selection.get("grants_action_authority") is not False
+        or selection.get("review_only") is not True
+    ):
+        return None, None, "selection_lineage_mismatch"
+    for key in (
+        "asset_id",
+        "asset_content_sha256",
+        "source_workflow_sha256",
+        "reviewed_revision_hash",
+        "canonical_origin",
+    ):
+        if selection.get(key) != context[key]:
+            return None, None, "selection_lineage_mismatch"
+    transition = _transition_by_id(canonical, _text(selection.get("transition_id")))
+    if transition is None:
+        return None, None, "selection_lineage_mismatch"
+    target_ref = _transition_target_ref(transition)
+    expected = {
+        "source_state_id": transition["source_state_id"],
+        "target_state_id": transition["target_state_id"],
+        "semantic_action": transition["semantic_action"],
+        "element_ref": target_ref,
+        "requirements": _selection_requirements(transition),
+        "requires_user_confirmation": (
+            transition["risk_policy"].get("requires_user_confirmation") is True
+        ),
+        **reviewed_action_parameter_fields(transition),
+    }
+    if not target_ref or any(selection.get(key) != value for key, value in expected.items()):
+        return None, None, "selection_lineage_mismatch"
+    if _capture_lineage(
+        selection.get("capture_lineage")
+        if isinstance(selection.get("capture_lineage"), Mapping)
+        else {},
+        require_exact=True,
+    ) is None:
+        return None, None, "selection_lineage_mismatch"
+    review_hash = _review_selection_hash(selection)
+    if (
+        _canonical_sha(selection.get("review_selection_sha256")) != review_hash
+        or selection.get("selection_sha256") != review_hash
+    ):
+        return None, None, "selection_lineage_mismatch"
+    return canonical, transition, None
+
+
+def _grounding_validation_core(
+    selection: Mapping[str, Any],
+    grounding_evidence: Mapping[str, Any],
+    gate_decision: Mapping[str, Any],
+    *,
+    policy: Mapping[str, Any] | None,
+    failure_contract: str,
+) -> dict[str, Any]:
+    try:
+        parameter_fields = reviewed_action_parameter_fields(selection)
+        actual_parameters = reviewed_action_parameter_fields(grounding_evidence, semantic_action=selection.get("semantic_action"))
+    except ValueError:
+        return _failure(failure_contract, "target_unresolved")
+    if parameter_fields != actual_parameters:
+        return _failure(failure_contract, "target_unresolved")
+    expected_lineage = _capture_lineage(
+        selection.get("capture_lineage")
+        if isinstance(selection.get("capture_lineage"), Mapping)
+        else {},
+        require_exact=True,
+    )
+    if expected_lineage is None:
+        return _failure(failure_contract, "capture_missing")
+    if (
+        set(grounding_evidence) != _GROUNDING_KEYS | set(parameter_fields)
+        or grounding_evidence.get("contract_version")
+        != "reviewed_workflow_current_grounding_v1"
+    ):
+        return _failure(failure_contract, "target_unresolved")
+    binding = {
+        "asset_content_sha256": selection.get("asset_content_sha256"),
+        "transition_id": selection.get("transition_id"),
+        "source_state_id": selection.get("source_state_id"),
+        "element_ref": selection.get("element_ref"),
+    }
+    if any(grounding_evidence.get(key) != value for key, value in binding.items()):
+        return _failure(failure_contract, "target_unresolved")
+    grounding_lineage = _capture_lineage(grounding_evidence)
+    if grounding_lineage is None:
+        return _failure(failure_contract, "capture_missing")
+    if not _same_lineage(expected_lineage, grounding_lineage):
+        return _failure(
+            failure_contract,
+            "capture_lineage_mismatch",
+            capture_lineage=grounding_lineage,
+        )
+    candidate_id = _text(grounding_evidence.get("candidate_id"))
+    if not candidate_id or grounding_evidence.get("eligible") is not True:
+        return _failure(
+            failure_contract, "target_unresolved", capture_lineage=grounding_lineage
+        )
+    if grounding_evidence.get("candidate_current") is not True:
+        return _failure(
+            failure_contract, "stale_candidate", capture_lineage=grounding_lineage
+        )
+    policy = policy if isinstance(policy, Mapping) else {}
+    minimum_confidence = policy.get("minimum_confidence")
+    minimum_margin = policy.get("minimum_score_margin")
+    confidence = grounding_evidence.get("confidence")
+    margin = grounding_evidence.get("score_margin")
+    if not all(
+        _finite_number(value, minimum=0.0, maximum=1.0)
+        for value in (minimum_confidence, minimum_margin, confidence, margin)
+    ):
+        return _failure(
+            failure_contract, "grounding_ambiguous", capture_lineage=grounding_lineage
+        )
+    if confidence < minimum_confidence or margin < minimum_margin:
+        return _failure(
+            failure_contract, "grounding_ambiguous", capture_lineage=grounding_lineage
+        )
+    bbox = grounding_evidence.get("bbox")
+    point = grounding_evidence.get("click_point")
+    if (
+        not isinstance(bbox, Mapping)
+        or set(bbox) != {"x", "y", "w", "h"}
+        or not isinstance(point, Mapping)
+        or set(point) != {"x", "y"}
+    ):
+        return _failure(
+            failure_contract, "target_unresolved", capture_lineage=grounding_lineage
+        )
+    if (
+        not all(_finite_number(bbox.get(field), minimum=0.0) for field in ("x", "y", "w", "h"))
+        or bbox["w"] <= 0
+        or bbox["h"] <= 0
+        or not all(_finite_number(point.get(field), minimum=0.0) for field in ("x", "y"))
+    ):
+        return _failure(
+            failure_contract, "target_unresolved", capture_lineage=grounding_lineage
+        )
+    viewport = grounding_lineage["viewport_size"]
+    try:
+        validate_reviewed_action_grounding_geometry(selection, grounding_evidence)
+    except ValueError:
+        return _failure(failure_contract, "target_unresolved", capture_lineage=grounding_lineage)
+    if (
+        bbox["x"] + bbox["w"] > viewport["width"]
+        or bbox["y"] + bbox["h"] > viewport["height"]
+        or not (
+            bbox["x"] <= point["x"] <= bbox["x"] + bbox["w"]
+            and bbox["y"] <= point["y"] <= bbox["y"] + bbox["h"]
+        )
+        or point["x"] > viewport["width"]
+        or point["y"] > viewport["height"]
+    ):
+        return _failure(
+            failure_contract, "target_unresolved", capture_lineage=grounding_lineage
+        )
+    grounding_refs = grounding_evidence.get("evidence_refs")
+    if (
+        not isinstance(grounding_refs, list)
+        or not any(isinstance(ref, str) and ref.strip() for ref in grounding_refs)
+    ):
+        return _failure(
+            failure_contract, "target_unresolved", capture_lineage=grounding_lineage
+        )
+    try:
+        gate_parameters = reviewed_action_parameter_fields(gate_decision, semantic_action=selection.get("semantic_action"))
+    except ValueError:
+        return _failure(failure_contract, "pre_click_rejected", capture_lineage=grounding_lineage)
+    if set(gate_decision) != _GATE_KEYS | set(parameter_fields) or gate_parameters != parameter_fields:
+        return _failure(
+            failure_contract, "pre_click_rejected", capture_lineage=grounding_lineage
+        )
+    gate_lineage = _capture_lineage(gate_decision)
+    gate_binding = {
+        "asset_content_sha256": selection.get("asset_content_sha256"),
+        "transition_id": selection.get("transition_id"),
+        "selection_sha256": selection.get("selection_sha256"),
+        "selected_candidate_id": candidate_id,
+        "selected_element_id": selection.get("element_ref"),
+        "selected_click_point": dict(point),
+    }
+    if (
+        gate_decision.get("contract_version") != "pre_click_decision_v1"
+        or gate_decision.get("allowed") is not True
+    ):
+        return _failure(
+            failure_contract, "pre_click_rejected", capture_lineage=grounding_lineage
+        )
+    if not _same_lineage(expected_lineage, gate_lineage):
+        return _failure(
+            failure_contract,
+            "capture_lineage_mismatch",
+            capture_lineage=grounding_lineage,
+        )
+    if any(gate_decision.get(key) != value for key, value in gate_binding.items()):
+        return _failure(
+            failure_contract, "pre_click_rejected", capture_lineage=grounding_lineage
+        )
+    gate_refs = gate_decision.get("evidence_refs")
+    if (
+        not isinstance(gate_refs, list)
+        or not any(isinstance(ref, str) and ref.strip() for ref in gate_refs)
+    ):
+        return _failure(
+            failure_contract, "pre_click_rejected", capture_lineage=grounding_lineage
+        )
+    refs = {
+        ref
+        for source in (grounding_evidence, gate_decision)
+        for ref in source.get("evidence_refs", [])
+        if isinstance(ref, str) and ref.strip()
+    }
+    return {
+        "status": "validated",
+        "capture_lineage": deepcopy(grounding_lineage),
+        "candidate_id": candidate_id,
+        "confidence": confidence,
+        "score_margin": margin,
+        "bbox": deepcopy(dict(bbox)),
+        "click_point": deepcopy(dict(point)),
+        "grounding_evidence_refs": sorted(
+            ref for ref in grounding_refs if isinstance(ref, str) and ref.strip()
+        ),
+        "gate_evidence_refs": sorted(
+            ref for ref in gate_refs if isinstance(ref, str) and ref.strip()
+        ),
+        "evidence_refs": sorted(refs),
+    }
+
+
+def validate_review_grounding_preview(
+    asset: Mapping[str, Any],
+    review_selection: Mapping[str, Any],
+    grounding_evidence: Mapping[str, Any],
+    gate_decision: Mapping[str, Any],
+    *,
+    policy: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """校验 review-only 当前定位并返回完整、不可授权的人审投影。"""
+    _, transition, selection_error = _validated_review_selection(asset, review_selection)
+    if selection_error or transition is None:
+        return _failure(
+            "review_grounding_preview_v1",
+            selection_error or "selection_lineage_mismatch",
+        )
+    geometry = _grounding_validation_core(
+        review_selection,
+        grounding_evidence,
+        gate_decision,
+        policy=policy,
+        failure_contract="review_grounding_preview_v1",
+    )
+    if geometry.get("status") != "validated":
+        return geometry
+    payload = _result(
+        "review_grounding_preview_v1",
+        status="validated",
+        grants_action_authority=False,
+        review_only=True,
+        asset_id=review_selection.get("asset_id"),
+        asset_content_sha256=review_selection.get("asset_content_sha256"),
+        source_workflow_sha256=review_selection.get("source_workflow_sha256"),
+        reviewed_revision_hash=review_selection.get("reviewed_revision_hash"),
+        canonical_origin=review_selection.get("canonical_origin"),
+        transition_id=review_selection.get("transition_id"),
+        source_state_id=review_selection.get("source_state_id"),
+        target_state_id=review_selection.get("target_state_id"),
+        semantic_action=review_selection.get("semantic_action"),
+        element_ref=review_selection.get("element_ref"),
+        capture_lineage=geometry["capture_lineage"],
+        review_selection_sha256=review_selection.get("review_selection_sha256"),
+        gate_selection_sha256=gate_decision.get("selection_sha256"),
+        candidate_id=geometry["candidate_id"],
+        confidence=geometry["confidence"],
+        score_margin=geometry["score_margin"],
+        bbox=geometry["bbox"],
+        click_point=geometry["click_point"],
+        grounding_evidence_refs=geometry["grounding_evidence_refs"],
+        gate_evidence_refs=geometry["gate_evidence_refs"],
+        gate_decision_ref=geometry["gate_evidence_refs"][0],
+        evidence_refs=geometry["evidence_refs"],
+        **reviewed_action_parameter_fields(review_selection),
+    )
+    payload["preview_sha256"] = _semantic_hash(
+        payload, excluded={"preview_sha256"}
+    )
+    return payload
 
 
 def validate_current_grounding(
@@ -572,107 +1133,64 @@ def _validate_current_grounding_impl(
     *,
     policy: Mapping[str, Any] | None = None,
     expected_confirmation_evidence_ref: str | None = None,
+    allow_grounded_confirmation_ref: bool = False,
 ) -> dict[str, Any]:
     """校验当前 candidate 的严格 lineage、阈值、viewport 几何和 Gate 绑定。"""
     _, transition, selection_error = _validated_selection(
         asset,
         selection,
         expected_confirmation_evidence_ref=expected_confirmation_evidence_ref,
+        allow_grounded_confirmation_ref=allow_grounded_confirmation_ref,
     )
     if selection_error or transition is None:
         return _failure("current_grounding_validation_v1", selection_error or "selection_lineage_mismatch")
-    expected_lineage = _capture_lineage(
-        selection.get("capture_lineage") if isinstance(selection.get("capture_lineage"), Mapping) else {},
-        require_exact=True,
+    geometry = _grounding_validation_core(
+        selection,
+        grounding_evidence,
+        gate_decision,
+        policy=policy,
+        failure_contract="current_grounding_validation_v1",
     )
-    if selection.get("contract_version") != "verified_transition_selection_v1" or selection.get("status") != "selected" or expected_lineage is None:
-        return _failure("current_grounding_validation_v1", "capture_missing")
+    if geometry.get("status") != "validated":
+        return geometry
     if _canonical_sha(selection.get("selection_sha256")) != _selection_hash(selection):
         return _failure("current_grounding_validation_v1", "target_unresolved")
-    if set(grounding_evidence) != _GROUNDING_KEYS or grounding_evidence.get("contract_version") != "reviewed_workflow_current_grounding_v1":
-        return _failure("current_grounding_validation_v1", "target_unresolved")
-    binding = {
-        "asset_content_sha256": selection.get("asset_content_sha256"),
-        "transition_id": selection.get("transition_id"),
-        "source_state_id": selection.get("source_state_id"),
-        "element_ref": selection.get("element_ref"),
-    }
-    if any(grounding_evidence.get(key) != value for key, value in binding.items()):
-        return _failure("current_grounding_validation_v1", "target_unresolved")
-    grounding_lineage = _capture_lineage(grounding_evidence)
-    if grounding_lineage is None:
-        return _failure("current_grounding_validation_v1", "capture_missing")
-    if not _same_lineage(expected_lineage, grounding_lineage):
-        return _failure("current_grounding_validation_v1", "capture_lineage_mismatch", capture_lineage=grounding_lineage)
-    candidate_id = _text(grounding_evidence.get("candidate_id"))
-    if not candidate_id or grounding_evidence.get("eligible") is not True:
-        return _failure("current_grounding_validation_v1", "target_unresolved", capture_lineage=grounding_lineage)
-    if grounding_evidence.get("candidate_current") is not True:
-        return _failure("current_grounding_validation_v1", "stale_candidate", capture_lineage=grounding_lineage)
-    policy = policy if isinstance(policy, Mapping) else {}
-    minimum_confidence, minimum_margin = policy.get("minimum_confidence"), policy.get("minimum_score_margin")
-    confidence, margin = grounding_evidence.get("confidence"), grounding_evidence.get("score_margin")
-    if not all(_finite_number(value, minimum=0.0, maximum=1.0) for value in (minimum_confidence, minimum_margin, confidence, margin)):
-        return _failure("current_grounding_validation_v1", "grounding_ambiguous", capture_lineage=grounding_lineage)
-    if confidence < minimum_confidence or margin < minimum_margin:
-        return _failure("current_grounding_validation_v1", "grounding_ambiguous", capture_lineage=grounding_lineage)
-    bbox, point = grounding_evidence.get("bbox"), grounding_evidence.get("click_point")
-    if (
-        not isinstance(bbox, Mapping)
-        or set(bbox) != {"x", "y", "w", "h"}
-        or not isinstance(point, Mapping)
-        or set(point) != {"x", "y"}
-    ):
-        return _failure("current_grounding_validation_v1", "target_unresolved", capture_lineage=grounding_lineage)
-    if not all(_finite_number(bbox.get(field), minimum=0.0) for field in ("x", "y", "w", "h")) or bbox["w"] <= 0 or bbox["h"] <= 0:
-        return _failure("current_grounding_validation_v1", "target_unresolved", capture_lineage=grounding_lineage)
-    if not all(_finite_number(point.get(field), minimum=0.0) for field in ("x", "y")):
-        return _failure("current_grounding_validation_v1", "target_unresolved", capture_lineage=grounding_lineage)
-    viewport = grounding_lineage["viewport_size"]
-    if bbox["x"] + bbox["w"] > viewport["width"] or bbox["y"] + bbox["h"] > viewport["height"]:
-        return _failure("current_grounding_validation_v1", "target_unresolved", capture_lineage=grounding_lineage)
-    if not (bbox["x"] <= point["x"] <= bbox["x"] + bbox["w"] and bbox["y"] <= point["y"] <= bbox["y"] + bbox["h"]):
-        return _failure("current_grounding_validation_v1", "target_unresolved", capture_lineage=grounding_lineage)
-    if point["x"] > viewport["width"] or point["y"] > viewport["height"]:
-        return _failure("current_grounding_validation_v1", "target_unresolved", capture_lineage=grounding_lineage)
-    grounding_refs = grounding_evidence.get("evidence_refs")
-    if not isinstance(grounding_refs, list) or not any(isinstance(ref, str) and ref.strip() for ref in grounding_refs):
-        return _failure("current_grounding_validation_v1", "target_unresolved", capture_lineage=grounding_lineage)
-    if set(gate_decision) != _GATE_KEYS:
-        return _failure("current_grounding_validation_v1", "pre_click_rejected", capture_lineage=grounding_lineage)
-    gate_lineage = _capture_lineage(gate_decision)
-    gate_binding = {
-        "asset_content_sha256": selection.get("asset_content_sha256"),
-        "transition_id": selection.get("transition_id"),
-        "selection_sha256": selection.get("selection_sha256"),
-        "selected_candidate_id": candidate_id,
-        "selected_element_id": selection.get("element_ref"),
-        "selected_click_point": dict(point),
-    }
-    if gate_decision.get("contract_version") != "pre_click_decision_v1" or gate_decision.get("allowed") is not True:
-        return _failure("current_grounding_validation_v1", "pre_click_rejected", capture_lineage=grounding_lineage)
-    if not _same_lineage(expected_lineage, gate_lineage):
-        return _failure("current_grounding_validation_v1", "capture_lineage_mismatch", capture_lineage=grounding_lineage)
-    if any(gate_decision.get(key) != value for key, value in gate_binding.items()):
-        return _failure("current_grounding_validation_v1", "pre_click_rejected", capture_lineage=grounding_lineage)
-    gate_refs = gate_decision.get("evidence_refs")
-    if not isinstance(gate_refs, list) or not any(isinstance(ref, str) and ref.strip() for ref in gate_refs):
-        return _failure("current_grounding_validation_v1", "pre_click_rejected", capture_lineage=grounding_lineage)
-    refs = {
-        ref for source in (grounding_evidence, gate_decision)
-        for ref in source.get("evidence_refs", [])
-        if isinstance(ref, str) and ref.strip()
-    }
     return _result(
         "current_grounding_validation_v1",
         status="validated",
         asset_content_sha256=selection.get("asset_content_sha256"),
         selection_sha256=selection.get("selection_sha256"),
         transition_id=selection.get("transition_id"),
-        capture_lineage=grounding_lineage,
+        capture_lineage=geometry["capture_lineage"],
         element_ref=selection.get("element_ref"),
-        candidate_id=candidate_id,
-        evidence_refs=sorted(refs),
+        candidate_id=geometry["candidate_id"],
+        evidence_refs=geometry["evidence_refs"],
+    )
+
+
+def _validate_grounded_current_grounding(
+    asset: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    grounding_evidence: Mapping[str, Any],
+    gate_decision: Mapping[str, Any],
+    *,
+    grounded_evidence: object,
+    policy: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """仅校验 distinct grounded seal 生成的 execution bundle。"""
+    from app.agent.runtime_intent_claim_store import _unwrap_grounded_execution_evidence
+
+    evidence = _unwrap_grounded_execution_evidence(grounded_evidence)
+    return _validate_current_grounding_impl(
+        asset,
+        selection,
+        grounding_evidence,
+        gate_decision,
+        policy=policy,
+        expected_confirmation_evidence_ref=(
+            evidence.evidence_ref if evidence is not None else None
+        ),
+        allow_grounded_confirmation_ref=True,
     )
 
 
@@ -790,22 +1308,30 @@ def verify_transition_result(
     )
 
 
-def verify_server_dispatched_transition_result(
+def _verify_server_dispatched_transition_result_impl(
     asset: Mapping[str, Any],
     selection: Mapping[str, Any],
     before_observation: Mapping[str, Any],
     post_observation: Mapping[str, Any],
     *,
     server_evidence_refs: list[str],
+    grounded_confirmation_evidence_ref: str | None = None,
 ) -> dict[str, Any]:
     """只凭服务端证据和 C1/C2 观察校验已派发 transition 的目标状态。"""
     canonical, transition, selection_error = _validated_selection(
         asset,
         selection,
         expected_confirmation_evidence_ref=(
-            selection.get("human_confirmation_evidence_ref")
-            if selection.get("requires_user_confirmation") is True
-            else None
+            grounded_confirmation_evidence_ref
+            if grounded_confirmation_evidence_ref is not None
+            else (
+                selection.get("human_confirmation_evidence_ref")
+                if selection.get("requires_user_confirmation") is True
+                else None
+            )
+        ),
+        allow_grounded_confirmation_ref=(
+            grounded_confirmation_evidence_ref is not None
         ),
     )
     if selection_error:
@@ -915,6 +1441,55 @@ def verify_server_dispatched_transition_result(
         post_capture_lineage=dict(post_lineage),
         post_state_resolution=post_resolution,
         evidence_refs=sorted(evidence_refs),
+    )
+
+
+def verify_server_dispatched_transition_result(
+    asset: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    before_observation: Mapping[str, Any],
+    post_observation: Mapping[str, Any],
+    *,
+    server_evidence_refs: list[str],
+) -> dict[str, Any]:
+    """保持既有公开 verifier 的精确签名与严格语义。"""
+    return _verify_server_dispatched_transition_result_impl(
+        asset,
+        selection,
+        before_observation,
+        post_observation,
+        server_evidence_refs=server_evidence_refs,
+    )
+
+
+def _verify_grounded_server_dispatched_transition_result(
+    asset: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    before_observation: Mapping[str, Any],
+    post_observation: Mapping[str, Any],
+    *,
+    server_evidence_refs: list[str],
+    grounded_confirmation_evidence_ref: str,
+) -> dict[str, Any]:
+    """只允许已由 grounded consume 严格重读的证明引用。"""
+    if (
+        not isinstance(grounded_confirmation_evidence_ref, str)
+        or not grounded_confirmation_evidence_ref.startswith(
+            "grounded-confirmation-proof:"
+        )
+    ):
+        return _failure(
+            "transition_verification_v1",
+            "selection_lineage_mismatch",
+            state_advanced=False,
+        )
+    return _verify_server_dispatched_transition_result_impl(
+        asset,
+        selection,
+        before_observation,
+        post_observation,
+        server_evidence_refs=server_evidence_refs,
+        grounded_confirmation_evidence_ref=grounded_confirmation_evidence_ref,
     )
 
 

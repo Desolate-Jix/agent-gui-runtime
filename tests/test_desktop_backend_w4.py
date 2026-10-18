@@ -410,7 +410,7 @@ def test_windows_backend_settles_once_only_after_successful_dispatch() -> None:
     assert events == [("click", 220, 240), ("sleep", 0.75)]
 
 
-def test_windows_backend_does_not_settle_by_default_after_successful_dispatch() -> None:
+def test_windows_backend_uses_shared_navigation_grace_by_default() -> None:
     from app.agent.desktop_backend import (
         DesktopDispatchCommand,
         ExistingWindowsBackendAdapter,
@@ -453,7 +453,7 @@ def test_windows_backend_does_not_settle_by_default_after_successful_dispatch() 
     receipt = backend.dispatch(command, authority=authority)
 
     assert receipt.status == "dispatched"
-    assert events == [("click", 220, 240)]
+    assert events == [("click", 220, 240), ("sleep", 2.0)]
 
 
 def test_windows_backend_does_not_settle_when_click_is_not_dispatched() -> None:

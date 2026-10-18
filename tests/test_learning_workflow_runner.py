@@ -4,10 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
-from app.api import panel as panel_api
-from app.main import app
 from app.learn.workflow_runner import run_learning_workflow_readonly_tail
 from app.learn.workflow_state import (
     LEARNING_WORKFLOW_COMPLETION_EVIDENCE,
@@ -231,13 +227,10 @@ def test_readonly_tail_runner_rejects_stale_revision_before_building(
     assert builder_called is False
 
 
-def test_panel_readonly_tail_endpoint_runs_backend_owned_stages(
+def test_readonly_tail_runner_completes_backend_owned_stages(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     store, fusion_state = _store_at_completed_fusion()
-    monkeypatch.setattr(panel_api, "learning_workflow_run_store", store)
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
     source_path = _write_json(
         tmp_path / "artifacts" / "learning-runs" / "run-demo" / "trial_result.json",
         {"contract_version": "learning_model_trial_v1"},
@@ -263,44 +256,16 @@ def test_panel_readonly_tail_endpoint_runs_backend_owned_stages(
             )
         }
 
-    monkeypatch.setattr(panel_api, "build_learn_page_detail_candidate", build_page_detail)
-    monkeypatch.setattr(panel_api, "build_learn_demo_scaffold", build_scaffold)
-
-    def write_runner_trace(**kwargs):
-        assert kwargs["operation"] == "run-learning-workflow-readonly-tail"
-        return str(
-            _write_json(
-                tmp_path / "logs" / "traces" / "panel" / "readonly-tail.json",
-                kwargs["payload"],
-            )
-        )
-
-    monkeypatch.setattr(panel_api, "write_trace", write_runner_trace)
-
-    response = TestClient(app).post(
-        "/panel/run_learning_workflow_readonly_tail",
-        json={
-            "run_id": "run-demo",
-            "expected_revision": fusion_state["revision"],
-            "source_path": str(source_path),
-        },
+    result = run_learning_workflow_readonly_tail(
+        run_id="run-demo",
+        expected_revision=fusion_state["revision"],
+        source_path=source_path,
+        project_root=tmp_path,
+        store=store,
+        page_detail_builder=build_page_detail,
+        scaffold_builder=build_scaffold,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    assert payload["data"]["workflow_state"]["workflow_status"] == "completed"
-    assert payload["data"]["real_clicks"] == 0
-    assert payload["data"]["trace_path"].endswith("readonly-tail.json")
-
-
-def test_panel_uses_backend_runner_for_readonly_tail() -> None:
-    panel_js = Path("app/web_panel/panel.js").read_text(encoding="utf-8")
-    start = panel_js.index("async function completeLearningInterfaceReadonlyFlow")
-    end = panel_js.index("async function runLearningDraftTrial", start)
-    body = panel_js[start:end]
-
-    assert "/panel/run_learning_workflow_readonly_tail" in body
-    assert 'transitionLearningWorkflowState("page_details"' not in body
-    assert 'transitionLearningWorkflowState("pathgraph_draft"' not in body
-    assert 'transitionLearningWorkflowState("complete"' not in body
+    assert result["success"] is True
+    assert result["workflow_state"]["workflow_status"] == "completed"
+    assert result["real_clicks"] == 0

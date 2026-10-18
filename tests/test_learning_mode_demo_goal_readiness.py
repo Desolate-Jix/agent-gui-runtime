@@ -4,10 +4,7 @@ import json
 import hashlib
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
 from app.learn.draft_review import load_learning_draft_review
-from app.main import app
 from scripts.build_learn_demo_scaffold import build_learn_demo_scaffold
 from scripts.report_learning_mode_demo_goal_readiness import report_learning_mode_demo_goal_readiness
 from tests.test_learn_demo_scaffold import _candidate_fixture
@@ -534,23 +531,16 @@ def test_learning_mode_demo_goal_readiness_separates_display_demo_from_final_goa
     assert summary["final_goal_complete"] is False
 
 
-def test_learning_mode_demo_goal_readiness_endpoint_is_review_only(tmp_path: Path, monkeypatch) -> None:
-    import app.api.panel as panel_api
-
+def test_learning_mode_demo_goal_readiness_is_review_only(tmp_path: Path) -> None:
     candidate = _candidate_fixture(tmp_path)
     scaffold = build_learn_demo_scaffold(source_path=candidate, out_dir=candidate.parent, project_root=tmp_path)
     _force_pending_calibration(scaffold)
-    monkeypatch.setattr(panel_api, "ROOT_DIR", tmp_path)
-
-    response = TestClient(app).post(
-        "/panel/create_learning_demo_goal_readiness",
-        json={"scaffold_path": str(Path(scaffold["report_path"]).relative_to(tmp_path))},
+    data = report_learning_mode_demo_goal_readiness(
+        scaffold_path=Path(scaffold["report_path"]),
+        out_dir=Path(scaffold["report_path"]).parent,
+        project_root=tmp_path,
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["success"] is True
-    data = payload["data"]
     assert data["contract_version"] == "learning_mode_demo_goal_readiness_v1"
     assert data["demo_goal_status"] == "display_demo_ready_official_goal_blocked"
     assert data["display_demo_ready"] is True
@@ -561,4 +551,3 @@ def test_learning_mode_demo_goal_readiness_endpoint_is_review_only(tmp_path: Pat
     assert data["safety"]["live_clicks"] == 0
     assert data["safety"]["live_submits"] == 0
     assert data["safety"]["execute_binding_enabled"] is False
-    assert data["trace_path"]

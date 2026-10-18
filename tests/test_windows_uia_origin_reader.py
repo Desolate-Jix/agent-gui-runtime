@@ -43,9 +43,9 @@ class _Root:
         self.controls = controls
         self.descendant_calls: list[dict[str, object]] = []
 
-    def descendants(self, **kwargs: object) -> list[_EditControl]:
+    def iter_descendants(self, **kwargs: object):
         self.descendant_calls.append(dict(kwargs))
-        return list(self.controls)
+        yield from self.controls
 
 
 class _Desktop:
@@ -102,6 +102,7 @@ def test_reads_normalized_origin_from_exact_bound_window_descendant() -> None:
         "origin": "https://example.com",
         "source": "uia_edit_value",
         "edit_control_count": 1,
+        "edit_control_count_scope": "inspected_prefix",
     }
     assert manager.calls == 2
     assert factory.calls == [{"backend": "uia"}]
@@ -227,7 +228,7 @@ def test_missing_uia_dependency_fails_closed_without_leaking_exception_text() ->
 
 def test_uia_read_failure_is_structured_and_does_not_leak_exception_text() -> None:
     class FailingRoot:
-        def descendants(self, **_: object) -> list[object]:
+        def iter_descendants(self, **_: object):
             raise RuntimeError("failed while reading https://example.com/private-token")
 
     desktop = _Desktop(FailingRoot())

@@ -1561,9 +1561,14 @@ def test_qwen_cancellation_finds_lease_by_owner_when_current_profile_id_changes(
     })
     requested: list[str] = []
     monkeypatch.setattr(model_server.urllib.request, "urlopen", lambda request, timeout: requested.append(request.full_url) or _FakeResponse({
+        "contract_version": "model_request_cancel_response_v1",
         "status": "request_not_active",
         "request_id": "owner-request",
+        "request_fenced": True,
     }))
+    monkeypatch.setattr(model_server, "check_model_server", lambda *_args, **_kwargs: {
+        "status": "busy", "health": {"status": "busy", "active_request": None},
+    })
 
     result = model_server.cancel_model_request(
         request_id="owner-request",
@@ -1975,6 +1980,7 @@ def test_qwen_last_request_cancel_stops_owned_server_then_new_external_lease_is_
     )
     stopped: list[dict] = []
     monkeypatch.setattr(model_server.urllib.request, "urlopen", lambda request, timeout: _FakeResponse({
+        "contract_version": "model_request_cancel_response_v1",
         "status": "cancellation_acknowledged",
         "request_id": "owned-request",
     }))
@@ -1990,8 +1996,8 @@ def test_qwen_last_request_cancel_stops_owned_server_then_new_external_lease_is_
         or {"status": "proven_absent", "reason": "terminate_wait"},
     )
     monkeypatch.setattr(model_server, "check_model_server", lambda selected, timeout=1.0: {
-        "status": "unreachable",
-        "health": {"active_request": None},
+        "status": "busy",
+        "health": {"status": "busy", "active_request": None},
     })
 
     cancelled = model_server.cancel_model_request(
@@ -2700,7 +2706,9 @@ def test_managed_factory_stub_endpoint_uses_lease_and_blocks_release_until_body(
         )
 
     monkeypatch.setattr(local_provider, "urlopen", controlled_urlopen)
-    provider = VisionProviderFactory.create(config=deepcopy(VisionProviderFactory.load_config(tmp_path / "missing.json")))
+    provider = VisionProviderFactory.create(config={
+        "vision": {"mode": "local", "local": {"model_name": "local_stub", "endpoint": None}}
+    })
     assert provider.endpoint is None
     provider.bind_managed_model_lease(lease)
     result: dict[str, object] = {}

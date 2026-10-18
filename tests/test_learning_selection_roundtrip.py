@@ -148,6 +148,9 @@ def test_selection_diagnostics_follow_review_projection_through_save_load_and_gr
     assert precise["region_count"] == precise["bbox_region_count"] == result["summary"]["region_count"] == 1
     assert precise["candidate_count"] == 2
     assert precise["state_count"] == precise["action_template_count"] == 0
+    assert precise["learning_state"] == "ready_for_learning"
+    assert precise["execute_binding_enabled"] is False
+    assert precise["artifact_is_authorization"] is False
     reloaded = load_learning_draft_review(result["reviewed_template_candidate_path"], project_root=tmp_path)
     assert reloaded["audit"]["manual_bbox_edit_summary"] == manual
     assert reloaded["audit"]["precise_understanding_summary"] == precise
@@ -155,8 +158,43 @@ def test_selection_diagnostics_follow_review_projection_through_save_load_and_gr
     path = tmp_path / result["reviewed_template_candidate_path"]
     durable = json.loads(path.read_text(encoding="utf-8"))
     durable["audit"]["manual_bbox_edit_summary"]["edited_region_count"] = 0
+    durable["audit"]["precise_understanding_summary"].update({
+        "learning_state": "published", "state_count": 99,
+        "execute_binding_enabled": True,
+    })
     path.write_text(json.dumps(durable, ensure_ascii=False), encoding="utf-8")
-    assert load_learning_draft_review(path, project_root=tmp_path)["audit"]["manual_bbox_edit_summary"] == manual
+    verified = load_learning_draft_review(path, project_root=tmp_path)
+    assert verified["audit"]["manual_bbox_edit_summary"] == manual
+    assert verified["audit"]["precise_understanding_summary"] == precise
+
+    # 新进程重算的摘要与前端消费真实 API 形状的结果必须一致。
+    root = Path(__file__).resolve().parents[1]
+    code = (
+        "import json,sys; from app.learn.draft_review import load_learning_draft_review; "
+        "print(json.dumps(load_learning_draft_review(sys.argv[1], project_root=sys.argv[2]), ensure_ascii=False))"
+    )
+    fresh = subprocess.run(
+        [sys.executable, "-c", code, str(path), str(tmp_path)], cwd=tmp_path,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONPATH": str(root)},
+        capture_output=True, text=True, encoding="utf-8", check=True, timeout=30,
+    )
+    assert json.loads(fresh.stdout)["audit"]["precise_understanding_summary"] == precise
+    node_code = (
+        "const fs=require('node:fs'),vm=require('node:vm');"
+        "const s=fs.readFileSync('app/web_panel/panel.js','utf8');"
+        "const c=vm.createContext({});"
+        "vm.runInContext(s.slice(s.indexOf('function selectionReviewSummaryCounts'),"
+        "s.indexOf('function renderLearningDraftReview(')),c);"
+        "console.log(JSON.stringify(c.selectionReviewSummaryCounts(JSON.parse(fs.readFileSync(0,'utf8')))));"
+    )
+    panel = subprocess.run(
+        ["node", "-e", node_code], cwd=root, input=fresh.stdout,
+        capture_output=True, text=True, encoding="utf-8", check=True, timeout=15,
+    )
+    assert json.loads(panel.stdout) == {
+        "candidate_box_count": 2, "semantically_reviewed_region_count": 1,
+        "region_learning_state": "ready_for_learning",
+    }
 
 
 def test_selection_missing_semantics_has_candidates_but_no_understood_regions(tmp_path):

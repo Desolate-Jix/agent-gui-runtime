@@ -1,21 +1,18 @@
 {
   "name": "agent-gui-runtime",
   "version": "0.3.0",
-  "description": "[中文](README.md) | [English](README.en.md)",
-  "main": "index.js",
+  "description": "Local Windows GUI runtime; Node.js runs the offline panel tests.",
   "directories": {
     "doc": "docs",
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test --test-concurrency=1 tests/js/panel_learning_selection_review.test.cjs tests/js/panel_learning_hybrid_review.test.cjs tests/js/panel_learning_selection_flow.test.cjs tests/js/interface_workflow_v2_panel.test.cjs tests/js/agent_runtime_panel.test.cjs tests/js/panel_primary_navigation.test.cjs"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Desolate-Jix/agent-gui-runtime.git"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {

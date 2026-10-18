@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.seek.learn_artifacts import build_seek_learn_artifacts
+from app.application_profiles.seek.learn_artifacts import build_seek_learn_artifacts
 from app.learn.path_graph_artifacts import build_seek_runtime_path_graph_export
 from app.learn.interface_map import build_learned_interface_map
 from app.learn.visual_asset_crops import build_visual_asset_crop_export
