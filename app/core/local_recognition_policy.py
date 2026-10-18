@@ -17,6 +17,20 @@ def local_recognition_diagnostics(plan, *, image_path, viewport_size):
     candidates = candidates if isinstance(candidates, list) else []
     rejected = rejected if isinstance(rejected, list) else []
     summaries = []
+    inventory = parsed.get('execute_fast_inventory') if isinstance(parsed, dict) else None
+    uia = inventory.get('raw_uia_snapshot') if isinstance(inventory, dict) else None
+    observation = None
+    if isinstance(uia, dict):
+        errors = uia.get('traversal_errors')
+        errors = [row for row in errors if isinstance(row, dict)] if isinstance(errors, list) else []
+        document = uia.get('browser_document_observation') or {}
+        # 展示观测失败而不是伪称目标不存在；只摘要错误，不复制整棵控件树。
+        observation = {key: deepcopy(uia.get(key)) for key in (
+            'status', 'scan_complete', 'scan_visited_count', 'truncated', 'truncation_reason')}
+        observation.update(traversal_error_count=len(errors), traversal_errors=[
+            {key: deepcopy(row[key]) for key in ('reason', 'index', 'child_index', 'winerror') if key in row}
+            for row in errors[:8]], target_absent_verified=False,
+            browser_document_status=document.get('status') if isinstance(document, dict) else None)
     for group, items in (("candidates", candidates), ("rejected", rejected)):
         for c in items:
             if not isinstance(c, dict) or len(summaries) >= 20:
@@ -36,8 +50,12 @@ def local_recognition_diagnostics(plan, *, image_path, viewport_size):
             "recommended_candidate_id": ranking.get("recommended_candidate_id"),
             "selection_status": "no_eligible_candidates" if not candidates else "selection_unresolved",
             "candidates": summaries, "truncated": len(candidates) + len(rejected) > 20,
+            "uia_observation": observation,
             "executable": False, "automatic_retry_allowed": False,
-            "next": "Inspect the current screenshot and rejection reasons. Specify the exact visible label "
+            "next": ("UIA observation is incomplete, not proof that the target is absent. Inspect the "
+                    "current screenshot, traversal errors and any owned popup before deciding recovery. "
+                    if observation is not None and observation['scan_complete'] is False else "")
+                    + "Inspect the current screenshot and rejection reasons. Specify the exact visible label "
                     "and surrounding context/region; distinguish no eligible candidate from ambiguous selection. "
                     "Request a new recognition only after review. Do not click these diagnostic boxes directly."}
 

@@ -1,4 +1,4 @@
-"""本地无学习单步会话：一条命令一份回执和后图，不自动规划或重放输入。"""
+"""本地单步会话：可选轻量记录，不启用旧学习执行器、不自动重放。"""
 from datetime import datetime, timezone
 import argparse
 import hashlib
@@ -47,7 +47,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-directory", type=Path, required=True)
-    parser.add_argument("--local-no-learning", action="store_true", required=True)
+    parser.add_argument("--local-no-learning", action="store_true", required=True,
+                        help="Disable legacy learning executor; optional receipt-only recording stays off until requested")
     parser.add_argument("--observer", choices=["minimal", "original"], default="minimal")
     parser.add_argument("--parent-pid", type=int)
     args = parser.parse_args()
@@ -55,6 +56,7 @@ def main():
     from app.core.process_sampler import ProcessSampler
     from app.desktop_review.host import DesktopReviewHost
     from app.desktop_review.single_step_coordinator import NativeSingleStepCoordinator
+    from app.learning_memory.event_store import CONTROL_KINDS, LearningEventStore
     import psutil
     parent_created = psutil.Process(args.parent_pid).create_time() if args.parent_pid else None
 
@@ -62,6 +64,7 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     for name in ("commands", "responses"):
         (out / name).mkdir()
+    learning = LearningEventStore(out)
     host = None
     co = None
     target = None
@@ -69,7 +72,9 @@ def main():
     sampler_thread = None
     errors = []
     report = {"started_at": now(), "phase": "starting", "runner_pid": os.getpid(),
-              "learning_enabled": False, "observer": args.observer, "completed_commands": []}
+              "learning_enabled": False, "legacy_learning_executor_enabled": False,
+              "learning_recording": {"status": "disabled", "recording_enabled": False},
+              "observer": args.observer, "completed_commands": []}
     import ctypes
     report["host_is_admin"] = bool(ctypes.windll.shell32.IsUserAnAdmin()) if os.name == "nt" else False
     sampler = ProcessSampler(os.getpid(), extra_root_getter=lambda: target, sample_interval=3)
@@ -128,6 +133,7 @@ def main():
         host.start()
         co = NativeSingleStepCoordinator(out / "reviews", host.facade, host, enable_agent_learning=False,
             runtime_output_root=out / "runtime-output", vision_config_path=out / "configs/vision.json")
+        co._memory_library_root = out.parent / "memory-library"
         co.set_automatic_safety_interception(False)
         co.set_keep_models_loaded(True)
         report["model_configuration"] = co.configure_vista_model(model_directory=str(args.model_directory.resolve()))
@@ -159,11 +165,26 @@ def main():
             response["started_at"] = now()
             started = time.perf_counter()
             kind = None
+            learning_ticket = None
+            learning_error = None
             try:
                 command = json.loads(path.read_text(encoding="utf-8"))
                 response["command"] = command
                 kind = command["kind"]
-                if kind == "discover":
+                try:
+                    learning_ticket = learning.prepare(path.stem, command, target)
+                    if learning_ticket is not None:
+                        response["learning_binding"] = learning_ticket
+                        learning.reserve(learning_ticket)
+                except Exception as error:
+                    # 记录故障单独报告，不能把随后输入结果替换成学习错误或要求重放。
+                    learning_error = {"status": "recording_failed", "phase": "prepare",
+                                      "error_type": type(error).__name__, "message": str(error)}
+                    response["learning_recording_error"] = learning_error
+                if kind in CONTROL_KINDS:
+                    response["learning_control"] = kind
+                    response["result"] = learning.control(kind, command.get("request") or {}, path.stem)
+                elif kind == "discover":
                     response["result"] = co.discover_applications()
                 elif kind == "select":
                     preview = co.preview_selected_window_preparation(
@@ -229,6 +250,29 @@ def main():
                 response["processes_after"] = sample_once()
             response["response_available_at"] = now()
             write(out / "responses" / path.name, response)
+            # 学习消费已持久回执；精简回执、轮询和取图都不能触发重复记录。
+            if learning_ticket is not None:
+                try:
+                    recorded = learning.record(path.stem, learning_ticket)
+                    learning.publish_recording_status(path.stem, recorded)
+                    learning_error = None
+                except Exception as error:
+                    learning_error = {"status": "recording_failed", "phase": "record",
+                        "learning_id": learning_ticket["learning_id"],
+                        "error_type": type(error).__name__, "message": str(error),
+                        "next": "Use learning_recover; never replay the original input."}
+            if learning_error is not None:
+                try:
+                    learning.publish_recording_status(path.stem, learning_error)
+                except OSError as error:
+                    learning_error["status_write_error"] = type(error).__name__
+            try:
+                report["learning_recording"] = learning.snapshot()
+                report["learning_enabled"] = report["learning_recording"]["recording_enabled"]
+            except Exception as error:
+                report["learning_recording"] = {"status": "unavailable", "error_type": type(error).__name__}
+                report["learning_enabled"] = None
+            report["learning_recording_error"] = learning_error
             done.add(path.name)
             report["completed_commands"].append({"name": path.name, "status": response["status"]})
             report["target"] = target
@@ -240,6 +284,13 @@ def main():
         report.update(phase="failed", error_type=type(error).__name__, error=str(error))
         raise
     finally:
+        try:
+            learning.close()
+            report["learning_recording"] = learning.status()
+            report["learning_enabled"] = False
+        except Exception as error:
+            report["learning_recording_error"] = {"phase": "close", "error_type": type(error).__name__}
+            report["learning_enabled"] = None
         if co is not None:
             try:
                 co.shutdown()

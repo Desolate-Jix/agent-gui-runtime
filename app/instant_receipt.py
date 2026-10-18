@@ -11,7 +11,8 @@ def compact_receipt(receipt, *, full_receipt_path=None):
         "input_route_succeeded", "task_effect_verified", "automatic_retry_allowed",
         "observation_status", "started_at", "finished_at", "command_wall_ms", "error", "error_type",
         "diagnostics", "agent_review", "next", "accepted", "action_executed",
-        "wait_expired", "command_cancelled", "partial_execution")
+        "wait_expired", "command_cancelled", "partial_execution", "learning_recording",
+        "learning_recording_error", "learning_binding", "learning_control")
     value = {key: deepcopy(receipt[key]) for key in keys if key in receipt}
     value["receipt_detail"] = "compact"
     value["full_receipt"] = {"tool": "instant_result", "arguments": {
@@ -29,6 +30,9 @@ def compact_receipt(receipt, *, full_receipt_path=None):
             response = (row.get("receipt") or {}).get("response") or {}
             if response.get("error"):
                 summary["error"] = deepcopy(response["error"])
+                diagnostic = (response.get("data") or {}).get("recognition_diagnostics")
+                if isinstance(diagnostic, dict):
+                    summary["recognition_diagnostics"] = deepcopy(diagnostic)
             value["sequence"]["steps"].append(summary)
         value["observation"] = {key: deepcopy(result.get("observation", {}).get(key)) for key in
             ("status", "error_code", "next_action", "recovery") if key in result.get("observation", {})}
@@ -40,6 +44,8 @@ def compact_receipt(receipt, *, full_receipt_path=None):
             action_executed=(action.get("execution_path") or {}).get("action_executed", action.get("pressed")))
         if api.get("error"):
             value["error"] = deepcopy(api["error"])
+            if isinstance(data.get("recognition_diagnostics"), dict):
+                value["recognition_diagnostics"] = deepcopy(data["recognition_diagnostics"])
         if api.get("message"):
             value["message"] = api["message"]
     else:

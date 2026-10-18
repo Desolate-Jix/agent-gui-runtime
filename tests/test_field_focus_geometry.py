@@ -1,6 +1,19 @@
 """字段已被本帧粗定位命中时，不让裁图细化重新选择另一个控件。"""
 import pytest
 from app.api import vision
+from types import SimpleNamespace as NS
+
+
+def test_spatial_field_goal_does_not_conflict_with_same_name_browser_tab():
+    candidate = NS(candidate_id="tab-wikipedia", label="Wikipedia", role="tab", refined_bbox=None,
+        element=NS(evidence={"screen_inventory_action": {"source": "windows_uia.controls"}},
+                   bbox=NS(to_dict=lambda: {"x":271,"y":0,"w":256,"h":41})))
+    assert vision._vista_direct_uia_conflicts(
+        goal="Wikipedia 页面中央，地球图标下方的搜索输入框", target_text=None,
+        point={"x":562,"y":571}, candidates=[candidate]) == []
+    assert vision._vista_direct_uia_conflicts(
+        goal="Click Wikipedia", target_text=None,
+        point={"x":562,"y":571}, candidates=[candidate]) == ["tab-wikipedia"]
 
 
 def snapshot():

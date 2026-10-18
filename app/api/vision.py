@@ -2521,9 +2521,14 @@ def _vista_direct_uia_conflicts(
     candidates: list[RecognitionCandidate],
 ) -> list[str]:
     from app.operation.recognition.candidate_ranker import _goal_label_match
+    from app.operation.recognition.control_target import generic_field_target
+    field_target = generic_field_target(goal, target_text=target_text)
     normalized_target_text = re.sub(r"\s+", " ", str(target_text or "").strip().casefold())
     exact_uia_candidates: list[RecognitionCandidate] = []
     for candidate in candidates:
+        # 方位描述中的站点名不能让同名页签否定正文输入框；同角色冲突仍保留。
+        if field_target and candidate.role not in {"input", "combobox"}:
+            continue
         if not isinstance(candidate.element.evidence.get("screen_inventory_action"), dict):
             continue
         normalized_label = re.sub(r"\s+", " ", str(candidate.label or "").strip().casefold())
@@ -2874,10 +2879,10 @@ def _recognition_plan_from_vista_point(
                 value = re.sub(r"\s*[（(]&?[a-zA-Z][)）]\s*$", "", value)
             return " ".join(value.casefold().split())
         literal_role = explicit_target_role(goal)
-        literal_control_type = {"button": "button", "link": "hyperlink", "hyperlink": "hyperlink"}.get(
+        literal_control_type = {"button": "button", "link": "hyperlink", "hyperlink": "hyperlink", "tab": "tabitem", "list item": "listitem"}.get(
             literal_role or "button"
         )
-        literal_candidate_role = {"button": "button", "hyperlink": "link"}.get(literal_control_type)
+        literal_candidate_role = {"button": "button", "hyperlink": "link", "tabitem": "tab", "listitem": "listitem"}.get(literal_control_type)
         def outside_capture(control: dict[str, Any]) -> bool:
             # 只排除几何上完全离屏的同名项；部分可见或缺少几何仍参与消歧。
             box = control.get("bbox") or {}
@@ -3098,17 +3103,21 @@ def _recognition_plan_from_vista_point(
                               "padding": roi_padding, "min_size": roi_min_size}
             needs_input_context = False
             if (roi_source == "current_uia_candidate_v1" and len(roi_candidates) == 1
-                    and roi_candidates[0].role in {"input", "combobox"}):
+                    and roi_candidates[0].role in {"input", "combobox", "listitem"}):
                 field_bbox = _candidate_bbox(roi_candidates[0])
                 natural_edge = max(field_bbox["w"], field_bbox["h"]) + 2 * roi_padding
                 needs_input_context = min(field_bbox["w"], field_bbox["h"]) * min(1.0, roi_max_edge / natural_edge) < 18
+                if roi_candidates[0].role == "listitem":
+                    # 只有实际缩小的长行需要整窗上下文；短行保持局部原始像素。
+                    needs_input_context = needs_input_context and natural_edge > roi_max_edge
             if needs_input_context:
-                # 长窄裁图会丢失标签与字段的空间关系；首次定位直接保留本窗口上下文，不回退到 UIA 中心点。
+                # 长窄字段或列表行会丢失空间上下文；首次直接用窗口图，不回退到 UIA 中心点。
                 roi_max_edge = 1024
-                roi_policy = {**roi_policy, "policy": "thin_input_window_context_primary"}
+                is_list_row = roi_candidates[0].role == "listitem"
+                roi_policy = {**roi_policy, "policy": "thin_list_row_window_context_primary" if is_list_row else "thin_input_window_context_primary"}
                 pathgraph_roi_preprocess = _prepare_vista_direct_image(image_path, input_image_size, max_edge=roi_max_edge)
                 pathgraph_roi_preprocess["roi_source"] = roi_source
-                pathgraph_roi_preprocess["context_reason"] = "thin_input_requires_window_context"
+                pathgraph_roi_preprocess["context_reason"] = "thin_list_row_requires_window_context" if is_list_row else "thin_input_requires_window_context"
             else:
                 pathgraph_roi_preprocess = _prepare_vista_candidate_roi_image(
                     image_path,

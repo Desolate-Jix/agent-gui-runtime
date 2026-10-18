@@ -53,7 +53,7 @@ def _validate_request_id(request_id):
 
 class InstantCommand(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "close_launched_window"]
+    kind: Literal["discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "step", "input_sequence", "close_launched_window", "learning_start", "learning_status", "learning_stop", "learning_recover", "learning_event", "learning_review", "learning_projection", "learning_import", "learning_library", "learning_memory", "learning_save_interface", "learning_commit", "learning_project", "learning_reuse", "learning_adopt_source", "learning_template", "learning_feedback"]
     app_id: str | None = None
     url: str | None = None
     handle: int | None = Field(default=None, gt=0)
@@ -73,6 +73,23 @@ class InstantCommand(BaseModel):
             "step": ({"operation", "request"}, {"operation", "request", "observation_wait_ms", "observation_condition"}),
             "input_sequence": ({"request"}, {"request", "observation_wait_ms", "observation_condition"}),
             "read_text": (set(), {"max_chars"}),
+            "learning_start": ({"request"}, {"request"}),
+            "learning_status": (set(), {"request"}),
+            "learning_stop": (set(), {"request"}),
+            "learning_recover": (set(), {"request"}),
+            "learning_event": ({"request"}, {"request"}),
+            "learning_review": ({"request"}, {"request"}),
+            "learning_projection": (set(), {"request"}),
+            "learning_import": ({"request"}, {"request"}),
+            "learning_adopt_source": ({"request"}, {"request"}),
+            "learning_template": ({"request"}, {"request"}),
+            "learning_feedback": ({"request"}, {"request"}),
+            "learning_library": (set(), {"request"}),
+            "learning_memory": ({"request"}, {"request"}),
+            "learning_save_interface": ({"request"}, {"request"}),
+            "learning_commit": (set(), {"request"}),
+            "learning_project": ({"request"}, {"request"}),
+            "learning_reuse": ({"request"}, {"request"}),
         }
         required, allowed = fields.get(self.kind, (set(), set()))
         present = set(value) - {"kind"}
@@ -85,6 +102,9 @@ class InstantCommand(BaseModel):
         elif self.kind == "input_sequence":
             from app.desktop_review.input_sequence import InputSequenceRequest
             InputSequenceRequest.model_validate(self.request)
+        elif self.kind.startswith("learning_"):
+            from app.learning_memory.event_store import validate_control
+            validate_control(self.kind, self.request or {})
         if self.observation_condition is not None:
             from app.core.observation_policy import resolve_render_grace_ms, local_action_observation_kind
             from app.desktop_review.conditional_observation import validate_condition
@@ -202,6 +222,14 @@ class InstantSession:
             if self.session and (self.session / "report.json").is_file():
                 report = read_json(self.session / "report.json")
             alive = self._host_alive()
+            learning_state = report.get("learning_recording", {"status": "disabled", "recording_enabled": False})
+            if self.session and (self.session / "learning-memory" / "current.json").is_file():
+                try:
+                    from app.learning_memory.event_store import LearningEventStore
+                    learning_state = LearningEventStore(self.session).snapshot()
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    learning_state = {"status": "unavailable", "recording_enabled": None,
+                                      "error_type": type(error).__name__}
             phase = report.get("phase", "starting" if alive else "not_started")
             if self.session is not None and not alive and not report.get("finished_at"):
                 phase = "host_exited_without_cleanup_proof"
@@ -210,7 +238,11 @@ class InstantSession:
                 pending = [p.stem for p in (self.session / "commands").glob("*.json")
                            if not (self.session / "responses" / p.name).exists()]
             return {"mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
-                "learning_enabled": False, "automatic_safety_interception": False if alive else None,
+                "learning_enabled": learning_state.get("recording_enabled") if alive else False,
+                "legacy_learning_executor_enabled": False,
+                "learning_recording": learning_state,
+                "learning_recording_error": report.get("learning_recording_error"),
+                "automatic_safety_interception": False if alive else None,
                 "local_input_enabled_by_operator": self.allow_local_input,
                 "host_is_admin": report.get("host_is_admin"),
                 "session_directory": str(self.session) if self.session else None,
@@ -235,6 +267,22 @@ class InstantSession:
                     raise ValueError("request_id already belongs to a different command")
                 return self.result(request_id)
             status = self.status()
+            from app.learning_memory.event_store import OFFLINE_CONTROL_KINDS
+            if not status["host_alive"] and command.get("kind") in OFFLINE_CONTROL_KINDS:
+                # 宿主已退出后仍可查询/补记旧会话；绝不拉起宿主或重放待定输入。
+                self._lock()
+                from app.learning_memory.event_store import LearningEventStore, validate_control
+                validate_control(command["kind"], command.get("request") or {})
+                write_json(path, command)
+                response = {"command": command, "learning_control": command["kind"],
+                            "offline_recording_only": True, "automatic_retry_allowed": False}
+                try:
+                    response.update(status="returned", result=LearningEventStore(self.session).control(
+                        command["kind"], command.get("request") or {}, request_id))
+                except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+                    response.update(status="failed", error_type=type(error).__name__, error=str(error))
+                write_json(self._path(request_id, "responses"), response)
+                return self.result(request_id)
             if status["phase"] != "ready" or not status["host_alive"]:
                 raise InstantAdmissionError("host_not_ready", "host is not ready; poll instant_status", "instant_status")
             if status["pending_ids"]:
@@ -263,6 +311,17 @@ class InstantSession:
                         "progress_path": str(progress_path), "task_effect_verified": None}
                 return pending
             response = read_json(path)
+            # 此处只读取宿主发布的学习状态，绝不把轮询当成新的学习事件。
+            recording_path = self.session / "learning-status" / path.name
+            if recording_path.is_file():
+                try:
+                    response["learning_recording"] = read_json(recording_path)
+                except (OSError, ValueError) as error:
+                    response["learning_recording"] = {"status": "unavailable", "error_type": type(error).__name__}
+            elif response.get("learning_binding"):
+                response["learning_recording"] = {"status": "pending" if self._host_alive() else "recovery_needed",
+                    "learning_id": response["learning_binding"]["learning_id"],
+                    "next": "Read the same receipt; use learning_recover to retry recording only, never input."}
             # 输入可能含个人文本，桥接回执不重复回显原始命令。
             response.pop("command", None)
             result = response.get("result") or {}
@@ -344,6 +403,17 @@ class InstantSession:
         if status == "result_unknown":
             raise InstantImageError("image_result_unknown", "the request has no completed receipt and its host is not alive",
                                     "Inspect instant_status and the original request receipt; input may have occurred. Do not replay automatically.")
+        if response.get("learning_control") == "learning_feedback":
+            result = response.get("result") or {}
+            if view != "before" or result.get("image_role") != "feedback_baseline_not_live_observation":
+                raise InstantImageError("image_frame_unavailable", "feedback only provides its pinned baseline image",
+                                        "Read feedback with action=read, then use view=before. No live after frame exists.")
+            try:
+                from app.learning_memory.feedback import read_baseline_image
+                return read_baseline_image(self.session.parent / "memory-library", result)
+            except (OSError, ValueError, KeyError, RuntimeError) as error:
+                raise InstantImageError("feedback_image_unavailable", str(error),
+                                        "Inspect the original feedback receipt and library storage; do not substitute a new screenshot.") from error
         if view == "before":
             capture = (response.get("result") or {}).get("capture") or {}
         else:
@@ -397,7 +467,7 @@ class InstantSession:
 def build_server(session):
     from mcp.server import MCPServer
     from mcp.types import CallToolResult, ImageContent, TextContent
-    server = MCPServer(name="agent-review-instant", version=INSTANT_VERSION, description="Windows instant-mode preview. Local operator input; no learning. Start explicitly, submit ONE command, poll its ID, inspect image before next action. No automatic retries.")
+    server = MCPServer(name="agent-review-instant", version=INSTANT_VERSION, description="Windows instant-mode preview. Local operator input; optional experimental receipt recording, disabled by default. No legacy learning executor or automatic graph/replay. Start explicitly, submit ONE command, inspect image before next action. No automatic retries.")
 
     def instant_start(new_session: bool = False) -> CallToolResult:
         try:
@@ -470,9 +540,12 @@ def build_server(session):
         value = (compact_receipt(receipt, full_receipt_path=session._path(request_id, "responses"))
                  if detail == "compact" else receipt)
         image_blocks = []
-        if images != "none" and receipt.get("status") not in {"pending", "not_found", "result_unknown"}:
+        feedback_image = (receipt.get("learning_control") == "learning_feedback"
+                          and (receipt.get("result") or {}).get("image_role") == "feedback_baseline_not_live_observation")
+        if images != "none" and (not receipt.get("learning_control") or feedback_image) and receipt.get("status") not in {"pending", "not_found", "result_unknown"}:
             delivery = []
-            for view in (("before", "after") if images == "both" else ("after",)):
+            views = ("before",) if feedback_image else (("before", "after") if images == "both" else ("after",))
+            for view in views:
                 try:
                     data = session.image(request_id, view=view)
                 except InstantImageError as error:
@@ -535,12 +608,21 @@ def build_server(session):
         "instant_run": "Preferred one-call execution: submit one durable command, wait up to wait_ms (0..30000, default 25000), return compact receipt plus exact original after PNG together. images=both adds before; detail=full preserves diagnostics. Same commands as instant_submit, including input_sequence request={field_goal,text,clear_existing:true,submit_search:true|false}. A sequence focuses the field through recognition, types, checks the actual focused UIA value, optionally presses Enter for search, then observes. No arbitrary batch, next-result click or task-success claim. Unsupported/unreadable fields interrupt with partial receipts; do not blindly replay. A wait timeout is NOT cancellation: use next to read the same ID, keeping this MCP connection alive.",
         "instant_start": "Start isolated host or reattach last session after reconnect, without launching apps/input. Poll status. new_session=true starts a fresh session ONLY after previous cleanup is verified and receipts resolved; request IDs are session-scoped. Requires operator --allow-local-input option. Known preflight configuration failures return isError=true, status=start_rejected, error.code and next guidance; host_launch_attempted=false refers only to this call, not existing sessions.",
         "instant_status": "Read host, target, pending IDs and cleanup status; no screenshot or input.",
-        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y, Shift+Left, Shift+Right, Shift+Up, Shift+Down, Shift+Home, Shift+End, Ctrl+Home, Ctrl+End. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learning, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
+        "instant_submit": "Submit exactly one command with a unique durable ID. discover lists apps/windows; launch uses app_id/url; select focuses handle/process_id; maximize/capture use selected target; read_text={max_chars:10000} captures the selected window NOW and returns OCR text/line boxes plus exact image evidence (1..20000 chars). Read-only, no VISTA or learning; only captured visible pixels, NOT full page/DOM or guaranteed exact text. Overlays/browser chrome may be included; inspect instant_image for the same request ID; close_launched_window={handle,process_id} explicitly requests graceful close ONLY for a new window launched in this session. window_close_pending is not closed: inspect before disconnecting, never force or auto-confirm unsaved prompts. prepare_models/release_models manage residency. step operations: execute_recognition_plan request={goal,click_kind:'single'|'double'|'right'} (default single; fresh non-learning input only); type_text={text,x,y,click_before_typing:true,clear_existing:false} (explicit click_before_typing:false keeps CURRENT FOCUS/selection; coordinates do not set focus in that mode; clear_existing:true replaces the whole field; never implicitly submits); press_key={key,x,y}, supported keys: Enter, Tab, Shift+Tab, Escape, Backspace, Delete, Left, Right, Up, Down, Home, End, Ctrl+A, Ctrl+Z, Ctrl+Y, Shift+Left, Shift+Right, Shift+Up, Shift+Down, Shift+Home, Shift+End, Ctrl+Home, Ctrl+End. Keys go to CURRENT FOCUS; x/y is an observed window point, not a click or focus instruction. scroll={direction:'down'|'up',wheel_clicks:3,x,y}. Coordinates are current original window screenshot pixels, NOT desktop or resized image coordinates. No arbitrary hotkeys, learned replay, or shell commands. Submission is NOT completion. Poll same ID; inspect image before next input. Avoid payment/send/delete/final submission.",
         "instant_result": "Read original response without executing again. pending means wait; result_unknown means inspect, never retry blindly. For local steps operation_success_scope=input_route_only; check observation_status and agent_review.recovery separately. operation_succeeded is not proof of task outcome.",
         "instant_image": "Return exact original PNG from a recorded response, without new capture or input. view=before returns the pre-input frame; view=after (default) returns the post-input observation. Missing/pending/corrupt evidence returns isError=true with status=image_unavailable, error.code and next guidance; it says nothing about whether the original input happened. Do not replay automatically. Compare both frames against the goal and report success/failure/uncertain yourself. Pixel change or no change alone does not prove task outcome.",
         "instant_stop": "Request graceful stop after current command. Does not undo or interrupt inflight input. Poll status until cleanup_verified=true. Does not close user apps itself; a Windows MCP client may terminate its launched descendants on disconnect. Explicitly close test-created windows first using close_launched_window and verify window_closed.",
     }
     descriptions["instant_submit"] += " Also supports kind=input_sequence, request={field_goal,text,clear_existing:true,submit_search:true|false}; observation_wait_ms applies to the final Enter observation. Use instant_run for bounded waiting and inline final image without separate polling/image calls."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Experimental source-only receipt recording: learning_start request={scope:'interface',title:'...'} records standalone observations; scope:'workflow' also requires project_id (1-80 lowercase ASCII letters/digits/dashes/underscores). learning_status, learning_stop and learning_recover accept optional request={learning_id:'...'}, otherwise use current/last segment. These controls issue no GUI input. Recording is OFF initially; learning_stop stops recording, not the execution host. learning_event request={event_id:...} returns the exact event and its digest. learning_review request={review:...} stores Agent verdict and explicit before/after interface identities against event/frame hashes. learning_projection accepts optional event_ids (max 128) and returns an on-demand semantic projection, not a persisted graph. These three also accept learning_id. learning_import request={event_id,view,regions?,recognition_text?,application_binding?} imports an explicitly identified observation into the existing versioned interface library. learning_library supports query/offset/limit; learning_memory requires interface_id and optional exact version_id and returns semantic hints without historical coordinates. learning_save_interface uses interface_id/expected_revision/expected_sha256/changes, with no mandatory approval. learning_stop persists a workflow-scope graph when receipt recording is complete; standalone scope never creates a graph. learning_commit optionally names expected_sha256 to persist amended reviews or explicitly replace existing project sources. learning_project action=list|read|save|memory|adopt_interface accesses native projects; memory returns a pinned snapshot_id, optionally bounded by node_id. learning_reuse requires workflow_id/snapshot_id/edge_id and explicit variables; it returns advice or a suggested EXISTING instant command, never executes or automatically follows edges. New source-only native editor is separate from the executor. learning_recover only imports already persisted receipts and never replays input. Keep original session evidence; recording_complete is bookkeeping completeness, not learned task success."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " learning_adopt_source request={learning_id?,event_id,event_sha256,review_sha256,view,interface_id,expected_revision,expected_sha256,regions,recognition_text} explicitly adopts a reviewed NEW screenshot for the SAME interface/state. Copy event/review digests from learning_event. Supply fresh regions/OCR (explicit [] and '' clear them); historical boxes are NOT inherited. Existing meaning/application binding are preserved. Creates a content revision only, not GUI input, and does NOT update pinned workflow versions; use learning_project action=adopt_interface separately. Ordinary save never changes screenshot provenance."
+    for name in ("instant_submit", "instant_run"):
+        descriptions[name] += " Template-first execution draft: step/execute_recognition_plan request={goal,click_kind?,template_memory:{template_id,interface_key,state_key}} uses a new live capture in the SAME action route, matches locally without preparing/calling VISTA, and continues through the existing point/window checks, input and after-image receipt. Template failure returns not_dispatched with diagnostics, without silent model fallback. The local host supplies the memory-library path; callers cannot inject it. The Agent must identify the intended interface; template identity is not whole-page recognition. Untested source only."
+        descriptions[name] += " For interface scope, learning_stop/learning_commit import explicitly reviewed states as standalone content and return interface_references without generating a graph. Unreviewed observations remain unresolved; review them and commit again. Automatic minimal imports do not invent controls or overwrite existing content; use learning_import before stopping to supply regions."
+        descriptions[name] += " learning_feedback request={action:list} lists human correction issues; action=read requires issue_id and returns pinned baseline content, candidates and PNG metadata (no base64 in JSON); instant_image view=before retrieves the original baseline, and instant_run/result images other than none attach that baseline with view=before, not a live after frame; action=submit requires issue_id, expected_baseline_sha256 and changes (meaning/recognition_text/regions). Regions are a complete ordered list; omitted regions are removed, partial fields within a listed existing region inherit the pinned baseline. Submit stores a candidate only: compare/adopt in the native interface editor. New screenshots use learning_adopt_source; graph pins never advance silently. Use instant_result detail=full to read learning payloads. No GUI input or model loading. Draft, untested."
+        descriptions[name] += " Experimental learning_template: action=save requires interface_id/version_id/region_id, optional padding=6/radius=80 (window pixels); stores an immutable button crop. action=list requires interface_id/version_id. action=locate requires template_id/event_id/view/frame_sha256/interface_key/state_key plus optional learning_id; matches against that exact RECORDED frame near the original window-relative position, without a model or input. Returns matched/ambiguous/not_found or a changed-viewport/detail reason, and a capture-bound candidate. Interface identity is supplied by Agent, not visually verified by this matcher. Matching a saved frame is NOT live freshness or click authorization; current executor must recheck before any input. No automatic model fallback or old-coordinate replay."
     descriptions["instant_result"] += " Optional detail=compact omits verbose traces; full (default) keeps the old receipt fields. images=after|both includes original PNGs in this same call; default none preserves JSON-only delivery."
     for name in ("instant_submit", "instant_run"):
         descriptions[name] += " Optional command.observation_condition={text:exact_accessible_name,control_type:Text|Hyperlink|Button|Document} enables read-only early observation for step or submit_search sequences. Requires a positive observation_wait_ms budget (navigation defaults to 2000). Only a newly appearing unique visible match, repeated and rechecked after capture, ends early. Accessible names can differ from screenshot captions. Missing/ambiguous/old matches time out and still return an image; inspect observation.condition, not operation_succeeded, for this outcome. This is not full-page readiness or task verification. Synchronous UIA and capture I/O are outside a hard timeout; no input replay. Omit the condition when no reliable marker is known."

@@ -52,6 +52,29 @@ def test_named_field_label_normalization_preserves_unicode_and_full_words():
     assert uia_action_identity_matches(field("邮件地址"), goal="Click the 邮件地址 input box")
 
 
+@pytest.mark.parametrize("goal", [
+    "Wikipedia 页面中央，地球图标下方的搜索输入框",
+    "点击页面上方的搜索输入框", "聚焦搜索输入框",
+])
+def test_chinese_spatial_field_context_is_not_a_browser_tab_label(goal):
+    assert generic_field_target(goal)
+    assert uia_action_identity_matches(field("Search Wikipedia"), goal=goal)
+    assert not uia_action_identity_matches(field("Wikipedia", kind="TabItem", patterns=["Selection"]), goal=goal)
+
+
+@pytest.mark.parametrize("goal", [
+    "不要点击搜索输入框", "点击搜索输入框里的按钮", "点击搜索输入框右侧的按钮",
+])
+def test_chinese_contained_or_negated_target_is_not_a_generic_field(goal):
+    assert not generic_field_target(goal)
+
+
+def test_chinese_named_field_keeps_label():
+    assert not generic_field_target("点击邮箱输入框")
+    assert uia_action_identity_matches(field("邮箱"), goal="点击邮箱输入框")
+    assert not uia_action_identity_matches(field("Search Wikipedia"), goal="点击邮箱输入框")
+
+
 def test_structured_and_quoted_targets_keep_existing_exact_label_contract():
     target = {"contract_version": "recognition_control_target_v1", "label": "Quick search",
               "role": "input", "source_binding_sha256": "a" * 64}

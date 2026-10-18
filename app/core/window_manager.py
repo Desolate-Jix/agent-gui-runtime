@@ -82,7 +82,7 @@ class WindowManager:
             raise ValueError(f"Window handle is not valid: {handle}")
         wrapper = HwndWrapper(handle)  # type: ignore[operator]
         if not self._is_candidate_window(wrapper):
-            raise ValueError(f"Window handle is not a visible top-level titled window: {handle}")
+            raise ValueError(f"Window handle is not a supported visible top-level window: {handle}")
         bound = self._build_bound_window(wrapper)
         self._bound_window = bound
         return bound
@@ -103,7 +103,7 @@ class WindowManager:
 
             wrapper = HwndWrapper(self._bound_window.handle)  # type: ignore[operator]
             if not self._is_candidate_window(wrapper):
-                logger.warning("Bound window is no longer a visible top-level titled window: {}", self._bound_window.handle)
+                logger.warning("Bound window is no longer a supported visible top-level window: {}", self._bound_window.handle)
                 self._bound_window = None
                 return None
 
@@ -202,6 +202,9 @@ class WindowManager:
                                 for x1, y1, x2, y2 in sorted(regions)]}
                 seen.add(current)
                 if win32gui.IsWindowVisible(current) and not win32gui.IsIconic(current):
+                    if self._is_proven_nonrendering_window(current):
+                        current = int(win32gui.GetWindow(current, win32con.GW_HWNDNEXT) or 0)
+                        continue
                     # 绑定窗口拥有的原生弹出菜单属于同一可见表面，不应被截图遮罩。
                     # 无法验证 owner 链时保持原处理，避免把不明窗口误判为内部内容。
                     if current != bound.handle and self._is_owned_popup(current, bound.handle, include_shadow=True):
@@ -220,6 +223,35 @@ class WindowManager:
             return base
         except Exception as error:
             return {**base, "error_type": type(error).__name__}
+
+    @staticmethod
+    def _is_dwm_cloaked(handle: int) -> bool:
+        """WS_VISIBLE 不代表正在合成；只读查询 DWM 的隐藏状态。"""
+        import ctypes
+        from ctypes import wintypes
+
+        value = wintypes.DWORD()
+        query = ctypes.WinDLL("dwmapi").DwmGetWindowAttribute
+        query.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+        query.restype = ctypes.c_long
+        result = query(handle, 14, ctypes.byref(value), ctypes.sizeof(value))
+        return result == 0 and bool(value.value)
+
+    def _is_proven_nonrendering_window(self, handle: int) -> bool:
+        """只排除已证实不绘制的窗口；半透明、逐像素透明或查询失败仍算遮挡。"""
+        try:
+            if self._is_dwm_cloaked(handle):
+                return True
+        except (OSError, AttributeError):
+            pass
+        try:
+            if win32gui.GetWindowLong(handle, win32con.GWL_EXSTYLE) & win32con.WS_EX_LAYERED:
+                _, alpha, flags = win32gui.GetLayeredWindowAttributes(handle)
+                return bool(flags & win32con.LWA_ALPHA) and alpha == 0
+        except Exception:
+            # 无法证明完全透明时保守保留遮挡，不放过真实浮窗。
+            return False
+        return False
 
     def _is_owned_popup(self, candidate_handle: int, bound_handle: int, *, include_shadow: bool = False) -> bool:
         """标准菜单可能没有 owner 链，此时核验活动 GUI 线程的菜单归属。"""
@@ -470,6 +502,9 @@ class WindowManager:
                     "process_name": process_name,
                 }
             )
+            if self._desktop_window_role(wrapper.handle) == "icon_host":
+                # 保留真实空标题；单独提供角色和显示名称，避免伪造窗口身份。
+                candidates[-1].update(window_kind="desktop", display_name="Windows Desktop")
 
         logger.info("Enumerated {} visible top-level windows", len(candidates))
         return candidates
@@ -529,6 +564,32 @@ class WindowManager:
 
         raise ValueError("No matching visible top-level window found")
 
+    @staticmethod
+    def _shell_window_handle() -> int:
+        """读取系统 Shell，pywin32 不一定暴露 GetShellWindow。"""
+        import ctypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        get_shell_window = user32.GetShellWindow
+        get_shell_window.argtypes = []
+        get_shell_window.restype = ctypes.c_void_p
+        return int(get_shell_window() or 0)
+
+    def _desktop_window_role(self, handle: int) -> Optional[str]:
+        """仅信任系统 Shell 进程内实际承载桌面图标树的顶层窗口。"""
+        class_name = win32gui.GetClassName(handle)
+        if class_name not in {"Progman", "WorkerW"}:
+            return None
+        shell = self._shell_window_handle()
+        shell_pid = self._get_process_id(shell) if shell else None
+        if not shell_pid:
+            return "unverified_shell"
+        if self._get_process_id(handle) != shell_pid:
+            return None
+        view = win32gui.FindWindowEx(handle, 0, "SHELLDLL_DefView", None)
+        icons = win32gui.FindWindowEx(view, 0, "SysListView32", None) if view else 0
+        return "icon_host" if icons else "shell_background"
+
     def _is_candidate_window(self, wrapper: HwndWrapper) -> bool:
         """Return whether a window is a usable top-level candidate."""
         if not WINDOWS_BACKEND_AVAILABLE:
@@ -548,7 +609,10 @@ class WindowManager:
             # GetParent 也返回弹窗 owner；只沿父子链判断，保留独立弹窗身份。
             if win32gui.GetAncestor(handle, win32con.GA_ROOT) != handle:  # type: ignore[union-attr]
                 return rejected("not_top_level")
-            if not wrapper.window_text().strip():
+            desktop_role = self._desktop_window_role(handle)
+            if desktop_role in {"shell_background", "unverified_shell"}:
+                return rejected("desktop_icon_host_unavailable")
+            if not wrapper.window_text().strip() and desktop_role != "icon_host":
                 return rejected("empty_title")
             return True
         except Exception as error:

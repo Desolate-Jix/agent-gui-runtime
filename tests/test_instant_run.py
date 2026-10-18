@@ -11,6 +11,24 @@ from app.instant_mcp import InstantSession, build_server, write_json
 from app.instant_receipt import compact_receipt
 
 
+@pytest.mark.parametrize('sequence', [False, True])
+def test_compact_failure_retains_bounded_recognition_diagnostics(sequence):
+    diagnostic = {'contract_version': 'local_recognition_diagnostics_v1',
+        'candidate_count': 0, 'candidates': [], 'executable': False,
+        'uia_observation': {'scan_complete': False, 'traversal_errors': [{'reason': 'ancestor_cycle'}]}}
+    response = {'success': False, 'data': {'recognition_diagnostics': diagnostic},
+                'error': {'code': 'local_recognition_invalid'}}
+    result = {'contract_version': 'local_direct_step_v1', 'response': response}
+    if sequence:
+        result = {'contract_version': 'input_sequence_v1', 'steps': [{'name': 'focus',
+                  'receipt': {'response': response}}]}
+    compact = compact_receipt({'request_id': 'failed', 'result': result})
+    projected = compact['sequence']['steps'][0] if sequence else compact
+    assert projected['recognition_diagnostics'] == diagnostic
+    projected['recognition_diagnostics']['candidates'].append('changed')
+    assert diagnostic['candidates'] == []
+
+
 class Alive:
     def poll(self):
         return None

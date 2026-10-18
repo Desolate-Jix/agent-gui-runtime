@@ -91,7 +91,8 @@ class LocalDirectStepMixin:
             with timer.step("coordinator_begin"):
                 self._begin("idle")
             configuration = None
-            prepare_model = operation == "execute_recognition_plan" and self._uses_production_factory
+            prepare_model = (operation == "execute_recognition_plan" and self._uses_production_factory
+                             and request.get("template_memory") is None)
             model_preparation_owned = False
             try:
                 with timer.step("host_preparation"):
@@ -199,10 +200,16 @@ class LocalDirectStepMixin:
                 with timer.step("report_persist", phase="dispatching"):
                     _write_report(output, report)
                 with timer.step("route_call", inclusive=True):
-                    report["response"] = _post_action(operation, request, manager)
+                    from app.learning_memory.live_template import template_library_scope
+                    with template_library_scope(getattr(self, "_memory_library_root", None)):
+                        report["response"] = _post_action(operation, request, manager)
             # 进入原路由后可能已产生部分输入，失败返回不能证明没有副作用。
             report["phase"] = "returned" if report["response"].get("success") is True else "result_unknown"
             response_data = report["response"].get("data") or {}
+            if (request.get("template_memory") is not None and report["response"].get("success") is False
+                    and response_data.get("dispatch_status") == "not_dispatched"
+                    and response_data.get("action_executed") is False):
+                report["phase"] = "not_dispatched"
             if (operation == "press_key" and report["response"].get("success") is False
                     and response_data.get("dispatch_status") == "not_dispatched"
                     and response_data.get("pressed") is False):

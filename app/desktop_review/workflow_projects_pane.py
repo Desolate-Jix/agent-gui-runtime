@@ -431,6 +431,13 @@ class WorkflowProjectsPane(QWidget):
             value = self.facade.load_interface_content(reference['interface_id'], reference['version_id'])
             latest = self.facade.load_interface_content(reference['interface_id'])
             if latest['version_id'] != reference['version_id']:
+                if (self.snapshot['graph'].get('source', {}).get('kind') == 'execution_memory'
+                        or getattr(self.facade, 'pinned_interface_references', False)):
+                    self.interface_pane.set_snapshot(value)
+                    self.interface_pane.set_read_only(True)
+                    self.details.setCurrentWidget(self.interface_pane)
+                    self.status.setText("当前节点固定旧版本；请在界面库修改后，明确采用最新版本。")
+                    return
                 self._install(self.facade.load_workflow_project(self.snapshot['logical_workflow_id']))
                 return self.node_selected(node_id)
             self.interface_pane.set_read_only(False)
@@ -562,7 +569,11 @@ class WorkflowProjectsPane(QWidget):
         node = self._node_id
         self._install(self.facade.load_workflow_project(self.snapshot['logical_workflow_id']))
         if node: self.node_selected(node)
-        self.status.setText("界面已保存；所有引用它的项目在下次打开/刷新时读取最新内容。")
+        if (self.snapshot['graph'].get('source', {}).get('kind') == 'execution_memory'
+                or getattr(self.facade, 'pinned_interface_references', False)):
+            self.status.setText("界面新版本已保存；流程仍固定原版本，请明确采用最新版本后再复用。")
+        else:
+            self.status.setText("界面已保存；所有引用它的项目在下次打开/刷新时读取最新内容。")
 
     def _action_revision_changed(self, value):
         if self._loading_action_editor or self.snapshot is None:

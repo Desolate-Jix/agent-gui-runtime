@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+import numpy as np
 
 
 VISUAL_ASSET_MATCH_CONTRACT = "visual_asset_match_v1"
@@ -29,8 +30,8 @@ def match_visual_asset(
     started = time.perf_counter()
     template_file = Path(template_path)
     target_file = Path(target_image_path)
-    target = cv2.imread(str(target_file), cv2.IMREAD_COLOR)
-    template = cv2.imread(str(template_file), cv2.IMREAD_COLOR)
+    target = _read_color(target_file)
+    template = _read_color(template_file)
     if target is None:
         return _failed_result(
             asset_id=asset_id,
@@ -75,7 +76,10 @@ def match_visual_asset(
         for method in methods:
             prepared_search, prepared_template = _prepare_match_images(search, resized_color, method)
             response = cv2.matchTemplate(prepared_search, prepared_template, cv2.TM_CCOEFF_NORMED)
-            for scored in _top_template_locations(response, limit=2):
+            for scored in _top_template_locations(
+                response, limit=2,
+                template_size=(resized_color.shape[1], resized_color.shape[0]),
+            ):
                 location = scored["location"]
                 candidate = {
                     "score": float(scored["score"]),
@@ -225,6 +229,15 @@ def _failed_result(
     }
 
 
+def _read_color(path: Path) -> Any:
+    # 按字节解码，避免 Windows 中文路径在 OpenCV 文件入口失真。
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    return cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR) if raw else None
+
+
 def _resize_template(template: Any, scale: float) -> Any:
     if scale == 1.0:
         return template
@@ -243,19 +256,25 @@ def _prepare_match_images(search: Any, template: Any, method: str) -> tuple[Any,
     return search_gray, template_gray
 
 
-def _top_template_locations(response: Any, *, limit: int) -> list[dict[str, Any]]:
+def _top_template_locations(
+    response: Any, *, limit: int, template_size: tuple[int, int],
+) -> list[dict[str, Any]]:
     work = response.copy()
     results: list[dict[str, Any]] = []
+    width, height = template_size
     for _ in range(max(1, limit)):
         _, max_score, _, max_location = cv2.minMaxLoc(work)
+        if not np.isfinite(max_score):
+            break
         results.append({"score": float(max_score), "location": (int(max_location[0]), int(max_location[1]))})
         x, y = max_location
-        pad = 12
-        left = max(0, int(x) - pad)
-        top = max(0, int(y) - pad)
-        right = min(work.shape[1], int(x) + pad + 1)
-        bottom = min(work.shape[0], int(y) + pad + 1)
-        work[top:bottom, left:right] = -1.0
+        left, top = max(0, x-width+1), max(0, y-height+1)
+        right, bottom = min(work.shape[1], x+width), min(work.shape[0], y+height)
+        # 按实际模板框的重叠度抑制同一目标，与下游候选去重保持一致。
+        yy, xx = np.ogrid[top:bottom, left:right]
+        intersection = (width-np.abs(xx-x)) * (height-np.abs(yy-y))
+        same_target = intersection / (2*width*height-intersection) >= 0.4
+        work[top:bottom, left:right][same_target] = -np.inf
     return results
 
 

@@ -160,6 +160,8 @@ class InterfaceContentLibrary(QDialog):
 
     def _scan_incoming_interfaces(self) -> list[dict[str, Any]]:
         """扫描待审核批次并幂等导入界面，不创建流程图。"""
+        if not callable(getattr(self.facade, "list_batches", None)):
+            return self.facade.list_interface_contents(self.reviewed_only, self.task_id)
         if self.reviewed_only:
             return self.facade.list_interface_contents(True, self.task_id)
         result: list[dict[str, Any]] = []
@@ -278,7 +280,7 @@ class InterfaceContentLibrary(QDialog):
             self.pane.set_read_only(False)
             self.latest_button.setEnabled(False)
             self._saved(latest)
-            self.error.setText("正在修改最新版本；项目再次打开或刷新时读取最新保存内容。")
+            self.error.setText("正在修改最新版本；流程项目中的固定版本不会自动更新，请在项目中明确更新引用。")
         except Exception as error:
             self.error.setText(f"读取最新界面失败：{error}")
 
@@ -362,7 +364,7 @@ class WorkflowCompositionDialog(QDialog):
         try:
             existing = self.facade.load_graph_revision(graph['logical_workflow_id'])
             if any(node.get('interface_reference', {}).get('interface_id') == self.interface_snapshot['interface_id'] for node in existing['graph']['nodes']):
-                self.status.setText("该界面已在这个项目中。项目会读取最新保存内容，不需要重复加入。")
+                self.status.setText("该界面已在这个项目中，不需要重复加入。固定版本不会自动更新，请在项目中明确更新引用。")
                 return
             result = self.facade.attach_interface_to_workflow(workflow_id=graph["logical_workflow_id"], interface_id=self.interface_snapshot["interface_id"], version_id=self.interface_snapshot["version_id"], expected_revision=graph["revision"], expected_sha256=graph["content_sha256"], idempotency_key=self._key("attach", graph))
             self._record_graph(result)

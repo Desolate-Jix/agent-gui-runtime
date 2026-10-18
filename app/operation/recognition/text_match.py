@@ -21,15 +21,20 @@ def text_similarity(left: str, right: str) -> float:
     return max(len(a & b) / len(a | b), SequenceMatcher(None, left, right).ratio())
 
 
-_TARGET_ROLE = r"menu\s+item|radio\s+button|hyperlink|link|button|tab|checkbox|input|field"
+_TARGET_ROLE = r"menu\s+item|list\s+item|radio\s+button|hyperlink|link|button|tab|checkbox|input|field"
+_CHINESE_ROLES = {"按钮": "button", "链接": "link", "标签页": "tab", "选项卡": "tab",
+                  "列表项": "list item", "菜单项": "menu item", "输入框": "input",
+                  "复选框": "checkbox", "单选按钮": "radio button"}
+_CHINESE_ROLE = "|".join(sorted(_CHINESE_ROLES, key=len, reverse=True))
 
 
 def explicit_target_marker(goal: str):
     return re.search(
         r"\b(labelled|labeled|named|titled)\s+|"
         r"\b(?:double[ -]?click|click|select)\s+(?:the\s+)?(?P<word>word)\s+|"
-        r"\b(?:double[ -]?click|click|select|choose|locate)\s+(?:the\s+)?"
-        rf"(?:(?P<quoted_role>{_TARGET_ROLE})\s+)?"
+        r"(?:\b(?:double[ -]?click|click|select|choose|locate)\s+(?:the\s+)?"
+        rf"(?:(?P<quoted_role>{_TARGET_ROLE})\s+)?|"
+        r"^\s*(?:点击|双击|选择|定位)\s*(?:名为|名称为|叫做)?\s*)"
         r"(?P<quoted>(?=[\"'“‘]))",
         goal, re.I)
 
@@ -55,6 +60,9 @@ def explicit_target_role(goal: str) -> str | None:
         # 只读取紧邻标签及可选翻译后的角色，不采纳后续位置说明中的控件名。
         suffix = re.match(rf"\s*(?:\([^()]*\)\s*)?({_TARGET_ROLE})\b", tail[end + 1:], re.I) if end > 0 else None
         role = suffix.group(1) if suffix else None
+        if not role and end > 0:
+            chinese = re.match(rf"\s*的?\s*({_CHINESE_ROLE})(?=$|[\s，。,；;])", tail[end + 1:])
+            role = _CHINESE_ROLES[chinese.group(1)] if chinese else None
     return " ".join(role.casefold().split()) if role else None
 
 
@@ -72,6 +80,8 @@ def explicit_target_label(goal: str) -> str | None:
         # 单词内部的撇号不是标签结束；引号后的备选项仍是歧义目标。
         end = _quoted_label_end(tail)
         if end > 0 and re.match(rf"\s+(?:\([^()]*\)\s*)?(?:(?:{_TARGET_ROLE})\s+)?or\b", tail[end + 1:], re.I):
+            return None
+        if end > 0 and re.match(rf"\s*(?:的?\s*(?:{_CHINESE_ROLE})\s*)?(?:或者|或|还是)", tail[end + 1:]):
             return None
         return (tail[1:end].strip() or None) if end > 0 else None
     # titled 的括号可为正式标题缩写；保留 labelled 的历史括号说明语法。

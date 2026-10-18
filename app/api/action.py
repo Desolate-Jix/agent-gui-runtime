@@ -2217,7 +2217,28 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             observe_trace_path=effective_observe_trace_path,
         )
         with timer.step("recognition_plan"):
-            plan_response = _run_recognition_plan_for_execution(plan_request)
+            if request.template_memory is not None:
+                from app.learning_memory.live_template import plan_current_template
+                try:
+                    template_plan, template_result = plan_current_template(
+                        request.template_memory, image_path, live_capture)
+                except Exception as error:
+                    return APIResponse(success=False, message="Template grounding failed before input",
+                        data={"action_executed": False, "dispatch_status": "not_dispatched",
+                              "failure_reason": "template_grounding_error", "automatic_retry_allowed": False,
+                              "timings": timer.to_dict()},
+                        error=ErrorModel(code="template_grounding_error",
+                                         details={"error_type": type(error).__name__, "message": str(error)}))
+                if template_plan is None:
+                    return APIResponse(success=False, message="Template did not identify one current target",
+                        data={"action_executed": False, "dispatch_status": "not_dispatched",
+                              "failure_reason": template_result["status"], "template_matching": template_result,
+                              "automatic_retry_allowed": False, "timings": timer.to_dict()},
+                        error=ErrorModel(code="template_target_unavailable", details=template_result))
+                plan_response = APIResponse(success=True, message="Current template target located",
+                                             data={"result": template_plan}, error=None)
+            else:
+                plan_response = _run_recognition_plan_for_execution(plan_request)
         if not plan_response.success or not plan_response.data:
             timings = timer.to_dict()
             fallback_plan = _execute_fallback_plan(
@@ -2380,13 +2401,14 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
             overlay = _render_recognition_plan_overlay_for_execution(plan_trace_path) if plan_trace_path and should_render_overlay else None
         execution_path = {
             "vision_model_used": bool((plan.get("execution_path") or {}).get("vision_model_used")),
-            "page_structure_used": True,
+            "page_structure_used": request.template_memory is None,
             "candidate_rank_used": True,
-            "narrow_search_used": True,
+            "narrow_search_used": request.template_memory is None,
+            "template_matching_used": request.template_memory is not None,
             "pre_click_decision_used": True,
             "post_click_verification_used": bool(request.enable_post_click_verification and not request.dry_run),
             "coordinate_source": "pre_click_decision_v1.selected_click_point",
-            "selection_source": "recognition_plan_v1",
+            "selection_source": "memory_template_v1" if request.template_memory else "recognition_plan_v1",
             "approved_plan_reused": False,
             "recognition_plan_reused": False,
             "action_executed": False,

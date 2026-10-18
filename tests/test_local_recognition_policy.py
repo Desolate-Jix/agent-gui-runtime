@@ -47,6 +47,37 @@ def test_risk_rejection_is_observed_not_rewritten():
     assert plan == original
 
 
+def test_diagnostics_explain_incomplete_uia_without_claiming_target_absent():
+    from app.core.local_recognition_policy import local_recognition_diagnostics
+    plan = plan_fixture()
+    plan['candidate_result'].update(candidates=[], rejected=[], recommended_candidate_id=None)
+    errors = [{"reason": "duplicate_runtime_id", "index": 74},
+              {"reason": "ancestor_cycle", "index": 76}]
+    plan['parse_result']['execute_fast_inventory'] = {"status": "incomplete", "raw_uia_snapshot": {
+        "status": "ok", "scan_complete": False, "truncated": False,
+        "scan_visited_count": 77, "traversal_errors": errors,
+        "browser_document_observation": {"status": "unknown_incomplete_scan"}}}
+    result = local_recognition_diagnostics(plan, image_path='capture.png', viewport_size={"width": 1000, "height": 690})
+    assert result['uia_observation']['scan_complete'] is False
+    assert result['uia_observation']['traversal_errors'] == errors
+    assert result['uia_observation']['browser_document_status'] == 'unknown_incomplete_scan'
+    assert result['uia_observation']['target_absent_verified'] is False
+    assert 'incomplete' in result['next']
+    assert result['automatic_retry_allowed'] is False
+
+
+def test_uia_diagnostics_bound_error_count_and_absent_provider():
+    from app.core.local_recognition_policy import local_recognition_diagnostics
+    plan = plan_fixture()
+    result = local_recognition_diagnostics(plan, image_path='capture.png', viewport_size={"width": 1000, "height": 690})
+    assert result['uia_observation'] is None
+    plan['parse_result']['execute_fast_inventory'] = {'raw_uia_snapshot': {
+        'scan_complete': False, 'traversal_errors': [{'reason': 'duplicate_runtime_id'}] * 50}}
+    result = local_recognition_diagnostics(plan, image_path='capture.png', viewport_size={"width": 1000, "height": 690})
+    assert len(result['uia_observation']['traversal_errors']) == 8
+    assert result['uia_observation']['traversal_error_count'] == 50
+
+
 @pytest.mark.parametrize("defect", ["old_image", "size", "float", "outside", "outside_box", "missing", "duplicate", "identity"])
 def test_disabled_policy_still_requires_valid_current_geometry(defect):
     p = plan_fixture(); local = p["narrow_search_result"]["results"][0]

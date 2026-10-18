@@ -390,9 +390,10 @@ class WindowsTextFieldReader:
         if value is None and text is None:
             raise TextFieldReadError("text_field_value_pattern_unavailable")
         # 值与名称偶然相等也不能把名称流选区当作内容选区。
-        name_range = (control_type == "ComboBox" and text_pattern is not None
-            and text is not None and (_chromium_object_text_range(wrapper, text_pattern, text)
-                if text == '\ufffc' else _chromium_name_text_range(wrapper, text_pattern, text)))
+        name_range = (value is not None and text_pattern is not None and text is not None
+            and (_chromium_object_text_range(wrapper, text_pattern, text)
+                if text == '\ufffc' else (control_type == "ComboBox"
+                    and _chromium_name_text_range(wrapper, text_pattern, text))))
         if value is not None and text is not None and value != text:
             if not name_range:
                 raise TextFieldReadError("text_field_value_patterns_disagree")
@@ -506,14 +507,17 @@ def _chromium_object_text_range(wrapper, pattern, text):
     try:
         info = wrapper.element_info
         element = info.element
+        roles = {"ComboBox": {"combobox"}, "Edit": {"searchbox", "textbox"}}
+        role = element.CurrentAriaRole
         enclosing = pattern.DocumentRange.GetEnclosingElement()
         children = pattern.DocumentRange.GetChildren()
-        return (info.control_type == 'ComboBox' and element.CurrentFrameworkId == 'Chrome'
-                and element.CurrentAriaRole == 'combobox'
+        return (role in roles.get(info.control_type, set()) and element.CurrentFrameworkId == 'Chrome'
+                and _explicit_uia_false(wrapper.iface_value.CurrentIsReadOnly)
+                and _explicit_uia_false(pattern.DocumentRange.GetAttributeValue(UIA_IS_READONLY_ATTRIBUTE_ID))
                 and enclosing is not None and children is not None and children.Length == 0
                 and tuple(enclosing.GetRuntimeId()) == tuple(info.runtime_id)
                 and enclosing.CurrentProcessId == element.CurrentProcessId
-                and enclosing.CurrentFrameworkId == 'Chrome' and enclosing.CurrentAriaRole == 'combobox'
+                and enclosing.CurrentFrameworkId == 'Chrome' and enclosing.CurrentAriaRole == role
                 and enclosing.CurrentName == element.CurrentName)
     except Exception:
         return False

@@ -81,6 +81,15 @@ def explicit_menu_item_goal(goal: str) -> bool:
 
 def _field_target_label(goal):
     """空标签表示泛型字段；字段前的限定词必须保留为完整名称。"""
+    chinese = re.fullmatch(r"\s*(?:点击|聚焦|定位)?\s*(.*?)((?:搜索)?输入框|搜索框|文本框|文本区域)\s*[。]?", goal)
+    if chinese:
+        prefix = chinese.group(1).strip()
+        if re.search(r"不要|禁止|别|然后|再点击|名为|叫做|[\"'“”‘’]", prefix):
+            return None
+        # 明确方位是搜索上下文，不是字段名称；其他前缀保留为完整标签。
+        if re.search(r"(?:上方|下方|左侧|右侧|中间|中央|顶部|底部)的$", prefix):
+            return ""
+        return prefix
     # 动作后的方位介词仍指字段本身；框内单词/按钮由下方目标边界排除。
     action = re.match(r"\s*(?:right[ -]?click|double[ -]?click|click|focus|locate)\b\s*(?:(?:on|inside|within|in)\s+)?", goal, re.I)
     if action is None:
@@ -117,7 +126,7 @@ def uia_action_identity_matches(control, *, goal, control_target=None, target_te
     from app.operation.recognition.text_match import explicit_target_role, explicit_target_marker
     requested_role = explicit_target_role(goal)
     if requested_role is not None:
-        expected = {"menu item": {"menuitem"}, "radio button": {"radiobutton"},
+        expected = {"menu item": {"menuitem"}, "list item": {"listitem"}, "radio button": {"radiobutton"},
                     "hyperlink": {"hyperlink"}, "link": {"hyperlink"}, "button": {"button", "splitbutton"},
                     "tab": {"tabitem"}, "checkbox": {"checkbox"},
                     "input": {"edit", "textbox", "combobox"}, "field": {"edit", "textbox", "combobox"}}

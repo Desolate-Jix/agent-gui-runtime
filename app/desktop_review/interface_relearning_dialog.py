@@ -51,6 +51,9 @@ class InterfaceRelearningDialog(QDialog):
         self.issues = QListWidget(); self.issues.setWordWrap(True); left_layout.addWidget(self.issues, 2)
         left_layout.addWidget(QLabel("Agent 的修正建议"))
         self.candidates = QListWidget(); left_layout.addWidget(self.candidates, 1)
+        # 留出实际可点的行高；逻辑像素随系统缩放，长反馈仍允许换行。
+        for listing in (self.issues, self.candidates):
+            listing.setStyleSheet("QListWidget::item { min-height: 32px; padding: 4px 6px; }")
         self.scope_label = QLabel("选择反馈查看其固定基线和建议"); self.scope_label.setWordWrap(True)
         right_layout.addWidget(self.scope_label)
         previews = QHBoxLayout()
@@ -76,6 +79,13 @@ class InterfaceRelearningDialog(QDialog):
         self.issues.currentItemChanged.connect(self.select_issue); self.candidates.currentItemChanged.connect(self.select_candidate)
         self.compare_button.clicked.connect(self.compare); self.adopt_button.clicked.connect(self.adopt); self.reject_button.clicked.connect(self.reject_issue); self.withdraw_button.clicked.connect(self.withdraw); self.close_button.clicked.connect(self.reject)
         self.refresh()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_initial_placement_done", False):
+            from .window_placement import fit_initial_window
+            fit_initial_window(self)
+            self._initial_placement_done = True
 
     def refresh(self):
         try:

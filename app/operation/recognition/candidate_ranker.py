@@ -208,6 +208,12 @@ def _score_element(
             text_similarity = min(text_similarity, 0.42)
             reasons.append("non_typeable_label_does_not_satisfy_field_goal")
 
+    if explicit_target_label(goal) and not explicit_label_match and not negated_label_match:
+        # 明确标签必须完整匹配；过滤值等短前缀不能借全文相似度压过真实目标。
+        text_similarity = min(text_similarity, 0.35)
+        screen_reading_score = min(screen_reading_score, 0.35)
+        reasons.append("explicit_target_label_not_fully_matched")
+
     if screen_text_similarity > base_text_similarity:
         reasons.append("screen_reading_text_match")
     if text_similarity >= 0.75:

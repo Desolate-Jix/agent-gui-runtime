@@ -25,7 +25,9 @@ _LOGICAL_ID = re.compile(r"workflow-[0-9a-f]{64}\Z")
 # 卡片留出更宽的中文标题和更大的点选面，仍只改变视图几何。
 _NODE_WIDTH = 204.0
 _NODE_HEIGHT = 82.0
-_COLUMN_GAP = 72.0
+_EDGE_LABEL_WIDTH = 176.0
+# 列间距容纳完整的省略标签及背景，防止连线名称被节点遮住。
+_COLUMN_GAP = _EDGE_LABEL_WIDTH + 24.0
 _ROW_GAP = 72.0
 _SURFACE = "#ffffff"
 _BACKGROUND = "#f4f7fb"
@@ -121,7 +123,7 @@ class _EdgeItem(QGraphicsPathItem):
         label_font.setPointSizeF(10.0)
         self._label_text.setFont(label_font)
         self.display_label = display_label or label
-        self._label_text.setText(_elide(self.display_label, label_font, 176.0))
+        self._label_text.setText(_elide(self.display_label, label_font, _EDGE_LABEL_WIDTH))
         self._label_text.setToolTip(label)
         self._label_text.setBrush(QColor(_MUTED))
         self._label_text.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
