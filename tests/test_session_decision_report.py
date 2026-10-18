@@ -10,7 +10,6 @@ from app.core import decision_configuration
 from app.core import process_sampler
 from app.core.json_snapshot import read_json_snapshot
 from app.desktop_review import host, single_step_coordinator
-from app.learning_memory import event_store
 from app.judgment import DecisionService
 from scripts import run_local_step_session as runner
 from tests.test_adaptive_decision_policy import context
@@ -87,27 +86,11 @@ def test_host_reports_current_budget_during_commands_and_after_close(tmp_path, m
             assert state["service"].status()["closed"] is True
             resources.append("coordinator_closed")
 
-    class Learning:
-        def __init__(self, *args):
-            pass
-
-        def prepare(self, *args):
-            return None
-
-        def snapshot(self):
-            return {"status": "disabled", "recording_enabled": False}
-
-        status = snapshot
-
-        def close(self):
-            resources.append("learning_closed")
-
     fake_host = SimpleNamespace(facade=object(), start=lambda: None,
         close=lambda: resources.append("host_closed"), status=lambda: {"phase": "stopped"})
     monkeypatch.setattr(host, "DesktopReviewHost", lambda *args: fake_host)
     monkeypatch.setattr(single_step_coordinator, "NativeSingleStepCoordinator", Coordinator)
     monkeypatch.setattr(process_sampler, "ProcessSampler", lambda *args, **kwargs: SimpleNamespace(snapshot=lambda: {}))
-    monkeypatch.setattr(event_store, "LearningEventStore", Learning)
     monkeypatch.setattr(decision_configuration, "create_session_decision_service", create)
     monkeypatch.setattr(runner, "write", publish)
     monkeypatch.setattr(runner, "initialize_session_resources", lambda *args, **kwargs: SimpleNamespace(mark_ready=lambda: None))
@@ -128,7 +111,7 @@ def test_host_reports_current_budget_during_commands_and_after_close(tmp_path, m
         assert final["decision_service"]["remaining"] == max(1, used) - used
         assert final["decision_service"]["unknown_dispatches"] == unknown
         assert final["phase"] == "stopped" and final["sampler_stopped"] is True
-        assert resources == ["learning_closed", "coordinator_closed", "host_closed"]
+        assert resources == ["coordinator_closed", "host_closed"]
         assert len(calls) == (0 if scenario in {"unknown", "off"} else used)
         reopened = DecisionService(out, profile=state["service"].profile)
         try:

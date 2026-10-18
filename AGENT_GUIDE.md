@@ -1,3 +1,9 @@
+## 2026-10-18 当前入口 / Current entrypoints
+
+学习模式已暂缓并封存。以下历史记录中的 `learning_*`、学习工作台启动及恢复命令不再适用于当前维护分支；当前 Agent 仅使用执行命令。见 [执行指南](docs/EXECUTION_GUIDE.zh-CN.md) 与 [归档记录](docs/LEARNING_PAUSED.md)。
+
+Learning commands and workbench launch instructions in historical entries below are retired. Use the [execution guide](docs/EXECUTION_GUIDE.md); the archive record explains recovery on a separate branch.
+
 ## 2026-10-15 当前普通执行合同 / Current ordinary execution contract
 
 新普通执行计划使用 `task_plan.v3`，Decision 使用 [visual-execution Choice 示例](configs/decision-profile.visual-execution.example.json) 并明确批准当前结果条件。v3 在原队列中接入候选审核和默认视觉输入；旧 v1/v2、显式原生与学习复用保持原合同。通用/adaptive 示例没有完整视觉条件白名单，不能替代该配置。新连接加载并冻结配置，已有宿主不热更新。 / Use task_plan.v3 with the visual-execution Choice profile and approved current outcome conditions. V3 wires candidate review and default visual input into the existing queue. Legacy/native/learned routes retain their contracts. General/adaptive examples do not include all visual conditions; reconnect to load and freeze the selected profile.

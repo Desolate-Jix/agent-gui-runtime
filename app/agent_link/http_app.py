@@ -10,18 +10,17 @@ from starlette.concurrency import run_in_threadpool
 from .contracts import AgentLinkError
 from .service import AgentLinkService
 from .feedback_view import compact_feedback_view
-from .interface_capability import INTERFACE_RELEARNING_CAPABILITY
 
-_AGENT_OPERATIONS = {"status", "submit_batch", "read_feedback", "read_feedback_view", "submit_candidate", "search_workflow_memory", "get_workflow_memory", "start_learning_segment", "get_learning_segment", "finish_learning_segment", "prepare_learning_runtime", "get_learning_runtime", "cancel_learning_runtime", "observe_learning_screen"}
-_AGENT_OPERATIONS.add("submit_observed_interface_learning")
-_AGENT_OPERATIONS.update({"inspect_learning_content", "read_learning_content"})
-_AGENT_OPERATIONS.update({"prepare_fresh_learning_runtime", "request_fresh_learning_action",
-                          "get_fresh_learning_runtime", "cancel_fresh_learning_runtime", "request_learning_action", "get_learning_action_result"})
-_AGENT_OPERATIONS.update({"search_interface_memory", "get_interface_memory", "request_interface_membership"})
-_AGENT_OPERATIONS.update({"search_workflow_projects", "get_workflow_project_memory"})
-_AGENT_OPERATIONS.update(INTERFACE_RELEARNING_CAPABILITY["operations"])
-_AGENT_OPERATIONS.update({"discover_applications", "request_application_launch", "get_application_launch"})
-_REVIEWER_OPERATIONS = {"create_connection", "revoke_connection", "list_batches", "list_connections", "get_batch", "record_feedback", "withdraw_issue"}
+_AGENT_OPERATIONS = {
+    "status", "read_feedback", "read_feedback_view", "search_workflow_memory", "get_workflow_memory",
+    "search_interface_memory", "get_interface_memory", "search_workflow_projects", "get_workflow_project_memory",
+    "discover_applications", "request_application_launch", "get_application_launch",
+}
+_REVIEWER_OPERATIONS = {"create_connection", "revoke_connection", "list_batches", "list_connections", "get_batch"}
+_STATUS_FIELDS = {
+    "contract_version", "connection_id", "task_id", "capabilities", "staging_only",
+    "workflow_memory", "interface_content", "workflow_project_memory", "application_startup",
+}
 _FEEDBACK_VIEW_CAPABILITY = {
     "operation": "read_feedback_view",
     "contract_version": "agent_link_feedback_view_v1",
@@ -108,6 +107,14 @@ def create_agent_link_app(
             except ValueError:
                 return _error(500, "invalid_feedback", "stored feedback cannot be presented")
         if role == "agent" and operation == "status":
+            # 共享服务仍可读取历史内容，HTTP 只声明当前执行入口实际提供的能力。
+            result = {key: value for key, value in result.items() if key in _STATUS_FIELDS}
+            result["capabilities"] = [name for name in result["capabilities"] if name in _AGENT_OPERATIONS]
+            for key in ("workflow_memory", "interface_content", "workflow_project_memory", "application_startup"):
+                capability = result.get(key)
+                if capability is not None:
+                    result[key] = {**capability, "operations": [name for name in capability["operations"]
+                        if name in _AGENT_OPERATIONS]}
             result = {**result, "feedback_view": dict(_FEEDBACK_VIEW_CAPABILITY)}
         return JSONResponse(status_code=200, content=result)
 

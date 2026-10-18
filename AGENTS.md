@@ -1,3 +1,9 @@
+## 2026-10-18 学习开发暂缓 / Learning development paused
+
+用户明确保留执行模式，只封存并移除学习模式。当前维护分支 `codex/dev-execution-maintained`；学习恢复必须从独立归档分支另开，不把旧学习主树覆盖执行主线。保留执行共享依赖和输入门禁，不因目录含 learn/learning 就整目录删除。详见 `docs/LEARNING_PAUSED.md`。
+
+Keep execution mode; learning entrypoints are retired. Resume learning on a separate branch from the archive. Preserve shared execution dependencies and existing input gates. Earlier learning priorities below are historical.
+
 ## 2026-10-05 原生 Computer Use 禁用 / Native Computer Use disabled
 
 - 禁止调用 Codex 原生 Computer Use、computer-use@openai-bundled 或 @oai/sky；不得为项目验收继续排查、复测或绕行使用该组件。项目桌面观察、截图及真实动作优先使用项目正式维护的截图/动作接口，并保留既有输入授权和门禁。浏览器 unified-computer-use 等无关能力不受此禁用影响。 / Do not invoke Codex native Computer Use, computer-use@openai-bundled or @oai/sky, or investigate/retest/work around that component for project acceptance. Use the project's maintained screenshot and action interfaces for project desktop observation and real input, preserving existing authorization and gates. Unrelated browser/unified-computer-use capabilities remain unchanged.

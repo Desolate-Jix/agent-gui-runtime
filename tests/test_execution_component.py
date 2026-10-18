@@ -96,7 +96,7 @@ def test_copied_execution_sources_close_adaptive_protocol_and_linked_profile(tmp
         "docs/development/EXTERNAL_VISION_API.md",
         "docs/verification/EXECUTION_STABLE_012_20261012.md",
         "docs/verification/RECORDING_OVERLAY_ALLOWLIST_20261012.md",
-        "docs/verification/DEFAULT_REPLACE_20261012.md", "docs/LEARNING_PREVIEW_QUICKSTART.md",
+        "docs/verification/DEFAULT_REPLACE_20261012.md", "docs/LEARNING_PAUSED.md",
         "app/judgment/adaptive_policy.py", "app/judgment/http_deadline.py", "app/execution/task_plan_review.py",
         "app/execution/task_plan_cancellation.py", "app/execution/task_plan_observation.py",
         "app/execution/task_plan_observation_capture.py",

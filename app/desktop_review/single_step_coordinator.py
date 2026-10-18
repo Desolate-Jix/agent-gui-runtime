@@ -64,6 +64,11 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
         resource_journal=None,
     ) -> None:
         timeout = _positive_timeout(foreground_timeout)
+        if enable_agent_learning is not None and type(enable_agent_learning) is not bool:
+            raise TypeError("enable_agent_learning must be bool or None")
+        if enable_agent_learning is True:
+            raise NativeSingleStepCoordinatorError(
+                "learning_mode_retired", "learning mode is archived and unavailable in the execution coordinator")
         if not callable(getattr(facade, "list_reviewed_assets", None)):
             raise TypeError("facade must expose list_reviewed_assets")
         if not callable(getattr(host, "status", None)):
@@ -119,14 +124,13 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
         self._window_preparations: dict[str, dict[str, Any]] = {}
         self._prepared_window_identities: dict[tuple[Any, ...], dict[str, Any]] = {}
         self._unverified_window_launch: dict[str, Any] | None = None
-        if enable_agent_learning is not None and type(enable_agent_learning) is not bool:
-            raise TypeError("enable_agent_learning must be bool or None")
-        enable_learning = self._uses_production_factory if enable_agent_learning is None else enable_agent_learning
-        installer = getattr(host, "enable_learning_runtime", None)
-        if enable_learning and callable(installer):
-            installer(self)
-        elif enable_agent_learning is True:
-            raise TypeError("host must expose the requested learning runtime capability")
+        installer = getattr(host, "enable_application_startup", None)
+        if callable(installer):
+            try:
+                installer(self)
+            except BaseException:
+                self._owner.close()
+                raise
 
     def safety_settings(self) -> dict[str, Any]:
         """仅展示本地会话选项，不为 Agent 签发批准。"""

@@ -37,6 +37,7 @@ RESOURCES = (
     "requirements/agent-runtime-win311.txt", "requirements/desktop-runtime-constraints.txt",
     "requirements/pylock.desktop-runtime-win311.toml", "pyproject.toml", "uv.lock",
     "LICENSE", "README.md", "README.zh-CN.md", "FRIEND_SETUP.md", "AGENT_GUIDE.md", "RELEASE_SCOPE.md",
+    "integrations/amadeus/agent-review-instant/README.md",
     "docs/EXECUTION_GUIDE.md", "docs/EXECUTION_GUIDE.zh-CN.md",
     "docs/assets/readme-hero.svg", "docs/assets/readme-hero.mobile.svg",
     "docs/assets/readme-hero.zh-CN.svg", "docs/assets/readme-hero.zh-CN.mobile.svg",
@@ -76,7 +77,7 @@ RESOURCES = (
     "docs/verification/DECISION_CASCADE_REPLAY_20261014.md",
     "docs/verification/VISUAL_SUBMIT_BINDING_20261013.md",
     "docs/verification/RECORDING_OVERLAY_ALLOWLIST_20261012.md",
-    "docs/verification/DEFAULT_REPLACE_20261012.md", "docs/LEARNING_PREVIEW_QUICKSTART.md",
+    "docs/verification/DEFAULT_REPLACE_20261012.md", "docs/LEARNING_PAUSED.md",
     "docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md",
     "configs/model_profiles/vista_4b_transformers.json", "skills/codex-vision-session/SKILL.md",
 )

@@ -1,3 +1,5 @@
+2026-10-18: This checkout maintains execution mode. Learning entrypoints are retired and development is paused. See [archive and recovery notes](docs/LEARNING_PAUSED.md). Installed applications are unchanged.
+
 <div align="center">
 
 **English** · [简体中文](README.zh-CN.md)

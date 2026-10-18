@@ -77,25 +77,7 @@ class DesktopReviewHost:
             self.facade = NativeReviewFacade(service, reviewer_token, review_root)
             service.bind_workflow_memory_reader(reviewer_token, self.facade)
             service.bind_interface_content_gateway(reviewer_token, self.facade)
-            from app.agent.action_learning_recorder import ActionLearningRecorder
-            from app.agent.action_learning_capture_archive import ActionLearningCaptureArchive
-            from app.agent_link.learning_segments import LearningSegmentOwner
-
-            recorder = ActionLearningRecorder(project_root=review_root)
-            self.learning_segments = LearningSegmentOwner(
-                self._store, recorder=recorder,
-                capture_archive=ActionLearningCaptureArchive(recorder=recorder),
-            )
-            service.bind_learning_segment_owner(reviewer_token, self.learning_segments)
-            self.learning_runtime = None
             self.application_startup = None
-            from app.agent_link.fresh_graph_source import FreshGraphSourceOwner
-
-            self.fresh_learning = FreshGraphSourceOwner(self.learning_segments, self.facade)
-            from app.desktop_review.learning_observation import LearningObservationProvider
-
-            self.learning_observation = LearningObservationProvider(self.fresh_learning)
-            service.bind_learning_observation_provider(reviewer_token, self.learning_observation)
             assert self._execution_token is not None
             self._http = OwnedAgentLinkHttpHost(
                 service,
@@ -124,22 +106,20 @@ class DesktopReviewHost:
             raise DesktopHostError("construction_failed", "desktop host could not be created") from error
 
     def enable_learning_runtime(self, coordinator: Any) -> None:
-        """复用既有协调器；能力只在真实准备入口安装后公开。"""
-        from .learning_runtime import LearningRuntimeProvider
+        """学习实现已封存；执行宿主不得重新安装该能力。"""
+        raise DesktopHostError("learning_mode_retired", "learning mode is archived and unavailable in the execution host")
+
+    def enable_application_startup(self, coordinator: Any) -> None:
+        """应用启动独立绑定执行协调器，不依赖学习运行时。"""
+        from .application_startup import ApplicationStartupProvider
 
         with self._guard:
-            if self.learning_runtime is not None:
-                raise DesktopHostError("learning_busy", "learning runtime is already installed")
-            provider = LearningRuntimeProvider(self.learning_segments, coordinator)
-            observer = getattr(coordinator, "observe_learning_target_passively", None)
-            if not callable(observer):
-                raise DesktopHostError("learning_runtime_unavailable", "managed targeted observation is unavailable")
-            self.learning_observation.bind_managed_observer(observer)
-            self._service.bind_learning_runtime_provider(self._reviewer_token, provider)
-            from .application_startup import ApplicationStartupProvider
+            if self._resources_closed or self._phase not in {"created", "ready"}:
+                raise DesktopHostError("host_not_ready", "application startup requires an open execution host")
+            if self.application_startup is not None:
+                raise DesktopHostError("application_startup_busy", "application startup is already installed")
             startup = ApplicationStartupProvider(self._store, coordinator)
             self._service.bind_application_startup_provider(self._reviewer_token, startup)
-            self.learning_runtime = provider
             self.application_startup = startup
 
     def start(self, *, timeout: float = 5.0) -> dict[str, Any]:

@@ -131,13 +131,14 @@ def test_preflight_refuses_missing_canonical_local_contract(monkeypatch):
 
 @pytest.mark.parametrize("path", ["app.desktop_review.local_keyboard_action", "app.execution.local_keyboard_action"])
 def test_keyboard_alias_patch_reaches_existing_local_dispatch(monkeypatch, path):
+    from types import SimpleNamespace
     keyboard = importlib.import_module(path)
     canonical = importlib.import_module("app.execution.local_keyboard_action")
     assert keyboard is canonical
     from app.desktop_review import local_direct_step
     from app.api import action
     from app.api.models.response import APIResponse
-    manager = object()
+    manager = SimpleNamespace(get_bound_window=lambda: None)
     monkeypatch.setattr(action, "window_manager", manager)
     calls = []
 
@@ -231,7 +232,8 @@ def test_local_alias_patch_reaches_original_dispatch(monkeypatch, path):
     canonical = importlib.import_module("app.execution.local_direct_step")
     from app.api import action
     from app.api.models.response import APIResponse
-    manager = object()
+    from types import SimpleNamespace
+    manager = SimpleNamespace(get_bound_window=lambda: None)
     monkeypatch.setattr(action, "window_manager", manager)
     calls = []
 

@@ -1,3 +1,5 @@
+2026-10-18：本地保留执行模式，学习模式已封存并移除公开入口，开发暂缓。归档与恢复说明见 [学习封存记录](docs/LEARNING_PAUSED.md)。本轮未更新安装版。
+
 <div align="center">
 
 [English](README.md) · **简体中文**

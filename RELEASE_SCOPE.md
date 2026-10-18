@@ -1,3 +1,9 @@
+## 2026-10-18 本地维护范围 / Local maintenance scope
+
+当前只维护执行模式，基于已发布执行 0.1.5 源码；学习工作台、录制与控制入口封存移除。以下学习预览版内容仅为历史，原始说明可从 `8d692847` 历史提交恢复。本轮未构建安装器、未发布、未改已安装程序。详见 [封存说明](docs/LEARNING_PAUSED.md)。
+
+This checkout maintains execution only. Learning preview entries below are historical; their original documentation remains in Git history. No installer or public release was produced by this cleanup.
+
 # Execution 0.1.2 / 执行 0.1.2
 
 本次只发布执行正式版，学习0.1.0-preview.3安装器不变。Choice直接判断本步，默认视觉执行；目标审核采用概览＋细节标注图，输入核验完整裁剪加外沿刻度，单问题比较规定文字。组合点击、全选替换和点击后Enter减少动作之间的焦点漂移；不恢复空框或焦点外观检查。支持外部视觉API、兼容Agent及本地模型，本地权重不是必需品。 / Execution-only stable release: current-step Choice, visual execution, focused marked images, complete field crops with margin ticks, and bound click/replace/Enter actions. Local weights remain optional; learning is unchanged.
