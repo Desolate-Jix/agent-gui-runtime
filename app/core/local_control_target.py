@@ -10,11 +10,12 @@ _TARGET_SCOPE = ContextVar("local_control_target", default=None)
 
 
 class LocalControlTargetError(ValueError):
-    def __init__(self, reason_code):
+    def __init__(self, reason_code, *, failure_evidence=None):
         if (not isinstance(reason_code, str) or not 1 <= len(reason_code) <= 96
                 or not reason_code.replace("_", "").isascii()
                 or not reason_code.replace("_", "").isalnum()):
             reason_code = "local_control_target_unavailable"
+        self.failure_evidence = deepcopy(failure_evidence)
         self.reason_code = reason_code
         super().__init__(reason_code)
 
@@ -84,14 +85,21 @@ class LocalControlTarget:
         if (not isinstance(current.get("window_identity"), dict) or not current["window_identity"]
                 or not isinstance(current.get("window_rect"), list) or len(current["window_rect"]) != 4
                 or any(type(item) is not int for item in current["window_rect"])
-                or current["kind"] not in {"dropdown", "checkbox", "radio"}
+                or current["kind"] not in {"dropdown", "checkbox", "radio", "row_selection"}
                 or not isinstance(current.get("label"), str) or not current["label"].strip()):
             _fail("identity_unavailable")
         box = _box(current.get("bbox"))
         if (box["x"] + box["w"] > current["window_rect"][2]
                 or box["y"] + box["h"] > current["window_rect"][3]):
             _fail("bbox_unavailable")
-        if current["kind"] in {"checkbox", "radio"}:
+        if current['kind'] == 'row_selection':
+            if (current.get('state_available') is not True or type(current.get('selected')) is not bool
+                    or current.get('editing') is not False or current.get('selected') is not False):
+                _fail('row_selection_state_changed')
+            if (not isinstance(current.get('container_runtime_id'), list) or not current['container_runtime_id']
+                    or current['container_runtime_id'] != self._expected.get('container_runtime_id')):
+                _fail('row_selection_container_changed')
+        elif current["kind"] in {"checkbox", "radio"}:
             if current.get("state_available") is not True or type(current.get("checked")) is not bool:
                 _fail("state_unavailable")
             if current["checked"] is not self._expected.get("checked"):
@@ -147,7 +155,9 @@ class LocalControlTarget:
         except LocalControlTargetError:
             raise
         except Exception as error:
-            raise LocalControlTargetError(getattr(error, "reason_code", "local_control_target_read_failed")) from None
+            from app.agent.windows_row_selection_reader import row_selection_failure_evidence
+            raise LocalControlTargetError(getattr(error, "reason_code", "local_control_target_read_failed"),
+                failure_evidence=row_selection_failure_evidence(error)) from None
 
     def verify_receipt(self, point, coordinate_space):
         # 事后回执校验只作纵深防御，不能替代输入前当前 UIA 约束。

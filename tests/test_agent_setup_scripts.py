@@ -2,10 +2,12 @@
 
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tomllib
 
 import pytest
 
@@ -105,3 +107,78 @@ def test_agent_setup_whatif_has_no_environment_or_config_side_effect(bundle):
     assert result.returncode == 0, result.stdout + result.stderr
     assert not (bundle / '.venv-agent').exists()
     assert not (bundle / 'mcp-config.local.json').exists()
+
+
+def test_execution_dependency_group_excludes_qt_and_keeps_desktop():
+    groups = tomllib.loads((ROOT / 'pyproject.toml').read_text(encoding='utf-8'))['dependency-groups']
+    assert groups.get('execution') == ['mcp==2.1.1', 'httpx==0.28.1']
+    assert groups['desktop'] == ['PySide6==6.11.2', 'mcp==2.1.1', 'httpx==0.28.1']
+
+
+def test_local_setup_selects_locked_execution_and_vista_groups_without_installing(bundle, tmp_path):
+    # 只记录联网边界，配置也留在隔离副本，避免生成真实运行配置。
+    (bundle / 'scripts/configure_instant.ps1').write_text('''
+[CmdletBinding(SupportsShouldProcess = $true)]
+param([string]$ModelDirectory,[string]$RecognitionSource,[string]$DataDirectory,[string]$Python)
+if ($PSCmdlet.ShouldProcess($PSScriptRoot, 'Record isolated configuration arguments')) {
+    [IO.File]::WriteAllText($env:UV_TEST_CONFIG, (ConvertTo-Json -Compress @{ModelDirectory=$ModelDirectory;RecognitionSource=$RecognitionSource;Python=$Python}), [Text.UTF8Encoding]::new($false))
+}
+''', encoding='utf-8')
+    driver = tmp_path / 'local-driver.ps1'
+    log = tmp_path / 'local-uv-calls.jsonl'
+    configuration = tmp_path / 'isolated-config.json'
+    driver.write_text('''
+$ErrorActionPreference = 'Stop'
+function uv {
+    [IO.File]::AppendAllText($env:UV_TEST_LOG, (ConvertTo-Json -InputObject @($args | ForEach-Object { [string]$_ }) -Compress) + "`n", [Text.UTF8Encoding]::new($false))
+    $global:LASTEXITCODE = 0
+}
+& $env:UV_TEST_SETUP -RecognitionSource local -ModelDirectory $env:UV_TEST_MODEL
+''', encoding='utf-8')
+    env = dict(os.environ, UV_TEST_LOG=str(log), UV_TEST_CONFIG=str(configuration),
+               UV_TEST_SETUP=str(bundle / 'scripts/setup_instant.ps1'), UV_TEST_MODEL=str(tmp_path / 'new-model-directory'))
+    result = subprocess.run([SHELL, '-NoProfile', '-NonInteractive', '-File', str(driver)],
+                            env=env, capture_output=True, text=True, encoding='utf-8', timeout=40)
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = [json.loads(line) for line in log.read_text(encoding='utf-8').splitlines()]
+    assert calls == [['python', 'install', '3.11', '--no-bin', '--no-registry'],
+                     ['sync', '--frozen', '--group', 'execution', '--group', 'vista']]
+    assert json.loads(configuration.read_text(encoding='utf-8'))['RecognitionSource'] == 'local'
+    assert not (bundle / '.venv').exists()
+    assert not (bundle / '.venv-agent').exists()
+
+
+def test_local_setup_whatif_and_powershell_syntax_have_no_install_side_effect(bundle):
+    # AST 解析只检查语法，不执行安装或配置。
+    parsed = subprocess.run([SHELL, '-NoProfile', '-NonInteractive', '-Command',
+        '$tokens=$null; $errors=$null; [void][System.Management.Automation.Language.Parser]::ParseFile($env:SETUP_SCRIPT,[ref]$tokens,[ref]$errors); if($errors.Count) { $errors | Out-String | Write-Error; exit 1 }'],
+        env=dict(os.environ, SETUP_SCRIPT=str(bundle / 'scripts/setup_instant.ps1')),
+        capture_output=True, text=True, encoding='utf-8', timeout=40)
+    assert parsed.returncode == 0, parsed.stdout + parsed.stderr
+    result = run_script(bundle, 'setup_instant.ps1', '-RecognitionSource', 'local',
+                        '-ModelDirectory', str(bundle / 'unused-model'), '-DownloadModel', '-WhatIf')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (bundle / '.venv').exists()
+    assert not (bundle / '.venv-agent').exists()
+    assert not (bundle / '.python').exists()
+    assert not (bundle / '.setup-cache').exists()
+    assert not (bundle / 'unused-model').exists()
+    assert not (bundle / 'mcp-config.local.json').exists()
+
+
+@pytest.mark.parametrize('groups', [
+    ['--only-group', 'execution'],
+    ['--no-default-groups', '--group', 'execution', '--group', 'vista'],
+])
+def test_frozen_execution_exports_exclude_qt_without_lock_or_environment_changes(groups):
+    uv = shutil.which('uv')
+    assert uv, 'existing uv is required for frozen group verification'
+    before = (ROOT / 'uv.lock').read_bytes()
+    result = subprocess.run([uv, 'export', '--frozen', '--offline', '--no-python-downloads',
+                             '--no-hashes', *groups], cwd=ROOT,
+                            capture_output=True, text=True, encoding='utf-8', timeout=40)
+    assert result.returncode == 0, result.stdout + result.stderr
+    packages = {name.lower() for name in re.findall(r'(?m)^([a-zA-Z0-9_.-]+)==', result.stdout)}
+    assert {'mcp', 'httpx'}.issubset(packages)
+    assert not packages.intersection({'pyside6', 'pyside6-addons', 'pyside6-essentials', 'shiboken6'})
+    assert (ROOT / 'uv.lock').read_bytes() == before

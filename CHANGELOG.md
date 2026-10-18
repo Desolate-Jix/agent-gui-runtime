@@ -1,4 +1,30 @@
-# 未发布源码 / Unreleased source
+# 2026-10-07 当前release-ready状态 / Current release-ready status
+
+第三批source14/GUI12已完成匹配冻结与实装限定验收，状态为release-ready。Main与独立Sol各记录2个教学事件、6个预期连续场景（5个正例完成，负例一次点击后判失败，无重复输入）；GUI Save原job为completed并返回captured状态的动作后截图，关闭重开后图像关闭选项保持，最终cleanup完成。第一批终态JSON读取失败及第二批空标题清除绑定失败原记录保留；旧便携candidate02未知退出未宣称修复，stablev0.1.1保持原发布。网络发布与下载核对单独记录在对应发行页。 / The matched third source14/GUI12 pair is release-ready after bounded installed acceptance. Main and independent Sol each recorded two teaching events and six expected continuous cases: five positive completions and one negative failure after a single click without replay. The original GUI Save job completed with captured post-action evidence; image disablement persisted across close/reopen and cleanup completed. Both earlier failures and the unexplained excluded portable exit remain historical. Stablev0.1.1 is unchanged; publication and download verification are recorded separately on the release page.
+
+当前安装包含默认图像规则提议、人工区域编辑及可关闭图像核验；不确定保留原请求交Agent审核，不重放输入。流程图引用图钉固定的界面版本，附加成员不自动创建跳转。GUI页签为“结果与读取”。本地模型权重可选；本轮没有新增真实API供应商测试，不宣称通用准确率、速度或模型用量收益。 / Current installers include default image proposals, editable regions and persistent disablement. Uncertain evidence retains the original request for Agent review without replay. Graphs pin interface versions and membership does not create transitions. The GUI tab is Results and readback. Local weights are optional; no new real API-provider tests or general accuracy, speed or usage claims.
+
+| 组件 / Component | 版本 / Version | 冻结批次 / Frozen pair | Setup SHA256 |
+|---|---|---|---|
+| 执行 / Execution | `0.1.2-preview.1` | source14 / installers-execution-13 | `fc8e343549d84d3deceb3d116451bc739729402fdefc2b5a1ba5a097e96ea5e7` |
+| 可选学习 / Optional learning | `0.1.0-preview.1` | GUI12 / installers-learning-12 | `d67443fdb9c77d60db4063a66b501e1be1ae45baf9c2af2b2a8cbecad86728b9` |
+
+[最终限定验收 / Final bounded acceptance](docs/verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)。下方原段落为原冻结时点历史记录；版本与限制以本节及最终验收为准，不覆盖首次失败。 / Original sections below describe historical freezes; use this section and final acceptance for current scope while preserving first failures.
+
+---
+
+# 可选学习测试候选 / Optional learning preview candidate
+
+学习 `0.1.0-preview.1` 与兼容执行 `0.1.2-preview.1` 独立安装，尚未公开发布。旧安装冻结的限定验收保留；本轮默认图像核验、人工区域编辑和有界成功早退已在源码验证，最终安装候选仍需集中构建与验收。旧便携candidate02不交付，其未知退出保留。 / The independent preview pair is unpublished. Current source adds default image checks, region editing and bounded early completion; final installers still require a new freeze and acceptance. Candidate02 is excluded while its unexplained exit remains documented.
+
+- 自动教学生成工作流草稿、人工修改审核、不可变版本保存与参数复用。 / Teaching synthesis, human editing/review, immutable saves and per-run inputs.
+- 学习可选，离线库编辑不需要宿主或模型；中英文切换并持久化，显式连接独立执行安装。 / Optional offline library editing, persisted bilingual UI and explicit independent execution attachment.
+- 修复匹配已审核票据取消后runner残留；未知或未审核输入保留门禁。 / Settle matching reviewed cancellation without relaxing unresolved-input gates.
+- 本轮源回归、独立包合同与实装证据分别报告；不宣称模型收益、任意应用或真实服务商准确率。详[使用说明](docs/LEARNING_PREVIEW_QUICKSTART.md)与[验收边界](docs/verification/LEARNING_PREVIEW_NATIVE_ACCEPTANCE.md)。 / Keep verification scopes and untested benefits explicit.
+
+正式执行 `instant-v0.1.1` 保持独立，原验收见[稳定版记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)。以下旧源码与版本记录保留为历史。 / Stable execution remains separate; older entries below are historical.
+
+# 历史源码记录 / Historical source notes
 
 - 新增 Codex 专用视觉会话技能，连续任务复用同一子 Agent ID；通用 MCP 接口不绑定 Codex 调度工具，版本号与已发布 ZIP 不变。 / Add a Codex-only skill that reuses one visual worker per continuous task, without changing generic MCP APIs, version numbers or published ZIP assets.
 - 接通显式 `external_api` 配置、启动、原图 HTTP 请求、候选校验、公共执行及结果回传；支持现有单步与组合调度，不新增执行器。 / Wire external API configuration, startup, original-image HTTP grounding, validation, shared execution and receipts.

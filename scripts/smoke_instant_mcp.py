@@ -53,7 +53,8 @@ async def run(root, model, data, administrator=False, recognition_source="local"
             tools = await client.list_tools()
             evidence["tools"] = [t.name for t in tools.tools]
             assert set(evidence["tools"]) == {"instant_start", "instant_status", "instant_submit",
-                "instant_result", "instant_image", "instant_stop", "instant_run"}
+                "instant_result", "instant_image", "instant_stop", "instant_run",
+                "instant_recovery_preview", "instant_recover_session"}
 
             async def call(name, args=None):
                 result = await client.call_tool(name, args or {})

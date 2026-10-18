@@ -128,7 +128,7 @@ def test_scope_rejects_wrong_thread_and_nested_scope():
 
 
 @pytest.mark.parametrize("defect", [None, "outside", "identity", "option_identity", "unknown", "reader_failure",
-    "expanded", "expansion_unknown"])
+    "expanded", "expansion_unknown", "row_scan_failure", "spoofed_evidence"])
 def test_real_recognition_route_checks_control_before_input_controller(monkeypatch, tmp_path, defect):
     from app.api import action
     from app.api.models.request import ExecuteRecognitionPlanRequest
@@ -171,7 +171,19 @@ def test_real_recognition_route_checks_control_before_input_controller(monkeypat
         current["checked"] = None
     elif defect in {"expanded", "expansion_unknown"}:
         current["expanded"] = True if defect == "expanded" else None
+    failure_evidence = {'contract_version': 'row_selection_scan_difference_v1',
+        'changed_fields': ['selected'], 'window_binding': {'identity': identity, 'window_rect': [100, 200, 1000, 690]},
+        'before': {'selected': False}, 'after': {'selected': True}}
     def read():
+        if defect == "row_scan_failure":
+            from app.agent.windows_row_selection_reader import RowSelectionReadError
+            error = RowSelectionReadError('row_selection_state_changed')
+            error.failure_evidence = deepcopy(failure_evidence)
+            raise error
+        if defect == "spoofed_evidence":
+            error = ReadError('row_selection_state_changed')
+            error.failure_evidence = deepcopy(failure_evidence)
+            raise error
         if defect == "reader_failure":
             raise ReadError("form_control_window_mismatch")
         return current
@@ -192,6 +204,11 @@ def test_real_recognition_route_checks_control_before_input_controller(monkeypat
         assert not response.success and clicks == []
         assert data["execution_path"]["action_executed"] is False
         assert data["control_target_check"]["status"] == "rejected"
+    if defect == "row_scan_failure":
+        assert data['control_target_check']['failure_evidence'] == failure_evidence
+        assert data['control_target_check']['error_code'] == 'row_selection_state_changed'
+    elif defect is not None:
+        assert 'failure_evidence' not in data['control_target_check']
     assert api().check_local_control_target({"x": 184, "y": 516}) is None
 
 

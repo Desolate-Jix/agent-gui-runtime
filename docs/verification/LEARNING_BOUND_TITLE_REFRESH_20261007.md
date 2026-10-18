@@ -1,0 +1,13 @@
+# 已绑定窗口标题刷新 / Bound-window title refresh
+
+1. **Failure / 失败**：第二批安装候选的工作台保存操作成功且只执行一次；随后窗口标题读取暂空，公共 WindowManager 清除已有绑定，观察回执报错。保存内容及下一次同窗口捕获均已核对，原失败不改记成功。 / The second installed pair saved once, but an empty title read cleared the known binding and failed post-action observation. Persisted data and the next same-window capture were verified; the original failed receipt remains failed.
+2. **Root invariant / 公共契约**：窗口发现与已核验窗口刷新需要区别处理。标题是可变显示属性；原 HWND 有效、可见顶层、角色合法且原/当前 PID 均可验证一致时，空标题不能单独使绑定失效。标题为什么瞬时为空仍未知。 / Discovery differs from refreshing a verified target. A mutable title alone must not invalidate a still-valid, visible top-level HWND with an allowed role and a verified unchanged PID. The reason for the transient empty title remains unknown.
+3. **Fix location / 修复位置**：`app/core/window_manager.py` 的既有绑定刷新前后核对 PID，仅在此路径允许实际空标题；新候选和初次绑定仍要求标题。没有缓存旧标题、重试、等待、换窗或输入重派。 / The common binding refresh checks PID before and after refresh and accepts the actual empty title only on this path. Discovery and initial binding keep their title requirement. There is no cached title, retry, delay, window substitution or action replay.
+4. **Why not app-only / 通用性**：修复适用于所有 Windows 应用的已绑定窗口，不依赖工作台 Save 特例。 / The repair applies to verified Windows targets generally, without a workbench Save exception.
+5. **Regression / 回归**：RED 为 7 failed / 19 passed；Main 对窗口发现、grounding 身份、动作后窗口转换和截图所有权的实际回归为 **55 passed**。独立只读审查无阻断意见。第三批实装保存后观察及连续验收仍待完成，源码检查不能替代现场结果。 / RED was 7 failed / 19 passed; Main's discovery, grounding identity, post-action transition and capture ownership regressions returned **55 passed**. Read-only review found no release blocker. Third-pair installed observation and continuous acceptance remain pending.
+6. **Safety impact / 安全影响**：原 HWND/PID、可见顶层和桌面角色检查保留；身份不可验证、发生变化、隐藏、销毁或非顶层仍拒绝。外部 create-time、可执行文件、几何及输入授权门禁未变。PID 本身不被宣称能排除所有进程重用。 / HWND/PID, visibility, top-level and desktop-role gates remain. Invalid or changed identity, hidden/destroyed or child windows are rejected. External creation-time, executable, geometry and input authorization checks are unchanged; PID alone is not claimed to exclude all process reuse.
+
+
+## 2026-10-07 第三批实装复验 / Third-pair installed retest
+
+pair03/source14/GUI12 的 Main 教学、连续使用、工作台保存后截图、正常重开与清理通过；Sol 在同一冻结载荷上用独立新数据复验通过，Main 已核对原始回执与图片。详见 [最终安装验收](LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)。上面的首次失败及原因未知项仍保留，后续通过不改写原失败。 / Main passed teaching, continuous use, Save post-capture, normal reopening and cleanup on pair03/source14/GUI12. Sol passed independent fresh-data acceptance on the same freeze, and Main audited the original receipts and images. See the final installed-acceptance report. Original failures and unknown causes above remain unchanged.

@@ -12,8 +12,40 @@ def check(root):
     sys.path.insert(0, str(root))
     action = importlib.import_module("app.api.action")
     execute = importlib.import_module("app.api.execute")
-    local = importlib.import_module("app.desktop_review.local_direct_step")
-    keyboard = importlib.import_module("app.desktop_review.local_keyboard_action")
+    local = importlib.import_module("app.execution.local_direct_step")
+    recovery = importlib.import_module("app.execution.post_action_recovery")
+    for name, canonical in (("local_direct_step", local), ("post_action_recovery", recovery)):
+        if importlib.import_module("app.desktop_review." + name) is not canonical:
+            raise ValueError("execution compatibility module identity diverged: " + name)
+    if not (callable(local.LocalDirectStepMixin.execute_local_step)
+            and callable(local.LocalDirectStepMixin.prepare_memory_grounding)
+            and callable(local.LocalDirectStepMixin._execute_local_step_on_owner)
+            and callable(recovery.observe_recovery_windows)):
+        raise ValueError("local step and recovery dependencies are unavailable")
+    # 判断合同是预留维护依赖；预检不创建证据、不求值或连接供应商。
+    judgment = importlib.import_module("app.core.outcome_judgment")
+    if not (all(callable(getattr(judgment, name)) for name in
+                ("JudgmentEvidence", "JudgmentRequest", "JudgmentAnswer", "JudgmentProvider", "OptionalJudgment"))
+            and callable(judgment.JudgmentProvider.judge)
+            and callable(judgment.OptionalJudgment.evaluate)):
+        raise ValueError("optional judgment contract is unavailable")
+    keyboard = importlib.import_module("app.execution.local_keyboard_action")
+    legacy_keyboard = importlib.import_module("app.desktop_review.local_keyboard_action")
+    if legacy_keyboard is not keyboard:
+        raise ValueError("local keyboard module identity diverged")
+    contract = importlib.import_module("app.execution.local_action_contract")
+    legacy_contract = importlib.import_module("app.desktop_review.local_action_contract")
+    if legacy_contract is not contract or keyboard.LocalKeyRequest is not contract.LocalKeyRequest:
+        raise ValueError("local action contract identity diverged")
+    owner = importlib.import_module("app.execution.single_step_runtime_owner")
+    legacy_owner = importlib.import_module("app.desktop_review.single_step_runtime_owner")
+    owner_symbols = ("RuntimeOwnerError", "RuntimeOwnerProxy", "SerialRuntimeOwner",
+                     "_STOP", "_initialize_com", "_finalize_com")
+    if legacy_owner is not owner or any(getattr(legacy_owner, name) is not getattr(owner, name)
+                                        for name in owner_symbols):
+        raise ValueError("single step runtime owner identity diverged")
+    if not all(callable(getattr(owner, name)) for name in owner_symbols if name != "_STOP"):
+        raise ValueError("single step runtime owner dependencies are unavailable")
     from fastapi import FastAPI
     application = FastAPI()
     application.include_router(action.router)
@@ -46,8 +78,8 @@ def check(root):
     reader = importlib.import_module("app.operation.screen_reading.captured_text")
     ocr = importlib.import_module("app.core.ocr_service")
     instant = importlib.import_module("app.instant_mcp")
-    sequence = importlib.import_module("app.desktop_review.input_sequence")
-    form = importlib.import_module("app.desktop_review.form_fill")
+    sequence = importlib.import_module("app.execution.input_sequence")
+    form = importlib.import_module("app.execution.form_fill")
     choices = importlib.import_module("app.agent.windows_form_control_reader")
     control_target = importlib.import_module("app.core.local_control_target")
     uia_graph = importlib.import_module("app.operation.screen_reading.uia_graph")
@@ -65,7 +97,7 @@ def check(root):
                         "format": "YYYY-MM-DD"})
     instant.InstantCommand.model_validate({"kind": "form_fill", "request": {"fields": form_fields}}).command()
     from pydantic import ValidationError
-    from app.desktop_review.form_fill import FormFillRequest
+    from app.execution.form_fill import FormFillRequest
     FormFillRequest.model_validate({"fields": [{"kind": "date", "field_goal": "Date",
         "value": "2026-09-23", "format": "YYYY-MM-DD"}]})
     try:
@@ -100,7 +132,12 @@ def check(root):
         raise ValueError("input sequence dependencies are unavailable")
     instant.InstantCommand.model_validate({"kind": "input_sequence", "request": {
         "field_goal": "Search input", "text": "dependency preflight only", "submit_search": True}}).command()
-    condition = importlib.import_module("app.desktop_review.conditional_observation")
+    condition = importlib.import_module("app.execution.conditional_observation")
+    for name, canonical in (("input_sequence", sequence), ("form_fill", form),
+                            ("conditional_observation", condition)):
+        compatibility = importlib.import_module("app.desktop_review." + name)
+        if compatibility is not canonical:
+            raise ValueError("execution compatibility module identity diverged: " + name)
     if not callable(condition.observe_until_condition) or not callable(condition.UIATextConditionProbe):
         raise ValueError("conditional observation dependencies are unavailable")
     instant.InstantCommand.model_validate({"kind": "input_sequence", "request": {
@@ -191,6 +228,8 @@ def check(root):
                           "field_kinds": [field["kind"] for field in form_fields], "max_fields": 32,
                           "tab_sequence_validated": True},
             "recognition_operations": recognition_checked,
+            "optional_judgment": {"contract_imported": True, "judgment_evaluated": False,
+                                  "provider_called": False, "request_factory_called": False},
             "local_module_sources": sources,
             "limitation": "Dependency and request validation only, not real input or end-to-end acceptance"}
 

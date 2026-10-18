@@ -27,7 +27,7 @@ def compact_receipt(receipt, *, full_receipt_path=None):
         "input_route_succeeded", "task_effect_verified", "automatic_retry_allowed",
         "observation_status", "started_at", "finished_at", "command_wall_ms", "error", "error_type",
         "diagnostics", "desktop_context", "agent_review", "next", "accepted", "action_executed",
-        "wait_expired", "command_cancelled", "partial_execution", "next_action")
+        "wait_expired", "command_cancelled", "partial_execution", "next_action", "learning_recording", "learning_recording_error", "learning_binding", "learning_control")
     value = {key: deepcopy(receipt[key]) for key in keys if key in receipt}
     value["receipt_detail"] = "compact"
     value["full_receipt"] = {"tool": "instant_result", "arguments": {
@@ -67,6 +67,11 @@ def compact_receipt(receipt, *, full_receipt_path=None):
             "click_kind", "dispatch_status", "pressed") if key in action}
         value["action"].update(operation=result.get("operation"), phase=result.get("phase"),
             action_executed=(action.get("execution_path") or {}).get("action_executed", action.get("pressed")))
+        proof = result.get("row_selection_proof")
+        if isinstance(proof, dict):
+            value["action"]["selection"] = {key: deepcopy(proof[key]) for key in (
+                "contract_version", "status", "action_required", "state_satisfied", "sha256") if key in proof}
+            value["action"]["selection"]["proof_verified"] = False
         if api.get("error"):
             value["error"] = deepcopy(api["error"])
         if api.get("message"):

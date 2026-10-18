@@ -19,11 +19,31 @@ from .recognition_source import _unique_object, _invalid_constant
 
 
 class ApiGroundingError(ValueError):
-    def __init__(self, code, *, status_code=None):
+    def __init__(self, code, *, status_code=None, attempt=None):
         self.code = code
         self.status_code = status_code
+        self.attempt = attempt
         # 服务端正文、异常链、请求头可能包含凭证，不能放进公共错误。
         super().__init__(code)
+
+
+def _measurement_usage(usage):
+    if not isinstance(usage, dict):
+        return None
+    prompt = usage.get("prompt_tokens")
+    completion = usage.get("completion_tokens")
+    if type(prompt) is not int or prompt < 0 or type(completion) is not int or completion < 0:
+        return None
+    result = {"input_tokens": prompt, "output_tokens": completion}
+    total = usage.get("total_tokens")
+    if type(total) is int and total >= prompt + completion:
+        result["total_tokens"] = total
+    return result
+
+
+def _attempt(started_ns, status, usage=None):
+    return {"started_ns": started_ns, "ended_ns": time.perf_counter_ns(),
+            "status": status, "usage": usage}
 
 
 class ApiGroundingProfile(BaseModel):
@@ -127,6 +147,7 @@ class ChatCompletionsGrounder:
                     {"type": "text", "text": json.dumps(context, ensure_ascii=False)},
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64encode(image_bytes).decode("ascii"),
                                                            "detail": "high"}}]}]}
+        attempt_started_ns = time.perf_counter_ns()
         try:
             with self._client.stream("POST", self.profile.endpoint, json=body,
                                      headers={"Authorization": "Bearer " + key}) as response:
@@ -144,11 +165,26 @@ class ChatCompletionsGrounder:
                     if time.perf_counter() - started > self.profile.timeout_seconds:
                         raise ApiGroundingError("api_timeout")
         except httpx.TimeoutException:
-            raise ApiGroundingError("api_timeout") from None
+            raise ApiGroundingError("api_timeout",
+                attempt=_attempt(attempt_started_ns, "timeout")) from None
         except httpx.RequestError:
-            raise ApiGroundingError("api_network_error") from None
+            raise ApiGroundingError("api_network_error",
+                attempt=_attempt(attempt_started_ns, "failure")) from None
+        except ApiGroundingError as error:
+            if error.attempt is None:
+                error.attempt = _attempt(attempt_started_ns,
+                    "timeout" if error.code == "api_timeout" else "failure")
+            raise
         try:
             payload = json.loads(data, object_pairs_hook=_unique_object, parse_constant=_invalid_constant)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise ApiGroundingError("api_response_invalid",
+                attempt=_attempt(attempt_started_ns, "failure")) from None
+        usage = payload.get("usage") if isinstance(payload, dict) else None
+        usage = {k:v for k,v in usage.items() if k in {"prompt_tokens", "completion_tokens", "total_tokens"}
+                 and type(v) is int and v >= 0} if isinstance(usage, dict) else {}
+        attempt_usage = _measurement_usage(usage)
+        try:
             choices = payload["choices"]
             if not isinstance(choices, list) or len(choices) != 1:
                 raise ValueError("invalid choices")
@@ -160,24 +196,27 @@ class ChatCompletionsGrounder:
                 raise ApiGroundingError("api_output_truncated")
             if choice.get("finish_reason") != "stop" or not isinstance(message.get("content"), str) or message.get("tool_calls"):
                 raise ValueError("invalid completion")
-        except ApiGroundingError:
+        except ApiGroundingError as error:
+            if error.attempt is None:
+                error.attempt = _attempt(attempt_started_ns, "failure", attempt_usage)
             raise
         except (ValueError, TypeError, KeyError, AttributeError):
-            raise ApiGroundingError("api_response_invalid") from None
+            raise ApiGroundingError("api_response_invalid",
+                attempt=_attempt(attempt_started_ns, "failure", attempt_usage)) from None
         try:
             result = validate_grounding_result(message["content"], request_id=request_id,
                 capture_id=capture["capture_id"], image_size=size)
         except ValueError:
-            raise ApiGroundingError("api_grounding_invalid") from None
+            raise ApiGroundingError("api_grounding_invalid",
+                attempt=_attempt(attempt_started_ns, "failure", attempt_usage)) from None
         if any(c.evidence_source != "api_visual" for c in result.candidates):
-            raise ApiGroundingError("api_source_mismatch")
-        usage = payload.get("usage")
-        usage = {k:v for k,v in usage.items() if k in {"prompt_tokens", "completion_tokens", "total_tokens"}
-                 and type(v) is int and v >= 0} if isinstance(usage, dict) else {}
+            raise ApiGroundingError("api_source_mismatch",
+                attempt=_attempt(attempt_started_ns, "failure", attempt_usage))
         returned_model = payload.get("model")
         returned_model = returned_model if isinstance(returned_model, str) and len(returned_model) <= 128 else None
         return {"result": result.model_dump(), "action_executed": False,
             "provider": {"protocol": self.profile.protocol, "requested_model": self.profile.model,
                 "returned_model": returned_model, "usage": usage or None,
                 "elapsed_ms": round((time.perf_counter()-started)*1000, 3),
-                "attempts": 1, "automatic_retry_allowed": False}}
+                "attempts": 1, "automatic_retry_allowed": False,
+                "attempt": _attempt(attempt_started_ns, "success", attempt_usage)}}

@@ -149,6 +149,140 @@ print(json.dumps({"count": len(results), "windows_modules": sorted(
     assert value["windows_modules"] == []
 
 
+@pytest.mark.parametrize("command_request", [
+    {"action": "synthesis_prepare", "learning_session_id": "learning-" + "a" * 32},
+    {"action": "synthesis_status", "synthesis_id": "synthesis-" + "b" * 32},
+    {"action": "synthesis_complete", "synthesis_id": "synthesis-" + "b" * 32,
+     "source_sha256": "c" * 64, "parameter_bindings": {}, "annotations": {}},
+])
+def test_learning_synthesis_commands_pass_public_mcp_validation(command_request):
+    command = InstantCommand.model_validate({"kind": "learning_workflow", "request": command_request}).command()
+    assert command["request"] == command_request
+
+
+@pytest.mark.parametrize("command_request", [
+    {"action": "synthesis_prepare", "learning_session_id": "learning-" + "a" * 32, "extra": True},
+    {"action": "synthesis_status", "synthesis_id": "synthesis-" + "b" * 32, "learning_session_id": "learning-" + "a" * 32},
+    {"action": "synthesis_complete", "synthesis_id": "synthesis-" + "b" * 32,
+     "source_sha256": "c" * 64, "parameter_bindings": {}, "annotations": {}, "extra": True},
+])
+def test_learning_synthesis_commands_reject_fields_outside_frozen_contract(command_request):
+    with pytest.raises(ValueError):
+        InstantCommand.model_validate({"kind": "learning_workflow", "request": command_request}).command()
+
+
+def test_tool_discovery_describes_learning_synthesis_without_execution(session):
+    import asyncio
+    tools = asyncio.run(build_server(session).list_tools())
+    description = next(tool.description for tool in tools if tool.name == "instant_submit")
+    assert "synthesis_prepare" in description
+    assert "synthesis_status" in description
+    assert "synthesis_complete" in description
+    assert "synthesis.synthesis_request" in description
+    assert "receipts also expose synthesis_request" in description
+    assert "same Agent session" in description
+    assert "execute input" in description
+    assert "does not save a formal program" in description
+    assert "at most one automatic correction" in description
+    assert "synthesis_resume" in description
+    assert "resume_request_id" in description
+
+
+def test_public_synthesis_correction_budget_and_user_resume(session, tmp_path):
+    import asyncio
+    from test_learning_action_evidence import repeated_state
+    from test_learning_observation_source import observation_scene
+    from test_learning_synthesis import _reply
+    from test_learning_synthesis_conversation import _resume
+
+    store, _, _, _, _ = repeated_state.__wrapped__(observation_scene.__wrapped__(tmp_path))
+    session.session = store.session
+    session.process = None
+    (session.session / "commands").mkdir(exist_ok=True)
+    write_json(session.session / "report.json", {"phase": "ready"})
+
+    async def scenario():
+        server = build_server(session)
+        async def command(request_id, command):
+            result = await server.call_tool("instant_run", {"request_id": request_id,
+                "command": command, "images": "none"})
+            assert not result.is_error
+            return json.loads(result.content[0].text)["result"]
+        stopped = await command("stop-conversation", {"kind": "learning_stop"})
+        request = stopped["synthesis"]["synthesis_request"]
+        assert stopped["synthesis"]["conversation"]["state"] == "initial_reply"
+        bad = _reply(request, annotations={"click-1": {"unrecognized": True}})
+        for name in ("initial-bad", "correction-bad"):
+            result = await command(name, {"kind": "learning_workflow", "request": bad})
+        assert result["conversation"]["state"] == "awaiting_user"
+        for detail in ("compact", "full"):
+            receipt = await server.call_tool("instant_result", {"request_id": "correction-bad",
+                "detail": detail, "images": "none"})
+            assert json.loads(receipt.content[0].text)["result"] == result
+        resumed = await command("user-resume", {"kind": "learning_workflow", "request": _resume(request)})
+        assert resumed["conversation"]["resume_request_id"] == "user-resume"
+        done = await command("valid-resumed-reply", {"kind": "learning_workflow",
+            "request": _reply(request, resume_request_id="user-resume")})
+        assert done["status"] == "draft_ready"
+        assert done["conversation"]["state"] == "review_draft"
+        assert done["input_executed"] is False
+        return done
+    asyncio.run(scenario())
+
+
+def test_learning_synthesis_request_survives_public_receipts_without_command_echo(session, tmp_path):
+    import asyncio
+    from test_learning_action_evidence import repeated_state
+    from test_learning_observation_source import observation_scene
+
+    observed = observation_scene.__wrapped__(tmp_path)
+    store, _, started, _, _ = repeated_state.__wrapped__(observed)
+    session.session = store.session
+    session.process = None
+    (session.session / "commands").mkdir(exist_ok=True)
+    write_json(session.session / "report.json", {"phase": "ready"})
+
+    initial = store.control("learning_stop", {}, "test-stop")
+    original = initial["synthesis"]["synthesis_request"]
+    commands = [
+        ("stop", {"kind": "learning_stop"}, None),
+        ("prepare", {"kind": "learning_workflow", "request": {
+            "action": "synthesis_prepare", "learning_session_id": started["learning_id"]}}, original),
+        ("status", {"kind": "learning_workflow", "request": {
+            "action": "synthesis_status", "synthesis_id": original["synthesis_id"]}}, original),
+    ]
+
+    async def scenario():
+        server = build_server(session)
+        returned = {}
+        for suffix, command, expected in commands:
+            request_id = "synthesis-" + suffix
+            submitted = await server.call_tool("instant_submit", {"request_id": request_id, "command": command})
+            assert not submitted.is_error
+            for detail in ("compact", "full"):
+                receipt = await server.call_tool("instant_result", {
+                    "request_id": request_id, "detail": detail, "images": "none"})
+                assert not receipt.is_error
+                value = json.loads(receipt.content[0].text)
+                result = value["result"]
+                handoff = result["synthesis"] if suffix == "stop" else result
+                request = handoff["synthesis_request"]
+                assert {"contract_version", "synthesis_id", "source_sha256", "learning_session_id",
+                        "events", "reply_contract"} <= set(request)
+                assert request["learning_session_id"] == started["learning_id"]
+                if expected is not None:
+                    assert request == expected
+                assert "command" not in value
+                assert "request" not in result
+                returned[(suffix, detail)] = request
+        return returned
+
+    values = asyncio.run(scenario())
+    assert values[("stop", "compact")] == values[("stop", "full")]
+    assert values[("prepare", "compact")] == values[("prepare", "full")] == original
+    assert values[("status", "compact")] == values[("status", "full")] == original
+
+
 def test_invalid_step_is_readable_logged_and_host_reusable(session):
     import asyncio
     server = build_server(session)
@@ -251,7 +385,7 @@ def test_queue_write_error_is_not_misreported_as_safe_rejection(session, monkeyp
     import asyncio
     def failed_write(path, value):
         raise OSError("uncertain write outcome")
-    monkeypatch.setattr("app.instant_mcp.write_json", failed_write)
+    monkeypatch.setattr("app.core.instant_command_queue.write_json_snapshot", failed_write)
     with pytest.raises(Exception, match="instant_submit|uncertain write"):
         asyncio.run(build_server(session).call_tool("instant_submit", {
             "request_id": "new", "command": {"kind": "discover"}}))

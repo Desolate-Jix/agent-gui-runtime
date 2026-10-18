@@ -99,3 +99,34 @@ def test_uia_collects_ownerless_menu_but_not_shadow(monkeypatch):
     for name in ("IsWindow", "IsWindowVisible", "GetAncestor", "EnumWindows"):
         monkeypatch.setattr(win32gui, name, getattr(gui, name))
     assert provider.WindowsUIAProvider._owned_popup_handles(bound) == [200]
+
+
+@pytest.mark.parametrize("flags", [0x04, 0x10, 0x14])
+def test_exact_menu_thread_shadow_preserves_capture_pixels(monkeypatch, flags):
+    manager, bound, _ = menu_setup(monkeypatch, menu_class="SysShadow", flags=flags)
+    result = manager.validate_bound_capture_visibility(bound=bound,
+        rect={"left": 10, "top": 20, "width": 200, "height": 100}, allow_partial=True)
+    assert result["reason"] == "capture_window_visible"
+    assert not manager._is_owned_popup(200, bound.handle)
+
+
+@pytest.mark.parametrize("change", ["pid", "thread", "no_menu", "active", "owner_root",
+                                    "owner_pid", "owner_thread", "foreground"])
+def test_in_menu_shadow_identity_mismatch_preserves_occlusion(monkeypatch, change):
+    manager, bound, gui = menu_setup(monkeypatch, menu_class="SysShadow", flags=0x04)
+    if change in {"pid", "thread", "owner_pid", "owner_thread"}:
+        changed = 101 if change.startswith("owner_") else 200
+        identity = [7, 99] if change.endswith("pid") else [8, 10]
+        monkeypatch.setattr(module.win32process, "GetWindowThreadProcessId",
+            lambda hwnd: identity if hwnd == changed else [7, 10])
+    if change in {"no_menu", "active", "owner_root"}:
+        state = {"flags": 0 if change == "no_menu" else 0x04,
+                 "active": 300 if change == "active" else 100,
+                 "menu_owner": 300 if change == "owner_root" else 101}
+        monkeypatch.setattr(manager, "_read_gui_menu_state", lambda thread: state)
+    if change == "foreground":
+        gui.GetForegroundWindow = lambda: 300
+    result = manager.validate_bound_capture_visibility(bound=bound,
+        rect={"left": 10, "top": 20, "width": 200, "height": 100}, allow_partial=True)
+    assert result["reason"] == "capture_window_partially_visible"
+    assert not manager._is_owned_popup(200, bound.handle, include_shadow=True)

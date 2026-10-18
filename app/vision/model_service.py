@@ -118,7 +118,7 @@ class FormalModelService:
     """由串行 Runtime 线程调用；取消方只设置事件，不越线程关闭 Job。"""
 
     def __init__(self, configuration: ModelServiceConfiguration, *, output_root: Path,
-                 allow_resource_coexistence: bool = False) -> None:
+                 allow_resource_coexistence: bool = False, resource_journal=None) -> None:
         if type(allow_resource_coexistence) is not bool:
             raise ModelServiceError("model_service_config_invalid")
         self._configuration = configuration
@@ -138,6 +138,11 @@ class FormalModelService:
         self._completed_request_id: str | None = None
         self._last_cancellation: dict[str, Any] | None = None
         self._cleanup_member_identities: dict[tuple[int, int], dict[str, int]] = {}
+        self._resource_journal = resource_journal
+        self._resource_id = identity
+        self._owned_cleanup_verified = False
+        if resource_journal is not None:
+            resource_journal.register_model(identity, scope_name=self._scope_name, pid_file=self._pid_path)
 
     def prepare(self, cancelled: Event) -> dict[str, Any]:
         from app.core import model_server
@@ -160,13 +165,21 @@ class FormalModelService:
                 self._check_cancel(cancelled)
                 if not scopes.scoped_process_launch_ready():
                     raise ModelServiceError("model_service_scope_unavailable")
+                if self._resource_journal is not None:
+                    self._resource_journal.begin_model_scope(self._resource_id)
                 self._scope = scopes.WindowsProcessScope(self._scope_name, create=True)
                 self._ownership = "owned"
+                if self._resource_journal is not None:
+                    self._resource_journal.model_scope_acquired(self._resource_id, self._scope.job_policy())
                 phase = "launch"
+                if self._resource_journal is not None:
+                    self._resource_journal.begin_model_launch(self._resource_id)
                 launch_result = model_server.start_model_server(self._profile, scope_name=self._scope_name,
                     child_env=model_worker_environment(os.environ), output_root=self._output_root, cancelled=cancelled, deadline=deadline,
                     **({"worker_executable": self._configuration.worker_executable}
-                       if self._configuration.worker_executable is not None else {}))
+                       if self._configuration.worker_executable is not None else {}),
+                    **({"before_resume": lambda identity: self._resource_journal.model_process_created(
+                        self._resource_id, identity)} if self._resource_journal is not None else {}))
                 phase = "readiness"
                 self._check_cancel(cancelled)
                 state = self._probe(deadline)
@@ -192,6 +205,7 @@ class FormalModelService:
                     self._check_cancel(cancelled)
                     if time.monotonic() >= deadline:
                         raise ModelServiceError("model_service_readiness_timeout")
+                    self._journal_ready()
                     self._prepared = True
                     return {"status": "ready", "ownership": self._ownership}
                 if self._scope is not None and not self._scope.pids():
@@ -285,6 +299,7 @@ class FormalModelService:
                 raise ModelServiceError("model_service_not_ready")
             if state.get("model_id") != self._profile["model_name"]:
                 raise ModelServiceError("model_service_identity_mismatch")
+            self._journal_ready()
             return {"status": "ready", "ownership": self._ownership, "reused": True}
         except ModelServiceError:
             raise
@@ -312,6 +327,22 @@ class FormalModelService:
         except Exception as error:
             raise ModelServiceError("model_service_instance_unobservable") from error
 
+    def _journal_ready(self):
+        if self._resource_journal is None:
+            return
+        from app.learn.hybrid import windows_process_scope as scopes
+        if self._ownership == "owned":
+            pids = set(self._scope.pids())
+            members = scopes._identities_for_pids(sorted(pids))
+            if (not pids or any(type(pid) is not int or pid <= 0 for pid in pids)
+                    or len(members) != len(pids) or {row.get("pid") for row in members} != pids
+                    or any(type(row.get("create_time_ns")) is not int or row["create_time_ns"] <= 0 for row in members)
+                    or set(self._scope.pids()) != pids):
+                raise ModelServiceError("model_service_instance_unobservable")
+        else:
+            members = [{"pid": pid, "create_time_ns": created} for pid, created in self._instance_identity]
+        self._resource_journal.model_ready(self._resource_id, ownership=self._ownership, member_identities=members)
+
     def verify_request_instance(self, endpoint: str, model_name: str) -> None:
         if self._closed or not self._prepared or self._instance_identity is None:
             raise ModelServiceError("model_service_invalid_phase")
@@ -330,12 +361,16 @@ class FormalModelService:
             raise ModelServiceError("model_service_request_pending", result_unknown=True)
         if not isinstance(request_id, str) or not request_id.strip():
             raise ModelServiceError("model_service_request_mismatch")
+        if self._resource_journal is not None:
+            self._resource_journal.model_request_started(self._resource_id, request_id)
         self._pending_request_id = request_id
         self._last_cancellation = None
 
     def complete_request(self, request_id: str) -> None:
         if request_id != self._pending_request_id:
             raise ModelServiceError("model_service_request_mismatch")
+        if self._resource_journal is not None:
+            self._resource_journal.model_request_finished(self._resource_id, request_id)
         self._completed_request_id = request_id
         self._pending_request_id = None
 
@@ -362,9 +397,11 @@ class FormalModelService:
         stopped = status in {"terminated", "request_not_active"}
         evidence = {"request_id": request_id, "status": status, "computation_stopped": stopped,
                     "ownership": self._ownership}
-        self._last_cancellation = evidence
         if stopped:
+            if self._resource_journal is not None:
+                self._resource_journal.model_request_finished(self._resource_id, request_id)
             self._pending_request_id = None
+        self._last_cancellation = evidence
         return dict(evidence)
 
     def _probe(self, deadline: float, profile: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -405,6 +442,12 @@ class FormalModelService:
         for key in ("observed_member_identities_before", "remaining_owned_process_identities"):
             for item in observed.get(key, []):
                 self._cleanup_member_identities[(item["pid"], item["create_time_ns"])] = dict(item)
+        self._journal_cleanup_members()
+
+    def _journal_cleanup_members(self):
+        if self._resource_journal is not None and self._cleanup_member_identities:
+            self._resource_journal.model_cleanup_members_observed(
+                self._resource_id, list(self._cleanup_member_identities.values()))
 
     def close(self) -> dict[str, Any]:
         from app.learn.hybrid.windows_process_scope import _identities_for_pids, observe_process_scope_cleanup
@@ -428,6 +471,7 @@ class FormalModelService:
                 # 失败重试时 Job 可能已空，旧进程身份不能随观察调用结束而丢失。
                 for item in _identities_for_pids(self._scope.pids()):
                     self._cleanup_member_identities[(item["pid"], item["create_time_ns"])] = item
+                self._journal_cleanup_members()
                 # 只证明本 Job 和专用 PID 文件清空，不要求也不清理旁人的监听端口。
                 evidence = observe_process_scope_cleanup(self._scope_name, terminate=True,
                     listener_ports=[], pid_file=self._pid_path, remove_owned_pid_file=True,
@@ -449,7 +493,13 @@ class FormalModelService:
                 raise failure from error
             self._scope = None
             self._cleanup_member_identities.clear()
+            self._owned_cleanup_verified = True
+        if self._pending_request_id is not None and self._ownership == "owned" and self._owned_cleanup_verified:
+            if self._resource_journal is not None:
+                self._resource_journal.model_request_finished(self._resource_id, self._pending_request_id)
             self._pending_request_id = None
+        if self._resource_journal is not None:
+            self._resource_journal.model_closed(self._resource_id)
         self._closed = True
         return {"cleanup_verified": True, "ownership": self._ownership}
 

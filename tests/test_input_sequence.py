@@ -56,6 +56,21 @@ def run(coordinator, **overrides):
     return module.run_input_sequence(coordinator, {"handle": 1, "process_id": 2}, request)
 
 
+def test_capture_visibility_reason_survives_without_replaying_input():
+    from app.core.screenshot import CaptureVisibilityError
+    class Blocked(Coordinator):
+        def execute_local_step(self, **kwargs):
+            self.calls.append(kwargs)
+            raise CaptureVisibilityError("capture_window_occluded")
+    co = Blocked()
+    result = run(co, submit_search=False)
+    assert result["error"] == {"code": "capture_window_occluded", "type": "CaptureVisibilityError"}
+    assert result["completed_steps"] == []
+    assert len(co.calls) == 1
+    assert result["action_executed"] is None
+    assert result["automatic_retry_allowed"] is False
+
+
 def test_sequence_dispatches_once_in_order_and_preserves_first_and_last_frames(monkeypatch):
     co = Coordinator()
     snapshots(monkeypatch, ["old", "maps"])
@@ -81,6 +96,38 @@ def test_focus_reuses_plain_click_semantics_instead_of_strict_fill_route(monkeyp
     snapshots(monkeypatch, ["", "maps"])
     run(co)
     assert co.calls[0]["request"] == {"goal": "Search input", "click_kind": "single"}
+
+
+def test_memory_reference_and_original_semantics_reach_only_focus_step(monkeypatch):
+    co = Coordinator()
+    snapshots(monkeypatch, ["", "maps"])
+    reference = {"recipe_id": "target-recipe-" + "a" * 64, "interface_key": "search", "state_key": "home"}
+    result = run(co, target_memory=reference)
+    assert result["status"] == "completed"
+    assert co.calls[0]["request"]["target_memory"] == reference
+    assert co.calls[0]["memory_action"] == {"kind": "input_sequence", "field_goal": "Search input", "submit_search": True}
+    assert all("target_memory" not in call["request"] and "memory_action" not in call for call in co.calls[1:])
+
+
+def test_trial_bindings_reach_only_memory_focus_and_text_must_match(monkeypatch):
+    co = Coordinator()
+    snapshots(monkeypatch, ["", "maps"])
+    reference = {"recipe_id": "target-recipe-" + "a" * 64, "interface_key": "search", "state_key": "home"}
+    bindings = {"run_id": "trial-now", "step_id": "search", "execution_request_id": "ticket-now",
+        "command_sha256": "a" * 64, "action": {"kind": "input_sequence", "field_goal": "Search input",
+            "text": {"source": "input", "name": "query"}, "clear_existing": True,
+            "submit_search": True, "target_memory": reference},
+        "inputs": {"query": "maps"}, "outputs": {}}
+    result = module.run_input_sequence(co, {"handle": 1, "process_id": 2},
+        {"field_goal": "Search input", "text": "maps", "submit_search": True,
+         "target_memory": reference}, memory_bindings=bindings)
+    assert result["status"] == "completed"
+    assert co.calls[0]["memory_bindings"] == bindings
+    assert all("memory_bindings" not in row for row in co.calls[1:])
+    with pytest.raises(ValueError, match="workflow_target_input_mismatch"):
+        module.run_input_sequence(Coordinator(), {"handle": 1, "process_id": 2},
+            {"field_goal": "Search input", "text": "other", "submit_search": True,
+             "target_memory": reference}, memory_bindings=bindings)
 
 
 def test_explicit_recognition_rejection_is_zero_input_not_unknown(monkeypatch):

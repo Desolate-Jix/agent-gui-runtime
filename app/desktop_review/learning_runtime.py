@@ -10,6 +10,7 @@ import re
 from threading import RLock
 from uuid import uuid4
 
+from app.core.learning_runtime_provider_contract import LearningRuntimeProviderContract
 from app.agent_link.contracts import AgentLinkError
 from app.agent_link.learning_runtime_binding import LearningRuntimeBinding
 from app.agent_link.learning_segments import LearningSegmentOwner
@@ -19,7 +20,7 @@ from .fresh_learning_runtime import FreshLearningRuntimeMixin
 _STABLE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
-class LearningRuntimeProvider(FreshLearningRuntimeMixin):
+class LearningRuntimeProvider(FreshLearningRuntimeMixin, LearningRuntimeProviderContract):
     def __init__(self, owner: LearningSegmentOwner, coordinator) -> None:
         from .single_step_coordinator import NativeSingleStepCoordinator
 

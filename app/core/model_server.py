@@ -4759,8 +4759,11 @@ def start_model_server(
     cancelled: threading.Event | None = None,
     deadline: float | None = None,
     worker_executable: Path | None = None,
+    before_resume=None,
 ) -> dict[str, Any]:
     _model_launch_remaining(cancelled, deadline)
+    if before_resume is not None and (scope_name is None or not str(scope_name).strip()):
+        raise ValueError("before_resume requires an explicit model process scope")
     explicit_scope_name = None
     if scope_name is not None:
         explicit_scope_name = str(scope_name).strip()
@@ -4849,6 +4852,7 @@ def start_model_server(
         **({"child_env": child_env} if child_env is not None else {}),
         **({"cancelled": cancelled} if cancelled is not None else {}),
         **({"deadline": deadline} if deadline is not None else {}),
+        **({"before_resume": before_resume} if before_resume is not None else {}),
     )
 
 
@@ -4861,8 +4865,11 @@ def _launch_model_server_process(
     child_env: dict[str, str] | None = None,
     cancelled: threading.Event | None = None,
     deadline: float | None = None,
+    before_resume=None,
 ) -> dict[str, Any]:
     _model_launch_remaining(cancelled, deadline)
+    if before_resume is not None and (scope_name is None or not str(scope_name).strip()):
+        raise ValueError("before_resume requires an explicit model process scope")
     if scope_name is None:
         hybrid_scope_name = os.environ.get(
             "AGENT_GUI_HYBRID_PROCESS_SCOPE_NAME", ""
@@ -4891,6 +4898,7 @@ def _launch_model_server_process(
                 stderr=subprocess.STDOUT,
                 creationflags=creationflags,
                 **({"env": child_env} if child_env is not None else {}),
+                **({"before_resume": before_resume} if before_resume is not None else {}),
             )
         else:
             process = subprocess.Popen(

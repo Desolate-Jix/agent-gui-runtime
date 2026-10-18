@@ -111,7 +111,8 @@ def test_bound_focus_accepts_layout_shift_only_for_same_focused_writable_group(m
     wrapper.element_info.element.CurrentHasKeyboardFocus = 1
     wrapper.is_visible = lambda: True
     wrapper.is_enabled = lambda: True
-    wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+    wrapper.parent = lambda: NS(element_info=NS(handle=10, process_id=20))
+    monkeypatch.setattr(reader_module, "_native_root_handle", lambda hwnd: {10: 10}.get(hwnd))
     monkeypatch.setattr(reader_module, "_focused_field", lambda: wrapper)
     monkeypatch.setattr(reader_module, "_selection", lambda _: (5, 5))
     instance = reader_module.WindowsTextFieldReader(window_manager=None, native_identity_reader=None,
@@ -132,7 +133,8 @@ def test_bound_focus_refuses_mixed_group_even_with_exact_rid(monkeypatch):
     wrapper.element_info.element.CurrentHasKeyboardFocus = 1
     wrapper.is_visible = lambda: True
     wrapper.is_enabled = lambda: True
-    wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+    wrapper.parent = lambda: NS(element_info=NS(handle=10, process_id=20))
+    monkeypatch.setattr(reader_module, "_native_root_handle", lambda hwnd: {10: 10}.get(hwnd))
     wrapper.iface_text.DocumentRange.GetAttributeValue = lambda _: object()
     monkeypatch.setattr(reader_module, "_focused_field", lambda: wrapper)
     instance = reader_module.WindowsTextFieldReader(window_manager=None, native_identity_reader=None)
@@ -218,7 +220,8 @@ def test_preclick_group_requires_full_range_explicit_writable_and_same_window(mo
     wrapper.element_info.rectangle = NS(left=20, top=30, right=120, bottom=70)
     wrapper.is_visible = lambda: True
     wrapper.is_enabled = lambda: True
-    wrapper.top_level_parent = lambda: NS(element_info=NS(handle=10))
+    wrapper.parent = lambda: NS(element_info=NS(handle=10, process_id=20))
+    monkeypatch.setattr(reader_module, "_native_root_handle", lambda hwnd: {10: 10}.get(hwnd))
     wrapper.iface_text.DocumentRange.GetAttributeValue = lambda _: object() if readonly == "mixed" else readonly
     del wrapper.iface_value
     manager = NS(get_bound_window=lambda: NS(handle=10, process_id=20,

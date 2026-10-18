@@ -91,6 +91,141 @@ def test_step_waits_for_explicit_resume_and_no_status_replay(env):
         jobs.resume("job-1", pending["request_id"], "exec-2")
 
 
+def test_memory_miss_handoff_uses_context_goal_but_preserves_original_command(env):
+    from copy import deepcopy
+    jobs, coordinator, store = env
+    reference = {"recipe_id": "target-recipe-" + "a" * 64,
+                 "interface_key": "search", "state_key": "results"}
+    command = {"kind": "step", "operation": "execute_recognition_plan",
+               "request": {"goal": "Open", "target_memory": reference}}
+    bindings = {"run_id": "trial-now", "step_id": "open", "action": {
+        "kind": "click", "goal": "Open", "target_memory": reference},
+        "inputs": {"query": "ID42"}, "outputs": {}}
+    prepared = []
+    coordinator.prepare_memory_grounding = lambda **kwargs: (
+        prepared.append(deepcopy(kwargs)) or None,
+        {"status": "miss", "reason": "visible_row_missing", "grounding_goal": "Open result ID42"})
+    jobs.start("memory-miss", command, {"handle": 100, "process_id": 200},
+        {"image_transport": "supported", "current_vision": "supported"},
+        workflow_bindings=bindings)
+    pending = _wait(jobs, "memory-miss", "awaiting_grounding")["pending_grounding"]
+    assert pending["goal"] == "Open result ID42"
+    assert prepared[0]["memory_bindings"] == bindings
+    store.resolve(pending["request_id"], _found(pending))
+    jobs.resume("memory-miss", pending["request_id"], "exec-miss")
+    _wait(jobs, "memory-miss", "completed")
+    assert coordinator.calls[0]["request"]["goal"] == "Open result ID42"
+    assert "target_memory" not in coordinator.calls[0]["request"]
+    assert "memory_action" not in coordinator.calls[0]
+    assert "memory_bindings" not in coordinator.calls[0]
+    assert jobs._jobs["memory-miss"].command == command
+
+
+@pytest.mark.parametrize("kind", ["step", "input_sequence"])
+def test_memory_match_precedes_unknown_vision_without_handoff(env, monkeypatch, kind):
+    jobs, coordinator, store = env
+    jobs.capture_current = lambda: pytest.fail("memory match requested a visual capture")
+    reference = {"recipe_id": "target-recipe-" + "a" * 64,
+                 "interface_key": "search", "state_key": "results"}
+    request = ({"goal": "Open", "target_memory": reference} if kind == "step" else
+               {"field_goal": "Open", "text": "ID42", "submit_search": False, "target_memory": reference})
+    command = {"kind": kind, "request": request}
+    if kind == "step":
+        command["operation"] = "execute_recognition_plan"
+    else:
+        import app.vision.agent_command_jobs as module
+        def sequence(proxy, target, request, *, persist, **kwargs):
+            proxy.execute_local_step(target_window_handle=target["handle"],
+                target_process_id=target["process_id"], operation="execute_recognition_plan",
+                request={"goal": request["field_goal"], "target_memory": reference},
+                memory_action={"kind": "input_sequence", "field_goal": "Open",
+                               "submit_search": False})
+            return {"status": "completed", "action_executed": True}
+        monkeypatch.setattr(module, "run_input_sequence", sequence)
+    target = object()
+    coordinator.prepare_memory_grounding = lambda **kwargs: (target, {"status": "matched"})
+    jobs.start("memory-match-" + kind, command, {"handle": 100, "process_id": 200}, {})
+    done = _wait(jobs, "memory-match-" + kind, "completed")
+    assert done["pending_grounding"] is None
+    assert len(coordinator.calls) == 1 and coordinator.calls[0]["memory_target"] is target
+    assert not list((store.session_root / "grounding").glob("*.json"))
+
+
+@pytest.mark.parametrize("status", ["miss", "ambiguous", "unsupported"])
+def test_memory_nonmatch_with_unknown_vision_refuses_before_handoff(env, status):
+    jobs, coordinator, store = env
+    jobs.capture_current = lambda: pytest.fail("memory miss requested a visual capture")
+    reference = {"recipe_id": "target-recipe-" + "a" * 64,
+                 "interface_key": "search", "state_key": "results"}
+    prepared = []
+    coordinator.prepare_memory_grounding = lambda **kwargs: (
+        prepared.append(kwargs) or None, {"status": status, "grounding_goal": "Open"})
+    jobs.start("memory-" + status, {"kind": "step", "operation": "execute_recognition_plan",
+        "request": {"goal": "Open", "target_memory": reference}},
+        {"handle": 100, "process_id": 200}, {})
+    failed = _wait(jobs, "memory-" + status, "failed")
+    assert failed["error"]["code"] == "capability_unknown"
+    assert failed["pending_grounding"] is None and failed["action_executed"] is False
+    assert len(prepared) == 1 and coordinator.calls == []
+    assert not list((store.session_root / "grounding").glob("*.json"))
+
+
+def test_explicit_unsupported_memory_and_unknown_form_fill_do_not_probe_memory(env):
+    jobs, coordinator, store = env
+    reference = {"recipe_id": "target-recipe-" + "a" * 64,
+                 "interface_key": "search", "state_key": "results"}
+    probes = []
+    coordinator.prepare_memory_grounding = lambda **kwargs: probes.append(kwargs)
+    with pytest.raises(AgentCommandError, match="vision_unsupported"):
+        jobs.start("unsupported-memory", {"kind": "step", "operation": "execute_recognition_plan",
+            "request": {"goal": "Open", "target_memory": reference}},
+            {"handle": 100, "process_id": 200}, {"image_transport": "unsupported"})
+    with pytest.raises(AgentCommandError, match="capability_unknown"):
+        jobs.start("unknown-form", {"kind": "form_fill", "request": {"target_memory": reference}},
+            {"handle": 100, "process_id": 200}, {})
+    with pytest.raises(AgentCommandError, match="capability_unknown"):
+        jobs.start("invalid-memory", {"kind": "step", "operation": "execute_recognition_plan",
+            "request": {"goal": "Open", "target_memory": {"recipe_id": "invalid"}}},
+            {"handle": 100, "process_id": 200}, {})
+    assert probes == [] and coordinator.calls == []
+    assert not (store.session_root / "agent-commands" / "unsupported-memory.json").exists()
+
+
+def test_external_api_memory_miss_receives_context_goal_without_rewriting_command(tmp_path):
+    frame = tmp_path / "current.png"
+    Image.new("RGB", (100, 80), "white").save(frame)
+    capture = {"image_path": str(frame), "sha256": sha256(frame.read_bytes()).hexdigest(),
+        "window_identity": {"handle": 100, "process_id": 200, "process_create_time": 1.5}}
+    coordinator = _Coordinator()
+    reference = {"recipe_id": "target-recipe-" + "a" * 64,
+                 "interface_key": "search", "state_key": "results"}
+    command = {"kind": "step", "operation": "execute_recognition_plan",
+               "request": {"goal": "Open", "target_memory": reference}}
+    coordinator.prepare_memory_grounding = lambda **kwargs: (None,
+        {"status": "miss", "reason": "visible_row_missing", "grounding_goal": "Open result ID42"})
+    observed = []
+    class Grounder:
+        def ground(self, *, request_id, capture, goal):
+            observed.append(goal)
+            result = _found({"request_id": request_id, "capture": capture})
+            result["candidates"][0]["evidence_source"] = "api_visual"
+            return {"provider": "fixture-api", "result": result}
+    store = GroundingHandoffStore(tmp_path, owner_id="api-miss")
+    jobs = AgentCommandJobs(coordinator, store, lambda: capture,
+        RecognitionSourceConfig(source="external_api", api_profile="fixture"), api_grounder=Grounder())
+    try:
+        jobs.start("api-miss", command, {"handle": 100, "process_id": 200},
+            {"image_transport": "supported", "current_vision": "supported"},
+            workflow_bindings={"action": {"kind": "click", "goal": "Open", "target_memory": reference},
+                               "run_id": "trial-now", "inputs": {"query": "ID42"}, "outputs": {}})
+        _wait(jobs, "api-miss", "completed")
+        assert observed == ["Open result ID42"]
+        assert coordinator.calls[0]["request"] == {"goal": "Open result ID42"}
+        assert jobs._jobs["api-miss"].command == command
+    finally:
+        jobs.close()
+
+
 def test_duplicate_second_active_and_cancel(env):
     jobs, coordinator, store = env
     _start(jobs)

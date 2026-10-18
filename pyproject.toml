@@ -46,6 +46,10 @@ desktop = [
   "mcp==2.1.1",
   "httpx==0.28.1",
 ]
+execution = [
+  "mcp==2.1.1",
+  "httpx==0.28.1",
+]
 dev = [
   "pytest>=8,<9",
 ]

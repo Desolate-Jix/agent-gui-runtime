@@ -1,47 +1,68 @@
-> **2026-09-27 后续源码，未发布 / Unreleased source follow-up:** `external_api` 已接入现有执行链；配置完整 API 端点、视觉模型和密钥环境变量名后，可用原有单步与组合命令，API 自动定位，执行仍走公共检查。已发布 test.8 ZIP 仍仅预留 API 适配器，不能按本段当成已更新。 / External API grounding is now wired into the common execution path in source. The published test.8 ZIP remains adapter-only and has not been replaced.
-
 # Agent Review Instant
 
+> **不强制使用本地模型。** 可以选择外部视觉 API、当前支持图像的 Agent，或客户端指定的视觉子 Agent；这些路线都不需要下载 VISTA 权重。只有选择 `local` 时，才需要安装本地识别依赖并准备模型。使用 API 仍需在本机运行执行框架，但识图由所配置的服务完成。
+> **Local models are optional.** Choose an external vision API, the current image-capable agent or an explicitly selected vision delegate without downloading VISTA weights. Only `local` requires local recognition dependencies and weights. The execution runtime still runs on your PC when using an API; the configured service handles visual grounding.
 
+| 使用方式 / Mode | 本地模型是否必需 / Local model required? | 需要准备 / Setup |
+|---|---|---|
+| 外部视觉 API / `external_api` | **不需要 / No** | 支持图像与 JSON 协议的服务端点、视觉模型 ID、密钥环境变量 / Image/JSON endpoint, vision model ID and secret environment variable |
+| 当前 Agent 或视觉子 Agent / `agent_current`, `agent_delegate` | **不需要 / No** | 支持图像的当前 Agent，或客户端显式配置的视觉委派 / Image-capable current agent or client-configured vision delegate |
+| 本地模型 / `local` | **需要 / Yes** | VISTA 权重、本地识别依赖与相应硬件 / VISTA weights, local recognition dependencies and suitable hardware |
 
-> v0.1.0-test.8：源码与隔离候选各 2025 项通过，本方 local、当前 Agent、实际 Luna 委派的单项及连续操作与清理通过；同候选独立 local、visual 与 cleanup 均已完成。首次失败、恢复与具体覆盖见验收记录。独立 API 仍仅预留接口，宿主禁用。 / Source and isolated candidate each passed 2025 checks. Main-agent local/current/actual-Luna single and continuous journeys passed; same-candidate independent local, visual and cleanup gates are complete. Initial failures and scope remain documented. External API remains interface-only with its host route disabled.
+## 可选学习工作台测试版 / Optional learning preview
+
+学习工作台 **0.1.0-preview.1** 和兼容执行组件 **0.1.2-preview.1** 分别安装、升级和卸载。[下载测试版 / Download preview](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/learning-v0.1.0-preview.1)。正式执行版 `v0.1.1` 保持独立。 / Install, upgrade and uninstall the two preview components separately; stable execution remains separate.
+
+| 安装文件 / Installer | 功能 / Function |
+|---|---|
+| `AgentGUIRuntimeExecutionPreview-Setup.exe` | 独立执行框架；按需选择外部视觉 API、当前 Agent、视觉委派或本地模型 / Standalone execution with explicitly configured API, current/delegated Agent or local grounding |
+| `AgentLearningWorkbenchPreview-Setup.exe` | 可选学习库界面；审核、修改、保存、重开，支持简体中文与 English / Optional bilingual library editor for review, editing, saving and reopening |
+
+仅学习工作台可离线管理库；采集教学和试运行时，明确连接兼容的执行安装及已有会话。数据根放在安装目录外。流程图引用界面确切版本，加入成员不自动补跳转。 / Offline library editing needs no host or model; explicitly attach to compatible execution for teaching/trials. Keep data outside installation roots. Graphs pin interface versions and membership adds no implicit transitions.
+
+有判别证据的学习跳转默认提议本地图像核验。审核后，图像明确匹配便继续；证据不确定时保留原请求交 Agent 审核。可在“任务步骤 → 结果与读取”修改区域和阈值，或关闭后保存，重开不会自动补回。图像匹配不要求本地模型权重。 / Distinguishable learned transitions propose local image checks. Reviewed matches advance; uncertain evidence retains the original request for Agent review. Edit regions/thresholds or persistently disable checks under Task Steps → Results and readback. Matching needs no local model weights.
+
+同一最终安装候选完成 Main 与独立 Sol 的全新教学、六个预期连续场景、保存后截图、关闭重开与正常清理；范围及安装器 SHA 见[本次验收](docs/verification/LEARNING_PREVIEW_RELEASE_ACCEPTANCE_20261007.md)。小样本不证明通用准确率、速度或模型用量收益；本轮没有新增真实 API 供应商测试。旧便携候选未知退出仍保留为历史未解决项。 / Fresh same-candidate acceptance covers teaching, six expected cases, Save observation, reopening and cleanup. See the report for installer hashes and limits; no general performance or new live-provider claim is established, and the old portable exit remains unexplained.
+
+[使用说明 / Guide](docs/LEARNING_PREVIEW_QUICKSTART.md) · [图像核验 / Image checks](docs/LEARNING_IMAGE_VERIFICATION.md) · [开发历史 / History](LEARNING_DEVELOPMENT_HISTORY.md)
+
+> v0.1.1 执行模式正式补丁：源码与隔离包各 2086 项、STDIO 七工具检查通过。本方与独立 Agent 在同一冻结运行时完成全新原生连续使用、429 恢复和最终清理，双方原始回执／PNG／trace 审计通过。首次 identity 拒绝原因未定；Note 定位 fixture 修复经 19 项离线检查、长中英前缀本方回归及独立复测通过，未修改冻结运行时。见 [验收记录](docs/verification/V011_RELEASE_ACCEPTANCE.md)。 / v0.1.1 execution patch: source and isolated bundle each passed 2086 checks, plus seven-tool STDIO. Main-agent and independent fresh native continuous journeys, 429 recovery and cleanup passed on the same frozen runtime, with original receipt/PNG/trace audit. The initial identity-rejection cause remains unresolved; the Note-target fixture correction passed 19 offline checks, long Chinese/English-prefix regression and independent retesting without changing the frozen runtime.
 **Windows GUI execution runtime for MCP agents / 面向 MCP Agent 的 Windows 图形界面执行框架**
 
 Agent 负责理解任务、决定下一步和判断结果；框架负责观察真实界面、定位目标、派发操作、返回证据与管理本地资源。它不是另一个自主决策 Agent，也不是网页管理面板。
 
 The connected agent plans and judges outcomes. This runtime observes real Windows interfaces, grounds targets, dispatches actions and returns evidence. It is an execution layer, not an autonomous planner or web management console.
 
-> **当前版本：v0.1.0-test.8 · 执行模式测试版。**
-> **Current version: v0.1.0-test.8 · execution-mode test release.**
+> **当前版本：v0.1.1 · 执行模式正式补丁。**
+> **Current version: v0.1.1 · execution-mode patch release.**
 >
-> **本次只更新执行模式，学习模式不发布。** 文末介绍是后续方向，不代表下载包已支持。
-> **Execution only. Learning is not shipped.** The roadmap below is not an available feature list.
+> **已发布稳定v0.1.1只包含执行模式。** 本段只描述该稳定版本；上方学习预览使用两个独立安装器。
+> **Published stable v0.1.1 is execution only.** This block describes that stable version; the learning preview above uses two separate installers.
 >
-> 测试版，不是生产稳定版。快捷配置启用管理员宿主、真实键鼠输入，关闭自动风险拦截。请有人看护，不用于付款、发送、删除或最终提交；UAC、窗口身份与坐标有效性检查仍存在。
-> Supervised test software. Quick setup enables elevated real input with automatic risk interception disabled. Do not use it for payment, sending, deletion or final submission. UAC and window/coordinate integrity checks remain.
+> 真实键鼠操作必须有人看护。快捷配置启用管理员宿主并关闭自动风险拦截；UAC、窗口身份与坐标有效性检查仍存在。不得用于付款、发送、删除或最终提交。
+> Supervise all real input. Quick setup enables an elevated host and disables automatic risk interception; UAC, window identity and coordinate checks remain. Do not use it for payment, sending, deletion or final submission.
 
 ## 1. 下载与文档 / Downloads and documentation
 
 - [GitHub Releases / 已发布版本](https://github.com/Desolate-Jix/agent-gui-runtime/releases)
-- [已发布 test.8 ZIP / Published test.8 download](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.0-test.8/AgentReviewInstant-v0.1.0-test.8.zip)
+- [v0.1.1 发布与下载 / Release and downloads](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.1)
 - [安装、模型下载与配置 / Setup and models](FRIEND_SETUP.md)
 - [Agent 使用指南 / Agent guide](AGENT_GUIDE.md)
 - [Codex 视觉会话适配 / Codex visual-session adapter](skills/codex-vision-session/SKILL.md)：Codex 委派识图连续复用同一个子 Agent；其他 MCP 客户端不受影响。 / Reuse one Codex visual worker across consecutive screenshots without changing other MCP clients.
-- [test.8 验收与限制 / Acceptance and limits](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md)
-- [Agent 视觉路由与组合协议 / Agent routing and batch protocol](docs/development/AGENT_VISION_BACKENDS_DESIGN.md) · [组合协议细节 / Batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md) · [独立 API 预留接口 / Reserved API adapter](docs/development/EXTERNAL_VISION_API.md)
+- [v0.1.1 验收与限制 / Acceptance and limits](docs/verification/V011_RELEASE_ACCEPTANCE.md)
+- [v0.1.0 历史验收 / Historical acceptance](docs/verification/V010_RELEASE_ACCEPTANCE.md)
+- [Agent 视觉路由与组合协议 / Agent routing and batch protocol](docs/development/AGENT_VISION_BACKENDS_DESIGN.md) · [组合协议细节 / Batch protocol](docs/development/AGENT_BATCH_PROTOCOL.md) · [外部视觉 API 接入 / External vision API](docs/development/EXTERNAL_VISION_API.md)
 - [调用方调度 / Caller scheduling](AGENT_GUIDE.md#执行契约--execution-contracts)：已知字段先合批、及时读取 pending 结果、直接核对回执原图；属于调用指引调整，尚无本轮实机提速数据。 / Batch known fields, promptly retrieve pending results and inspect inline evidence; caller guidance only, without a new live speed measurement.
 - [发布范围 / Release scope](RELEASE_SCOPE.md) · [变更记录 / Changelog](CHANGELOG.md)
 - [历史网页与学习工作台归档 / Historical workbench archive](https://github.com/Desolate-Jix/agent-gui-runtime/tree/codex/archive-learning-workbench)
 
-这是小型源码包，不是独立 EXE 安装器。不包含模型权重、Python 环境、用户截图、账号或本机 MCP 配置。程序、模型、数据分开存放；升级不要覆盖未清理的运行会话。
-
-This is a source bundle, not a standalone installer. Prepare dependencies, weights and configuration locally. Keep application, model and data directories separate and preserve unresolved sessions.
+已发布稳定v0.1.1下载为小型源码ZIP，本段仅适用于该稳定版；上方执行0.1.2-preview.1和学习0.1.0-preview.1使用独立安装器。不包含模型权重、用户截图、账号或本机MCP配置。程序、可选模型、数据分开存放；升级不要覆盖未清理的运行会话。 / Published stablev0.1.1 uses a source ZIP; this paragraph applies only to that stable version. The preview execution/learning pair above uses separate installers. Keep programs, optional models and data separate and preserve unresolved sessions.
 
 ## 2. 功能 / Capabilities
 
 **本地兼容能力 / Local compatibility:** 保留原有 VISTA 操作与 1–32 项 `form_fill`；新增视觉来源仍使用同一执行器。具体范围见 [发布范围](RELEASE_SCOPE.md)。 / Existing local VISTA actions and 1–32-field form filling remain available through the shared executor.
 
-**test.8 新增 / New in test.8:** 当前 Agent、客户端显式委派 Agent、原图交接、可恢复组合命令与原图文字阅读；外部 API 仅预留接口。 / Current/delegated Agent grounding, resumable batches and image-based reading; external API is interface-only.
+**视觉来源 / Vision sources:** 当前 Agent、客户端显式委派 Agent，或配置的外部视觉 API；定位结果均进入现有公共执行器。Agent 路线的 `read_text` 返回原图，不运行本地 OCR。外部 API 路线会把截图发送给所配置服务，且不要求本地模型权重。 / Use the current Agent, a client-selected delegate or a configured external vision API. Grounding uses the shared executor. Agent-route `read_text` returns the original image without local OCR; the API route sends screenshots to the configured service and requires no local model weights.
 
 | Agent 路由 / Agent route | 行为与边界 / Behavior and boundary |
 |---|---|
@@ -49,9 +70,38 @@ This is a source bundle, not a standalone installer. Prepare dependencies, weigh
 | `agent_delegate` | 仅由客户端按显式配置/profile 选择和调用视觉子 Agent，例如 Astra 主 Agent 显式委派给 Luna；宿主不继承 API/key，也不自动创建或切换子 Agent。 / The client explicitly selects/invokes a delegate (e.g. Astra planner to Luna vision); no host credential inheritance or automatic model switching. |
 | `read_text` on Agent routes | 返回当前原图供 Agent 阅读，不运行本地 OCR。 / Returns the current original image for the Agent; does not run local OCR. |
 | resumable batch | grounding 等待通过 pending/status/resume 继续原命令，保留已完成项并禁止自动重放。 / Pending grounding suspends and resumes the same command without replaying completed fields. |
-| external API | 仅保留 adapter/config/mock 协议检查；宿主路由禁用，无 key/live-provider 验收要求，也不宣称服务商支持。 / Adapter/config/mock checks only; host route disabled, no key or live-provider requirement, and no provider-support claim. |
+| `external_api` | 按配置端点和模型定位，再由公共执行器处理；无自动重试或切换服务。截图会发送给该服务，准确率及任意服务商兼容性不作保证。 / Grounds through the configured endpoint/model and shared executor; no automatic retry or provider fallback. Screenshots are sent to that service; accuracy and universal provider compatibility are not guaranteed. |
 
-Historical candidate01 isolated verification: source and frozen candidate each passed 2010 checks, with 283 module origins and 715 manifest hashes. These are historical results, not the current candidate03 results. / candidate01 历史隔离验证：源码与冻结包各 2010 项，283 个模块来源与 715 项 manifest 摘要均已核对，这些不是当前 candidate03 结果。
+Historical test.8 and candidate01 results are recorded in their versioned acceptance documents; they do not count as v0.1.0 verification. / test.8 与 candidate01 的历史结果保存在各自验收文档中，不计作 v0.1.0 验收结果。
+
+### 外部视觉 API / External vision API
+
+此路线不需要本地 VISTA 模型或模型权重。每次定位会把当前截图发送给配置的服务，并把返回候选交给现有公共执行器；`read_text` 仍返回原图，由调用方阅读。请求错误会明确停止，不自动重试，也不回退到本地模型或其他服务。请勿发送包含私人页面、凭证或账户信息的截图。
+
+This route needs no local VISTA model or weights. Each grounding request sends the current screenshot to the configured service and passes its candidate through the shared executor. `read_text` still returns the original image to the caller. Errors stop clearly without retry or fallback to a local model or another provider. Do not send screenshots containing private pages, credentials or account information.
+
+将下例保存为 `D:\AgentReviewConfig\vision-api.json`，按服务商替换完整请求端点和视觉模型 ID。密钥只通过运行 MCP 的进程环境提供；不要把密钥写入配置文件。
+
+Save the following profile as `D:\AgentReviewConfig\vision-api.json` and replace the full request endpoint and vision model ID for your provider. Supply the key only through the MCP process environment; never put it in the profile.
+
+```json
+{
+  "protocol": "chat_completions_json",
+  "endpoint": "https://YOUR_PROVIDER/v1/chat/completions",
+  "model": "YOUR_VISION_MODEL_ID",
+  "api_key_env": "AGENT_REVIEW_VISION_API_KEY"
+}
+```
+
+在程序目录运行以下命令。它会安装无本地模型的轻量执行依赖并生成 MCP 配置；连接所用进程必须能读取上述环境变量。管理员宿主也必须在其自身环境中取得密钥。
+
+Run this from the application directory. It installs the lightweight execution dependencies without local model weights and creates the MCP configuration. The process connecting to MCP must inherit the named environment variable; an elevated host must receive it in its own environment.
+
+```powershell
+.\scripts\setup_instant.ps1 -RecognitionSource external_api -ApiProfile "D:\AgentReviewConfig\vision-api.json" -DataDirectory "D:\AgentReviewInstantData"
+```
+
+配置示例不会发送请求，也不证明服务商连通性。接入格式不等于对任意服务商兼容、识别准确率、速度或费用的承诺；详见[API 接入说明](docs/development/EXTERNAL_VISION_API.md)。 / Creating a profile sends no request and proves no provider connectivity. Protocol support does not guarantee compatibility, accuracy, speed or cost for any provider; see the API guide.
 
 | 功能 / Capability | 执行模式 / Execution mode |
 |---|---|
@@ -75,7 +125,7 @@ Historical candidate01 isolated verification: source and frozen candidate each p
 - 修正模型下载参数及跨机器配置说明。
 - `form_fill` supports 1–32 text/date/dropdown/radio/checkbox fields with partial receipts and no automatic final submission. See [form-fill contract](docs/verification/EXECUTION_FORM_FILL.md); historical test.7 acceptance remains separately archived.
 
-The published test.7 live acceptance and its retained failure details are historical evidence for that exact package, not test.8 acceptance. See [test.7 acceptance](docs/verification/TEST7_CANDIDATE_ACCEPTANCE.md). The test.8 candidate record is the only source for current candidate verification; do not infer universal website/widget support.
+The published test.7 and test.8 acceptance records preserve results for those exact historical packages. Current v0.1.1 progress belongs in the [v0.1.1 acceptance record](docs/verification/V011_RELEASE_ACCEPTANCE.md); do not infer universal website/widget support.
 
 ## 3. 系统架构 / System architecture
 
@@ -119,11 +169,14 @@ The adapter validates/persists requests; the serial coordinator owns native reso
 | `app/instant_mcp.py`, `app/instant_receipt.py` | MCP tools, admission, compact/full receipts |
 | `scripts/start_instant_mcp.py`, `scripts/start_instant_mcp_admin.py` | Normal/elevated entrypoints |
 | `scripts/run_local_step_session.py` | Session loop and evidence |
-| `app/desktop_review/` | Coordinator, ownership, app preparation, input sequences, recovery |
+| `app/execution/` | Eight maintained execution modules; legacy imports alias the same objects / 八个维护执行模块，旧导入为同对象别名 |
+| `app/desktop_review/` | Coordinator and app preparation; compatible execution imports / 协调器、应用准备与执行兼容导入 |
 | `app/core/`, `app/agent/` | Capture, Win32/UIA, input, target identity |
 | `app/vision/`, `modules/ocr/` | Model service/worker and OCR contracts |
 | `app/api/`, `app/application_profiles/` | Maintained action handlers and shared dependencies |
 | `tests/`, `docs/verification/` | Regression and acceptance evidence |
+
+v0.1.1 收拢八个既有执行模块，沿用原 owner、公共动作 API、七个 MCP 工具及全部视觉路线；不增加执行器。可选 `OptionalJudgment` 与 `ModelUsage` 仅为共享合同，未生产接线，默认不调用判断模型；未知用量保持 null，不代表全量 Agent 用量。见 [模块边界](docs/EXECUTION_MODULE_BOUNDARIES.md) 与 [判断／用量合同](docs/OPTIONAL_JUDGMENT_AND_MODEL_USAGE.md)。 / v0.1.1 consolidates eight existing execution modules while retaining the original owner, action API, seven MCP tools and all vision routes. Optional judgment and usage are unwired shared contracts: no default judgment-model invocation; unknown usage stays null and does not represent total Agent usage.
 
 部分历史命名模块仍为执行模式的共用依赖，不能因目录名含 `learn` 就删除。它们不代表学习产品已启用；本包不配送学习启动入口，MCP 只暴露执行工具。
 
@@ -131,22 +184,50 @@ Historically named modules may remain shared dependencies. Their presence does n
 
 ## 4. 模型与环境 / Models and environment
 
-- Windows x64、**Python 3.11**，使用仓库 `uv.lock`，不随意替换版本。
-- 视觉定位使用官方 [inclusionAI/VISTA-4B](https://huggingface.co/inclusionAI/VISTA-4B)，走 Transformers 格式，不是 GGUF；保留配置、分词器、处理器、模板与全部权重。
+- 所有路线都需要 Windows x64、**Python 3.11** 和本机执行框架。**外部 API / Agent 路线安装轻量执行依赖，不需要 VISTA 权重、CUDA 或用于本地识图的 GPU**；服务或 Agent 自身的要求由其提供方决定。
+- **以下模型、CUDA、显存和磁盘规划只适用于 `local` 路线，不是 API / Agent 使用门槛。** 本地路线使用仓库 `uv.lock`，不随意替换依赖版本。
+- 本地视觉定位使用官方 [inclusionAI/VISTA-4B](https://huggingface.co/inclusionAI/VISTA-4B)，走 Transformers 格式，不是 GGUF；保留配置、分词器、处理器、模板与全部权重。
 - OCR 是另一个本地组件，UIA 是 Windows 可访问性接口，决策大模型由外部 Agent 提供。因此“只下载一个 VISTA 目录”不等于只有一个算法，**也无需额外部署三套大模型**。
 - 锁定 GPU 路径使用 CUDA 13.0 PyTorch；CPU／AMD／所有 NVIDIA 驱动组合尚未认证。本机最近生命周期测试使用 RTX 4070 SUPER 12 GB，不代表该显存满足所有截图与并行负载。
 - 模型约 9.1 GB；Python、依赖、缓存和截图另外占空间。可按 32 GB RAM、16 GB VRAM、35–45 GB 空闲磁盘做试用规划，**不是已验证最低配置**。
 
-Use Windows x64, Python 3.11 and locked dependencies. VISTA grounds visual targets; OCR/UIA and the external planning agent have different roles. Hardware numbers are trial-planning estimates, not certified minima. See [full setup guidance](FRIEND_SETUP.md).
+All routes require Windows x64, Python 3.11 and the local execution runtime. API/Agent routes use lightweight dependencies without VISTA weights, CUDA or a GPU for local grounding. The model, GPU and disk estimates above apply only to `local`; they are not API/Agent requirements or certified minima. The local route uses locked dependencies. See [full setup guidance](FRIEND_SETUP.md).
 
 ## 5. 安装与配置 / Install and configure
 
 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)，解压到例如 `D:\AgentReviewInstant`。路径均为示例，请按本机修改。/ Install uv, extract the source and adjust paths.
 
+**按所选识图方式执行其中一组命令，不需要全部安装。** / **Choose one setup route; you do not need to install every option.**
+
+### A. 使用外部视觉 API，不下载本地模型 / External vision API, no local weights
+
+先按上方“外部视觉 API”说明准备 JSON 配置和密钥环境变量，然后运行： / Prepare the API profile and secret environment variable described above, then run:
+
 ```powershell
 Set-Location "D:\AgentReviewInstant"
-.\scripts\setup_instant.ps1 -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel -WhatIf
-.\scripts\setup_instant.ps1 -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel
+.\scripts\setup_instant.ps1 -RecognitionSource external_api -ApiProfile "D:\AgentReviewConfig\vision-api.json" -DataDirectory "D:\AgentReviewInstantData"
+```
+
+这一路线不传 `-ModelDirectory` 或 `-DownloadModel`，无需执行下方本地模型下载步骤。 / Do not pass `-ModelDirectory` or `-DownloadModel`; skip the local-model download steps below.
+
+### B. 使用当前 Agent 或视觉子 Agent，不下载本地模型 / Current or delegated agent, no local weights
+
+当前 Agent 确实支持图像时使用： / When the current agent supports images:
+
+```powershell
+.\scripts\setup_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentReviewInstantData"
+```
+
+客户端已配置视觉委派时，可改用 `-RecognitionSource agent_delegate -DelegateProfile "vision-luna"`；`vision-luna` 是示例配置名。 / For a client-configured delegate, use `-RecognitionSource agent_delegate -DelegateProfile "vision-luna"`; the profile name is an example.
+
+### C. 使用本地 VISTA 模型 / Local VISTA model
+
+**只有选择本地识图才需要以下模型安装与下载。** / **These model installation/download steps are required only for local grounding.**
+
+```powershell
+Set-Location "D:\AgentReviewInstant"
+.\scripts\setup_instant.ps1 -RecognitionSource local -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel -WhatIf
+.\scripts\setup_instant.ps1 -RecognitionSource local -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel
 ```
 
 已有环境与模型，只生成配置 / Reuse existing environment and weights:
@@ -179,12 +260,12 @@ Repeat `--include` per pattern. Merge the generated server entry without replaci
 
 1. `instant_start` → 轮询到 `ready`。
 2. `discover` → `launch` 或 `select` → `capture`，检查目标和原图。
-3. 需要识别时 `prepare_models`，同一会话保持驻留，不要每步关模型。
+3. 仅本地模型路线在需要识别时调用 `prepare_models`，同一会话保持驻留；API / Agent 路线无需加载本地模型。
 4. `instant_run` 执行一项动作或一个支持的 `input_sequence`。
 5. 根据回执与后图判断 success / failure / uncertain，再决定下一步。
 6. 正常关闭本轮创建的测试窗口 → `instant_stop` → `cleanup_verified=true` 且宿主退出，再断连。
 
-Start/reattach, inspect the target, prepare models, execute and inspect each result. Keep one connection and one desktop controller. Finish with verified owned-window and resource cleanup.
+Start/reattach, inspect the target, prepare models only for local recognition, then execute and inspect each result. API/Agent routes do not load local models. Keep one connection and one desktop controller. Finish with verified owned-window and resource cleanup.
 
 已选定并确认目标后，以下是 `instant_run` 参数示例，只提交搜索，不自动点击结果。/ After selecting and inspecting the target, this example submits a search only.
 
@@ -232,31 +313,10 @@ Data can contain private text/images and may reach the client's model provider. 
 
 ## 8. 验证状态 / Verification status
 
-**candidate01 历史 / Historical candidate01:** 原源码与隔离包各 2010 项，283 个模块、715 项清单；两轮 Luna 混合表单为 139.013 / 126.147 秒，含调用方等待。首次 CaptureVisibilityError 和 AionUi PARTIAL 均保留。当前交付依据为 candidate03，结果见验收文档。 / Preserve the original 2010-check candidate, its initial capture failure and PARTIAL independent report. These are historical; current delivery is based on candidate03 acceptance.
+v0.1.1 源码与隔离候选各 2086 项（覆盖重叠，不相加）；294 个项目模块来自独立包目录，739 项冻结清单摘要一致，STDIO 七工具通过。双方同冻结候选连续使用与清理及原始证据审计通过。外部 API 的真实输入使用本机回环测试服务，不等于真实供应商连通性或识别准确率验证。[v0.1.0 验收](docs/verification/V010_RELEASE_ACCEPTANCE.md) 另行保留为历史证据。 / v0.1.1 source and isolated candidate each passed 2086 overlapping checks; 294 project modules resolved inside the bundle, 739 manifest hashes matched and seven-tool STDIO passed. Main-agent and independent same-candidate continuous journeys, cleanup and original-evidence audit passed. Real API input used a loopback fixture, not a live-provider connectivity or accuracy benchmark; v0.1.0 acceptance remains separate historical evidence.
 
 
-Published test.7 results, failures and scope remain in the [test.7 acceptance record](docs/verification/TEST7_CANDIDATE_ACCEPTANCE.md); do not treat them as test.8 evidence. See [test.8 candidate acceptance](docs/verification/TEST8_CANDIDATE_ACCEPTANCE.md) and the [form contract](docs/verification/EXECUTION_FORM_FILL.md) for current evidence and limits.
-
-## 9. 后续轻量学习模式 / Future lightweight learning
-
-**独立开发中，本次不发布，不要求额外学习模型，不承诺完成时间。 / Separate development, not shipped and no extra learning models required.**
-
-核心：**Agent 决策，框架提供可编辑、可复用的界面与流程记忆，继续使用同一个执行器。** 不再建一套点击引擎，也不每步重复读取完整历史。
-
-The agent remains the decision-maker. Learning adds editable interface/process memory above the same executor, with scoped retrieval rather than full-history replay.
-
-1. **学习段**：Agent 正常操作时记录前后界面、目标、动作和真实跳转。
-2. **界面与流程分开**：单页面学习产生独立界面；连续学习按实际跳转成图。输入值作为变量，不因换搜索词重复造页面。
-3. **人工修改**：在原图上修改控件框、标签、含义；已有界面可加入／移出流程，持续保存编辑，不强制定稿。
-4. **轻量复用**：按需读取节点、目标控件、下一跳与变量，使用明确版本引用；仍核对当前界面，不照搬旧坐标。
-5. **局部截图定位**：固定样式按钮保存局部模板，在当前图里比较定位。重复匹配、缺失、缩放／布局变化要明确返回，不伪装成命中。
-6. **反馈与版本**：可人工修正或交 Agent 重学，保留来源和修订，避免新修改静默污染旧流程。
-
-Planned experience: action-linked learning segments, standalone interfaces, real transition graphs, editable regions/semantics, parameterized reuse, local screenshot-template matching and explicit revisions/relearning. Templates assist localization; they do not prove old coordinates remain valid.
-
-先把执行模式稳定性、操作覆盖和跨 Agent 使用打磨好，再把学习接到稳定执行链上。历史网页／工作台仅供参考，不把旧截图和旧流程当成新版验收数据。
-
-Execution stability and coverage come first. Learning requires separate acceptance with fresh content; the historical workbench is not the current product download.
+Published test.7 and test.8 results, failures and scope remain in their versioned acceptance records as historical evidence. See the [v0.1.1 acceptance record](docs/verification/V011_RELEASE_ACCEPTANCE.md) and [form contract](docs/verification/EXECUTION_FORM_FILL.md) for this patch's progress and limits; [v0.1.0 acceptance](docs/verification/V010_RELEASE_ACCEPTANCE.md) remains historical.
 
 ## License / 许可证
 

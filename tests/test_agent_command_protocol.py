@@ -35,7 +35,17 @@ def test_agent_command_receipt_never_calls_waiting_or_failed_work_success(tmp_pa
     session = InstantSession(tmp_path, tmp_path, None, recognition_source='agent_current')
     session.session = tmp_path
     (tmp_path / 'responses').mkdir()
-    write_json(tmp_path / 'responses/status-1.json', {'status': 'returned', 'result': {
+    (tmp_path / 'commands').mkdir()
+    original = InstantCommand.model_validate({'kind': 'input_sequence', 'request': {
+        'field_goal': 'Search', 'text': 'test', 'clear_existing': True, 'submit_search': False}}).command()
+    status_command = InstantCommand.model_validate({'kind': 'agent_command_status',
+        'request': {'command_id': 'batch-1'}}).command()
+    write_json(tmp_path / 'commands/batch-1.json', original)
+    write_json(tmp_path / 'commands/status-1.json', status_command)
+    write_json(tmp_path / 'responses/batch-1.json', {'command': original, 'status': 'returned',
+        'result': {'contract_version': 'agent_command.v1', 'command_id': 'batch-1',
+                   'status': 'running', 'action_executed': None}})
+    write_json(tmp_path / 'responses/status-1.json', {'command': status_command, 'status': 'returned', 'result': {
         'contract_version': 'agent_command.v1', 'command_id': 'batch-1', 'status': status,
         'action_executed': None, 'result': {'status': 'completed'} if status == 'completed' else None}})
     receipt = session.result('status-1')
@@ -44,8 +54,11 @@ def test_agent_command_receipt_never_calls_waiting_or_failed_work_success(tmp_pa
     assert receipt['action_executed'] is None
     assert receipt['operation_success_scope'] == 'agent_command_progress'
     if status in {'running', 'awaiting_grounding'}:
-        assert receipt['next']['tool'] == 'instant_run'
-        assert receipt['next']['arguments']['command']['kind'] == 'agent_command_status'
+        assert receipt['next_action'] == 'inspect_original_worker_evidence_no_replay'
+        assert 'next' not in receipt
+        assert receipt['worker_status'] == 'result_unknown'
+        assert receipt['persisted_worker_evidence']['status'] == 'unavailable'
+        assert receipt['persisted_worker_evidence']['scope'] == 'saved_worker_diagnostic_not_execution_receipt'
 
 
 def test_agent_read_text_returns_original_for_agent_without_local_ocr(monkeypatch):
@@ -69,6 +82,27 @@ def test_active_job_blocks_other_input_before_coordinator_dispatch():
     for kind in ('close', 'agent_command_status', 'agent_command_continue', 'agent_command_cancel',
                  'grounding_resolve', 'grounding_status', 'grounding_cancel'):
         check_agent_command_admission(jobs, kind)
+
+
+@pytest.mark.parametrize('action', ['takeover_preview', 'takeover_commit'])
+def test_active_job_allows_takeover_readonly_retry_but_keeps_run_start_gate(action):
+    from scripts.run_local_step_session import check_agent_command_admission
+    jobs = SimpleNamespace(active=True)
+    request = ({'action': action, 'admission_request_id': 'epoch-admission',
+                'source_run_id': 'trial-' + 'a' * 64} if action == 'takeover_preview' else
+               {'action': action, 'preview_request_id': 'takeover-preview',
+                'preview_sha256': 'a' * 64, 'mode': 'until_wait'})
+    command = InstantCommand.model_validate({'kind': 'learning_workflow', 'request': request}).command()
+    check_agent_command_admission(jobs, command['kind'], command)
+    check_agent_command_admission(jobs, command['kind'], command)
+    for blocked in ({'action': 'run', 'run_id': 'trial-' + 'a' * 64, 'mode': 'until_wait'},
+                    {'action': 'start', 'workflow_id': 'workflow-' + 'a' * 64,
+                     'program_id': 'program-' + 'b' * 64, 'start_step_id': 'search', 'inputs': {'query': 'test'}}):
+        blocked_command = InstantCommand.model_validate({'kind': 'learning_workflow', 'request': blocked}).command()
+        with pytest.raises(ValueError, match='agent_command_in_progress'):
+            check_agent_command_admission(jobs, 'learning_workflow', blocked_command)
+    with pytest.raises(ValueError, match='agent_command_in_progress'):
+        check_agent_command_admission(jobs, 'learning_workflow')
 
 
 def test_host_routes_batches_and_recognition_but_not_keys_to_agent_jobs():

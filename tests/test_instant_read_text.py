@@ -7,6 +7,49 @@ from PIL import Image
 
 from app.instant_mcp import InstantCommand
 from modules.ocr.contracts import OCRBoundingBox, OCRResult, OCRTextMatch
+from tests.test_memory_grounding_execution import timed_scene, original_timed_scene
+
+
+@pytest.mark.parametrize('failure', [None, 'focus_failure', 'focus_unconfirmed', 'geometry_drift',
+    'process_id', 'process_create_time', 'executable_path', 'occluded'])
+def test_read_execution_prepares_exact_target_before_original_capture(timed_scene, captured, tmp_path, failure):
+    from scripts.run_local_step_session import run_read_text_command
+    from app.core.screenshot import CaptureVisibilityError
+    co, state, _, _ = timed_scene
+    if failure in {'process_id', 'process_create_time', 'executable_path'}:
+        state.identity_drift = failure
+    elif failure:
+        setattr(state, failure, True)
+    def capture():
+        assert co._windows().get_bound_window().is_active is True
+        state.events.append('read_capture')
+        if failure == 'occluded':
+            raise CaptureVisibilityError('capture_window_occluded')
+        return captured
+    def execute():
+        return run_read_text_command(capture, {'kind': 'read_text'}, recognition_source='agent_current',
+            evidence_dir=tmp_path / 'durable-read', coordinator=co, target={'handle': 321, 'process_id': 12})
+    if failure:
+        with pytest.raises((PermissionError, ValueError)):
+            execute()
+        assert state.events.count('read_capture') == (1 if failure == 'occluded' else 0)
+    else:
+        result, observation = execute()
+        assert result['status'] == 'agent_read_required'
+        assert result['action_executed'] is False
+        assert Path(observation['image_path']).read_bytes() == Path(captured['image_path']).read_bytes()
+        assert state.events.count('target_focus') == 1
+        assert state.events.index('target_focus') < state.events.index('read_capture')
+    assert 'route' not in state.events
+
+
+def test_plain_read_observation_does_not_activate_target(timed_scene, captured):
+    from scripts.run_local_step_session import run_read_text_command
+    _, state, _, _ = timed_scene
+    result, observation = run_read_text_command(lambda: captured, {}, recognition_source='agent_current')
+    assert result['action_executed'] is False
+    assert observation['sha256'] == captured['sha256']
+    assert 'target_focus' not in state.events
 
 
 def test_read_text_command_is_available_without_step_or_model_plan():

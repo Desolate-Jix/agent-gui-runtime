@@ -979,15 +979,30 @@ def _native_root_handle(hwnd: Any) -> int | None:
 
 def _top_window_handle(wrapper: Any) -> int | None:
     try:
-        info = getattr(wrapper, "element_info", None)
-        value = getattr(info, "handle", getattr(wrapper, "handle", 0))
-        root_handle = _native_root_handle(value)
-        if root_handle is not None:
-            return root_handle
-        root = wrapper.top_level_parent()
-        root_info = getattr(root, "element_info", None)
-        value = getattr(root_info, "handle", getattr(root, "handle", 0))
-        return value if type(value) is int and value > 0 else None
+        initial = wrapper.element_info
+        pid = _process_id(initial, getattr(initial, "element", None))
+        current = wrapper
+        seen = set()
+        # 虚拟控件只认最近可验证原生根，不能越过模态窗口找 owner。
+        for _ in range(16):
+            if current is None:
+                return None
+            info = current.element_info
+            current_pid = _process_id(info, getattr(info, "element", None))
+            if pid is not None and current_pid != pid:
+                return None
+            value = getattr(info, "handle", getattr(current, "handle", 0))
+            if value not in (None, 0):
+                return _native_root_handle(value)
+            if pid is None:
+                return None
+            runtime_id = getattr(info, "runtime_id", None)
+            key = tuple(runtime_id) if isinstance(runtime_id, (tuple, list)) and runtime_id else id(current)
+            if key in seen:
+                return None
+            seen.add(key)
+            current = current.parent()
+        return None
     except Exception:
         return None
 

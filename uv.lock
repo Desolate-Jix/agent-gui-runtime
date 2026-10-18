@@ -60,6 +60,10 @@ desktop = [
 dev = [
     { name = "pytest" },
 ]
+execution = [
+    { name = "httpx" },
+    { name = "mcp" },
+]
 vista = [
     { name = "accelerate" },
     { name = "safetensors" },
@@ -96,6 +100,10 @@ desktop = [
     { name = "pyside6", specifier = "==6.11.2" },
 ]
 dev = [{ name = "pytest", specifier = ">=8,<9" }]
+execution = [
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "mcp", specifier = "==2.1.1" },
+]
 vista = [
     { name = "accelerate" },
     { name = "safetensors" },

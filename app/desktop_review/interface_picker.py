@@ -1,5 +1,6 @@
 """从流程项目直接挑选已有界面；只修改记忆引用，不执行操作。"""
 from __future__ import annotations
+from app.learning_memory.workbench_i18n import ui, tr, bind_text, initialize_i18n, language_manager
 
 from copy import deepcopy
 from hashlib import sha256
@@ -29,7 +30,7 @@ class InterfacePickerDialog(QDialog):
         self._loading = False
         self._request = None
         self._selected_before_reload = []
-        self.setWindowTitle("添加已有界面")
+        ui(self.setWindowTitle, tr('添加已有界面'))
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(880, 680)
         self.setMinimumSize(620, 460)
@@ -41,14 +42,14 @@ class InterfacePickerDialog(QDialog):
         self.heading.setWordWrap(True)
         self.heading.setStyleSheet("font-size: 20px; font-weight: 600;")
         root.addWidget(self.heading)
-        note = QLabel("勾选界面，一次加入项目。已有审核记录的界面也在这里，无需再次审核。")
+        note = ui(QLabel, tr('勾选界面，一次加入项目。已有审核记录的界面也在这里，无需再次审核。'))
         note.setWordWrap(True)
         root.addWidget(note)
         search_row = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("搜索界面名称、识别文字或应用名称")
+        ui(self.search.setPlaceholderText, tr('搜索界面名称、识别文字或应用名称'))
         self.search.setClearButtonEnabled(True)
-        self.refresh_button = QPushButton("刷新界面库")
+        self.refresh_button = ui(QPushButton, tr('刷新界面库'))
         search_row.addWidget(self.search, 1)
         search_row.addWidget(self.refresh_button)
         root.addLayout(search_row)
@@ -61,7 +62,7 @@ class InterfacePickerDialog(QDialog):
         self.items.setStyleSheet("QListWidget {border: 1px solid #d8e1ec; border-radius: 8px;}"
                                  "QListWidget::item {padding: 10px; border-bottom: 1px solid #edf1f6;}"
                                  "QListWidget::item:hover {background: #eef5ff;}")
-        self.items.setAccessibleName("已有界面，多选加入项目")
+        ui(self.items.setAccessibleName, tr('已有界面，多选加入项目'))
         root.addWidget(self.items, 1)
         self.selection_note = QLabel()
         self.selection_note.setWordWrap(True)
@@ -71,10 +72,10 @@ class InterfacePickerDialog(QDialog):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
         actions = QHBoxLayout()
-        self.select_visible_button = QPushButton("勾选当前可加入项")
-        self.clear_button = QPushButton("清空选择")
-        self.cancel_button = QPushButton("取消")
-        self.add_button = QPushButton("加入选中的界面")
+        self.select_visible_button = ui(QPushButton, tr('勾选当前可加入项'))
+        self.clear_button = ui(QPushButton, tr('清空选择'))
+        self.cancel_button = ui(QPushButton, tr('取消'))
+        self.add_button = ui(QPushButton, tr('加入选中的界面'))
         self.add_button.setStyleSheet("QPushButton {padding: 9px 18px;}"
                                       "QPushButton:enabled {background: #2563eb; color: white; border-radius: 6px;}")
         for button in (self.select_visible_button, self.clear_button):
@@ -122,8 +123,7 @@ class InterfacePickerDialog(QDialog):
         self._selection_changed()
         if not outcome or not outcome[0]:
             message = str(outcome[1]) if outcome else "后台任务没有返回结果"
-            self.status.setText(("加入失败，选择已保留。请刷新后检查并重试：" if operation == "add"
-                                 else "读取界面库失败，请刷新重试：") + message.splitlines()[0])
+            ui(self.status.setText, (tr('加入失败，选择已保留。请刷新后检查并重试：') if operation == 'add' else tr('读取界面库失败，请刷新重试：')) + message.splitlines()[0])
             self.status.setToolTip(message)
             return
         if operation == "load":
@@ -136,7 +136,7 @@ class InterfacePickerDialog(QDialog):
         if self.busy:
             return
         self._selected_before_reload = self.selected_references()
-        self.status.setText("正在读取界面库和截图…")
+        ui(self.status.setText, tr('正在读取界面库和截图…'))
         self._run("load", self._load_candidates)
 
     def _load_candidates(self):
@@ -150,9 +150,9 @@ class InterfacePickerDialog(QDialog):
                 continue
             reason = ""
             if value['interface_id'] in present:
-                reason = "已在项目中 · 无需重复加入"
+                reason = tr("已在项目中 · 无需重复加入")
             elif value['source']['task_id'] != task_id:
-                reason = "来自其他学习连接 · 当前项目暂不支持跨连接加入"
+                reason = tr("来自其他学习连接 · 当前项目暂不支持跨连接加入")
             thumbnail = QImage()
             try:
                 evidence = self.facade.load_interface_content_evidence(value['interface_id'], value['version_id'])
@@ -166,7 +166,7 @@ class InterfacePickerDialog(QDialog):
                 thumbnail = thumbnail.scaled(160, 96, Qt.AspectRatioMode.KeepAspectRatio,
                                               Qt.TransformationMode.SmoothTransformation)
             except (ValueError, OSError, RuntimeError) as error:
-                reason = (reason + "；" if reason else "") + f"截图读取失败：{error}"
+                reason = (reason + tr("；") if reason else "") + tr('截图读取失败：{error}', error=error)
             records.append({'value': value, 'reason': reason, 'thumbnail': thumbnail})
         records.sort(key=lambda item: (bool(item['reason']), item['value']['content']['meaning'].casefold(),
                                       item['value']['interface_id']))
@@ -174,7 +174,7 @@ class InterfacePickerDialog(QDialog):
 
     def _install(self, result):
         self.project = result['project']
-        self.heading.setText("添加到：" + self.project['graph']['workflow']['goal'])
+        ui(self.heading.setText, tr('添加到：') + self.project['graph']['workflow']['goal'])
         self._loading = True
         self.items.clear()
         retained = 0
@@ -183,11 +183,11 @@ class InterfacePickerDialog(QDialog):
             ref = {key: value[key] for key in ('interface_id', 'version_id', 'content_sha256')}
             binding = value.get('application_binding') or {}
             title = value['content']['meaning']
-            context = binding.get('display_name') or "未命名应用"
-            reason = record['reason'] or "可加入"
-            item = QListWidgetItem(f"{title}\n{context} · 已保存版本 {value['revision']}\n{reason}")
+            context = binding.get('display_name') or tr("未命名应用")
+            reason = record['reason'] or tr("可加入")
+            item = ui(QListWidgetItem, tr('{v0}\n{v1} · 已保存版本 {v2}\n{v3}', v0=title, v1=context, v2=value['revision'], v3=reason))
             item.setSizeHint(QSize(0, 120))
-            item.setToolTip(f"{title}\n{reason}\n学习连接：{value['source']['task_id']}\n界面：{value['interface_id']}")
+            ui(item.setToolTip, tr('{v0}\n{v1}\n学习连接：{v2}\n界面：{v3}', v0=title, v1=reason, v2=value['source']['task_id'], v3=value['interface_id']))
             item.setData(Qt.ItemDataRole.UserRole, ref)
             item.setData(Qt.ItemDataRole.UserRole + 1, " ".join((title, str(value['content'].get('recognition_text', '')),
                          context, value['source']['task_id'])).casefold())
@@ -206,11 +206,11 @@ class InterfacePickerDialog(QDialog):
         self._filter()
         self.status.setToolTip("")
         if removed:
-            self.status.setText(f"有 {removed} 个原选项已更新或不能加入，已取消勾选；请检查后重新勾选。")
+            ui(self.status.setText, tr('有 {v0} 个原选项已更新或不能加入，已取消勾选；请检查后重新勾选。', v0=removed))
         elif not self.items.count():
-            self.status.setText("当前数据目录还没有已保存界面。请先让 Agent 学习并保存界面，再刷新这里。")
+            ui(self.status.setText, tr('当前数据目录还没有已保存界面。请先让 Agent 学习并保存界面，再刷新这里。'))
         else:
-            self.status.setText("只添加引用，不复制界面、不自动连线，也不执行点击。灰色说明会解释不能加入的原因。")
+            ui(self.status.setText, tr('只添加引用，不复制界面、不自动连线，也不执行点击。灰色说明会解释不能加入的原因。'))
 
     def selected_references(self):
         return [deepcopy(item.data(Qt.ItemDataRole.UserRole)) for item in self._items()
@@ -234,11 +234,10 @@ class InterfacePickerDialog(QDialog):
         available = [item for item in visible if item.flags() & Qt.ItemFlag.ItemIsUserCheckable]
         existing = sum('interface_reference' in node for node in self.project['graph']['nodes'])
         remaining = max(0, 256 - existing)
-        self.selection_note.setText(f"当前显示 {len(visible)} 个 · 可加入 {len(available)} 个 · 已选 {len(selected)} 个"
-                                   + (f"（其中 {hidden_selected} 个被搜索隐藏，仍会一起加入）" if hidden_selected else ""))
+        ui(self.selection_note.setText, tr('当前显示 {v0} 个 · 可加入 {v1} 个 · 已选 {v2} 个', v0=len(visible), v1=len(available), v2=len(selected)) + (tr('（其中 {v0} 个被搜索隐藏，仍会一起加入）', v0=hidden_selected) if hidden_selected else ''))
         if len(selected) > remaining:
-            self.selection_note.setText(self.selection_note.text() + f"；此项目最多还能加入 {remaining} 个，请减少勾选。")
-        self.add_button.setText(f"加入选中的 {len(selected)} 个界面")
+            ui(self.selection_note.setText, self.selection_note.text() + tr('；此项目最多还能加入 {v0} 个，请减少勾选。', v0=remaining))
+        ui(self.add_button.setText, tr('加入选中的 {v0} 个界面', v0=len(selected)))
         self.add_button.setEnabled(bool(selected) and len(selected) <= remaining and not self.busy)
         for widget in (self.items, self.search, self.refresh_button):
             widget.setEnabled(not self.busy)
@@ -268,7 +267,7 @@ class InterfacePickerDialog(QDialog):
         if self._request is None or self._request[:2] != fingerprint:
             self._request = (*fingerprint, uuid4().hex)
         project, key = deepcopy(self.project), self._request[2]
-        self.status.setText(f"正在将 {len(refs)} 个界面一起加入项目…")
+        ui(self.status.setText, tr('正在将 {v0} 个界面一起加入项目…', v0=len(refs)))
         self._run("add", lambda: self.facade.attach_interfaces_to_workflow(
             project['logical_workflow_id'], refs, project['source_revision'], project['source_sha256'], key))
 
@@ -276,9 +275,9 @@ class InterfacePickerDialog(QDialog):
         if self.busy:
             if self._operation == "load":
                 self._closing = True
-                self.status.setText("正在结束读取，不会修改项目…")
+                ui(self.status.setText, tr('正在结束读取，不会修改项目…'))
             else:
-                self.status.setText("正在保存加入结果，请稍候；完成后会自动返回项目。")
+                ui(self.status.setText, tr('正在保存加入结果，请稍候；完成后会自动返回项目。'))
             return
         super().reject()
 

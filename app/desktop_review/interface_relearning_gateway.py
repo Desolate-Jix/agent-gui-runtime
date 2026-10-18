@@ -36,7 +36,7 @@ class InterfaceRelearningGateway:
             raise AgentLinkError("not_found", "interface feedback was not found for this task")
         return issue
 
-    def get(self, allowed_task_id, issue_id):
+    def get(self, allowed_task_id, issue_id, *, include_image=True):
         issue = self._owned(allowed_task_id, issue_id)
         version_id = "interface-version-" + issue["baseline_content_sha256"]
         baseline = self.facade.get_interface_memory(allowed_task_id, issue["interface_id"], version_id)
@@ -49,10 +49,12 @@ class InterfaceRelearningGateway:
         for candidate_id in issue["candidate_ids"]:
             candidate = self.service.compare(issue_id, candidate_id)["candidate"]
             candidates.append(self._candidate_view(candidate))
-        return _envelope(issue=_issue_view(issue), baseline=baseline, candidates=candidates, screenshot={
+        screenshot = {
             "mime_type": "image/png", "sha256": evidence["sha256"],
-            "width": evidence["width"], "height": evidence["height"],
-            "png_base64": base64.b64encode(raw).decode("ascii")})
+            "width": evidence["width"], "height": evidence["height"]}
+        if include_image:
+            screenshot["png_base64"] = base64.b64encode(raw).decode("ascii")
+        return _envelope(issue=_issue_view(issue), baseline=baseline, candidates=candidates, screenshot=screenshot)
 
     @staticmethod
     def _candidate_view(candidate):

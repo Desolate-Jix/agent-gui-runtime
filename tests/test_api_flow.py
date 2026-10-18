@@ -74,6 +74,7 @@ def flow(tmp_path, monkeypatch, api_server):
     from app.core.agent_grounding_target import agent_grounding_scope
     from app.core.local_input_policy import _local_operator_input_scope
     from app.desktop_review.local_action_contract import _validated_request
+    from app.learning_memory.learning_observation_capture import learning_capture_scope
     from app.instant_mcp import InstantCommand
 
     image = Image.new('RGB', (200, 150), 'white')
@@ -110,11 +111,18 @@ def flow(tmp_path, monkeypatch, api_server):
 
     class Coordinator:
         _owner = SimpleNamespace(call=lambda callback: callback())
+        learning_context = None
+
+        def _windows(self):
+            return manager
 
         def execute_local_step(self, **kwargs):
             request = ExecuteRecognitionPlanRequest.model_validate(_validated_request(
                 'execute_recognition_plan', kwargs['request']))
-            with agent_grounding_scope(kwargs['grounding_target']), _local_operator_input_scope(
+            learning_context = kwargs.get('learning_context')
+            if learning_context is None:
+                learning_context = self.learning_context
+            with learning_capture_scope(self, learning_context), agent_grounding_scope(kwargs['grounding_target']), _local_operator_input_scope(
                 manager=manager, identity_reader=reader, identity=identity,
                 window_rect=(100, 200, 300, 350), enabled=lambda: True):
                 result = action.execute_recognition_plan(request)
@@ -163,6 +171,11 @@ def test_http_to_common_action_route_and_fresh_second_operation(flow, api_server
         assert candidate['freshness']['status'] == 'revalidated'
         assert plan['narrow_search_result']['results'][0]['coordinate_source'] == 'api_visual'
         assert state['recognition_calls'][0]['provider']['returned_model'] == 'loopback-fixture'
+        call = state['recognition_calls'][0]
+        assert call['source'] == 'external_api'
+        assert call['attempt'] == call['provider']['attempt']
+        assert call['attempt']['status'] == 'success'
+        assert call['attempt']['usage'] is None
         with Image.open(state['observation']['capture']['image_path']) as after:
             assert after.getpixel((170, 110)) == (0, 128, 0)
     assert flow.clicks == [(65, 55), (65, 55)]
@@ -172,6 +185,46 @@ def test_http_to_common_action_route_and_fresh_second_operation(flow, api_server
     assert all(flow.store.get(row['context']['request_id'])['phase'] == 'completed'
         for row in api_server.requests)
     assert 'local-test-key' not in json.dumps(state)
+
+
+def test_learning_observation_uses_action_capture_before_dispatch(flow, monkeypatch):
+    from app.learning_memory import learning_observation_capture
+    observed = {}
+
+    def capture(coordinator, handle, pid, *, image_path, recipe):
+        observed.update(handle=handle, pid=pid, image_path=image_path, recipe=recipe)
+        frame = {"capture_id": "learn-current-frame", "image_path": image_path,
+            "sha256": sha256(Path(image_path).read_bytes()).hexdigest(),
+            "image_size": {"width": 200, "height": 150},
+            "window_identity": {"handle": handle, "process_id": pid, "process_create_time": 30.0},
+            "application": {"executable_name": "editor.exe"}}
+        snapshot = {"provider": "windows_uia", "status": "ok", "scan_complete": True,
+            "truncated": False, "capture_id": frame["capture_id"],
+            "window_identity": frame["window_identity"], "controls": []}
+        return frame, {"uia": {"status": "ok", "capture_id": frame["capture_id"],
+            "window_identity": frame["window_identity"], "snapshot": snapshot}}
+
+    monkeypatch.setattr(learning_observation_capture, "capture_memory_observation", capture)
+    flow.jobs.coordinator.learning_context = {"event_id": "learn-event", "command_sha256": "a" * 64}
+    flow.start('learning-observation')
+    state = terminal(flow.jobs, 'learning-observation')
+    assert state['status'] == 'completed', state.get('error')
+    action = state['result']['response']['data']['result']
+    observation = action['learning_observation']
+    assert observation['contract_version'] == 'learning_target_observation.v1'
+    assert observation['event_id'] == 'learn-event'
+    assert observation['command_sha256'] == 'a' * 64
+    assert 'candidate' in observation, observation.get('reason')
+    assert observation['candidate'] == {'capture_id': 'learn-current-frame',
+        'viewport_size': {'width': 200, 'height': 150}, 'source': 'api_visual',
+        'bbox': {'x': 30, 'y': 40, 'w': 71, 'h': 31},
+        'click_point': {'x': 65, 'y': 55}, 'freshness': 'current_capture'}
+    assert Path(observed['image_path']).resolve() == flow.frames[2].resolve()
+    assert observed['image_path'] != action['live_capture']['image_path']
+    assert observed['image_path'] != flow.frames[0].as_posix()
+    assert observed['recipe'] == {'scope': {'anchors': [{'kind': 'uia'}]}, 'strategies': []}
+    assert any(step['name'] == 'learning_target_observation'
+        for step in action['timings']['steps'])
 
 
 @pytest.mark.parametrize('status,mode,code', [(401, 'found', 'api_authentication_failed'),
@@ -185,6 +238,15 @@ def test_api_failure_stops_before_input_and_next_command_can_recover(flow, api_s
     assert state['error']['code'] == code
     assert state['action_executed'] is False and flow.clicks == []
     assert len(api_server.requests) == 1
+    assert len(state['recognition_calls']) == 1
+    call = state['recognition_calls'][0]
+    assert call['source'] == 'external_api'
+    assert call['request_id'] == api_server.requests[0]['context']['request_id']
+    assert call['attempt']['status'] == ('success' if code == 'request_absent' else 'failure')
+    if code == 'request_absent':
+        assert call['attempt'] == call['provider']['attempt']
+    else:
+        assert call['attempt']['usage'] is None
     api_server.status, api_server.mode = 200, 'found'
     flow.start('recovery')
     assert terminal(flow.jobs, 'recovery')['status'] == 'completed'
@@ -211,7 +273,74 @@ def test_api_compact_receipt_preserves_provider_and_request_state(flow):
     state = terminal(flow.jobs, 'compact')
     receipt = compact_receipt({'request_id': 'status-1', 'result': state})
     assert receipt['agent_command']['recognition_calls'][0]['provider']['requested_model'] == 'loopback-fixture'
+    assert receipt['agent_command']['recognition_calls'][0]['attempt']['status'] == 'success'
     assert receipt['agent_command']['api_request']['phase'] == 'grounding_ready'
+
+
+def test_api_attempt_survives_store_resolve_failure_once(flow, api_server, monkeypatch):
+    def fail_resolve(*_args, **_kwargs):
+        raise ValueError('resolve_failed')
+    monkeypatch.setattr(flow.store, 'resolve', fail_resolve)
+    flow.start('resolve-failure')
+    state = terminal(flow.jobs, 'resolve-failure')
+    assert state['status'] == 'failed'
+    assert state['error']['code'] == 'resolve_failed'
+    assert len(api_server.requests) == 1
+    assert len(state['recognition_calls']) == 1
+    call = state['recognition_calls'][0]
+    assert call['source'] == 'external_api'
+    assert call['attempt'] == call['provider']['attempt']
+    assert call['attempt']['status'] == 'success'
+    persisted = json.loads(Path(flow.jobs._path('resolve-failure')).read_text(encoding='utf-8'))
+    assert persisted['recognition_calls'] == state['recognition_calls']
+
+
+def test_api_timeout_attempt_is_persisted(flow, api_server):
+    api_server.release.clear()
+    flow.jobs.api_grounder.close()
+    flow.jobs.api_grounder = ChatCompletionsGrounder(
+        api_server.profile.model_copy(update={'timeout_seconds': 0.05}))
+    flow.start('timeout')
+    assert api_server.entered.wait(3)
+    state = terminal(flow.jobs, 'timeout')
+    assert state['status'] == 'failed'
+    assert state['error']['code'] == 'api_timeout'
+    assert len(state['recognition_calls']) == 1
+    call = state['recognition_calls'][0]
+    assert call['source'] == 'external_api'
+    assert call['attempt']['status'] == 'timeout'
+    assert call['attempt']['usage'] is None
+
+
+@pytest.mark.parametrize('http_status', [200, 429])
+def test_real_http_attempt_projects_into_run_metrics_once(flow, api_server, http_status):
+    from app.core.json_snapshot import write_json_snapshot
+    from app.learning_memory.workflow_metrics import load_run_metrics
+    from app.learning_memory.measurement import load_events
+    api_server.status = http_status
+    initial = flow.start('measured-command')
+    state = terminal(flow.jobs, 'measured-command')
+    session = Path(flow.store.session_root)
+    command = flow.jobs._jobs['measured-command'].command
+    for folder in ('commands', 'responses'):
+        (session / folder).mkdir(exist_ok=True)
+    write_json_snapshot(session / 'commands/measured-command.json', command)
+    write_json_snapshot(session / 'responses/measured-command.json',
+                        {'status': 'returned', 'command': command, 'result': initial})
+    trial = {'run_id': 'measured-run', 'history': [], 'pending': {
+        'step_id': 'measured-step', 'execution_request_id': 'measured-command', 'suggested_command': command}}
+    for _ in range(2):
+        metrics = load_run_metrics(session, trial['run_id'], trial=trial)
+        assert metrics['observed']['model_calls']['grounding'] == 1
+        assert metrics['observed']['status_counts'] == {'success' if http_status == 200 else 'failure': 1}
+        assert metrics['total_model_calls'] is None and metrics['total_usage'] is None
+    assert len(api_server.requests) == 1
+    events = load_events(session, trial['run_id'])
+    assert len(events) == 1
+    assert events[0]['request_id'] == api_server.requests[0]['context']['request_id']
+    assert events[0]['started_ns'] == state['recognition_calls'][0]['attempt']['started_ns']
+    if http_status == 429:
+        assert flow.clicks == [] and state['action_executed'] is False
 
 
 def test_cancel_after_api_claim_before_dispatch_finishes_claim_without_input(flow, monkeypatch):

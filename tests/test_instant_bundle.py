@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import zipfile
 
 import pytest
@@ -41,6 +42,54 @@ def test_missing_required_source_fails_before_output(tmp_path):
     with pytest.raises(FileNotFoundError):
         bundle.build(tmp_path / "missing", tmp_path / "output")
     assert not (tmp_path / "output").exists()
+
+
+def test_source_selection_preserves_current_readme_guide_links(tmp_path):
+    seed(tmp_path)
+    references = ["docs/EXECUTION_MODULE_BOUNDARIES.md",
+                  "docs/WORKFLOW_DEFINITION_AND_RUN_EVIDENCE.md"]
+    (tmp_path / "README.md").write_text("\n".join(f"[guide]({name})" for name in references),
+                                      encoding="utf-8")
+    for name in references:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("guide", encoding="utf-8")
+    found = {p.relative_to(tmp_path).as_posix() for p in bundle.collect_sources(tmp_path)}
+    linked = re.findall(r"\]\((docs/[^)]+)\)", (tmp_path / "README.md").read_text(encoding="utf-8"))
+    assert set(linked) <= found
+
+
+def test_fresh_source_current_trial_links_do_not_require_local_status(tmp_path):
+    source = Path(__file__).resolve().parents[1]
+    guides = ("README.md", "docs/WORKFLOW_EDITOR.md", "AGENT_GUIDE.md")
+    current_targets = {"docs/verification/LEARNING_TRIAL_READINESS.md",
+        "docs/superpowers/plans/2026-10-03-learning-trial-closeout.md",
+        "docs/superpowers/plans/2026-10-01-learning-mainline-refocus.md",
+        "docs/WORKFLOW_INTERRUPTION_CONTRACT.md", "CURRENT_STATE.md", "NEXT_STEPS.md"}
+    seed(tmp_path)
+    for name in ("CURRENT_STATE.md", "NEXT_STEPS.md"):
+        path = tmp_path / name
+        if path.exists():
+            path.unlink()
+    linked = set()
+    for name in guides:
+        text = (source / name).read_text(encoding="utf-8")
+        (tmp_path / name).write_text(text, encoding="utf-8")
+        for target in re.findall(r"\]\(([^)]+)\)", text):
+            if re.match(r"^[A-Za-z]+:|^#", target):
+                continue
+            path = (tmp_path / name).parent / target.split("#", 1)[0]
+            if path.resolve().is_relative_to(tmp_path.resolve()):
+                relative = path.resolve().relative_to(tmp_path.resolve()).as_posix()
+                if relative in current_targets:
+                    linked.add(relative)
+                    if relative not in {"CURRENT_STATE.md", "NEXT_STEPS.md"}:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text((source / relative).read_text(encoding="utf-8"), encoding="utf-8")
+    found = {path.relative_to(tmp_path).as_posix() for path in bundle.collect_sources(tmp_path)}
+    assert linked == current_targets - {"CURRENT_STATE.md", "NEXT_STEPS.md"}
+    assert linked <= found
+    assert not {"CURRENT_STATE.md", "NEXT_STEPS.md"} & found
 
 
 def test_delivery_includes_referenced_development_docs_not_private_evidence(tmp_path):
