@@ -1,4 +1,4 @@
-2026-10-18: This checkout maintains execution mode. Learning entrypoints are retired and development is paused. See [archive and recovery notes](docs/LEARNING_PAUSED.md). Installed applications are unchanged.
+2026-10-18: The sole local development checkout maintains execution mode on `codex/dev-execution-maintained`. Learning development is paused; source archive branches are pushed and superseded environments are backed up and retired. See [archive and recovery notes](docs/LEARNING_PAUSED.md). Installed applications are unchanged.
 
 <div align="center">
 

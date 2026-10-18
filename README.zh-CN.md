@@ -1,4 +1,4 @@
-2026-10-18：本地保留执行模式，学习模式已封存并移除公开入口，开发暂缓。归档与恢复说明见 [学习封存记录](docs/LEARNING_PAUSED.md)。本轮未更新安装版。
+2026-10-18：本地仅保留 `codex/dev-execution-maintained` 执行模式开发环境。学习开发暂缓，源码归档分支已推送，冗余环境已备份清理。详见[封存与恢复说明](docs/LEARNING_PAUSED.md)。已安装程序未变。
 
 <div align="center">
 
