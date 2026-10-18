@@ -8,14 +8,17 @@ import math
 import re
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QComboBox, QFormLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QFormLayout, QLabel, QLineEdit, QPlainTextEdit, QVBoxLayout, QWidget
 from .workflow_image_check_editor import WorkflowImageCheckEditor
+from .condition_template_editor import ConditionTemplateEditor
 
 
 _VERIFY_KINDS = ((tr('无结果规则'), None), (tr('字段等于'), 'field_equals'), (tr('文本等于'), 'text_equals'), (tr('文本包含'), 'text_contains'), (tr('目标存在'), 'target_present'), (tr('目标不存在'), 'target_absent'), (tr('Agent 判断'), 'agent_judgment'))
 _READ_METHODS = ((tr('无读取规则'), None), (tr('控件值'), 'uia_value'), (tr('可见文字'), 'visible_text'), (tr('Agent 读取'), 'agent_read'))
 _SOURCES = ((tr('常量'), 'constant'), (tr('工作流输入'), 'input'), (tr('本次上游输出'), 'output'))
 _TYPES = ((tr('文本'), 'text'), (tr('数字'), 'number'), (tr('是／否'), 'boolean'))
+_REVIEW_POLICIES = ((tr('沿用宿主策略'), None), (tr('自适应（不弱化宿主策略）'), 'adaptive'),
+                    (tr('每步交主 Agent 审核（包括本地成功）'), 'always_main'))
 
 
 def _choice(combo, value):
@@ -53,6 +56,13 @@ class WorkflowRulesEditor(QWidget):
         self.verification_kind = QComboBox()
         for label, value in _VERIFY_KINDS:
             ui(self.verification_kind.addItem, tr(label), value)
+        self.decision_condition = QPlainTextEdit()
+        self.decision_condition.setMaximumHeight(96)
+        ui(self.decision_condition.setPlaceholderText, tr('仅描述当前结果中可见的成功状态。'))
+        self.review_policy = QComboBox()
+        for label, value in _REVIEW_POLICIES:
+            ui(self.review_policy.addItem, label, value)
+        ui(self.review_policy.setToolTip, tr('指定每步审核时，本地图像成功也暂停，且不调用 Decision API。'))
         self.target_type = QLineEdit(); ui(self.target_type.setPlaceholderText, tr('例如 Text'))
         self.target_name = QLineEdit(); ui(self.target_name.setPlaceholderText, tr('可见控件名称'))
         self.target_automation_id = QLineEdit(); ui(self.target_automation_id.setPlaceholderText, tr('可选的 AutomationId'))
@@ -71,6 +81,7 @@ class WorkflowRulesEditor(QWidget):
             ui(self.read_method.addItem, tr(label), value)
         self.read_output = QComboBox(); self.read_output.setEditable(True)
         for label, widget in (("结果规则", self.verification_kind), ("控件类型", self.target_type),
+                              ("语义成功条件", self.decision_condition), ("交接策略", self.review_policy),
                               ("控件名称", self.target_name), ("AutomationId", self.target_automation_id),
                               ("预期值来源", self.expected_source), ("常量类型", self.expected_type),
                               ("常量值", self.expected_value), ("输入／输出名称", self.expected_name),
@@ -82,9 +93,14 @@ class WorkflowRulesEditor(QWidget):
         self.image_check_editor = WorkflowImageCheckEditor()
         form.insertRow(1, self.image_check_editor)
         self.image_check_editor.changed.connect(self._mark_modified)
+        self.condition_template = ConditionTemplateEditor()
+        form.insertRow(2, self.condition_template)
+        self.condition_template.changed.connect(self._mark_modified)
+        self.condition_template.changed.connect(self._update_fields)
         root.addStretch()
-        for widget in (self.verification_kind, self.expected_source, self.expected_type, self.read_method):
+        for widget in (self.verification_kind, self.expected_source, self.expected_type, self.read_method, self.review_policy):
             widget.currentIndexChanged.connect(self._mark_modified)
+        self.decision_condition.textChanged.connect(self._mark_modified)
         for widget in (self.target_type, self.target_name, self.target_automation_id, self.expected_value):
             widget.textChanged.connect(self._mark_modified)
         for widget in (self.expected_name, self.expected_step, self.verification_output, self.read_output):
@@ -104,6 +120,11 @@ class WorkflowRulesEditor(QWidget):
 
     def _update_fields(self, *_args):
         kind = self.verification_kind.currentData()
+        semantic = kind == "agent_judgment" and self._image_step_eligible and self._action_kind != "read_text"
+        self.condition_template.setEnabled(semantic or self.condition_template.enabled.isChecked())
+        self.condition_template.body.setEnabled(semantic)
+        self.decision_condition.setEnabled(semantic and not self.condition_template.enabled.isChecked())
+        self.review_policy.setEnabled(semantic)
         expected = kind in {"field_equals", "text_equals", "text_contains"}
         source = self.expected_source.currentData()
         target_enabled = kind not in {None, "agent_judgment"} or (
@@ -146,16 +167,25 @@ class WorkflowRulesEditor(QWidget):
         self.expected_name.blockSignals(False)
 
     def set_step(self, step, definition, index):
+        try:
+            self._set_step(step, definition, index)
+        finally:
+            self._loading = False
+
+    def _set_step(self, step, definition, index):
         self._loading = True
         self._original_verification = deepcopy(step.get("verification")) if step else None
         self._original_read = deepcopy(step.get("read_spec")) if step else None
         self.validation_error = None
         verification = self._original_verification or {}
+        self.condition_template.set_binding(verification.get("condition_binding"), (definition or {}).get("inputs", []))
         self._image_step_eligible = not bool((step or {}).get('outputs') or (step or {}).get('read_spec'))
         self.image_check_editor.set_config(verification.get('image_check'),
             self._image_step_eligible and (step or {}).get('action', {}).get('kind') != 'read_text')
         read_spec = self._original_read or {}
         _choice(self.verification_kind, verification.get("kind"))
+        self.decision_condition.setPlainText(verification.get("decision_condition", ""))
+        _choice(self.review_policy, verification.get("review_policy"))
         target = verification.get("target") or read_spec.get("target") or {}
         self.target_type.setText(target.get("control_type", ""))
         self.target_name.setText(target.get("name", ""))
@@ -201,6 +231,11 @@ class WorkflowRulesEditor(QWidget):
 
     def rules(self, action_kind):
         self.validation_error = None
+        _binding, template_error = self.condition_template.value()
+        if template_error:
+            self.validation_error = template_error
+        if self.condition_template.enabled.isChecked() and (action_kind == "read_text" or not self._image_step_eligible):
+            self.validation_error = tr("条件模板不能用于读取文本或生成输出的步骤；请先移除模板。")
         self.image_check_editor.set_eligible(self._image_step_eligible and action_kind != 'read_text')
         _image_value, image_error = self.image_check_editor.value()
         if image_error:
@@ -255,10 +290,20 @@ class WorkflowRulesEditor(QWidget):
                 self.validation_error = tr('图像核验必须使用 Agent 判断结果规则。')
             else:
                 verification = {'kind': 'agent_judgment', 'image_check': image_check}
-        if (verification is not None and verification.get("kind") == "agent_judgment"
-                and "decision_condition" in (self._original_verification or {})):
-            # 修改图像规则不应静默丢弃已声明的语义核验条件。
-            verification["decision_condition"] = self._original_verification["decision_condition"]
+        if verification is not None and verification.get("kind") == "agent_judgment":
+            binding, template_error = self.condition_template.value()
+            if template_error:
+                self.validation_error = template_error
+            if binding is not None:
+                verification["condition_binding"] = binding
+            condition = self.decision_condition.toPlainText()
+            if condition.strip() and not self.condition_template.enabled.isChecked():
+                if len(condition) > 4000:
+                    self.validation_error = tr('语义成功条件最多 4000 个字符。')
+                verification["decision_condition"] = condition
+            policy = self.review_policy.currentData()
+            if policy is not None:
+                verification["review_policy"] = policy
         return verification, read_spec
 
 

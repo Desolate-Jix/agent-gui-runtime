@@ -60,7 +60,7 @@ class InterfaceRelearningDialog(QDialog):
         previews = QHBoxLayout()
         self.baseline_canvas, self.candidate_canvas = ReviewCanvas(self), ReviewCanvas(self)
         for title, canvas in (("基线（只读）", self.baseline_canvas), ("候选（只读）", self.candidate_canvas)):
-            box = QGroupBox(title); box_layout = QVBoxLayout(box); box_layout.addWidget(canvas)
+            box = ui(QGroupBox, tr(title)); box_layout = QVBoxLayout(box); box_layout.addWidget(canvas)
             canvas.setInteractive(False); canvas.setMinimumHeight(220)
             fit = ui(QPushButton, tr('适应窗口')); fit.clicked.connect(canvas.fit_image); actual = ui(QPushButton, tr('原图 100%')); actual.clicked.connect(canvas.show_actual_size)
             controls = QHBoxLayout(); controls.addWidget(fit); controls.addWidget(actual); box_layout.addLayout(controls); previews.addWidget(box)

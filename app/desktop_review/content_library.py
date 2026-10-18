@@ -109,7 +109,7 @@ class InterfaceContentLibrary(QDialog):
         self.items.clear()
         target = None
         for value in values:
-            state = "原始观察" if value.get("learning_status") == "observation_only" else ("新学内容" if value.get("origin_status") == "new" else "有修改")
+            state = tr("原始观察") if value.get("learning_status") == "observation_only" else (tr("新学内容") if value.get("origin_status") == "new" else tr("有修改"))
             item = ui(QListWidgetItem, tr('{v0}\n{v1} · 修订 {v2}', v0=value['content']['meaning'], v1=state, v2=value['revision']))
             item.setData(256, deepcopy(value))
             self.items.addItem(item)
@@ -301,7 +301,7 @@ class InterfaceContentLibrary(QDialog):
         current = self.items.currentItem()
         if current is not None and isinstance(snapshot, dict):
             current.setData(256, deepcopy(snapshot))
-            state = "原始观察" if snapshot.get("learning_status") == "observation_only" else ("新学内容" if snapshot.get("origin_status") == "new" else "有修改")
+            state = tr("原始观察") if snapshot.get("learning_status") == "observation_only" else (tr("新学内容") if snapshot.get("origin_status") == "new" else tr("有修改"))
             ui(current.setText, tr('{v0}\n{v1} · 修订 {v2}', v0=snapshot['content']['meaning'], v1=state, v2=snapshot['revision']))
             self._sync_learning_flow()
             self.error.clear()

@@ -66,6 +66,13 @@ def test_actual_learning_snapshot_closes_gui_without_executor(tmp_path):
     paths = {row['path'] for row in manifest['files']}
     assert 'scripts/start_learning_workbench.py' in paths
     assert 'app/core/instant_attachment_transport.py' in paths
+    assert 'app/core/input_sequence_partial.py' in paths
+    assert 'app/core/input_sequence_contract.py' in paths
+    assert 'app/core/control_target_contract.py' in paths
+    assert 'app/judgment/condition_templates.py' in paths
+    assert 'app/learning_memory/condition_template_editor.py' in paths
+    assert 'app/learning_memory/workflow_condition_templates.py' in paths
+    assert 'app/execution/input_sequence.py' not in paths
     assert 'app/learning_memory/translations/en-US.qm' in paths
     assert 'app/learning_memory/translations/zh-CN.qm' in paths
     assert 'app/instant_mcp.py' not in paths

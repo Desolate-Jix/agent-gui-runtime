@@ -3,6 +3,120 @@
   <context>
     <name>Workbench</name>
     <message>
+      <source>{name}（输入已缺失或类型不符）</source>
+      <translation>{name} (input missing or incompatible)</translation>
+    </message>
+    <message>
+      <source>条件模板不能用于读取文本或生成输出的步骤；请先移除模板。</source>
+      <translation>Condition templates cannot read text or produce outputs. Remove the template first.</translation>
+    </message>
+    <message>
+      <source>编辑模板规则（生成新版本）</source>
+      <translation>Edit template rule (new revision)</translation>
+    </message>
+    <message>
+      <source>使用记录号条件模板</source>
+      <translation>Use a record ID condition template</translation>
+    </message>
+    <message>
+      <source>每行一个允许状态；留空表示不增加状态范围。</source>
+      <translation>One allowed state per line; leave empty to add no state restriction.</translation>
+    </message>
+    <message>
+      <source>模板版本</source>
+      <translation>Template version</translation>
+    </message>
+    <message>
+      <source>模板规则（保留 {record_id}）</source>
+      <translation>Template rule (keep {record_id})</translation>
+    </message>
+    <message>
+      <source>记录号最少字符</source>
+      <translation>Minimum record ID length</translation>
+    </message>
+    <message>
+      <source>记录号最多字符</source>
+      <translation>Maximum record ID length</translation>
+    </message>
+    <message>
+      <source>记录号来源</source>
+      <translation>Record ID source</translation>
+    </message>
+    <message>
+      <source>输入名称</source>
+      <translation>Input name</translation>
+    </message>
+    <message>
+      <source>记录号常量</source>
+      <translation>Record ID value</translation>
+    </message>
+    <message>
+      <source>模板允许状态</source>
+      <translation>Template allowed states</translation>
+    </message>
+    <message>
+      <source>模板审核策略</source>
+      <translation>Template review policy</translation>
+    </message>
+    <message>
+      <source>条件预览</source>
+      <translation>Condition preview</translation>
+    </message>
+    <message>
+      <source>规则、范围或策略变化将生成新模板版本，保存后需重新审核并加入配置允许列表。</source>
+      <translation>Changing the rule, scope or policy creates a new template revision. Review it after saving and approve its identity in the profile.</translation>
+    </message>
+    <message>
+      <source>请检查模板占位符、字符范围、允许状态和记录号来源。</source>
+      <translation>Check the template placeholder, length limits, allowed states and record ID source.</translation>
+    </message>
+    <message>
+      <source>模板尚未通过校验</source>
+      <translation>Template is not valid yet</translation>
+    </message>
+    <message>
+      <source>{name} · 修订 {revision} · {digest}</source>
+      <translation>{name} · revision {revision} · {digest}</translation>
+    </message>
+    <message>
+      <source>运行时取输入 {name} 的实际值：
+{rule}</source>
+      <translation>Use the actual value of input {name} at run time:
+{rule}</translation>
+    </message>
+    <message>
+      <source>语义成功条件</source>
+      <translation>Observable success condition</translation>
+    </message>
+    <message>
+      <source>仅描述当前结果中可见的成功状态。</source>
+      <translation>Describe success visible in the current result.</translation>
+    </message>
+    <message>
+      <source>交接策略</source>
+      <translation>Main review policy</translation>
+    </message>
+    <message>
+      <source>沿用宿主策略</source>
+      <translation>Inherit host policy</translation>
+    </message>
+    <message>
+      <source>自适应（不弱化宿主策略）</source>
+      <translation>Adaptive (host restrictions apply)</translation>
+    </message>
+    <message>
+      <source>每步交主 Agent 审核（包括本地成功）</source>
+      <translation>Main review at every step (including local success)</translation>
+    </message>
+    <message>
+      <source>指定每步审核时，本地图像成功也暂停，且不调用 Decision API。</source>
+      <translation>Every-step review also pauses after local image success, without calling the Decision API.</translation>
+    </message>
+    <message>
+      <source>语义成功条件最多 4000 个字符。</source>
+      <translation>The observable success condition must be at most 4,000 characters.</translation>
+    </message>
+    <message>
       <source>学习工作台</source>
       <translation>Learning workbench</translation>
     </message>

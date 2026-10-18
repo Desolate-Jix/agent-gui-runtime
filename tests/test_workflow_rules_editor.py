@@ -93,3 +93,47 @@ def test_agent_judgment_drops_target_and_sources_filter_declared_names(app):
     editor.expected_step.setCurrentText("missing-step")
     assert editor.rules("click")[0]["expected"]["step_id"] == "missing-step"
     editor.close()
+
+
+def test_decision_condition_and_review_policy_edit_roundtrip(app):
+    editor = WorkflowRulesEditor()
+    step = {"step_id": "read", "action": {"kind": "click"},
+            "verification": {"kind": "agent_judgment", "decision_condition": "Results are visible.",
+                             "review_policy": "adaptive"}}
+    editor.set_step(step, context(), 1)
+    assert editor.rules("click")[0] == step["verification"]
+    editor.decision_condition.setPlainText("The updated result panel is visible.")
+    editor.review_policy.setCurrentIndex(editor.review_policy.findData("always_main"))
+    rule, read_spec = editor.rules("click")
+    assert rule == {"kind": "agent_judgment", "decision_condition": "The updated result panel is visible.",
+                    "review_policy": "always_main"}
+    assert read_spec is None and editor.validation_error is None
+    editor.close()
+
+
+def test_decision_editor_cannot_enable_dynamic_reads(app):
+    editor = WorkflowRulesEditor()
+    step = {"step_id": "read", "action": {"kind": "read_text"},
+            "outputs": [{"name": "status", "type": "text"}], "verification": {"kind": "agent_judgment"}}
+    editor.set_step(step, context(), 1)
+    assert not editor.decision_condition.isEnabled()
+    assert not editor.review_policy.isEnabled()
+    editor.close()
+
+
+def test_semantic_editor_labels_switch_language_without_changing_rules(app, tmp_path):
+    from PySide6.QtWidgets import QLabel
+    from app.learning_memory.workbench_i18n import initialize_i18n
+    manager = initialize_i18n(app, tmp_path / "adaptive-language.json", "en-US")
+    editor = WorkflowRulesEditor()
+    step = {"step_id": "read", "action": {"kind": "click"},
+            "verification": {"kind": "agent_judgment", "decision_condition": "用户保留的可见条件", "review_policy": "always_main"}}
+    editor.set_step(step, context(), 1)
+    assert "Observable success condition" in [label.text() for label in editor.findChildren(QLabel)]
+    assert editor.review_policy.currentText() == "Main review at every step (including local success)"
+    manager.set_language("zh-CN", persist=False)
+    assert "语义成功条件" in [label.text() for label in editor.findChildren(QLabel)]
+    assert editor.review_policy.currentText() == "每步交主 Agent 审核（包括本地成功）"
+    assert editor.decision_condition.toPlainText() == step["verification"]["decision_condition"]
+    assert editor.rules("click")[0] == step["verification"]
+    editor.close()

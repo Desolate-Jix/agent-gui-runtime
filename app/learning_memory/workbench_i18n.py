@@ -7,7 +7,7 @@ from pathlib import Path
 import weakref
 
 from PySide6.QtCore import QEvent, QObject, QStandardPaths, QTranslator, Signal
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QFormLayout, QLabel, QWidget
 from shiboken6 import isValid
 
 _manager = None
@@ -152,6 +152,8 @@ def ui(callable_, *args, **kwargs):
         return widget
     if name == "addRow" and args and isinstance(args[0], str):
         label = ui(QLabel, args[0])
+        if isinstance(owner, QFormLayout) and len(args) == 2 and isinstance(args[1], QWidget):
+            label.setBuddy(args[1])
         return callable_(label, *args[1:], **kwargs)
     if name == "addItems":
         for text in args[0]:

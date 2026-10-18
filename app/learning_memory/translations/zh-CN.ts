@@ -3,6 +3,120 @@
   <context>
     <name>Workbench</name>
     <message>
+      <source>{name}（输入已缺失或类型不符）</source>
+      <translation>{name}（输入已缺失或类型不符）</translation>
+    </message>
+    <message>
+      <source>条件模板不能用于读取文本或生成输出的步骤；请先移除模板。</source>
+      <translation>条件模板不能用于读取文本或生成输出的步骤；请先移除模板。</translation>
+    </message>
+    <message>
+      <source>编辑模板规则（生成新版本）</source>
+      <translation>编辑模板规则（生成新版本）</translation>
+    </message>
+    <message>
+      <source>使用记录号条件模板</source>
+      <translation>使用记录号条件模板</translation>
+    </message>
+    <message>
+      <source>每行一个允许状态；留空表示不增加状态范围。</source>
+      <translation>每行一个允许状态；留空表示不增加状态范围。</translation>
+    </message>
+    <message>
+      <source>模板版本</source>
+      <translation>模板版本</translation>
+    </message>
+    <message>
+      <source>模板规则（保留 {record_id}）</source>
+      <translation>模板规则（保留 {record_id}）</translation>
+    </message>
+    <message>
+      <source>记录号最少字符</source>
+      <translation>记录号最少字符</translation>
+    </message>
+    <message>
+      <source>记录号最多字符</source>
+      <translation>记录号最多字符</translation>
+    </message>
+    <message>
+      <source>记录号来源</source>
+      <translation>记录号来源</translation>
+    </message>
+    <message>
+      <source>输入名称</source>
+      <translation>输入名称</translation>
+    </message>
+    <message>
+      <source>记录号常量</source>
+      <translation>记录号常量</translation>
+    </message>
+    <message>
+      <source>模板允许状态</source>
+      <translation>模板允许状态</translation>
+    </message>
+    <message>
+      <source>模板审核策略</source>
+      <translation>模板审核策略</translation>
+    </message>
+    <message>
+      <source>条件预览</source>
+      <translation>条件预览</translation>
+    </message>
+    <message>
+      <source>规则、范围或策略变化将生成新模板版本，保存后需重新审核并加入配置允许列表。</source>
+      <translation>规则、范围或策略变化将生成新模板版本，保存后需重新审核并加入配置允许列表。</translation>
+    </message>
+    <message>
+      <source>请检查模板占位符、字符范围、允许状态和记录号来源。</source>
+      <translation>请检查模板占位符、字符范围、允许状态和记录号来源。</translation>
+    </message>
+    <message>
+      <source>模板尚未通过校验</source>
+      <translation>模板尚未通过校验</translation>
+    </message>
+    <message>
+      <source>{name} · 修订 {revision} · {digest}</source>
+      <translation>{name} · 修订 {revision} · {digest}</translation>
+    </message>
+    <message>
+      <source>运行时取输入 {name} 的实际值：
+{rule}</source>
+      <translation>运行时取输入 {name} 的实际值：
+{rule}</translation>
+    </message>
+    <message>
+      <source>语义成功条件</source>
+      <translation>语义成功条件</translation>
+    </message>
+    <message>
+      <source>仅描述当前结果中可见的成功状态。</source>
+      <translation>仅描述当前结果中可见的成功状态。</translation>
+    </message>
+    <message>
+      <source>交接策略</source>
+      <translation>交接策略</translation>
+    </message>
+    <message>
+      <source>沿用宿主策略</source>
+      <translation>沿用宿主策略</translation>
+    </message>
+    <message>
+      <source>自适应（不弱化宿主策略）</source>
+      <translation>自适应（不弱化宿主策略）</translation>
+    </message>
+    <message>
+      <source>每步交主 Agent 审核（包括本地成功）</source>
+      <translation>每步交主 Agent 审核（包括本地成功）</translation>
+    </message>
+    <message>
+      <source>指定每步审核时，本地图像成功也暂停，且不调用 Decision API。</source>
+      <translation>指定每步审核时，本地图像成功也暂停，且不调用 Decision API。</translation>
+    </message>
+    <message>
+      <source>语义成功条件最多 4000 个字符。</source>
+      <translation>语义成功条件最多 4000 个字符。</translation>
+    </message>
+    <message>
       <source>学习工作台</source>
       <translation>学习工作台</translation>
     </message>
