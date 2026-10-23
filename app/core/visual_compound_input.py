@@ -54,6 +54,27 @@ def _check_stop(spec):
         raise ValueError("visual_field_deadline_expired")
 
 
+def resume_pre_action_compound(target, approval, *, execution_request_id):
+    """Renew only the original unperformed compound under the live Main capability."""
+    from .local_text_focus import VisualTextFocusTarget
+    from app.execution.main_pre_action_approval import MainPreActionApproval
+    if type(target) is not VisualTextFocusTarget or not hasattr(target, '_compound_spec'):
+        return
+    if type(approval) is not MainPreActionApproval:
+        raise ValueError('visual_compound_main_approval_invalid')
+    approval.validate()
+    spec = target._compound_spec
+    context = approval.source.context
+    step = next(row for row in context['plan']['steps'] if row['step_id'] == context['step_id'])
+    from app.execution.task_plan_contract import resolve_action_text
+    if (spec.get('issuer') is not _ISSUER or target._compound_prepared is not None or target._compound_consumed
+            or spec['execution_request_id'] != execution_request_id
+            or step['action']['kind'] != 'input_sequence' or step['action']['field_goal'] != spec['field_goal']
+            or resolve_action_text(step['action']['text'], context['plan']['inputs']) != spec['text']):
+        raise ValueError('visual_compound_main_binding_invalid')
+    spec['deadline_ns'] = approval.deadline_ns
+
+
 def prepare_visual_compound_input(manager, point, review):
     scope = _scope()
     if scope is None:
@@ -69,9 +90,13 @@ def prepare_visual_compound_input(manager, point, review):
     if target._compound_consumed or target._compound_prepared is not None:
         raise ValueError("visual_compound_already_consumed")
     active = current_action_review()
+    from app.execution.main_pre_action_approval import MainPreActionApproval
+    main_approval = review.get('main_pre_action_approval') if isinstance(review, dict) else None
+    main_adopted = (type(main_approval) is MainPreActionApproval and main_approval.validate() is True
+        and active is not None and active.get('main_pre_action_review') == main_approval.to_reference())
     if (not isinstance(review, dict) or active is None or review.get("scope") is not active
-            or not validate_assessment(active["service"], active["assessment"],
-                envelope=active["envelope"], cancelled=active["cancelled"])):
+            or not (main_adopted or validate_assessment(active["service"], active["assessment"],
+                envelope=active["envelope"], cancelled=active["cancelled"]))):
         reject("visual_compound_candidate_review_required")
     review["validate"]()
     context = active["context"]

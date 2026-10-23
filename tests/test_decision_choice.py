@@ -1,6 +1,7 @@
 """三选一采用合同；只用离线传输与真实认证账本。"""
 from copy import deepcopy
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -69,6 +70,22 @@ def test_single_choice_drives_outcome_without_probability_threshold_or_observati
     changed["choice_result"]["choice"] = "condition_not_met" if choice != "condition_not_met" else "condition_met"
     assert not service.validate_result(changed, **args)
     client.close()
+
+
+def test_recorded_cache_write_details_survive_authenticated_receipt_without_rebilling(tmp_path, monkeypatch):
+    body = json.loads((Path(__file__).parent / "fixtures/decisions-choice-cache-write-details-20261023.json").read_text(encoding="utf-8"))
+    service, calls, client = runtime(tmp_path, monkeypatch, body=body)
+    args = arguments(tmp_path, review_context=context())
+    try:
+        result = service.evaluate(**args)
+        assert result["status"] == "completed" and result["choice_result"] == body["answers"][0]
+        assert result["usage"] == body["usage"]
+        assert result["authorizes_action"] is False and result["automatic_retry_allowed"] is False
+        assert service.validate_result(result, **args)
+        assert service.evaluate(**args) == result and len(calls) == 1
+    finally:
+        service.close()
+        client.close()
 
 
 @pytest.mark.parametrize("mutation", [

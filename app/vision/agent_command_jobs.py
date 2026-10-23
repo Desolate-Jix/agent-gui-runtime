@@ -18,6 +18,7 @@ from app.execution.input_sequence import run_input_sequence
 from app.vision.grounding_contract import GroundingResult
 from app.vision.recognition_source import ClientVisionCapabilities, resolve_recognition_route
 from app.vision.field_review_wait import FieldReviewWait
+from app.vision.pre_action_review_wait import PreActionReviewWait
 
 
 
@@ -44,6 +45,14 @@ class _CoordinatorProxy:
 
     def __getattr__(self, name):
         return getattr(self._job.manager.coordinator, name)
+
+    def pre_action_approval_for_receipt(self, receipt):
+        record = self._job.pre_action_review_state
+        approval = record.get('approval') if record is not None else None
+        if approval is None or receipt.get('main_pre_action_review') != approval.to_reference():
+            return None
+        approval.validate()
+        return approval
 
     def execute_local_step(self, **kwargs):
         job = self._job
@@ -212,6 +221,7 @@ class _CoordinatorProxy:
     def _execute_grounded(self, kwargs, request_id, claimed, execution_id):
         job, manager = self._job, self._job.manager
         dispatch_started = False
+        grounding_target, original_zero = None, None
         try:
             with manager._condition:
                 if job.cancelled:
@@ -229,7 +239,69 @@ class _CoordinatorProxy:
                 attempt_index = manager._begin_dispatch(job, "execute_recognition_plan")
                 dispatch_started = True
             receipt = manager.coordinator.execute_local_step(**kwargs, grounding_target=grounding_target)
+            manager._record_receipt(job, receipt, "execute_recognition_plan", attempt_index)
+            from app.core.recognition_dispatch import local_receipt_zero_input_verified
+            if (grounding_target._pre_action_source is not None and not grounding_target.input_claimed
+                    and local_receipt_zero_input_verified(receipt, 'execute_recognition_plan')):
+                original_zero = deepcopy(receipt)
+                approval = manager._await_pre_action_review(job, grounding_target, receipt, attempt_index)
+                if approval is not None:
+                    grounding_target._resume_main_pre_action(approval)
+                    job.pre_action_review_state['approval'] = approval
+                    from app.core.visual_compound_input import resume_pre_action_compound
+                    resume_pre_action_compound(kwargs.get('focus_target'), approval, execution_request_id=job.command_id)
+                    with manager._condition:
+                        if job.cancelled or manager._closed:
+                            raise _Cancelled('agent_command_cancelled')
+                        attempts = deepcopy(manager._snapshots[job.command_id]['dispatch_attempts'])
+                        if attempts[-1]['status'] != 'paused_before_input':
+                            raise AgentCommandError('pre_action_dispatch_attempt_mismatch')
+                        attempts[-1]['status'] = 'started'
+                        manager._update(job, dispatch_attempts=attempts, dispatch_in_progress=True,
+                            action_executed=None, observation={'status': 'unavailable', 'reason': 'action_in_progress'})
+                    resumed_kwargs = {**kwargs, 'action_review_deadline_ns': job.action_review_deadline_ns}
+                    receipt = manager.coordinator.execute_local_step(**resumed_kwargs, grounding_target=grounding_target)
+                    resumed_receipt = receipt
+                    with manager._condition:
+                        actual = _receipt_action(receipt, 'execute_recognition_plan')
+                        manager._update(job, pre_action_resolution={'schema': 'pre_action_outcome.v1',
+                            'status': ('dispatched' if actual is True else 'input_result_unknown'
+                                if grounding_target.input_claimed else 'stopped_before_input'),
+                            'input_claimed': grounding_target.input_claimed,
+                            'receipt_id': receipt.get('step_id'),
+                            'receipt_sha256': sha256(canonical_json_bytes(receipt)).hexdigest(),
+                            'error': deepcopy((receipt.get('response') or {}).get('error'))})
+                    if (not grounding_target.input_claimed
+                            and not local_receipt_zero_input_verified(receipt, 'execute_recognition_plan')):
+                        # Private native target is the input claim boundary. Retain
+                        # the failed second invocation separately; don't call an
+                        # unclaimed suffix "input unknown" or rewrite its receipt.
+                        with manager._condition:
+                            manager._update(job, pre_action_resume_receipt=deepcopy(receipt),
+                                pre_action_resolution={'schema': 'pre_action_outcome.v1', 'status': 'stopped_before_input',
+                                    'receipt_id': receipt.get('step_id'),
+                                    'input_fact_source': 'live_original_grounding_target_unclaimed'})
+                        receipt = original_zero
+                    manager._record_receipt(job, receipt, 'execute_recognition_plan', attempt_index,
+                        invocation_receipt=resumed_receipt)
+                elif manager._snapshots[job.command_id]['dispatch_attempts'][-1]['status'] == 'paused_before_input':
+                    with manager._condition:
+                        attempts = deepcopy(manager._snapshots[job.command_id]['dispatch_attempts'])
+                        attempts[-1]['status'] = 'returned'
+                        manager._update(job, dispatch_attempts=attempts)
         except Exception as error:
+            if original_zero is not None and not grounding_target.input_claimed:
+                with manager._condition:
+                    attempts = deepcopy(manager._snapshots[job.command_id]['dispatch_attempts'])
+                    attempts[-1].update(status='started', action_executed=None)
+                    manager._update(job, dispatch_attempts=attempts)
+                manager._record_receipt(job, original_zero, 'execute_recognition_plan', attempt_index, record_invocation=False)
+                manager.store.finish_execution(request_id, execution_id, original_zero, input_attempted=False)
+                if not job.cancelled:
+                    job.failure_code = str(error)
+                with manager._condition:
+                    manager._update(job, pre_action_resolution={'status': 'stopped_before_input', 'reason': str(error)})
+                return original_zero
             if not isinstance(error, _Cancelled):
                 manager.store.finish_execution(request_id, execution_id,
                     {"phase": "result_unknown" if dispatch_started else "failed_before_dispatch",
@@ -241,7 +313,6 @@ class _CoordinatorProxy:
                     with manager._condition:
                         manager._update(job, observation={"status": "unavailable", "reason": "failed_before_dispatch"})
             raise
-        manager._record_receipt(job, receipt, "execute_recognition_plan", attempt_index)
         manager.store.finish_execution(request_id, execution_id, receipt,
             input_attempted=grounding_target.input_claimed)
         return receipt
@@ -340,10 +411,11 @@ class _Job:
         self.measurement_changes = {}
         self.thread = None
         self.field_review_state = None
+        self.pre_action_review_state = None
         self.prefetch_checked = False
 
 
-class AgentCommandJobs(FieldReviewWait):
+class AgentCommandJobs(PreActionReviewWait, FieldReviewWait):
     """单宿主单活动命令；磁盘记录只供诊断，重启绝不恢复输入。"""
 
     def __init__(self, coordinator, store, capture_current, configuration, *, api_grounder=None):
@@ -361,6 +433,7 @@ class AgentCommandJobs(FieldReviewWait):
         self._closed = False
         self._root = Path(store.session_root) / "agent-commands"
         self.field_review_plan_validator = None
+        self.pre_action_plan_validator = None
         from .task_grounding_prefetch import TaskGroundingPrefetch
         self.task_grounding_prefetch = TaskGroundingPrefetch(self)
 
@@ -568,14 +641,20 @@ class AgentCommandJobs(FieldReviewWait):
                 action_executed=_merge_action(attempts[-1]["previous_action_executed"], None),
                 observation={"status": "unavailable", "reason": "execution_result_unknown"})
 
-    def _record_receipt(self, job, receipt, operation, attempt_index):
+    def _record_receipt(self, job, receipt, operation, attempt_index, *, invocation_receipt=None, record_invocation=True):
         with self._condition:
             attempts = self._dispatch_attempt(job, operation, attempt_index)
             executed = _receipt_action(receipt, operation)
             attempts[-1].update(status="returned", action_executed=executed)
+            invocations = deepcopy(self._snapshots[job.command_id].get('local_invocations', []))
+            if record_invocation:
+                actual = invocation_receipt if invocation_receipt is not None else receipt
+                invocations.append({'attempt_index': attempt_index, 'receipt_id': actual.get('step_id'),
+                    'phase': actual.get('phase'), 'receipt_sha256': sha256(canonical_json_bytes(actual)).hexdigest()})
             # 原回执、动作事实和关闭边界必须在同一原子快照中发布。
             self._update(job, dispatch_attempts=attempts, dispatch_in_progress=False,
                 last_execution={"attempt_index": attempt_index, "operation": operation, "receipt": deepcopy(receipt)},
+                local_invocations=invocations,
                 action_executed=_merge_action(attempts[-1]["previous_action_executed"], executed),
                 observation=deepcopy(receipt.get("observation") or
                     {"status": "unavailable", "reason": "post_action_observation_unavailable"}))
@@ -640,7 +719,8 @@ class AgentCommandJobs(FieldReviewWait):
             job = _Job(self, command_id, frozen, target, capabilities, workflow_bindings,
                        learning_context)
             state = {"contract_version": "agent_command.v1", "command_id": command_id,
-                "status": "running", "pending_grounding": None, "pending_field_review": None, "progress": None,
+                "status": "running", "pending_grounding": None, "pending_field_review": None,
+                "pending_pre_action_review": None, "progress": None,
                 "result": None, "observation": {"status": "not_requested", "capture": None},
                 "action_executed": False, "cancel_requested": False,
                 "dispatch_in_progress": False,
@@ -705,14 +785,14 @@ class AgentCommandJobs(FieldReviewWait):
                 observation = (current_observation if current_observation.get("reason") ==
                     "execution_result_unknown" else result.get("observation") or current_observation)
                 self._update(job, status="failed" if job.failure_code else "cancelled" if job.cancelled else status,
-                    pending_grounding=None, pending_field_review=None, result=result,
+                    pending_grounding=None, pending_field_review=None, pending_pre_action_review=None, result=result,
                     action_executed=_merge_action(self._snapshots[job.command_id]["action_executed"],
                         action_executed),
                     observation=deepcopy(observation))
         except Exception as error:
             with self._condition:
                 self._update(job, status="failed" if job.failure_code else "cancelled" if job.cancelled else "failed",
-                    pending_grounding=None, pending_field_review=None, error={"code": job.failure_code or str(error),
+                    pending_grounding=None, pending_field_review=None, pending_pre_action_review=None, error={"code": job.failure_code or str(error),
                         "type": type(error).__name__})
         finally:
             with self._condition:

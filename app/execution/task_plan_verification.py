@@ -141,8 +141,12 @@ def verify_task_plan_step(backend, *, session_dir, run_id, request_id, execution
     # 可信已知失败只停止，保留实际副作用；无终态证明的部分输入仍保留原票据。
     if input_status != "completed":
         from .task_plan_intervention import zero_input_verified
+        # A live Main pre-action wait that ended without input is a stop. It
+        # must not become the legacy "new attempt and rejudge" recovery route.
+        worker = read_json_snapshot(terminal['path']) if terminal is not None else {}
+        main_pre_action_stopped = bool(worker.get('pre_action_review'))
         if (review is None and state.get("recovery_policy") == "intervention_v1" and state["status"] == "pending"
-                and actual is False and zero_input_verified(backend, state, pending)):
+                and not main_pre_action_stopped and actual is False and zero_input_verified(backend, state, pending)):
             _unchanged(session, references)
             return backend.record_pre_dispatch_block(run_id, request_id, execution_id, result)
         if review is not None:

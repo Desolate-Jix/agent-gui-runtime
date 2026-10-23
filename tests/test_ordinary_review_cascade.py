@@ -1,6 +1,7 @@
 """两级审核只覆盖模型结论，保持原证据、预算及认证边界。"""
 from copy import deepcopy
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -33,6 +34,93 @@ def setup(root, monkeypatch, *, first='condition_not_met', second='condition_met
                 'http_elapsed_ms': 5, 'server_processing_ms': 3, 'provider_request_id': 'secondary-1'}
     monkeypatch.setattr(service._provider, 'review', review, raising=False)
     return service, calls, reviews, client
+
+
+def cache_write_usages(primary_details=True, secondary_details=True):
+    """Synthetic nonzero counts extend the recorded single-response shape."""
+    fixture = Path(__file__).parent / 'fixtures/decisions-choice-cache-write-details-20261023.json'
+    primary = json.loads(fixture.read_text(encoding='utf-8'))['usage']
+    primary['input_tokens_details'].update(cache_write_tokens=12,
+        cache_write_tokens_details={'ttl_30m_tokens': 5, 'ttl_12h_tokens': 7})
+    secondary = {'input_tokens': 20, 'output_tokens': 3, 'total_tokens': 23,
+        'input_tokens_details': {'cached_tokens': 2, 'cache_write_tokens': 7,
+            'cache_write_tokens_details': {'ttl_30m_tokens': 3, 'ttl_12h_tokens': 4}},
+        'output_tokens_details': {'reasoning_tokens': 2}}
+    for usage, present in ((primary, primary_details), (secondary, secondary_details)):
+        if present is None:
+            usage.pop('input_tokens_details')
+        elif not present:
+            usage['input_tokens_details'].pop('cache_write_tokens_details')
+    return primary, secondary
+
+
+def expected_cache_write_usage(primary_details, secondary_details):
+    expected = {'input_tokens': 1472, 'output_tokens': 3, 'total_tokens': 1475,
+        'output_tokens_details': {'reasoning_tokens': 2}}
+    if primary_details is not None and secondary_details is not None:
+        expected['input_tokens_details'] = {'cached_tokens': 1279, 'cache_write_tokens': 19}
+        if primary_details and secondary_details:
+            expected['input_tokens_details']['cache_write_tokens_details'] = {'ttl_30m_tokens': 8, 'ttl_12h_tokens': 11}
+    return expected
+
+
+@pytest.mark.parametrize('primary_details,secondary_details', [(True, True), (True, False), (False, True), (True, None), (None, True)])
+def test_combined_cache_write_usage_sums_known_counts_without_inventing_missing_metadata(primary_details, secondary_details):
+    from app.judgment.ordinary_review import combined_usage
+
+    primary, secondary = cache_write_usages(primary_details, secondary_details)
+    original = deepcopy((primary, secondary))
+    assert combined_usage(primary, secondary) == expected_cache_write_usage(primary_details, secondary_details)
+    assert (primary, secondary) == original
+
+
+@pytest.mark.parametrize('side', [0, 1])
+@pytest.mark.parametrize('nested', [True, {'ttl_30m_tokens': True, 'ttl_12h_tokens': 0},
+    {'ttl_30m_tokens': -1, 'ttl_12h_tokens': 0}, {'ttl_30m_tokens': 0, 'ttl_12h_tokens': 0, 'unknown': 0}])
+def test_combined_cache_write_usage_rejects_bad_structure_in_either_layer(side, nested):
+    from app.judgment.ordinary_review import combined_usage
+
+    layers = cache_write_usages()
+    layers[side]['input_tokens_details']['cache_write_tokens_details'] = nested
+    with pytest.raises(ValueError, match='decision_usage_details_invalid'):
+        combined_usage(*layers)
+
+
+@pytest.mark.parametrize('primary_details,secondary_details', [(True, True), (True, False), (False, True), (True, None), (None, True)])
+def test_cascade_cache_write_usage_is_authenticated_and_never_rebilled(tmp_path, monkeypatch, primary_details, secondary_details):
+    from test_luna_choice_review_provider import response_body
+
+    primary_usage, secondary_usage = cache_write_usages(primary_details, secondary_details)
+
+    def handle(request):
+        ordinary = request.url.path == '/v1/responses'
+        body = response_body('condition_met') if ordinary else choice_reply('condition_not_met')
+        body['usage'] = secondary_usage if ordinary else primary_usage
+        return httpx.Response(200, json=body)
+
+    service, calls, client = runtime(tmp_path, monkeypatch, handler=handle,
+        profile={'ordinary_review': 'on_reject'})
+    args = arguments(tmp_path, review_context=context())
+    try:
+        result = service.evaluate(**args)
+        assert result['status'] == 'completed' and result['ordinary_review']['status'] == 'completed'
+        assert result['primary_usage'] == primary_usage
+        assert result['ordinary_review']['usage'] == secondary_usage
+        assert result['usage'] == expected_cache_write_usage(primary_details, secondary_details)
+        assert result['authorizes_action'] is False and result['automatic_retry_allowed'] is False
+        assert service.status()['used'] == 2 and len(calls) == 2
+        assert service.validate_result(result, **args)
+        assert service.evaluate(**args) == result and len(calls) == 2
+        reopened = DecisionService(tmp_path, profile=service.profile)
+        try:
+            assert reopened.evaluate(**args) == result
+            assert reopened.validate_result(result, **args)
+            assert reopened.status()['used'] == 2 and len(calls) == 2
+        finally:
+            reopened.close()
+    finally:
+        service.close()
+        client.close()
 
 
 @pytest.mark.parametrize('first,second,adopted,verdict', [

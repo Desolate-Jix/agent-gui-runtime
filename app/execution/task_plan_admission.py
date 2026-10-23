@@ -4,7 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 import re
 
-from app.core.instant_command_queue import command_queue_lock
+from app.core.instant_command_queue import CommandQueueBusy, command_queue_lock
 from app.core.json_snapshot import read_json_snapshot
 from app.learning_memory.workflow_program import _id
 from app.learning_memory.workflow_runner import WorkflowRunner, _run_id, _exclusive
@@ -115,26 +115,94 @@ class TaskPlanRuntime(WorkflowRuntime):
             settle_failed=self._verify)
         if self.agent_jobs is not None:
             self.agent_jobs.field_review_plan_validator = self._field_review_plan_matches
+            self.agent_jobs.pre_action_plan_validator = self._pre_action_plan_matches
+
+    def _pre_action_plan_matches(self, execution_id, action_review):
+        job = getattr(self.agent_jobs, '_jobs', {}).get(execution_id)
+        def rejected(reason):
+            if job is not None:
+                job.pre_action_binding_failure = reason
+            return False
+        failure = self._field_review_plan_failure(execution_id, action_review, retry_queue_busy=True)
+        if failure is not None:
+            return rejected(failure)
+        # Original command and this read/control are allowed; competing or unknown
+        # queued work cannot inherit Main's approval.
+        try:
+            for path in (self.session / 'commands').glob('*.json'):
+                if path.stem in {execution_id, self._control_id}:
+                    continue
+                command = read_json_snapshot(path)
+                response_path = self.session / 'responses' / path.name
+                if response_path.is_file():
+                    if command.get('kind') in {'step', 'input_sequence', 'form_fill', 'grounding_execute'}:
+                        from app.learning_memory.workflow_trial import _receipt_state, _actual_action_executed
+                        from app.learning_memory.receipt_adapter import resolve_execution_receipt
+                        receipt = read_json_snapshot(response_path)
+                        succeeded, terminal, _ = _receipt_state(receipt, response_path, path.stem, command)
+                        effective, resolved = resolve_execution_receipt(receipt, response_path, path.stem)
+                        if terminal != resolved or not succeeded and _actual_action_executed(effective.get('result'), terminal) is not False:
+                            return rejected('prior_input_unsettled:' + path.stem)
+                    continue
+                live = getattr(job, 'pre_action_review_state', None)
+                from .main_pre_action_approval import digest
+                if live is not None and live['accepted_controls'].get(path.stem) == digest(command):
+                    continue
+                from .task_plan_pre_action_review import queued_pre_action_control
+                if queued_pre_action_control(live, command, self.runner.status(action_review['run_id']).get('wait')):
+                    continue
+                if (command.get('kind') == 'agent_command_status'
+                        or command.get('kind') == 'task_plan' and (command.get('request') or {}).get('action') == 'status'):
+                    continue
+                return rejected('queued_command_not_bound:' + path.stem)
+            for path in (self.session / 'agent-commands').glob('*.json'):
+                if path.stem != execution_id and read_json_snapshot(path).get('status') not in _TERMINAL:
+                    return rejected('other_agent_job_active:' + path.stem)
+            if job is not None:
+                job.pre_action_binding_failure = None
+            return True
+        except (OSError, ValueError, TypeError) as error:
+            return rejected('queue_validation_error:' + type(error).__name__)
 
     def _field_review_plan_matches(self, execution_id, action_review):
+        return self._field_review_plan_failure(execution_id, action_review) is None
+
+    def _field_review_plan_failure(self, execution_id, action_review, *, retry_queue_busy=False):
         # 只有真实原计划的待处理命令可暂停；自声明上下文不能创建无人可审核的等待。
-        if not isinstance(action_review, dict) or (self.session / "closing.json").exists():
-            return False
+        if not isinstance(action_review, dict):
+            return 'action_review_context_invalid'
+        if (self.session / "closing.json").exists():
+            return 'session_closing'
         try:
             state = self.backend.status(action_review["run_id"])
             pending = state.get("pending")
-            if (state.get("status") != "pending" or not pending
-                    or pending["execution_request_id"] != execution_id
-                    or pending["step_id"] != action_review.get("step_id")
-                    or pending["suggested_command"].get("action_review") != action_review):
-                return False
+            if state.get('status') != 'pending':
+                return 'plan_not_pending:' + str(state.get('status'))
+            if not pending:
+                return 'pending_ticket_missing'
+            if pending['execution_request_id'] != execution_id:
+                return 'execution_id_mismatch'
+            if pending['step_id'] != action_review.get('step_id'):
+                return 'step_id_mismatch'
+            if pending['suggested_command'].get('action_review') != action_review:
+                return 'action_review_context_mismatch'
             self.backend.validate_resume(state["run_id"], None)
             source = self.backend._source(state)
             original = read_json_snapshot(self.session / "commands" / (execution_id + ".json"))
             assert_no_queued_plan_cancel(self.session, state["run_id"])
-            return source["plan"] == action_review.get("plan") and original == pending["suggested_command"]
-        except (KeyError, ValueError, OSError):
-            return False
+            if source['plan'] != action_review.get('plan'):
+                return 'frozen_plan_mismatch'
+            if original != pending['suggested_command']:
+                return 'original_command_mismatch'
+            return None
+        except CommandQueueBusy as error:
+            # A queued cancel inherits this exception: it must still revoke the
+            # capability. Only actual lock contention may be rechecked later.
+            if retry_queue_busy and type(error) is CommandQueueBusy:
+                raise
+            return 'plan_validation_error:' + type(error).__name__
+        except (KeyError, ValueError, OSError) as error:
+            return 'plan_validation_error:' + type(error).__name__
 
     def _enqueue(self, execution_id, command):
         run_id = self.runner._active_run()
@@ -172,7 +240,8 @@ class TaskPlanRuntime(WorkflowRuntime):
 
     def _remember_active(self, snapshot):
         snapshot = self._review_snapshot(snapshot)
-        if snapshot.get("field_review_pending_settlement") is True:
+        if (snapshot.get("field_review_pending_settlement") is True
+                or snapshot.get('pre_action_review_pending_settlement') is True):
             self._enabled_run = snapshot["run_id"]
             return snapshot
         if snapshot.get("observation_pending") is True and snapshot.get("status") != "cancel_requested":
@@ -191,6 +260,10 @@ class TaskPlanRuntime(WorkflowRuntime):
     def _review_snapshot(self, snapshot):
         value = deepcopy(snapshot)
         value["prefix_sha256"] = self.backend.prefix_sha256(value["run_id"])
+        from .task_plan_pre_action_review import project_pre_action_review
+        pre_action = project_pre_action_review(self, value)
+        if pre_action is not None:
+            return pre_action
         from .task_plan_field_review import project_field_review
         field_review = project_field_review(self, value)
         if field_review is not None:
@@ -425,6 +498,10 @@ class TaskPlanRuntime(WorkflowRuntime):
                 return self._remember_active(snapshot)
             if action == "review":
                 snapshot = self.runner.status(run_id)
+                from .task_plan_pre_action_review import control_pre_action_review
+                pre_action = control_pre_action_review(self, snapshot, request, request_id)
+                if pre_action is not None:
+                    return pre_action
                 from .task_plan_field_review import control_field_review
                 field_result = control_field_review(self, snapshot, request, request_id)
                 if field_result is not None:
@@ -442,6 +519,10 @@ class TaskPlanRuntime(WorkflowRuntime):
                 # 审核只结算原票据；调用方用原 wait_id 明确继续，避免状态查询产生输入。
                 return self._review_snapshot(self.runner.status(run_id))
             from .task_plan_field_review import control_field_review
+            from .task_plan_pre_action_review import control_pre_action_review
+            pre_action = control_pre_action_review(self, self.runner.status(run_id), request, request_id)
+            if pre_action is not None:
+                return pre_action
             field_result = control_field_review(self, self.runner.status(run_id), request, request_id)
             if field_result is not None:
                 return field_result

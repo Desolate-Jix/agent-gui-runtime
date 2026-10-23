@@ -116,7 +116,13 @@ class InstantAttachmentTransport:
             if self.session and decision_status.get("mode", "off") != "off":
                 from app.core.decision_configuration import read_session_decision_status
                 decision_status = read_session_decision_status(self.session, decision_status)
-            return {"mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
+            from app.instant_receipt import _pre_action_packet
+            plan_status = report.get('task_plan_run') or {}
+            pre_action = _pre_action_packet(plan_status.get('review_packet'))
+            review_context = ({'pre_action_review': pre_action,
+                'caller_controls': (deepcopy(plan_status.get('caller_controls'))
+                    if alive and not (self.session / 'closing.json').exists() else None)} if pre_action is not None else {})
+            return {**review_context, "mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
                 "recognition_source": self.recognition_source, "delegate_profile": self.delegate_profile,
                 "api_profile": self.api_profile,
                 "decision_service": decision_status,
@@ -188,7 +194,7 @@ class InstantAttachmentTransport:
             raise ValueError("instant_agent_worker_evidence_invalid") from error
         if (not isinstance(state, dict) or state.get("contract_version") != "agent_command.v1"
                 or state.get("command_id") != command_id
-                or state.get("status") not in {"running", "awaiting_grounding", "awaiting_field_review", "completed", "failed", "cancelled"}
+                or state.get("status") not in {"running", "awaiting_grounding", "awaiting_field_review", "awaiting_pre_action_review", "completed", "failed", "cancelled"}
                 or state.get("action_executed") is not None and type(state["action_executed"]) is not bool):
             raise ValueError("instant_agent_worker_evidence_invalid")
         return {**evidence, "sha256": hashlib.sha256(raw).hexdigest(), "status": state["status"],
@@ -251,7 +257,7 @@ class InstantAttachmentTransport:
                     operation_success_scope="task_plan_control", task_effect_verified=None,
                     next_action="inspect_original_plan_status_without_resubmitting_start")
             if result.get("contract_version") == "agent_command.v1":
-                waiting = outcome in {"running", "awaiting_grounding", "awaiting_field_review"}
+                waiting = outcome in {"running", "awaiting_grounding", "awaiting_field_review", "awaiting_pre_action_review"}
                 receipt.update(operation_succeeded=None if waiting else ok and outcome == "completed",
                     operation_success_scope="agent_command_progress", task_effect_verified=None,
                     action_executed=result.get("action_executed"))
@@ -275,6 +281,9 @@ class InstantAttachmentTransport:
                         "request_id": "agent-status-" + uuid4().hex,
                         "command": {"kind": "agent_command_status", "request": {
                             "command_id": result["command_id"]}}, "images": "after"}}
+                    if outcome == 'awaiting_pre_action_review':
+                        receipt['next_action'] = 'read_original_bound_before_image_then_task_plan_review_and_explicit_continue'
+                        receipt['next']['arguments']['images'] = 'none'
                     if not self._host_alive():
                         evidence = self._saved_agent_worker_evidence(request_id, original_command, result)
                         # 原接收快照不是退出后的执行事实；只读原 worker，不结算、不重派。

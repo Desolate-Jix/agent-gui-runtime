@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amadeus-agent-gui-runtime"
-version = "0.0.2"
-description = "Experimental Amadeus MCP and Skill adapter for an existing Windows GUI Runtime"
+version = "0.0.4"
+description = "Declarative HTTP MCP connection and Skill for an authenticated local Windows GUI Runtime"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "ISC"

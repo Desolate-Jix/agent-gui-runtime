@@ -1,6 +1,7 @@
 """真实传输适配器的离线协议回归；不读取用户凭据。"""
 import json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Event
 
 import httpx
@@ -20,6 +21,68 @@ def payload():
     return {"condition": "详情已打开", "phase": "after_action", "frames": [
         {"role": "after", "capture_id": "c1", "data_url": "data:image/png;base64,aGVsbG8="}],
         "request_sha256": "a" * 64, "action": None}
+
+
+def test_recorded_cache_write_details_response_passes_original_choice_and_provider(monkeypatch):
+    """2026-10-23 one-call diagnosis: HTTP 200 previously became protocol_error.
+
+    Preserve the actual response fields/values. The original normal run's
+    response was not retained; this fixture comes from the separately authorized
+    single-call diagnosis with the same bound image/question and wire builder.
+    """
+    from app.judgment.openai_decisions import OpenAIDecisionsProvider, _parse_choice_reply
+
+    body = json.loads((Path(__file__).parent / "fixtures/decisions-choice-cache-write-details-20261023.json").read_text(encoding="utf-8"))
+    choice, usage = _parse_choice_reply(body)
+    assert choice == body["answers"][0] and usage == body["usage"]
+    monkeypatch.setenv("DECISION_TEST_KEY", "synthetic-secret")
+    calls = []
+
+    def handle(request):
+        calls.append(request)
+        return httpx.Response(200, json=body)
+
+    data = {**payload(), "schema_version": "decision_request.v2", "decision_format": "choice", "enabled_predicates": []}
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        result = OpenAIDecisionsProvider(api_key_env="DECISION_TEST_KEY", client=client).judge(data)
+    assert result["choice_result"] == body["answers"][0]
+    assert result["usage"] == body["usage"] and len(calls) == 1
+
+
+@pytest.mark.parametrize("nested", [
+    None, [], 0, True, {}, {"ttl_30m_tokens": 0}, {"ttl_12h_tokens": 0},
+    {"ttl_30m_tokens": 0, "ttl_12h_tokens": 0, "unknown_tokens": 0},
+])
+def test_cache_write_details_reject_malformed_structure(nested):
+    from app.judgment.openai_decisions import _usage_counts
+
+    usage = {**reply()["usage"], "input_tokens_details": {"cache_write_tokens_details": nested}}
+    with pytest.raises(ValueError, match="decision_usage_details_invalid"):
+        _usage_counts(usage)
+
+
+@pytest.mark.parametrize("name", ["ttl_30m_tokens", "ttl_12h_tokens"])
+@pytest.mark.parametrize("value", [True, False, -1, 0.0, 1.5, "0", None, {}])
+def test_cache_write_details_require_nonnegative_integer_counts(name, value):
+    from app.judgment.openai_decisions import _usage_counts
+
+    nested = {"ttl_30m_tokens": 0, "ttl_12h_tokens": 0, name: value}
+    usage = {**reply()["usage"], "input_tokens_details": {"cache_write_tokens_details": nested}}
+    with pytest.raises(ValueError, match="decision_usage_details_invalid"):
+        _usage_counts(usage)
+
+
+def test_cache_write_breakdown_preserves_reported_totals_without_deriving_costs():
+    from app.judgment.openai_decisions import _usage_counts
+
+    usage = {"input_tokens": 1452, "output_tokens": 0, "total_tokens": 1452,
+        "input_tokens_details": {"cached_tokens": 1277, "cache_write_tokens": 18,
+            "cache_write_tokens_details": {"ttl_30m_tokens": 7, "ttl_12h_tokens": 11}},
+        "output_tokens_details": {"reasoning_tokens": 0}}
+    counts = _usage_counts(usage)
+    assert counts == usage
+    counts["input_tokens_details"]["cache_write_tokens_details"]["ttl_30m_tokens"] = 100
+    assert usage["input_tokens_details"]["cache_write_tokens_details"]["ttl_30m_tokens"] == 7
 
 
 def test_provider_batches_shared_images_and_preserves_real_usage_and_timings(monkeypatch):

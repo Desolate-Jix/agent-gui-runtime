@@ -1,6 +1,8 @@
-# 执行模式 0.1.5 详细指南
+# 执行模式 0.1.6 详细指南
 
-**0.1.5 同版本更新（2026-10-17）：** Enter 后自适应观察，当前结果复核与下一步只读定位并行。小样本源码对照中，实际动作间隔中位数为 **记事本 5.803→5.597 秒、7-Zip 7.805→7.254 秒、Edge 10.786→9.280 秒**。新候选六个三步计划均自动完成，原图／磁盘核对及收尾通过；模型配置和通过规则不变。这些是源码测量，不是通用准确率，尚未达到四秒目标。[方法、完整任务时间、调用和限制 →](verification/EXECUTION_015_REFRESH_20261017.md) · [日期安装包验收与摘要 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+**0.1.6（2026-10-23）：** 保留 stdio，新增带鉴权的本机 HTTP MCP；新建 API／Agent 环境默认使用 Python 3.12；点击前双拒可由 Main 看图审核后继续原任务。临时队列锁竞争会短等后重核全部门禁，阈值、提示词和默认服务不变。[下载 Runtime 0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) · [Amadeus 0.0.4 安装说明](../integrations/amadeus/agent-review-instant/README.zh-CN.md) · [恢复验收与限制](verification/MAIN_PRE_ACTION_REVIEW_20261023.md)。
+
+**历史 0.1.5 同版本更新（2026-10-17）：** Enter 后自适应观察，当前结果复核与下一步只读定位并行。小样本源码对照中，实际动作间隔中位数为 **记事本 5.803→5.597 秒、7-Zip 7.805→7.254 秒、Edge 10.786→9.280 秒**。新候选六个三步计划均自动完成，原图／磁盘核对及收尾通过；模型配置和通过规则不变。这些是源码测量，不是通用准确率，尚未达到四秒目标。[方法、完整任务时间、调用和限制 →](verification/EXECUTION_015_REFRESH_20261017.md) · [日期安装包验收与摘要 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 [返回首页](../README.zh-CN.md) · [English](EXECUTION_GUIDE.md)
 
@@ -8,13 +10,13 @@
 
 Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图定位目标，执行点击、替换输入、按键和滚动。主 Agent 提供一份明确的线性计划，运行时在同一会话中执行受支持的步骤并核验结果，减少每次成功操作后都返回主 Agent 的等待。
 
-**执行版 0.1.5 新增 Main 审核后明确继续原文字输入命令。** 下方记录已安装 Amadeus／Pi 的正常任务证据；最终包的独立验收状态见 [0.1.5 发布说明](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)。旧测量与演示保留原版本归属。
+**历史执行版 0.1.5 新增 Main 审核后明确继续原文字输入命令。** 下方记录已安装 Amadeus／Pi 的正常任务证据；最终包的独立验收状态见 [0.1.5 发布说明](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)。旧测量与演示保留原版本归属。
 
 **历史执行版 0.1.4 已通过限定范围的记事本与 7-Zip 安装态流程，包括 Sol 独立验收。** Main 完成三个计划（3+3+6 步），Sol 完成两个全新计划（3+3 步），五个计划均自动完成。耗时、原始失败与安装验收边界见[多应用报告](verification/MULTI_APP_EXECUTION_20261015.md)。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
 
-[0.1.5 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup-0.1.5-20261017-01.exe) · [0.1.5 发布说明、校验文件与独立验收状态](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+[0.1.6 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/AgentGUIRuntimeExecution-Setup.exe) · [0.1.6 发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6)
 
-**0.1.5 的服务配置：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
+**0.1.6 的服务配置：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
 
 ## Decision 和视觉模型如何配合
 
@@ -32,28 +34,40 @@ Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图�
 
 ```mermaid
 flowchart TD
-    U([用户下达任务]) --> M[主 Agent 给出线性计划]
-    M --> C[绑定目标窗口并截图]
-    C --> V[视觉模型定位目标]
-    V --> D{Decision 审核目标}
-    D -->|满足| A[执行动作]
-    D -->|不满足或不明确| L{普通 Luna 对同一证据复核一次}
-    L -->|通过| A
-    L -->|仍未通过或失败| R[交回原主 Agent]
-    A --> E[采集当前结果]
-    E --> O{Decision 核验本步结果}
-    O -->|满足| N{还有步骤吗？}
-    O -->|不满足或不明确| Q{普通 Luna 对同一证据复核一次}
-    Q -->|通过| N
-    Q -->|仍未通过或失败| R
-    N -->|有| C
-    N -->|无| F([返回完成回执])
-    R --> P[审核绑定证据后明确继续、修订或停止]
+    U([User task / 用户任务]) --> M[Main plan / 主 Agent 计划]
+    M --> C[Capture and ground target / 截图定位]
+    C --> D{Decision target check / 目标核验}
+    D -->|Pass / 通过| G[Freshness and input gates / 新鲜度及输入门禁]
+    D -->|Nonpass / 未通过| L{Ordinary Luna / 普通复核}
+    L -->|Pass / 通过| G
+    L -->|Authenticated double nonpass / 已认证双拒| B[Main reads bound before image / Main 看操作前绑定图]
+    B -->|Review then separate continue / 审核后单独续行| K[Fresh capture, same job and candidate / 新截图及原任务候选]
+    B -->|Reject / 拒绝| S([Stop without input / 不输入并停止])
+    K --> G
+    G -->|Valid / 有效| A[Dispatch original action once / 原动作派发一次]
+    G -->|Changed, stale or cancelled / 变化失效或取消| S
+    A --> E[Capture and verify result / 截图核验结果]
+    E --> V{Decision, then Luna if needed / Decision 未过再普通复核}
+    V -->|Pass / 通过| N{More steps? / 还有步骤？}
+    V -->|Settled input double nonpass / 已结算输入双拒| H[Main reads bound after image / Main 看操作后绑定图]
+    H -->|Review then separate continue / 审核后单独续行| J[Resume original job, gate remaining input / 续原任务及核验余下输入]
+    J --> N
+    H -->|Reject / 拒绝| Z([Stop, no replay / 停止且不重放])
+    N -->|Yes / 有| C
+    N -->|No / 无| F([Return settled receipt / 返回结算回执])
 ```
 
 视觉输入将 **点击 → Ctrl+A → 替换文字** 绑定为连续动作，只核验规定文字，再复用字段位置重新审核点击点，执行 **点击 → Enter**。不推断焦点，不判断空框，两组连续动作内部均不插入截图或模型调用。详见 [视觉输入说明](development/VISUAL_EXECUTION_INPUT.md)。
 
-## 0.1.5：审核并继续原文字输入
+## 0.1.6：点击前双拒后审核并继续
+
+直接 MCP 调用方和 Amadeus Pi 使用同一份 `pre_action_review_packet.v1` 合同：两层模型均完成但未接受候选、且原动作确认尚未派发时，保留原任务等待 Main。以新的外层请求 ID 查询原 `execution_request_id`，再读取该状态请求绑定的 `instant_image(view="before")`。Main 使用实际返回的 review 配方明确审核，再单独使用 continue 配方继续。
+
+审核本身不会点击。续行保留原 run／step／job／attempt 和候选，重新截图并检查目标区域、窗口身份、几何、可见性、取消与输入授权，再派发一次原动作。保存的 JSON、版本号或已过期证据不能授权输入。操作后的 `field_review_packet.v1` 仍使用 **after** 图，两类票据不能互换。
+
+安装态候选完成本体五步及原生 Pi 四步流程，均覆盖显式 TEST 双拒后的 Main 实际看图和续行；阈值不变。这是功能恢复验收，不是准确率、速度或 token 节省基准。[结果与限制](verification/MAIN_PRE_ACTION_REVIEW_20261023.md) · [完整设计](development/MAIN_PRE_ACTION_REVIEW.md)。
+
+## 历史 0.1.5：审核并继续原文字输入
 
 原输入已结算后发生通过认证的双模型非通过判断时，活跃 job 可停在 `field_review_packet.v1`。支持图像的 Main 读取绑定 after 原图，使用确切 `caller_controls.review.request`，再单独调用返回的 `caller_controls.continue.request`。review 只记录结论；continue 续行同一 run／step／command，不重新全选或输入。剩余 submit 后缀仍经过正常 fresh-target／输入门禁与结果核验。
 
@@ -127,7 +141,7 @@ flowchart TD
 
 ## 安装与配置
 
-要求 **Windows x64、Python 3.11 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)**。安装器提供维护源码与配置脚本；首次配置按所选路线安装依赖，不附带模型权重或 API 密钥。请按实际安装位置调整示例路径。为兼容升级，目录或快捷方式可能保留历史 Preview 名称；产品版本、安装窗口及卸载条目会标明组件版本。安装器验收状态及校验值见 0.1.4 发布说明。
+要求 **Windows x64 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)**。API／Agent 路线推荐 Python 3.12，保留已有的受支持 3.11 环境；本地模型路线仍要求 Python 3.11。安装器提供维护源码与配置脚本；首次配置按所选路线安装依赖，不附带模型权重或 API 密钥。请按实际安装位置调整示例路径。为兼容升级，目录或快捷方式可能保留历史 Preview 名称；产品版本、安装窗口及卸载条目会标明组件版本。安装器校验值与精确验收范围见 0.1.6 发布说明。
 
 使用外部 Luna 视觉 API 和 Decision：
 
@@ -151,17 +165,21 @@ flowchart TD
 
 去掉 `-WhatIf` 后才会实际准备本地环境。本地路线使用官方 [VISTA-4B](https://huggingface.co/inclusionAI/VISTA-4B) Transformers 权重；本地硬件要求只适用于该路线。另见 [外部视觉 API 配置](development/EXTERNAL_VISION_API.md)。
 
+## Amadeus HTTP MCP 接入
+
+安装 Runtime 0.1.6、准备 API 环境，在独立控制台启动 `scripts/start_instant_mcp_http.py`。服务仅绑定 `127.0.0.1`，环境变量中的本机连接 token 与模型 API Key 分开。导入 0.0.4 wheel，填写 `runtime_url` 与保密的 `connection_token`，将 MCP＋Skill 绑定 Pi，启用、重启后端，再新建 Work。扩展不会启动 Runtime，也不接收其模型密钥。详见[完整命令与迁移说明](../integrations/amadeus/agent-review-instant/README.zh-CN.md)。原 stdio 客户端可继续使用原接入方式。
+
 ## Agent 接入
 
 MCP stdio 提供七个核心工具：`instant_start`、`instant_status`、`instant_run`、`instant_submit`、`instant_result`、`instant_image`、`instant_stop`，另有 `instant_recovery_preview` 和 `instant_recover_session` 两个恢复工具。
 
-保持同一会话、同一桌面输入所有者。支持单步动作、组合输入和线性计划。执行版 0.1.5 候选保留 0.1.4 的非空线性计划支持，不设固定步数上限；逐步校验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在明确升级前保留构建时协议。见[源码验证](verification/UNBOUNDED_TASK_PLANS_20261015.md)。等待到期不等于取消；应查询原请求 ID，避免重放输入。详见 [Agent 指南](../AGENT_GUIDE.md)、[任务计划](development/TASK_PLAN.md) 和 [Decision 配置](development/DECISION_API.md)。
+保持同一会话、同一桌面输入所有者。支持单步动作、组合输入和线性计划。执行版 0.1.6 保留 0.1.4 的非空线性计划支持，不设固定步数上限；逐步校验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在明确升级前保留构建时协议。见[源码验证](verification/UNBOUNDED_TASK_PLANS_20261015.md)。等待到期不等于取消；应查询原请求 ID，避免重放输入。详见 [Agent 指南](../AGENT_GUIDE.md)、[任务计划](development/TASK_PLAN.md) 和 [Decision 配置](development/DECISION_API.md)。
 
 维护代码中，`app/execution` 负责计划与动作，`app/judgment` 负责 Decision，`app/core` 负责截图与输入，`app/vision` 负责视觉定位。部分执行共享依赖仍保留历史 `learning_memory` 名称，不意味着必须安装学习工作台。
 
 ## 发布边界与历史记录
 
-本指南将安装态 0.1.5 正常任务与历史 0.1.4 源码／安装结果及首次失败分开。最终包的独立验收由发布说明记录，不从源码成功推定。安装器未签名，使用已有 Python 环境的检查不能证明全新机器依赖 setup。2026-10-15 的 0.1.3 重打包首次加入独立服务配置；上文浏览器计时及提示词评测属于 0.1.3，记事本／7-Zip 演示与测量保留 0.1.4 归属，均非新的 0.1.5 性能结果。已有安装须明确升级。不承诺任意任务无人干预完成或完整角色／壁纸合成效果。
+本指南将 0.1.6 受控点击前恢复验收、安装态 0.1.5 正常任务与历史 0.1.4 源码／安装结果及首次失败分开。最终包的独立验收由发布说明记录，不从源码成功推定。安装器未签名，使用已有 Python 环境的检查不能证明全新机器依赖 setup。2026-10-15 的 0.1.3 重打包首次加入独立服务配置；上文浏览器计时及提示词评测属于 0.1.3，记事本／7-Zip 演示与测量保留 0.1.4 归属，均非新的 0.1.5 性能结果。已有安装须明确升级。不承诺任意任务无人干预完成或完整角色／壁纸合成效果。
 
 历史开发失败与结果保留在 [0.1.2 验收记录](verification/EXECUTION_STABLE_012_20261012.md)、[目标审核诊断](verification/DECISION_TARGET_USAGE_20261013.md) 和 [0.1.3 验证记录](verification/EXECUTION_SPEED_20261015.md)。历史检查点描述当时状态，不代表当前发布状态。
 

@@ -15,7 +15,7 @@
 <rect x="609.5" y="177" width="61" height="27" rx="7" fill="#1d2d45" stroke="#31445f"/>
 <text x="640" y="195" text-anchor="middle" font-size="13" font-weight="600" fill="#dbeafe">MCP</text>
 <rect x="678.5" y="177" width="76" height="27" rx="7" fill="#1d2d45" stroke="#31445f"/>
-<text x="716.5" y="195" text-anchor="middle" font-size="13" font-weight="600" fill="#dbeafe">v0.1.5</text>
+<text x="716.5" y="195" text-anchor="middle" font-size="13" font-weight="600" fill="#dbeafe">v0.1.6</text>
 <rect x="48" y="236" width="192" height="124" rx="14" fill="#18263b" stroke="#30415c"/>
 <text x="62" y="259" font-size="12" fill="#9cb4d5">01</text>
 <g transform="translate(128 256)" fill="none" stroke="#90d1ff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 3 3 5-6M14 7h12M2 19l3 3 5-6M14 19h12"/></g>

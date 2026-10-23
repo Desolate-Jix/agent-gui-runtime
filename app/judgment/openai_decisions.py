@@ -125,13 +125,24 @@ def _usage_counts(usage):
     if set(usage) - {"input_tokens", "output_tokens", "total_tokens", "input_tokens_details", "output_tokens_details", "compute_units"}:
         raise ValueError("decision_usage_invalid")
     counts = ModelUsage.model_validate({key: usage[key] for key in ("input_tokens", "output_tokens", "total_tokens")}).counts()
-    for key, allowed in (("input_tokens_details", {"cached_tokens", "cache_write_tokens"}),
+    for key, allowed in (("input_tokens_details", {"cached_tokens", "cache_write_tokens", "cache_write_tokens_details"}),
                          ("output_tokens_details", {"reasoning_tokens"})):
         if key in usage:
             details = usage[key]
-            if not isinstance(details, dict) or set(details) - allowed or any(type(v) is not int or v < 0 for v in details.values()):
+            if not isinstance(details, dict) or set(details) - allowed:
                 raise ValueError("decision_usage_details_invalid")
-            counts[key] = details
+            normalized = {}
+            for name, value in details.items():
+                if name == "cache_write_tokens_details":
+                    if (type(value) is not dict or set(value) != {"ttl_30m_tokens", "ttl_12h_tokens"}
+                            or any(type(v) is not int or v < 0 for v in value.values())):
+                        raise ValueError("decision_usage_details_invalid")
+                    normalized[name] = dict(value)
+                elif type(value) is not int or value < 0:
+                    raise ValueError("decision_usage_details_invalid")
+                else:
+                    normalized[name] = value
+            counts[key] = normalized
     if "compute_units" in usage:
         value = usage["compute_units"]
         if value is not None and (type(value) is not int or value < 0):

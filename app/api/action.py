@@ -5,6 +5,7 @@ import hashlib
 import re
 import shutil
 import uuid
+from time import perf_counter_ns
 from contextlib import nullcontext
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -2924,9 +2925,12 @@ def execute_recognition_plan(request: ExecuteRecognitionPlanRequest) -> APIRespo
                         with timer.step("agent_grounding_dispatch_scene_check"):
                             dispatch_capture = screenshot_service.capture_window(
                                 focus_window=False, purpose="agent-grounding-dispatch-check")
+                            main_capture_completed_ns = perf_counter_ns()
                             dispatch_plan = grounding_target.plan(
                                 image_path=dispatch_capture["image_path"], goal=request.goal,
-                                identity=current_local_operator_identity(window_manager))
+                                identity=current_local_operator_identity(window_manager),
+                                **({'main_capture_completed_ns': main_capture_completed_ns}
+                                    if getattr(grounding_target, '_main_pre_action', None) is not None else {}))
                             learning_image_path = dispatch_capture["image_path"]
                             learning_plan = dispatch_plan
                             learning_pre_click = dispatch_plan["pre_click_decision"]

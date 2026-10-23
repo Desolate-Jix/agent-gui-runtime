@@ -1,6 +1,8 @@
-# Execution 0.1.5 guide
+# Execution 0.1.6 guide
 
-**0.1.5 refresh (2026-10-17):** adaptive observation after Enter and next-step read-only grounding alongside current-result verification. In a small source comparison, actual action-interval medians changed **5.803→5.597 s (Notepad), 7.805→7.254 s (7-Zip), 10.786→9.280 s (Edge)**. New-candidate six three-step plans completed automatically, with independent image/disk checks and cleanup. Model settings and acceptance rules are unchanged. These are source measurements, not general accuracy claims; the four-second objective is not yet reached. [Method, complete task times, calls and limitations →](verification/EXECUTION_015_REFRESH_20261017.md) · [Dated installer acceptance and hashes →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+**0.1.6 (2026-10-23):** authenticated loopback HTTP MCP alongside stdio, Python 3.12 for new API/Agent environments, and Main review/continuation after authenticated pre-action double refusal. Temporary queue-lock contention is retried with all gates rechecked. Thresholds, prompts and provider defaults are unchanged. [Download Runtime 0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) · [Amadeus 0.0.4 setup](../integrations/amadeus/agent-review-instant/README.md) · [Recovery acceptance and limits](verification/MAIN_PRE_ACTION_REVIEW_20261023.md).
+
+**Historical 0.1.5 refresh (2026-10-17):** adaptive observation after Enter and next-step read-only grounding alongside current-result verification. In a small source comparison, actual action-interval medians changed **5.803→5.597 s (Notepad), 7.805→7.254 s (7-Zip), 10.786→9.280 s (Edge)**. New-candidate six three-step plans completed automatically, with independent image/disk checks and cleanup. Model settings and acceptance rules are unchanged. These are source measurements, not general accuracy claims; the four-second objective is not yet reached. [Method, complete task times, calls and limitations →](verification/EXECUTION_015_REFRESH_20261017.md) · [Dated installer acceptance and hashes →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 [Home](../README.md) · [简体中文](EXECUTION_GUIDE.zh-CN.md)
 
@@ -8,13 +10,13 @@
 
 Agent Review Instant lets an MCP-compatible agent operate Windows applications: locate a target from a screenshot, click, replace text, press keys and scroll. The main agent supplies an explicit linear plan; the runtime executes supported steps in the same session and checks their results. This avoids returning to the main agent after every successful action.
 
-**Execution 0.1.5 adds Main review followed by explicit continuation of the original typed-input command.** Installed Amadeus/Pi normal-task evidence is recorded below; independent final-package acceptance status is in the [0.1.5 release notes](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5). The older measurements and demos retain their original versions.
+**Historical execution 0.1.5 added Main review followed by explicit continuation of the original typed-input command.** Installed Amadeus/Pi normal-task evidence is recorded below; independent final-package acceptance status is in the [0.1.5 release notes](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5). The older measurements and demos retain their original versions.
 
 **Historical 0.1.4 passed scoped installed Notepad and 7-Zip workflows, including independent Sol acceptance.** Main completed three plans (3+3+6 steps); Sol completed two fresh plans (3+3 steps). All five completed automatically. See the [multi-application report](verification/MULTI_APP_EXECUTION_20261015.md) for timings, original failures and installation boundaries. API-based vision does **not** require local model weights or a local GPU.
 
-[0.1.5 Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.5/AgentGUIRuntimeExecution-Setup-0.1.5-20261017-01.exe) · [0.1.5 release notes, checksums and independent acceptance status](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
+[0.1.6 Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/AgentGUIRuntimeExecution-Setup.exe) · [0.1.6 release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6)
 
-**Provider configuration in 0.1.5:** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
+**Provider configuration in 0.1.6:** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
 
 ## How Decision and the vision model work together
 
@@ -32,23 +34,27 @@ Target checks use cropped, annotated images, with an overview and target detail 
 
 ```mermaid
 flowchart TD
-    U([User gives a task]) --> M[Main agent creates a linear plan]
-    M --> C[Bind the target window and capture]
-    C --> V[Vision model locates the target]
-    V --> D{Decision checks the target}
-    D -->|Met| A[Execute the action]
-    D -->|Not met or unclear| L{Luna reviews the same evidence once}
-    L -->|Accepted| A
-    L -->|Unresolved or failed| R[Return to the original main agent]
-    A --> E[Capture the current result]
-    E --> O{Decision checks this step's result}
-    O -->|Met| N{More steps?}
-    O -->|Not met or unclear| Q{Luna reviews the same evidence once}
-    Q -->|Accepted| N
-    Q -->|Unresolved or failed| R
-    N -->|Yes| C
-    N -->|No| F([Return the completed receipt])
-    R --> P[Review the bound evidence and explicitly continue, revise or stop]
+    U([User task / 用户任务]) --> M[Main plan / 主 Agent 计划]
+    M --> C[Capture and ground target / 截图定位]
+    C --> D{Decision target check / 目标核验}
+    D -->|Pass / 通过| G[Freshness and input gates / 新鲜度及输入门禁]
+    D -->|Nonpass / 未通过| L{Ordinary Luna / 普通复核}
+    L -->|Pass / 通过| G
+    L -->|Authenticated double nonpass / 已认证双拒| B[Main reads bound before image / Main 看操作前绑定图]
+    B -->|Review then separate continue / 审核后单独续行| K[Fresh capture, same job and candidate / 新截图及原任务候选]
+    B -->|Reject / 拒绝| S([Stop without input / 不输入并停止])
+    K --> G
+    G -->|Valid / 有效| A[Dispatch original action once / 原动作派发一次]
+    G -->|Changed, stale or cancelled / 变化失效或取消| S
+    A --> E[Capture and verify result / 截图核验结果]
+    E --> V{Decision, then Luna if needed / Decision 未过再普通复核}
+    V -->|Pass / 通过| N{More steps? / 还有步骤？}
+    V -->|Settled input double nonpass / 已结算输入双拒| H[Main reads bound after image / Main 看操作后绑定图]
+    H -->|Review then separate continue / 审核后单独续行| J[Resume original job, gate remaining input / 续原任务及核验余下输入]
+    J --> N
+    H -->|Reject / 拒绝| Z([Stop, no replay / 停止且不重放])
+    N -->|Yes / 有| C
+    N -->|No / 无| F([Return settled receipt / 返回结算回执])
 ```
 
 Visual text entry combines **click → Ctrl+A → replace text**, verifies only the requested text, then reuses the field position for a fresh click-point check and **click → Enter**. It does not infer focus or classify empty fields. No screenshot or model call is inserted inside either combined action. See [visual input](development/VISUAL_EXECUTION_INPUT.md).
@@ -56,6 +62,22 @@ Visual text entry combines **click → Ctrl+A → replace text**, verifies only 
 ## 0.1.5: review and continue original typed input
 
 When authenticated dual-model nonpass occurs after the original input has settled, the live job can wait at `field_review_packet.v1`. An image-capable Main reads the original bound after image, uses the exact `caller_controls.review.request`, then the separately returned `caller_controls.continue.request`. Review only records a verdict; continue resumes the same run/step/command without selecting or typing again. Any remaining submit suffix still uses the normal fresh-target/input gates and result verification.
+
+**0.1.6 pre-action Main review:** the shared Runtime also adds
+`pre_action_review_packet.v1` for authenticated candidate double refusals before
+input. This is the same execution contract for direct MCP callers and Amadeus
+Pi. Read the original execution through a new `agent_command_status` request,
+then use that status request's `instant_image(view="before")`. Main reviews the
+bound candidate and explicitly continues the original wait using the returned
+recipes. The original job and grounding candidate remain; review does not click.
+Continue takes a fresh screenshot and preserves the target-region, identity,
+geometry, visibility, cancellation and input gates before one native dispatch.
+Installed candidate05 acceptance passed five direct Runtime steps and four native
+Pi steps after explicit TEST double refusal, with unchanged thresholds. This is
+functional recovery evidence, not an accuracy or speed benchmark; see the
+[installed results and limits](verification/MAIN_PRE_ACTION_REVIEW_20261023.md).
+Neither a version marker nor saved approval JSON authorizes input. See the
+[pre-action design and acceptance boundary](development/MAIN_PRE_ACTION_REVIEW.md).
 
 While the original command is unfinished, submit `agent_command_status` with `command_id=packet.execution_request_id` under a new outer request ID, then call `instant_image` using that status request ID. Missing controls, unknown input, changed evidence, cancellation or restart do not authorize replay. Close owned windows before stopping and verifying Runtime cleanup.
 
@@ -127,7 +149,7 @@ Without Decision, use basic actions, compatible v1/v2 plans or explicit `field_e
 
 ## Install and configure
 
-Requires **Windows x64, Python 3.11 and [uv](https://docs.astral.sh/uv/getting-started/installation/)**. The installer supplies the maintained source and setup scripts; initial setup installs dependencies for the chosen route. Model weights and API keys are not bundled. Adjust the example paths to your installation. Historical Preview directory or shortcut names may remain for upgrade compatibility; the product version, installer and uninstall entry identify the component version. Consult the 0.1.4 release notes for installer acceptance status and checksums.
+Requires **Windows x64 and [uv](https://docs.astral.sh/uv/getting-started/installation/)**. API/Agent setup recommends Python 3.12 and retains supported 3.11 environments; local-model setup still requires Python 3.11. The installer supplies the maintained source and setup scripts; initial setup installs dependencies for the chosen route. Model weights and API keys are not bundled. Adjust the example paths to your installation. Historical Preview directory or shortcut names may remain for upgrade compatibility; the product version, installer and uninstall entry identify the component version. Consult the 0.1.6 release notes for the installer checksums and exact acceptance boundary.
 
 For external Luna vision plus Decision:
 
@@ -151,17 +173,21 @@ For current-agent grounding or a preview of local setup:
 
 Remove `-WhatIf` to perform local setup. Local use requires the official [VISTA-4B](https://huggingface.co/inclusionAI/VISTA-4B) Transformers weights; local hardware requirements apply only to that route. See [external vision API setup](development/EXTERNAL_VISION_API.md).
 
+## HTTP MCP for Amadeus
+
+Install Runtime 0.1.6, prepare its API environment, and start `scripts/start_instant_mcp_http.py` in a dedicated console. The service binds only `127.0.0.1`; its named environment-variable connection token is separate from model API keys. Install the 0.0.4 wheel, configure `runtime_url` and secret `connection_token`, bind MCP + Skill to Pi, enable, restart the backend, then create a new Work. The extension neither launches Runtime nor receives its provider keys. Follow the [complete commands and migration instructions](../integrations/amadeus/agent-review-instant/README.md). stdio clients can keep their existing integration.
+
 ## Agent integration
 
-MCP stdio exposes seven core tools: `instant_start`, `instant_status`, `instant_run`, `instant_submit`, `instant_result`, `instant_image` and `instant_stop`, plus `instant_recovery_preview` and `instant_recover_session`.
+MCP stdio and the authenticated HTTP service expose the same core tools: `instant_start`, `instant_status`, `instant_run`, `instant_submit`, `instant_result`, `instant_image` and `instant_stop`, plus `instant_recovery_preview` and `instant_recover_session`.
 
-Keep one persistent session and one desktop input owner. Supported requests include single actions, combined input and linear plans. The execution 0.1.5 candidate retains 0.1.4 support for nonempty linear plans without a fixed step-count cap, while retaining per-step validation, context-size limits, evidence checks, cancellation and API/time budgets. Existing 0.1.3 installations retain their build-time contract until explicitly upgraded. See [source checks](verification/UNBOUNDED_TASK_PLANS_20261015.md). Wait expiry is not cancellation: poll the original request ID rather than replaying input. See the [agent guide](../AGENT_GUIDE.md), [task plans](development/TASK_PLAN.md) and [Decision configuration](development/DECISION_API.md).
+Keep one persistent session and one desktop input owner. Supported requests include single actions, combined input and linear plans. Execution 0.1.6 retains 0.1.4 support for nonempty linear plans without a fixed step-count cap, while retaining per-step validation, context-size limits, evidence checks, cancellation and API/time budgets. Existing 0.1.3 installations retain their build-time contract until explicitly upgraded. See [source checks](verification/UNBOUNDED_TASK_PLANS_20261015.md). Wait expiry is not cancellation: poll the original request ID rather than replaying input. See the [agent guide](../AGENT_GUIDE.md), [task plans](development/TASK_PLAN.md) and [Decision configuration](development/DECISION_API.md).
 
 Maintained code is organized around `app/execution` for plans and actions, `app/judgment` for Decision, `app/core` for capture/input and `app/vision` for grounding. Some execution dependencies retain historical `learning_memory` names; they do not require the learning workbench to be installed.
 
 ## Release boundaries and history
 
-This guide separates installed 0.1.5 normal-task evidence from historical 0.1.4 source/installed results and retained first failures. Independent final-package acceptance is recorded in the release notes, not inferred from source success. The installer is unsigned; checks using an existing Python environment do not prove clean-machine dependency setup. The 2026-10-15 0.1.3 rebuild first included independent provider configuration. Browser timings and prompt benchmarks above belong to 0.1.3, and the Notepad/7-Zip demos and measurements retain 0.1.4: none are new 0.1.5 performance results. Existing installations need an explicit upgrade. Arbitrary unattended completion and full character/wallpaper composition are not promised.
+This guide separates 0.1.6 controlled pre-action recovery evidence from installed 0.1.5 normal-task evidence from historical 0.1.4 source/installed results and retained first failures. Independent final-package acceptance is recorded in the release notes, not inferred from source success. The installer is unsigned; checks using an existing Python environment do not prove clean-machine dependency setup. The 2026-10-15 0.1.3 rebuild first included independent provider configuration. Browser timings and prompt benchmarks above belong to 0.1.3, and the Notepad/7-Zip demos and measurements retain 0.1.4: none are new 0.1.5 performance results. Existing installations need an explicit upgrade. Arbitrary unattended completion and full character/wallpaper composition are not promised.
 
 Earlier development failures and results remain in the [0.1.2 acceptance record](verification/EXECUTION_STABLE_012_20261012.md), [target-check diagnosis](verification/DECISION_TARGET_USAGE_20261013.md) and [0.1.3 verification record](verification/EXECUTION_SPEED_20261015.md). Earlier checkpoints describe their original state, not the current release status.
 

@@ -294,7 +294,13 @@ def _focus_target_binding(context, focus_receipt, expected, *, required=False):
         raw = summary["judgment"]["judgment_result"]
         candidate = _candidate(data["recognition_plan"]["recommended_target"], expected["click_point"])
         frame = request["frames"][0]
-        if (summary["scope"] != "candidate" or summary["disposition"] != "pass"
+        from .main_pre_action_approval import MainPreActionApproval
+        main = context.get('main_pre_action_approval')
+        main_adopted = (type(main) is MainPreActionApproval and main.validate() is True
+            and main.source.context == checked and main.source.service is context['service']
+            and main.source.assessment == summary
+            and focus_receipt.get('main_pre_action_review') == main.to_reference())
+        if (summary["scope"] != "candidate" or not (main_adopted or summary["disposition"] == "pass")
                 or summary["authorizes_action"] is not False
                 or summary["envelope_sha256"] != action["envelope_sha256"]
                 or request["condition"] != CANDIDATE_CONDITION or request["phase"] != "before_action"
@@ -311,7 +317,7 @@ def _focus_target_binding(context, focus_receipt, expected, *, required=False):
                 or action["candidate"] != {**candidate, "capture_id": frame["capture_id"]}
                 or action["target_window_identity"] != expected["window_identity"]
                 or frame["window_identity"] != expected["window_identity"]
-                or raw.get("adopted") is not True or raw.get("verdict") != "success"
+                or not (main_adopted or raw.get("adopted") is True and raw.get("verdict") == "success")
                 or context["service"].validate_result(raw, **request) is not True):
             raise ValueError("visual_field_target_identity_source_invalid")
         if {"target_identity", "target_check"} <= set(action):

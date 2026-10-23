@@ -50,7 +50,13 @@ def combined_usage(primary, secondary):
     result = {key: first[key] + second[key] for key in ("input_tokens", "output_tokens", "total_tokens")}
     for key in ("input_tokens_details", "output_tokens_details"):
         if key in first and key in second:
-            result[key] = {name: first[key][name] + second[key][name] for name in first[key].keys() & second[key].keys()}
+            result[key] = {}
+            for name in first[key].keys() & second[key].keys():
+                if key == "input_tokens_details" and name == "cache_write_tokens_details":
+                    result[key][name] = {ttl: first[key][name][ttl] + second[key][name][ttl]
+                                         for ttl in ("ttl_30m_tokens", "ttl_12h_tokens")}
+                else:
+                    result[key][name] = first[key][name] + second[key][name]
     return result
 
 

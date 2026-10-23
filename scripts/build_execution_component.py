@@ -18,7 +18,7 @@ from app.learning_memory.execution_installation import build_execution_installat
 
 
 ENTRIES = (
-    "scripts/start_instant_mcp.py", "scripts/run_local_step_session.py",
+    "scripts/start_instant_mcp.py", "scripts/start_instant_mcp_http.py", "scripts/run_local_step_session.py",
     "scripts/start_instant_mcp_admin.py", "scripts/instant_admin_worker.py",
     "scripts/configure_instant_mcp.py", "scripts/check_instant_entrypoints.py",
     "scripts/check_execution_component.py",
@@ -35,9 +35,19 @@ ENTRIES = (
 RESOURCES = (
     "scripts/setup_instant.ps1", "scripts/configure_instant.ps1",
     "requirements/agent-runtime-win311.txt", "requirements/desktop-runtime-constraints.txt",
+    "requirements/agent-runtime-api.txt", "requirements/agent-runtime-api-win.lock.txt",
     "requirements/pylock.desktop-runtime-win311.toml", "pyproject.toml", "uv.lock",
     "LICENSE", "README.md", "README.zh-CN.md", "FRIEND_SETUP.md", "AGENT_GUIDE.md", "RELEASE_SCOPE.md",
     "integrations/amadeus/agent-review-instant/README.md",
+    "integrations/amadeus/agent-review-instant/README.zh-CN.md",
+    "integrations/amadeus/agent-review-instant/README.stdio-0.0.2.md",
+    "integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md",
+    "integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/SKILL.md",
+    "integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/references/runtime.md",
+    "docs/development/AMADEUS_MARKETPLACE_HTTP_PLAN.md",
+    "docs/verification/AMADEUS_MARKETPLACE_HTTP_20261023.md",
+    "docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md",
+    "docs/releases/EXECUTION_016_20261023.md",
     "docs/EXECUTION_GUIDE.md", "docs/EXECUTION_GUIDE.zh-CN.md",
     "docs/assets/readme-hero.svg", "docs/assets/readme-hero.mobile.svg",
     "docs/assets/readme-hero.zh-CN.svg", "docs/assets/readme-hero.zh-CN.mobile.svg",
@@ -52,6 +62,7 @@ RESOURCES = (
     "docs/development/EXTERNAL_VISION_API.md",
     "docs/development/TARGET_CHECK.md", "docs/development/SETTLED_OBSERVATION.md",
     "docs/development/MAIN_FIELD_REVIEW_RESUME.md",
+    "docs/development/MAIN_PRE_ACTION_REVIEW.md",
     "docs/development/DECISION_LUNA_REVIEW.md", "docs/development/TARGET_IDENTITY_REVIEW.md",
     "configs/vision-api-openai-luna.example.json", "docs/development/TASK_PLAN.md",
     "docs/development/EXTERNAL_VISION_BENCHMARK.md",

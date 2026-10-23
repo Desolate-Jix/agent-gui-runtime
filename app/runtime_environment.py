@@ -23,11 +23,13 @@ _PROFILES = {
     ),
 }
 PROFILE_NAMES = ("all", *_PROFILES)
+RECOGNITION_SOURCES = ("local", "agent_current", "agent_delegate", "external_api")
 
 
 def inspect_environment(
     profile: str = "all",
     *,
+    recognition_source: str = "local",
     find_spec: Callable | None = None,
     version: Callable | None = None,
     python_version: tuple[int, ...] | None = None,
@@ -35,11 +37,14 @@ def inspect_environment(
 ) -> dict:
     if profile not in PROFILE_NAMES:
         raise ValueError("unknown environment profile")
+    if recognition_source not in RECOGNITION_SOURCES:
+        raise ValueError("unknown recognition source")
     discover = find_spec if find_spec is not None else importlib.util.find_spec
     distribution_version = version if version is not None else importlib.metadata.version
     python_info = tuple(sys.version_info[:3]) if python_version is None else python_version
     platform_name = sys.platform if platform is None else platform
-    python_supported = python_info[:2] == (3, 11)
+    api_execution = profile == "windows_runtime" and recognition_source != "local"
+    python_supported = python_info[:2] in ((3, 11), (3, 12)) if api_execution else python_info[:2] == (3, 11)
     platform_supported = profile not in {"all", "windows_runtime"} or platform_name == "win32"
     entries = dict.fromkeys(
         pair for name in (_PROFILES if profile == "all" else (profile,))
@@ -76,13 +81,14 @@ def inspect_environment(
     return {
         "contract_version": "native_environment_metadata_v1",
         "profile": profile,
+        "recognition_source": recognition_source,
         "status": "blocked" if blocked else "metadata_present_unverified",
         "interpreter": sys.executable,
         "python_version": ".".join(map(str, python_info)),
         "platform": platform_name,
         "python_supported": python_supported,
         "platform_supported": platform_supported,
-        "required_python": ">=3.11,<3.12",
+        "required_python": ">=3.11,<3.13" if api_execution else ">=3.11,<3.12",
         "checks": checks,
         "missing_modules": missing_modules,
         "missing_distributions": missing_distributions,

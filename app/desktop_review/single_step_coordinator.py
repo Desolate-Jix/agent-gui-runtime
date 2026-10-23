@@ -16,7 +16,7 @@ import time
 from typing import Any, Callable
 from uuid import uuid4
 
-from app.runtime_environment import inspect_environment
+from app.runtime_environment import RECOGNITION_SOURCES, inspect_environment
 from app.vision.configuration import (
     VisionConfigurationError, load_formal_vision_configuration, resolve_vision_config_path,
 )
@@ -62,8 +62,11 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
         runtime_output_root: str | Path | None = None,
         enable_agent_learning: bool | None = None,
         resource_journal=None,
+        recognition_source: str = "local",
     ) -> None:
         timeout = _positive_timeout(foreground_timeout)
+        if recognition_source not in RECOGNITION_SOURCES:
+            raise ValueError("unknown recognition source")
         if enable_agent_learning is not None and type(enable_agent_learning) is not bool:
             raise TypeError("enable_agent_learning must be bool or None")
         if enable_agent_learning is True:
@@ -74,6 +77,8 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
         if not callable(getattr(host, "status", None)):
             raise TypeError("host must expose status")
         self._project_root = Path(project_root).resolve()
+        # 仅受控启动配置决定兼容范围；每步请求和模型结果不能切换来源。
+        self._recognition_source = recognition_source
         self._resource_journal = resource_journal
         self._runtime_output_root = (self._project_root / "runtime-output" if runtime_output_root is None
                                      else Path(runtime_output_root).expanduser().resolve())
@@ -155,7 +160,10 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
     def environment(self) -> dict[str, Any]:
         self._begin("idle")
         try:
-            report = inspect_environment()
+            report = inspect_environment(
+                profile="all" if self._recognition_source == "local" else "windows_runtime",
+                recognition_source=self._recognition_source,
+            )
             config_report = {"config_path": str(self._vision_config_path), "runtime_verified": False,
                 "model_assets_checked": False, "service_contacted": False}
             try:
@@ -1063,7 +1071,7 @@ class NativeSingleStepCoordinator(LocalDirectStepMixin, WindowPreparationMixin, 
     def _check_runtime_environment(self) -> None:
         if not self._uses_production_factory:
             return
-        report = inspect_environment(profile="windows_runtime")
+        report = inspect_environment(profile="windows_runtime", recognition_source=self._recognition_source)
         if report["status"] != "metadata_present_unverified":
             raise self._error(
                 "runtime_dependencies_missing",

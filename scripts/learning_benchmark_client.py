@@ -34,6 +34,58 @@ _PLAN_TERMINAL = frozenset({"completed", "failed", "cancelled"})
 _TOOLS = frozenset({"instant_status", "instant_submit", "instant_result", "instant_run", "instant_image"})
 
 
+def _validate_pre_action_review_packet(packet, snapshot, previous):
+    """Validate host evidence bindings without reading files or issuing approval."""
+    from app.execution.task_plan_review import digest
+    try:
+        pending = snapshot['pending']
+        envelope, assessment, frame = packet['envelope'], packet['assessment'], packet['before']
+        request = assessment['evaluation_request']
+        raw = assessment['judgment']['judgment_result']
+        root = Path(packet['session_directory'])
+        path = Path(frame['image_path'])
+        refs = packet['evidence_refs']
+        prior = (previous or {}).get('review_packet')
+        if (snapshot['status'] != 'pending' or snapshot['runner_state'] != 'waiting'
+                or snapshot['wait_reason'] != 'verification_required'
+                or packet['stage'] != 'before_dispatch' or packet['action_executed'] is not False
+                or packet['authorizes_action'] is not False or packet['automatic_retry_allowed'] is not False
+                or packet['original_input_status'] != 'not_dispatched' or type(packet['assessment_round']) is not int
+                or packet['assessment_round'] != 0
+                or any(packet[key] != snapshot[key] for key in ('run_id', 'plan_sha256', 'session_directory'))
+                or packet['command_id'] != packet['execution_request_id']
+                or packet['execution_request_id'] != snapshot['active_command_id']
+                or pending['execution_request_id'] != packet['execution_request_id']
+                or pending['step_id'] != packet['step_id'] or packet['step_id'] != snapshot['current_step_id']
+                or packet['packet_sha256'] != digest({k: v for k, v in packet.items() if k != 'packet_sha256'})
+                or packet['evidence_set_sha256'] != digest(refs) or type(refs) is not list or not refs
+                or frame['role'] != 'before' or frame['window_identity'] != snapshot['target_identity']
+                or frame != envelope['frame'] or packet['candidate'] != envelope['candidate']
+                or packet['profile_sha256'] != envelope['profile_sha256']
+                or any(envelope[key] != packet[key] for key in ('run_id', 'step_id', 'attempt_id'))
+                or envelope['review_context']['source_sha256'] != packet['plan_sha256']
+                or assessment['scope'] != 'candidate' or assessment['disposition'] != 'review'
+                or assessment['envelope_sha256'] != envelope['envelope_sha256']
+                or raw['status'] != 'completed' or raw['adopted'] is not False
+                or raw['choice_result']['choice'] not in {'condition_not_met', 'evidence_insufficient'}
+                or raw['ordinary_review']['status'] != 'completed'
+                or raw['ordinary_review']['review_result']['choice'] not in {'condition_not_met', 'evidence_insufficient'}
+                or request['frames'] != [frame] or request['review_context']['source_id'] != packet['run_id']
+                or request['review_context']['source_sha256'] != packet['plan_sha256']
+                or not root.is_absolute() or not path.is_absolute() or not path.is_relative_to(root)
+                or '..' in path.parts or {'path': path.relative_to(root).as_posix(), 'sha256': frame['sha256']} not in refs
+                or prior is not None and prior != packet):
+            raise ValueError('benchmark_task_plan_pre_action_review_binding_invalid')
+        for ref in refs:
+            relative = Path(ref['path'])
+            if (set(ref) != {'path', 'sha256'} or relative.is_absolute() or relative.drive
+                    or '..' in relative.parts or not relative.parts or relative.as_posix() != ref['path']
+                    or re.fullmatch(r'[0-9a-f]{64}', ref['sha256']) is None):
+                raise ValueError('benchmark_task_plan_pre_action_review_evidence_invalid')
+    except (KeyError, TypeError, AttributeError) as error:
+        raise ValueError('benchmark_task_plan_pre_action_review_binding_invalid') from error
+
+
 def _validate_field_review_packet(packet, snapshot, previous):
     from app.execution.task_plan_review import digest
     body = {key: value for key, value in packet.items() if key != "packet_sha256"}
@@ -406,7 +458,9 @@ class LearningBenchmarkClient:
                            for key in ("capture_id", "image_path", "sha256"))):
                 raise ValueError("benchmark_task_plan_grounding_evidence_invalid")
         packet = value.get("review_packet")
-        if isinstance(packet, dict) and packet.get("schema") == "field_review_packet.v1":
+        if isinstance(packet, dict) and packet.get('schema') == 'pre_action_review_packet.v1':
+            _validate_pre_action_review_packet(packet, value, previous)
+        elif isinstance(packet, dict) and packet.get("schema") == "field_review_packet.v1":
             _validate_field_review_packet(packet, value, previous)
         elif packet is not None:
             from app.execution.task_plan_review import digest
@@ -439,7 +493,7 @@ class LearningBenchmarkClient:
                     raise ValueError("benchmark_task_plan_video_review_packet_binding_invalid")
             previous_packet = (previous or {}).get("review_packet")
             field_completed = (isinstance(previous_packet, dict)
-                and previous_packet.get("schema") == "field_review_packet.v1"
+                and previous_packet.get("schema") in {"field_review_packet.v1", "pre_action_review_packet.v1"}
                 and packet.get("original_input_status") == "completed"
                 and all(packet.get(key) == previous_packet.get(key) for key in (
                     "run_id", "step_id", "execution_request_id", "plan_sha256", "session_directory")))
@@ -756,7 +810,7 @@ class LearningBenchmarkClient:
                     return self._result(value, original_request_id, status_request_id, command_id, "terminal")
                 if state == "awaiting_grounding":
                     return self._result(value, original_request_id, status_request_id, command_id, "awaiting_grounding")
-                if state == "awaiting_field_review":
+                if state in {"awaiting_field_review", "awaiting_pre_action_review"}:
                     return self._result(value, original_request_id, status_request_id, command_id, "review_required")
                 if state != "running":
                     raise ValueError("benchmark_agent_command_state_invalid")

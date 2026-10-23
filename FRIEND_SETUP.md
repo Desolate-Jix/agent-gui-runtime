@@ -1,5 +1,7 @@
 > **执行 0.1.5 / Execution 0.1.5:** 当前安装和配置见[中文执行指南](docs/EXECUTION_GUIDE.zh-CN.md#安装与配置)或 [English guide](docs/EXECUTION_GUIDE.md#install-and-configure)。后文保留早期执行源码包说明。默认视觉组合输入需要 Decision auto；无 Decision 时使用显式原生组合输入或基础单步。 / Follow the linked execution guide for current setup. The sections below retain earlier execution source-package instructions. Default visual sequences require Decision auto; explicit native sequences and basic actions remain available without it.
 
+**Execution 0.1.6 / 执行版 0.1.6:** API/Agent setup recommends Python 3.12; local-model setup below remains Python 3.11. / API／Agent 路线推荐 Python 3.12，下方本地模型路线仍用 3.11。 [English execution setup](docs/EXECUTION_GUIDE.md#install-and-configure) · [中文执行安装](docs/EXECUTION_GUIDE.zh-CN.md#安装与配置) · [Amadeus HTTP MCP 0.0.4](integrations/amadeus/agent-review-instant/README.zh-CN.md). Runtime and Amadeus use separate environments. / Runtime 与 Amadeus 环境分开。
+
 ## 执行组件安装说明 / Execution component setup
 
 执行 Setup 交付维护运行时源码，Agent/API 路线仍需按现有 setup/configure 配置用户环境，安装器不替代环境配置。本地源码 setup 使用 execution + vista 依赖组，不要求学习 Qt；本地模型可选。 / Execution Setup delivers maintained source; Agent/API routes require the existing setup/configure environment. Local setup uses execution + vista without learning Qt; local models are optional.

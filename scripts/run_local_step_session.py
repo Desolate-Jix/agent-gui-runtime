@@ -396,7 +396,7 @@ def main():
         host.start()
         co = NativeSingleStepCoordinator(out / "reviews", host.facade, host, enable_agent_learning=False,
             runtime_output_root=out / "runtime-output", vision_config_path=out / "configs/vision.json",
-            resource_journal=resource_journal)
+            resource_journal=resource_journal, recognition_source=args.recognition_source)
         co._memory_library_root = out.parent / "memory-library"
         co._decision_service = decision_service
         co.set_automatic_safety_interception(False)

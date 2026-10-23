@@ -2,6 +2,24 @@
 from copy import deepcopy
 
 
+def _pre_action_packet(packet):
+    if not isinstance(packet, dict) or packet.get('schema') != 'pre_action_review_packet.v1':
+        return None
+    value = {key: deepcopy(packet[key]) for key in ('schema', 'stage', 'reason', 'command_id', 'session_directory', 'owner_id',
+        'execution_request_id', 'run_id', 'step_id', 'attempt_id', 'plan_sha256', 'target_identity',
+        'window_rect', 'candidate', 'before', 'packet_sha256', 'evidence_set_sha256', 'assessment_round',
+        'profile_sha256', 'original_receipt_id', 'original_receipt_sha256', 'original_input_status',
+        'action_executed', 'main_wait_deadline_ns', 'authorizes_action', 'automatic_retry_allowed', 'image') if key in packet}
+    assessment = packet.get('assessment') or {}
+    raw = (assessment.get('judgment') or {}).get('judgment_result') or {}
+    ordinary = raw.get('ordinary_review') or {}
+    value['original_refusal'] = {'disposition': assessment.get('disposition'),
+        'envelope_sha256': assessment.get('envelope_sha256'), 'status': raw.get('status'),
+        'adopted': raw.get('adopted'), 'choice_result': deepcopy(raw.get('choice_result')),
+        'ordinary_status': ordinary.get('status'), 'ordinary_result': deepcopy(ordinary.get('review_result'))}
+    return value
+
+
 def _compact_steps(steps):
     summaries = []
     for row in steps:
@@ -47,6 +65,12 @@ def compact_receipt(receipt, *, full_receipt_path=None):
         "diagnostics", "desktop_context", "agent_review", "decision_judgment", "decision_validation", "next", "accepted", "action_executed",
         "wait_expired", "command_cancelled", "partial_execution", "next_action", "learning_recording", "learning_recording_error", "learning_binding", "learning_control")
     value = {key: deepcopy(receipt[key]) for key in keys if key in receipt}
+    pre_action = _pre_action_packet(result.get('review_packet') or result.get('pending_pre_action_review')
+        or (result.get('pre_action_review') or {}).get('packet'))
+    if pre_action is not None:
+        # Place actionable controls/evidence before verbose status history.
+        value = {'pre_action_review': pre_action,
+            'caller_controls': deepcopy(result.get('caller_controls')), **value}
     value["receipt_detail"] = "compact"
     value["full_receipt"] = {"tool": "instant_result", "arguments": {
         "request_id": receipt.get("request_id"), "detail": "full", "images": "none"},
@@ -55,10 +79,15 @@ def compact_receipt(receipt, *, full_receipt_path=None):
         value['agent_command'] = {key: deepcopy(result[key]) for key in (
             'contract_version', 'command_id', 'status', 'pending_grounding',
             'action_executed', 'cancel_requested', 'error', 'automatic_retry_allowed',
-            'api_request', 'recognition_calls') if key in result}
+            'api_request', 'recognition_calls', 'pre_action_resolution') if key in result}
         field_review = _field_review_packet(result.get("pending_field_review"))
         if field_review is not None:
             value["agent_command"]["pending_field_review"] = field_review
+        if pre_action is not None:
+            value['agent_command']['pending_pre_action_review'] = pre_action
+            review = result.get('pre_action_review') or {}
+            value['agent_command']['main_review'] = {key: deepcopy(review[key]) for key in (
+                'review', 'review_request_id', 'continued', 'continue_request_id') if key in review}
         for key in ('progress', 'result'):
             if isinstance(result.get(key), dict):
                 projected = compact_receipt({'request_id': receipt.get('request_id'), 'result': result[key]})
@@ -99,7 +128,10 @@ def compact_receipt(receipt, *, full_receipt_path=None):
             value["message"] = api["message"]
     else:
         # 发现结果、正文和窗口身份是下一步决策必需信息，不作无差别截断。
-        if result:
+        if pre_action is not None:
+            value['result'] = {key: deepcopy(result[key]) for key in ('run_id', 'status', 'runner_state',
+                'wait_reason', 'wait', 'pending', 'allowed_controls', 'review_required', 'review_scope') if key in result}
+        elif result:
             value["result"] = deepcopy(result)
     assessment = result.get("action_assessment", action.get("action_assessment"))
     if isinstance(assessment, dict):

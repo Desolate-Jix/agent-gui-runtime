@@ -525,6 +525,8 @@ class LocalDirectStepMixin:
                             report["popup_decision_judgment"] = deepcopy(popup_scope["result"])
                         if review_scope is not None and review_scope["assessment"] is not None:
                             report["action_assessment"] = deepcopy(review_scope["assessment"])
+                            if review_scope.get('main_pre_action_review') is not None:
+                                report['main_pre_action_review'] = deepcopy(review_scope['main_pre_action_review'])
             if shared_before and report.get('before_capture_status') != 'captured':
                 report['before_capture_status'] = 'unavailable'
                 if report['response'].get('success') is True:

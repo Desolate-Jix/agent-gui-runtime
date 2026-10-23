@@ -320,6 +320,7 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
             persist(result)
 
     def action(name, operation, payload, wait_ms, *, keyboard_target=None, focus_target=None, memory_action=None, grounding_target=None):
+        nonlocal action_review_deadline_ns
         result["phase"] = name
         # 后图必须属于最后一次尝试，不能把上一步的图冒充本次输入后的图。
         result["observation"] = {"status": "unavailable", "reason": "action_in_progress"}
@@ -353,6 +354,17 @@ def run_input_sequence(coordinator, target, request, *, observation_wait_ms=None
         finally:
             row["elapsed_ms"] = round((perf_counter() - at) * 1000, 3)
         row.update(status=step.get("phase"), receipt=step)
+        getter = getattr(coordinator, 'pre_action_approval_for_receipt', None)
+        if callable(getter) and step.get('main_pre_action_review') is not None:
+            from .main_pre_action_approval import MainPreActionApproval
+            approval = getter(step)
+            if (type(approval) is not MainPreActionApproval or approval.validate() is not True
+                    or approval.source.context != action_review):
+                raise InputSequenceInterrupted('input_sequence_main_pre_action_binding_invalid')
+            action_review_deadline_ns = approval.deadline_ns
+            if visual:
+                visual_field_context['deadline_ns'] = approval.deadline_ns
+                visual_field_context['main_pre_action_approval'] = approval
         if result["capture"] is None:
             result["capture"] = step.get("capture")
         result["observation"] = step.get("observation") or {"status": "unavailable"}

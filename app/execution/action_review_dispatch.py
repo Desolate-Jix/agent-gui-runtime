@@ -29,6 +29,13 @@ def review_original_action(*, capture, identity, candidate, point, goal, click_k
     service, context = scope["service"], scope["context"]
     if service is None:
         _reject(scope, "action_review_service_unavailable")
+    from app.core.agent_grounding_target import current_agent_grounding
+    target = current_agent_grounding()
+    if target is not None and getattr(target, '_main_pre_action', None) is not None:
+        from .pre_action_dispatch import review_main_pre_action
+        return review_main_pre_action(target=target, scope=scope, capture=capture, identity=identity,
+            candidate=candidate, point=point, goal=goal, click_kind=click_kind,
+            manager=manager, validate_binding=validate_binding)
     bound = manager.get_bound_window()
     bound_handle, bound_pid = bound.handle, bound.process_id
     rect = [bound.rect.left, bound.rect.top, bound.rect.right, bound.rect.bottom]
@@ -56,6 +63,8 @@ def review_original_action(*, capture, identity, candidate, point, goal, click_k
         profile_sha256=decision_profile_sha256(service.profile), deadline_ns=scope["deadline_ns"])
     scope["envelope"] = envelope
     scope["assessment"] = assess_candidate(service, envelope=envelope)
+    from .main_pre_action_approval import offer_source
+    offer_source(target, scope, identity=identity, rect=rect)
     def validate():
         if (current_action_review() is not scope or not validate_assessment(service, scope["assessment"],
                 envelope=envelope, cancelled=scope["cancelled"])):

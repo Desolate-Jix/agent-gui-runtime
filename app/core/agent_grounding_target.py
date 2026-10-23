@@ -32,6 +32,9 @@ class AgentGroundingTarget:
         self._planned = False
         self._claimed = False
         self._pending_review = None
+        self._pre_action_source = None
+        self._main_pre_action = None
+        self._main_fresh = None
 
     @property
     def goal(self):
@@ -70,8 +73,20 @@ class AgentGroundingTarget:
                 or identity.get("process_id") != expected["process_id"]
                 or identity.get("process_create_time") != expected["process_create_time"]):
             raise ValueError("agent_grounding_identity_changed")
-        if time.time() >= self._state["expires_at"]:
+        if self._main_pre_action is not None:
+            self._main_pre_action.validate()
+        elif time.time() >= self._state["expires_at"]:
             raise ValueError("agent_grounding_request_expired")
+
+    def _resume_main_pre_action(self, approval):
+        from app.execution.main_pre_action_approval import MainPreActionApproval
+        if (type(approval) is not MainPreActionApproval or approval.source is not self._pre_action_source
+                or approval.source.target is not self or self._claimed or self._main_pre_action is not None):
+            raise ValueError('main_pre_action_target_binding_invalid')
+        approval.validate()
+        self._main_pre_action = approval
+        self._planned = False
+        self._pending_review = None
 
     def _eligible_review(self):
         from app.execution.action_review import (current_action_review, normalize_action_review_context,
@@ -141,13 +156,17 @@ class AgentGroundingTarget:
             raise ValueError("agent_grounding_candidate_review_required")
         self._identity(identity)
 
-    def plan(self, *, image_path, goal, identity):
+    def plan(self, *, image_path, goal, identity, main_capture_completed_ns=None):
         self._identity(identity)
+        if self._main_pre_action is not None and self._main_fresh is not None:
+            raise ValueError('main_pre_action_fresh_capture_already_bound')
         if goal != self.goal:
             raise ValueError("agent_grounding_goal_mismatch")
         capture = self._state["capture"]
-        original = Path(capture["image_path"]).read_bytes()
-        if sha256(original).hexdigest() != capture["sha256"]:
+        baseline = (self._main_pre_action.source.envelope['frame']
+            if self._main_pre_action is not None else capture)
+        original = Path(baseline["image_path"]).read_bytes()
+        if sha256(original).hexdigest() != baseline["sha256"]:
             raise ValueError("agent_grounding_source_hash_mismatch")
         current_bytes = Path(image_path).read_bytes()
         review_scope = None
@@ -166,6 +185,8 @@ class AgentGroundingTarget:
             changed = sum(histogram[13:]) / (before.width * before.height)
             # 只容忍局部少量光标/抗锯齿变化；这是新鲜度启发式，不是语义命中证明。
             if changed > .02:
+                if self._main_pre_action is not None:
+                    raise ValueError('main_pre_action_target_region_changed')
                 review_scope = self._eligible_review()
                 if review_scope is None:
                     raise ValueError("agent_grounding_target_region_changed")
@@ -198,6 +219,15 @@ class AgentGroundingTarget:
                 "candidate": _candidate(candidate, point), "image_path": Path(image_path).resolve(),
                 "sha256": sha256(current_bytes).hexdigest(), "dimensions": expected_size}
         self._planned = True
+        if self._main_pre_action is not None and main_capture_completed_ns is not None:
+            if (type(main_capture_completed_ns) is not int
+                    or main_capture_completed_ns < self._main_pre_action.issued_ns
+                    or not main_capture_completed_ns <= time.perf_counter_ns()
+                    or time.perf_counter_ns() - main_capture_completed_ns >= 2_000_000_000):
+                raise ValueError('main_pre_action_fresh_capture_expired')
+            self._main_fresh = {'image_path': str(Path(image_path).resolve()),
+                'sha256': sha256(current_bytes).hexdigest(), 'checked_ns': main_capture_completed_ns,
+                'region_changed_fraction': changed}
         return {"image_path": str(image_path), "goal": goal, "target_text": self._candidate.label,
             "parse_result": {"vision_regions": {"image_size": self._result.image_size.model_dump()}},
             "candidate_result": {"recommended_candidate_id": self._candidate.id, "candidates": [candidate]},
@@ -223,7 +253,18 @@ class AgentGroundingTarget:
             raise ValueError("agent_grounding_point_mismatch")
         if self._pending_review is not None:
             self._validate_pending_review(identity)
+        if self._main_pre_action is not None:
+            self._validate_main_fresh()
+            self._main_pre_action.consume()
         self._claimed = True
+
+    def _validate_main_fresh(self):
+        self._main_pre_action.validate()
+        fresh = self._main_fresh
+        if (fresh is None or time.perf_counter_ns() - fresh['checked_ns'] >= 2_000_000_000
+                or sha256(Path(fresh['image_path']).read_bytes()).hexdigest() != fresh['sha256']):
+            raise ValueError('main_pre_action_fresh_capture_expired')
+        return True
 
 
 def current_agent_grounding():

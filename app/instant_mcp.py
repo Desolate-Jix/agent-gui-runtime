@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.instant_attachment_transport import InstantAttachmentTransport, InstantAdmissionError, _validate_request_id
 
-INSTANT_VERSION = "0.1.5"
+INSTANT_VERSION = "0.1.6"
 
 
 def _run_wait_budget(kind, requested):
@@ -401,7 +401,13 @@ class InstantSession(InstantAttachmentTransport):
                 except (OSError, ValueError) as error:
                     raise InstantImageError("image_frame_unavailable", "the recorded agent command identity is mismatched",
                                             "Inspect the original command and receipt; do not read another command's image or replay input.") from error
-                result = result.get("result") or {}
+                pre_action = result.get('pending_pre_action_review') or {}
+                if (view == 'before' and result.get('status') == 'awaiting_pre_action_review'
+                        and pre_action.get('schema') == 'pre_action_review_packet.v1'
+                        and pre_action.get('execution_request_id') == result.get('command_id')):
+                    result = {'capture': pre_action.get('before')}
+                else:
+                    result = result.get("result") or {}
         if view == "before":
             capture = result.get("capture") or {}
         else:

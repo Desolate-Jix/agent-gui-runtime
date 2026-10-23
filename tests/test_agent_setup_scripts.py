@@ -24,7 +24,8 @@ def bundle(tmp_path):
     (root / 'requirements').mkdir()
     for name in ('setup_instant.ps1', 'configure_instant.ps1', 'configure_instant_mcp.py'):
         shutil.copy2(ROOT / 'scripts' / name, root / 'scripts' / name)
-    shutil.copy2(ROOT / 'requirements/agent-runtime-win311.txt', root / 'requirements')
+    for name in ('agent-runtime-win311.txt', 'agent-runtime-api.txt', 'agent-runtime-api-win.lock.txt'):
+        shutil.copy2(ROOT / 'requirements' / name, root / 'requirements')
     return root
 
 
@@ -56,6 +57,7 @@ def test_configure_agent_source_without_model_generates_correct_route(bundle, so
     (['-RecognitionSource', 'agent_current', '-DownloadModel'], 'do not accept'),
     (['-RecognitionSource', 'agent_current', '-ModelDirectory', 'unused'], 'do not accept'),
     (['-RecognitionSource', 'local'], 'requires -ModelDirectory'),
+    (['-RecognitionSource', 'local', '-ModelDirectory', 'unused', '-PythonVersion', '3.12'], 'requires Python 3.11'),
 ])
 def test_setup_invalid_route_stops_before_installation(bundle, args, error):
     result = run_script(bundle, 'setup_instant.ps1', *args)
@@ -65,7 +67,10 @@ def test_setup_invalid_route_stops_before_installation(bundle, args, error):
     assert not (bundle / 'mcp-config.local.json').exists()
 
 
-def test_agent_setup_installs_only_light_manifest_and_preserves_local_environment(bundle, tmp_path):
+@pytest.mark.parametrize('python_version', ['current', None])
+def test_agent_setup_installs_only_light_manifest_and_preserves_local_environment(bundle, tmp_path, python_version):
+    if python_version is None and sys.version_info[:2] != (3, 12):
+        pytest.skip('The default fresh API environment is Python 3.12; run with that interpreter')
     # 联网依赖安装替换为命令记录；虚拟环境与最终配置仍实际创建。
     (bundle / '.venv').mkdir()
     marker = bundle / '.venv/local-model-environment.txt'
@@ -83,23 +88,68 @@ function uv {
     }
     $global:LASTEXITCODE = 0
 }
-& $env:UV_TEST_SETUP -RecognitionSource agent_current -DataDirectory $env:UV_TEST_DATA
+$setupArguments = @{RecognitionSource='agent_current'; DataDirectory=$env:UV_TEST_DATA}
+if ($env:UV_TEST_VERSION) { $setupArguments.PythonVersion = $env:UV_TEST_VERSION }
+& $env:UV_TEST_SETUP @setupArguments
 ''', encoding='utf-8')
     env = dict(os.environ, UV_TEST_LOG=str(log), UV_TEST_PYTHON=sys.executable,
-        UV_TEST_SETUP=str(bundle / 'scripts/setup_instant.ps1'), UV_TEST_DATA=str(bundle / 'data'))
+        UV_TEST_SETUP=str(bundle / 'scripts/setup_instant.ps1'), UV_TEST_DATA=str(bundle / 'data'),
+        UV_TEST_VERSION='.'.join(map(str, sys.version_info[:2])) if python_version else '')
     result = subprocess.run([SHELL, '-NoProfile', '-NonInteractive', '-File', str(driver)],
         env=env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40)
     assert result.returncode == 0, result.stdout + result.stderr
     calls = [json.loads(line) for line in log.read_text(encoding='utf-8').splitlines()]
     assert not any(c[0] == 'sync' for c in calls)
     installation = next(c for c in calls if c[:2] == ['python', 'install'])
+    assert installation[2] == ('.'.join(map(str, sys.version_info[:2])) if python_version else '3.12')
     assert '--no-bin' in installation and '--no-registry' in installation
     pip = next(c for c in calls if c[:2] == ['pip', 'install'])
-    assert Path(pip[pip.index('-r') + 1]).name == 'agent-runtime-win311.txt'
+    assert Path(pip[pip.index('-r') + 1]).name == 'agent-runtime-api-win.lock.txt'
+    assert '--require-hashes' in pip
+    assert pip[pip.index('--only-binary') + 1] == ':all:'
     assert Path(pip[pip.index('--python') + 1]) == bundle / '.venv-agent/Scripts/python.exe'
     assert marker.read_text(encoding='utf-8') == 'preserve'
     config = json.loads((bundle / 'mcp-config.local.json').read_text(encoding='utf-8'))
     assert Path(config['mcpServers']['agent-review-instant']['command']) == bundle / '.venv-agent/Scripts/python.exe'
+
+
+@pytest.mark.parametrize('version_request', ['implicit', 'matching', 'different'])
+def test_api_setup_preserves_existing_interpreter_and_rejects_in_place_minor_migration(bundle, tmp_path, version_request):
+    environment = bundle / '.venv-agent'
+    created = subprocess.run([sys.executable, '-I', '-B', '-m', 'venv', '--without-pip', str(environment)],
+        capture_output=True, text=True, timeout=30)
+    assert created.returncode == 0, created.stderr
+    before = (environment / 'pyvenv.cfg').read_bytes()
+    driver = tmp_path / 'reuse-driver.ps1'
+    log = tmp_path / 'reuse-uv-calls.jsonl'
+    driver.write_text('''
+$ErrorActionPreference = 'Stop'
+function uv {
+    [IO.File]::AppendAllText($env:UV_TEST_LOG, (ConvertTo-Json -InputObject @($args) -Compress) + "`n")
+    $global:LASTEXITCODE = 0
+}
+$setupArguments = @{RecognitionSource='agent_current'; DataDirectory=$env:UV_TEST_DATA}
+if ($env:UV_TEST_VERSION) { $setupArguments.PythonVersion = $env:UV_TEST_VERSION }
+& $env:UV_TEST_SETUP @setupArguments
+''', encoding='utf-8')
+    current = '.'.join(map(str, sys.version_info[:2]))
+    selected = '' if version_request == 'implicit' else current if version_request == 'matching' else ('3.11' if current == '3.12' else '3.12')
+    result = subprocess.run([SHELL, '-NoProfile', '-NonInteractive', '-File', str(driver)],
+        env=dict(os.environ, UV_TEST_LOG=str(log), UV_TEST_VERSION=selected,
+                 UV_TEST_SETUP=str(bundle / 'scripts/setup_instant.ps1'), UV_TEST_DATA=str(bundle / 'data')),
+        capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40)
+    assert (environment / 'pyvenv.cfg').read_bytes() == before
+    if version_request == 'different':
+        assert result.returncode != 0
+        assert 'separate installation' in result.stdout + result.stderr
+        assert not log.exists()
+        assert not (bundle / 'mcp-config.local.json').exists()
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        calls = [json.loads(line) for line in log.read_text(encoding='utf-8').splitlines()]
+        assert len(calls) == 1 and calls[0][:2] == ['pip', 'install']
+        assert '--require-hashes' in calls[0]
+        assert (bundle / 'mcp-config.local.json').is_file()
 
 
 def test_agent_setup_whatif_has_no_environment_or_config_side_effect(bundle):

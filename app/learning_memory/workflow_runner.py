@@ -23,7 +23,7 @@ from .workflow_trial import _RUN
 _SCHEMA = "workflow_runner.v1"
 _CLOCK_ID = uuid4().hex
 _TERMINAL = frozenset({"completed", "failed", "cancelled"})
-_RESULT_STATUSES = frozenset({"pending", "running", "awaiting_grounding", "awaiting_field_review", "completed", "failed", "cancelled", "result_unknown", "not_found"})
+_RESULT_STATUSES = frozenset({"pending", "running", "awaiting_grounding", "awaiting_field_review", "awaiting_pre_action_review", "completed", "failed", "cancelled", "result_unknown", "not_found"})
 
 
 def _digest(value):
@@ -278,7 +278,7 @@ class WorkflowRunner:
         if status == "awaiting_grounding":
             self._wait(state, "grounding_required", raw=result.get("raw"))
             return False
-        if status == "awaiting_field_review":
+        if status in {"awaiting_field_review", "awaiting_pre_action_review"}:
             # 原命令停在已输入后的审核边界；保留票据，不把未完成后缀结算成失败。
             self._wait(state, "execution_pending" if state.get("cancel_request_id") else "verification_required")
             return False

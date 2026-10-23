@@ -9,7 +9,7 @@ from packaging.requirements import Requirement
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "requirements" / "agent-runtime-win311.txt"
+MANIFEST = ROOT / "requirements" / "agent-runtime-api.txt"
 IMPORT_DISTRIBUTIONS = {
     "mcp": "mcp", "fastapi": "fastapi", "pydantic": "pydantic",
     "uvicorn": "uvicorn", "httpx": "httpx", "PIL": "pillow",

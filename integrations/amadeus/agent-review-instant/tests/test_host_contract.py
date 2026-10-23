@@ -25,7 +25,7 @@ class HostContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(json.loads(result.stdout)["ok"])
 
-    def test_native_projection_binds_secret_only_in_env_and_defaults_input_off(self):
+    def test_native_http_projection_keeps_connection_secret_out_of_url_and_commands(self):
         manifest = PACKAGE / "amadeus-extension.json"
         self.assertTrue(manifest.is_file(), "MCP projection needs the package manifest")
         script = '''import json,sys
@@ -33,20 +33,18 @@ from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 from agent_host.extension_mcp import project_extension_mcp_connections
 m=json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
-entry={'manifest':m,'enabled':True,'providers':['pi'],'python_path':sys.executable,
+entry={'manifest':m,'enabled':True,'providers':['pi'],'python_path':None,
  'package_path':str(Path(sys.argv[2]).parent),'data_path':'D:/synthetic extension data',
- 'config':{'runtime_root':'D:/synthetic Runtime','runtime_python':'D:/runtime python/python.exe',
- 'api_profile':'D:/profiles/vision.json','decision_profile':'D:/profiles/decision.json'},
- 'secrets':{'api_key':'synthetic-binding-secret'}}
+ 'config':{'runtime_url':'http://127.0.0.1:17665/mcp'},
+ 'secrets':{'connection_token':'synthetic-binding-secret'}}
 s=project_extension_mcp_connections(entry)[0]
-assert s.command==sys.executable
-assert list(s.arguments)==['-I','-m','amadeus_agent_gui']
-assert s.environment['OPENAI_API_KEY']=='synthetic-binding-secret'
-assert s.environment['AGENT_GUI_RUNTIME_INPUT_ALLOWED']=='false'
-assert s.environment['AGENT_GUI_RUNTIME_ROOT']=='D:/synthetic Runtime'
-assert s.environment['AGENT_GUI_RUNTIME_PYTHON']=='D:/runtime python/python.exe'
-assert s.environment['AGENT_GUI_RUNTIME_DATA']=='D:/synthetic extension data/runtime'
-assert 'synthetic-binding-secret' not in s.command+' '.join(s.arguments)
+assert s.transport=='http'
+assert s.url=='http://127.0.0.1:17665/mcp'
+assert not s.command and not s.arguments
+assert s.bearer_token_env_var.startswith('AMADEUS_MCP_TOKEN_')
+assert s.environment=={s.bearer_token_env_var:'synthetic-binding-secret'}
+assert 'synthetic-binding-secret' not in s.url
+assert 'OPENAI_API_KEY' not in s.environment
 assert tuple(s.provider_ids)==('pi',)
 entry['enabled']=False
 assert project_extension_mcp_connections(entry)==()
