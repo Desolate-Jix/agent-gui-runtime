@@ -285,6 +285,8 @@ class LearningBenchmarkClient:
         env.pop("PYTHONPATH", None)
         self._stack = AsyncExitStack()
         try:
+            from app.runtime_lifecycle import InstallationLease
+            self._stack.enter_context(InstallationLease(self.root))
             streams = await self._stack.enter_async_context(transport(params(
                 command=sys.executable, args=arguments, env=env, cwd=str(self.root))))
             self._session = await self._stack.enter_async_context(client(*streams))

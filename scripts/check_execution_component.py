@@ -194,7 +194,7 @@ def check(root):
     decision_feature = check_decision_dependencies()
     entries = {}
     for name in ("start_instant_mcp", "start_instant_mcp_http", "run_local_step_session", "start_instant_mcp_admin",
-                 "instant_admin_worker", "configure_instant_mcp", "execution_client"):
+                 "instant_admin_worker", "configure_instant_mcp", "execution_client", "update_runtime"):
         module = importlib.import_module("scripts." + name)
         if not callable(module.main):
             raise ValueError("execution entrypoint is unavailable: " + name)

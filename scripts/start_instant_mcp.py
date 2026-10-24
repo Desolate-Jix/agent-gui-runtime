@@ -54,4 +54,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    from app.runtime_lifecycle import InstallationLease
+    with InstallationLease(ROOT):
+        from app.runtime_update_schedule import schedule_check
+        schedule_check(ROOT)
+        main()

@@ -1,3 +1,9 @@
+# Execution 0.1.8 / 执行 0.1.8 — 2026-10-24
+
+新增可关闭的后台更新检查、下载核验与确切目标确认、安装级任务维护锁、持久会话登记、安装健康检查及失败恢复。0.1.7 及更早版本须手动安装首个带更新器的版本。Amadeus Host 支持另见 [PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261)，扩展 wheel 保持 0.0.4。 / Adds optional background checks, verified staging and exact-target confirmation, installation-wide task locks, persistent session registrations, installation health checks and failure recovery. Versions 0.1.7 and earlier require manual installation of this first updater-enabled release. Amadeus Host support is separate [PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261); the extension wheel remains 0.0.4.
+
+[发布与验收 / Release and acceptance](docs/releases/EXECUTION_018_20261024.md) · [更新命令 / Update commands](docs/RUNTIME_UPDATES.md)
+
 # Execution 0.1.2 / 执行 0.1.2
 
 本次只发布执行正式版，学习0.1.0-preview.3安装器不变。Choice直接判断本步，默认视觉执行；目标审核采用概览＋细节标注图，输入核验完整裁剪加外沿刻度，单问题比较规定文字。组合点击、全选替换和点击后Enter减少动作之间的焦点漂移；不恢复空框或焦点外观检查。支持外部视觉API、兼容Agent及本地模型，本地权重不是必需品。 / Execution-only stable release: current-step Choice, visual execution, focused marked images, complete field crops with margin ticks, and bound click/replace/Enter actions. Local weights remain optional; learning is unchanged.

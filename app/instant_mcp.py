@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.instant_attachment_transport import InstantAttachmentTransport, InstantAdmissionError, _validate_request_id
 
-INSTANT_VERSION = "0.1.7"
+INSTANT_VERSION = "0.1.8"
 
 
 def _run_wait_budget(kind, requested):
@@ -184,6 +184,10 @@ class InstantSession(InstantAttachmentTransport):
         self.lock_file = None
         self.log_file = None
         self.host_identity = None
+        # Cover every data directory and both maintained MCP transports.  The
+        # child independently holds its lease until actual process exit.
+        from app.runtime_lifecycle import InstallationLease
+        self._installation_lease = InstallationLease(self.root).acquire()
 
     def _lock(self):
         if self.lock_file is not None:
@@ -292,6 +296,8 @@ class InstantSession(InstantAttachmentTransport):
 
     def _launch_session(self, config, *, session_name=None, on_created=None, before_publish=None):
         import psutil
+        # Also cover explicit recovery/reuse of an object after close().
+        self._installation_lease.acquire()
         name = session_name or "session-" + uuid4().hex
         target = (self.data_root / name).resolve()
         if not re.fullmatch(r"session-[0-9a-f]{32}", name) or target.parent != self.data_root or target.exists():
@@ -313,6 +319,11 @@ class InstantSession(InstantAttachmentTransport):
             command.extend(["--api-profile", config.api_profile])
         if self.decision_profile:
             command.extend(["--decision-profile", self.decision_profile])
+        from app.runtime_task_ledger import register
+        register(self.root, self.session)
+        # Even Popen construction can fail after Windows created a process.
+        # Preserve registration on every exception; absence of a directory/PID
+        # is not sufficient proof that no host was created or input occurred.
         self.process = subprocess.Popen(command, cwd=self.root,
             stdin=subprocess.DEVNULL, stdout=self.log_file, stderr=self.log_file,
             env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -452,17 +463,27 @@ class InstantSession(InstantAttachmentTransport):
             return status
 
     def close(self):
-        self.stop()
-        if self.process:
-            try:
-                self.process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                # 不杀正在执行的输入；父进程退出后宿主在当前命令结束时自行清理。
-                pass
-        if self.log_file:
-            self.log_file.close()
-        if self.lock_file:
-            self.lock_file.close()
+        try:
+            self.stop()
+            if self.process:
+                try:
+                    self.process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    # Do not kill input to update. The child's lease remains.
+                    pass
+            if self.log_file:
+                self.log_file.close()
+            if self.lock_file:
+                self.lock_file.close()
+        finally:
+            if self.session is not None:
+                from app.runtime_task_ledger import clear, RuntimeTaskLedgerError
+                try:
+                    clear(self.root, self.session)
+                except (OSError, ValueError, RuntimeTaskLedgerError):
+                    # Unknown input/cleanup stays registered, even after death.
+                    pass
+            self._installation_lease.close()
 
 
 def build_server(session):
@@ -491,7 +512,11 @@ def build_server(session):
                               structuredContent=value)
 
     def instant_status() -> dict:
-        return session.status()
+        value = session.status()
+        if getattr(session, "root", None) is not None:
+            from app.runtime_update_schedule import cached_check
+            value["updates"] = cached_check(session.root)
+        return value
 
     def instant_recovery_preview() -> CallToolResult:
         try:

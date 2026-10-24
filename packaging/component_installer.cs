@@ -8,6 +8,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
@@ -177,7 +178,40 @@ internal static class ComponentInstaller {
             }
         }
     }
+    // Same byte-range protocol as app/runtime_lifecycle.py. A stable sibling
+    // lock survives payload replacement; Python executable location is irrelevant.
+    [StructLayout(LayoutKind.Sequential)]
+    struct LeaseOverlapped { public UIntPtr Internal, InternalHigh; public uint Offset, OffsetHigh; public IntPtr Event; }
+    [DllImport("kernel32.dll", SetLastError=true)]
+    static extern bool LockFileEx(IntPtr file, uint flags, uint reserved, uint low, uint high, ref LeaseOverlapped overlap);
+    sealed class MaintenanceLease : IDisposable {
+        FileStream stream;
+        internal MaintenanceLease(string root) {
+            root=Canonical(root);
+            string parent=Path.GetDirectoryName(root), name="."+Path.GetFileName(root);
+            NoReparse(parent); Directory.CreateDirectory(parent);
+            string path=Path.Combine(parent,name+".runtime-maintenance.lock"); NoReparse(path);
+            stream=new FileStream(path,FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.ReadWrite);
+            var overlap=new LeaseOverlapped();
+            if(!LockFileEx(stream.SafeFileHandle.DangerousGetHandle(),3,0,1,0,ref overlap)) {
+                stream.Dispose(); stream=null;
+                Fail("Runtime is running or maintenance is active; close Runtime yourself before retrying.");
+            }
+            try {
+                string pending=Path.Combine(parent,name+".runtime-update-pending.json"); NoReparse(pending);
+                if(File.Exists(pending) || Directory.Exists(pending)) Fail("Interrupted Runtime update requires recovery before installation/uninstallation.");
+                string sessions=Path.Combine(parent,name+".runtime-sessions"); NoReparse(sessions);
+                if(File.Exists(sessions)) Fail("Runtime session registry is invalid; maintenance refused.");
+                if(Directory.Exists(sessions) && Directory.EnumerateFileSystemEntries(sessions).Any())
+                    Fail("Runtime session cleanup is unresolved; settle its original receipts before maintenance.");
+            } catch {Dispose();throw;}
+        }
+        public void Dispose() {if(stream!=null) {stream.Dispose();stream=null;}}
+    }
     static void Install(string root, bool check, List<FileFact> rows, IntegrationBackend backend=null) {
+        using(var lease=new MaintenanceLease(root)) InstallUnlocked(root,check,rows,backend);
+    }
+    static void InstallUnlocked(string root, bool check, List<FileFact> rows, IntegrationBackend backend=null) {
         root = Canonical(root); NoReparse(root);
         InstallRecord old = ReadRecord(root, check, false); RunningGuard(root);
         if(!check) IntegrationPreflight(root);
@@ -253,6 +287,9 @@ internal static class ComponentInstaller {
         return false;
     }
     static void Uninstall(string root, bool check, IntegrationBackend backend=null) {
+        using(var lease=new MaintenanceLease(root)) UninstallUnlocked(root,check,backend);
+    }
+    static void UninstallUnlocked(string root, bool check, IntegrationBackend backend=null) {
         root=Canonical(root); InstallRecord record=ReadRecord(root,check,true); RunningGuard(root);
         if(!check) IntegrationPreflight(root);
         foreach(var row in record.files) Exclusive(Target(root,row.path,true));

@@ -136,6 +136,49 @@ def test_unmarked_existing_check_root_is_refused(tmp_path):
     assert list(target.iterdir()) == []
 
 
+def test_installer_and_uninstaller_respect_external_python_runtime_lease(tmp_path):
+    from app.runtime_lifecycle import InstallationLease
+    setup = package(tmp_path, component='execution', version='0.2.0')
+    target = tmp_path / 'lease-check'
+    assert run(setup, '--check-install', target).returncode == 0
+    installed = target / 'AgentGUIRuntimeExecutionPreview'
+    with InstallationLease(installed):
+        for action in ('--check-install', '--check-uninstall'):
+            result = run(setup, action, target)
+            assert result.returncode != 0
+            assert 'Runtime is running' in result.stderr
+    assert run(setup, '--check-uninstall', target).returncode == 0
+
+
+def test_installer_refuses_interrupted_update_and_unsettled_session(tmp_path):
+    from app.runtime_lifecycle import update_pending_path
+    setup = package(tmp_path, component='execution', version='0.2.0')
+    target = tmp_path / 'pending-check'
+    assert run(setup, '--check-install', target).returncode == 0
+    installed = target / 'AgentGUIRuntimeExecutionPreview'
+    pending = update_pending_path(installed)
+    pending.write_text('{incomplete')
+    result = run(setup, '--check-install', target)
+    assert result.returncode != 0 and 'requires recovery' in result.stderr
+    pending.unlink()
+    pending.mkdir()
+    result = run(setup, '--check-install', target)
+    assert result.returncode != 0 and 'requires recovery' in result.stderr
+    pending.rmdir()
+    ledger = installed.parent / ('.' + installed.name + '.runtime-sessions')
+    ledger.write_bytes(b'invalid registry type')
+    result = run(setup, '--check-install', target)
+    assert result.returncode != 0 and 'registry is invalid' in result.stderr
+    ledger.unlink()
+    ledger.mkdir()
+    evidence = ledger / 'unsettled.json'
+    evidence.write_text('{}')
+    result = run(setup, '--check-uninstall', target)
+    assert result.returncode != 0 and 'cleanup is unresolved' in result.stderr
+    evidence.unlink()
+    assert run(setup, '--check-uninstall', target).returncode == 0
+
+
 def test_two_components_are_independent(tmp_path):
     learning = package(tmp_path)
     execution = package(tmp_path, component='execution')

@@ -49,7 +49,7 @@ ROOT_FILES = ("LICENSE", ".gitignore", ".gitattributes", "pyproject.toml", "uv.l
               "packaging/learning_workbench.spec")
 SCRIPTS = tuple("scripts/" + name for name in (
     "start_instant_mcp.py", "run_local_step_session.py", "start_instant_mcp_admin.py",
-    "instant_admin_worker.py", "setup_instant.ps1", "configure_instant.ps1",
+    "instant_admin_worker.py", "setup_instant.ps1", "configure_instant.ps1", "runtime_maintenance.ps1",
     "configure_instant_mcp.py", "smoke_instant_mcp.py", "check_instant_entrypoints.py",
     "build_instant_bundle.py", "run_learning_memory_workbench.py",
     "start_learning_workbench.py", "build_learning_workbench.py"))

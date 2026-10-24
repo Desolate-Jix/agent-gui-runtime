@@ -25,6 +25,11 @@ if ($RecognitionSource -ne 'agent_delegate' -and $DelegateProfile) { throw '-Del
 $environmentName = if ($agentSource) { '.venv-agent' } else { '.venv' }
 $environmentPath = Join-Path $root $environmentName
 $python = Join-Path $environmentPath 'Scripts\python.exe'
+$maintenanceLease = $null
+if (-not $WhatIfPreference) {
+    . (Join-Path $PSScriptRoot 'runtime_maintenance.ps1')
+    $maintenanceLease = Open-RuntimeMaintenance -InstallationRoot $root
+}
 Push-Location $root
 try {
     $installDescription = if ($agentSource) { 'Install API/Agent execution dependencies (Python 3.12 recommended; reuse existing 3.11/3.12)' } else { 'Install locked Python 3.11 runtime and local-model dependencies (large download)' }
@@ -79,4 +84,5 @@ try {
     & (Join-Path $PSScriptRoot 'configure_instant.ps1') @configuration -WhatIf:$WhatIfPreference
 } finally {
     Pop-Location
+    if ($null -ne $maintenanceLease) { $maintenanceLease.Dispose() }
 }

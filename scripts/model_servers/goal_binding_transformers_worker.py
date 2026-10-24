@@ -454,4 +454,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, RuntimeError, ImportError) as exc:
         parser.error(str(exc))
 
-if __name__ == "__main__": raise SystemExit(main())
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from app.runtime_lifecycle import InstallationLease
+    with InstallationLease(Path(__file__).resolve().parents[2]):
+        raise SystemExit(main())

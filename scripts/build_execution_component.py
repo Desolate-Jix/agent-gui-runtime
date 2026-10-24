@@ -26,6 +26,7 @@ ENTRIES = (
     "scripts/execution_client.py",
     "scripts/current_agent_client.py",
     "scripts/execution_startup.py",
+    "scripts/update_runtime.py",
     # PowerShell 启动的维护 worker 不可从 Python 导入图发现，须显式闭合。
     "app/vision/model_workers/vista_openai_server.py",
     # 真实预检动态拼接的兼容入口须明确纳入，不能靠原工作树补包。
@@ -35,6 +36,7 @@ ENTRIES = (
 )
 RESOURCES = (
     "scripts/setup_instant.ps1", "scripts/configure_instant.ps1",
+    "scripts/runtime_maintenance.ps1", "scripts/update_runtime.ps1",
     "requirements/agent-runtime-win311.txt", "requirements/desktop-runtime-constraints.txt",
     "requirements/agent-runtime-api.txt", "requirements/agent-runtime-api-win.lock.txt",
     "requirements/pylock.desktop-runtime-win311.toml", "pyproject.toml", "uv.lock",
@@ -52,8 +54,12 @@ RESOURCES = (
     "docs/EXECUTION_GUIDE.md", "docs/EXECUTION_GUIDE.zh-CN.md",
     "docs/development/CURRENT_AGENT_MODE.md", "docs/development/CURRENT_AGENT_MODE.zh-CN.md",
     "docs/development/RUNTIME_UPDATE_STRATEGY.md", "docs/development/AMADEUS_UPDATE_STRATEGY.md",
+    "docs/RUNTIME_UPDATES.md", "docs/RUNTIME_UPDATES.zh-CN.md",
+    "docs/development/AMADEUS_UPDATE_IMPLEMENTATION.md",
+    "docs/verification/RUNTIME_UPDATE_20261024.md",
     "docs/verification/CURRENT_AGENT_MODE_20261024.md", "docs/verification/CURRENT_AGENT_LIVE_20261024.md",
     "docs/releases/EXECUTION_017_20261024.md",
+    "docs/releases/EXECUTION_018_20261024.md",
     "docs/assets/readme-hero.svg", "docs/assets/readme-hero.mobile.svg",
     "docs/assets/readme-hero.zh-CN.svg", "docs/assets/readme-hero.zh-CN.mobile.svg",
     "docs/assets/demos/browser-0.1.4.gif", "docs/assets/demos/notepad-0.1.4.gif",

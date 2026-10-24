@@ -1,4 +1,6 @@
-# 执行模式 0.1.7 详细指南
+# 执行模式 0.1.8 详细指南
+
+**0.1.8（2026-10-24）：** 后台更新检查、确切目标确认、安装级任务锁及回滚。0.1.7 及更早版本须手动安装本版。见[发布与安装包验证](releases/EXECUTION_018_20261024.md)及[更新命令](RUNTIME_UPDATES.zh-CN.md)。下方历史 GUI 证据保留原版本归属。
 
 **0.1.7（2026-10-24）：** 新增 `--current-agent` 持久基础点击闭环，由当前支持图像的 Agent 读原图、定位并核验，无需独立视觉／Decision API，仍消耗承载 Agent 的服务额度。源码同连接 7-Zip 20 步与拒绝／取消负控已通过；安装版 0.1.7 另测计算器五次点击（C → 1 → + → 2 → = 显示 3）、取消负控与清理通过，见[发布记录](releases/EXECUTION_017_20261024.md)及单独的[源码实机记录](verification/CURRENT_AGENT_LIVE_20261024.md)。
 
@@ -25,7 +27,7 @@ Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图�
 
 **历史执行版 0.1.4 已通过限定范围的记事本与 7-Zip 安装态流程，包括 Sol 独立验收。** Main 完成三个计划（3+3+6 步），Sol 完成两个全新计划（3+3 步），五个计划均自动完成。耗时、原始失败与安装验收边界见[多应用报告](verification/MULTI_APP_EXECUTION_20261015.md)。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
 
-[0.1.7 制品、校验文件与安装验收状态](releases/EXECUTION_017_20261024.md)
+[0.1.8 制品、校验文件与安装包验收](releases/EXECUTION_018_20261024.md)
 
 **0.1.6 的服务配置：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
 
@@ -152,7 +154,7 @@ flowchart TD
 
 ## 安装与配置
 
-要求 **Windows x64 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)**。API／Agent 路线推荐 Python 3.12，保留已有的受支持 3.11 环境；本地模型路线仍要求 Python 3.11。安装器提供维护源码与配置脚本；首次配置按所选路线安装依赖，不附带模型权重或 API 密钥。请按实际安装位置调整示例路径。为兼容升级，目录或快捷方式可能保留历史 Preview 名称；产品版本、安装窗口及卸载条目会标明组件版本。安装器校验值与精确验收范围见 [0.1.7 发布记录](releases/EXECUTION_017_20261024.md)。
+要求 **Windows x64 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)**。API／Agent 路线推荐 Python 3.12，保留已有的受支持 3.11 环境；本地模型路线仍要求 Python 3.11。安装器提供维护源码与配置脚本；首次配置按所选路线安装依赖，不附带模型权重或 API 密钥。请按实际安装位置调整示例路径。为兼容升级，目录或快捷方式可能保留历史 Preview 名称；产品版本、安装窗口及卸载条目会标明组件版本。安装器校验值与精确验收范围见 [0.1.8 发布记录](releases/EXECUTION_018_20261024.md)。
 
 使用外部 Luna 视觉 API 和 Decision：
 
@@ -188,7 +190,7 @@ flowchart TD
 
 安装 Runtime 0.1.6、准备 API 环境，在独立控制台启动 `scripts/start_instant_mcp_http.py`。服务仅绑定 `127.0.0.1`，环境变量中的本机连接 token 与模型 API Key 分开。导入 0.0.4 wheel，填写 `runtime_url` 与保密的 `connection_token`，将 MCP＋Skill 绑定 Pi，启用、重启后端，再新建 Work。扩展不会启动 Runtime，也不接收其模型密钥。详见[完整命令与迁移说明](../integrations/amadeus/agent-review-instant/README.zh-CN.md)。原 stdio 客户端可继续使用原接入方式。
 
-0.0.4 wheel 继续使用固定 `instant-v0.1.6` 下载地址与原 API 路线 Skill；本轮没有 Amadeus 当前 Agent 实测。兼容的 HTTP 合同无需每个 Runtime 补丁重装未变化的 wheel。自动更新尚未实现，见 [Amadeus](development/AMADEUS_UPDATE_STRATEGY.md)与 [Runtime](development/RUNTIME_UPDATE_STRATEGY.md) 策略。
+0.0.4 wheel 继续使用固定 `instant-v0.1.6` 下载地址与原 API 路线 Skill；本轮没有 Amadeus 当前 Agent 实测。兼容的 HTTP 合同无需每个 Runtime 补丁重装未变化的 wheel。Runtime 0.1.8 首次提供更新器，0.1.7 及更早版本须手动安装本版。Amadeus Host 更新另见 [PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261)，尚待上游交付。详见[更新说明](RUNTIME_UPDATES.zh-CN.md)。
 
 ## Agent 接入
 

@@ -303,6 +303,8 @@ def main():
     parent_created = psutil.Process(args.parent_pid).create_time() if args.parent_pid else None
 
     out = args.output.resolve()
+    from app.runtime_task_ledger import register
+    register(ROOT, out)
     out.mkdir(parents=True, exist_ok=False)
     for name in ("commands", "responses"):
         (out / name).mkdir()
@@ -651,7 +653,16 @@ def main():
         report.update(finished_at=now(), cleanup_errors=errors, host_phase=host.status()["phase"] if host else "not_created",
             sampler_stopped=sampler_thread is None or not sampler_thread.is_alive())
         publish_report()
+        from app.runtime_task_ledger import clear, RuntimeTaskLedgerError
+        try:
+            clear(ROOT, out)
+        except (OSError, ValueError, RuntimeTaskLedgerError):
+            # A crash, unknown input or unverified cleanup continues to block
+            # maintenance until the original session is explicitly settled.
+            pass
 
 
 if __name__ == "__main__":
-    main()
+    from app.runtime_lifecycle import InstallationLease
+    with InstallationLease(Path(__file__).resolve().parents[1]):
+        main()

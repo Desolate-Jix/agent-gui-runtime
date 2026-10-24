@@ -22,7 +22,7 @@ def bundle(tmp_path):
     root = tmp_path / 'bundle with spaces'
     (root / 'scripts').mkdir(parents=True)
     (root / 'requirements').mkdir()
-    for name in ('setup_instant.ps1', 'configure_instant.ps1', 'configure_instant_mcp.py'):
+    for name in ('setup_instant.ps1', 'configure_instant.ps1', 'configure_instant_mcp.py', 'runtime_maintenance.ps1'):
         shutil.copy2(ROOT / 'scripts' / name, root / 'scripts' / name)
     for name in ('agent-runtime-win311.txt', 'agent-runtime-api.txt', 'agent-runtime-api-win.lock.txt'):
         shutil.copy2(ROOT / 'requirements' / name, root / 'requirements')

@@ -1,3 +1,7 @@
+## 2026-10-24 执行 0.1.8 / Execution 0.1.8
+
+本次交付执行 Runtime 更新检查、确切目标确认、任务维护锁及恢复；0.1.7 及更早版本先手动安装。Amadeus Host 更新为独立上游 PR，扩展 wheel 保持 0.0.4；不恢复学习开发。确切包验收与限制见 [0.1.8 发布记录](docs/releases/EXECUTION_018_20261024.md)。下方为历史范围。 / This release delivers Runtime update checks, exact-target confirmation, task maintenance locks and recovery. Versions 0.1.7 and earlier require manual installation. Amadeus Host updates are a separate upstream PR; the extension wheel stays at 0.0.4 and learning remains paused. See the [0.1.8 release record](docs/releases/EXECUTION_018_20261024.md) for package acceptance and limits. Entries below are historical.
+
 ## 2026-10-18 本地维护范围 / Local maintenance scope
 
 当前只维护执行模式，基于已发布执行 0.1.5 源码；学习工作台、录制与控制入口封存移除。以下学习预览版内容仅为历史，原始说明可从 `8d692847` 历史提交恢复。本轮未构建安装器、未发布、未改已安装程序。详见 [封存说明](docs/LEARNING_PAUSED.md)。

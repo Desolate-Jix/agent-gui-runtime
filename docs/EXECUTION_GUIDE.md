@@ -1,4 +1,6 @@
-# Execution 0.1.7 guide
+# Execution 0.1.8 guide
+
+**0.1.8 (2026-10-24):** background update checks, exact-target confirmation, installation-wide task locks and rollback. Install this version manually from 0.1.7 or earlier. See the [release and package verification](releases/EXECUTION_018_20261024.md) and [update commands](RUNTIME_UPDATES.md). Historical GUI evidence below retains its original version.
 
 **0.1.7 (2026-10-24):** `--current-agent` adds a persistent basic-click loop. The current image-capable Agent reads original images, grounds targets and judges results without an independent Runtime vision/Decision API; its hosting service quota still applies. A 20-step live 7-Zip source run and refusal/cancellation controls passed. Installed 0.1.7 separately passed five Calculator clicks (C → 1 → + → 2 → =, showing 3), cancellation controls and cleanup. See the [release record](releases/EXECUTION_017_20261024.md) and the distinct [source live evidence](verification/CURRENT_AGENT_LIVE_20261024.md).
 
@@ -25,7 +27,7 @@ Agent Review Instant lets an MCP-compatible agent operate Windows applications: 
 
 **Historical 0.1.4 passed scoped installed Notepad and 7-Zip workflows, including independent Sol acceptance.** Main completed three plans (3+3+6 steps); Sol completed two fresh plans (3+3 steps). All five completed automatically. See the [multi-application report](verification/MULTI_APP_EXECUTION_20261015.md) for timings, original failures and installation boundaries. API-based vision does **not** require local model weights or a local GPU.
 
-[0.1.7 artifacts, checksums and installed acceptance status](releases/EXECUTION_017_20261024.md)
+[0.1.8 artifacts, checksums and package acceptance](releases/EXECUTION_018_20261024.md)
 
 **Provider configuration in 0.1.6:** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
 
@@ -160,7 +162,7 @@ Without Decision, use basic actions, compatible v1/v2 plans or explicit `field_e
 
 ## Install and configure
 
-Requires **Windows x64 and [uv](https://docs.astral.sh/uv/getting-started/installation/)**. API/Agent setup recommends Python 3.12 and retains supported 3.11 environments; local-model setup still requires Python 3.11. The installer supplies the maintained source and setup scripts; initial setup installs dependencies for the chosen route. Model weights and API keys are not bundled. Adjust the example paths to your installation. Historical Preview directory or shortcut names may remain for upgrade compatibility; the product version, installer and uninstall entry identify the component version. Consult the [0.1.7 release record](releases/EXECUTION_017_20261024.md) for installer checksums and exact acceptance scope.
+Requires **Windows x64 and [uv](https://docs.astral.sh/uv/getting-started/installation/)**. API/Agent setup recommends Python 3.12 and retains supported 3.11 environments; local-model setup still requires Python 3.11. The installer supplies the maintained source and setup scripts; initial setup installs dependencies for the chosen route. Model weights and API keys are not bundled. Adjust the example paths to your installation. Historical Preview directory or shortcut names may remain for upgrade compatibility; the product version, installer and uninstall entry identify the component version. Consult the [0.1.8 release record](releases/EXECUTION_018_20261024.md) for installer checksums and exact acceptance scope.
 
 For external Luna vision plus Decision:
 
@@ -196,7 +198,7 @@ Remove `-WhatIf` to perform local setup. Local use requires the official [VISTA-
 
 Install Runtime 0.1.6, prepare its API environment, and start `scripts/start_instant_mcp_http.py` in a dedicated console. The service binds only `127.0.0.1`; its named environment-variable connection token is separate from model API keys. Install the 0.0.4 wheel, configure `runtime_url` and secret `connection_token`, bind MCP + Skill to Pi, enable, restart the backend, then create a new Work. The extension neither launches Runtime nor receives its provider keys. Follow the [complete commands and migration instructions](../integrations/amadeus/agent-review-instant/README.md). stdio clients can keep their existing integration.
 
-The 0.0.4 wheel retains its fixed `instant-v0.1.6` download URL and API-route Skill. This round does not establish current-agent acceptance in Amadeus. A compatible HTTP contract does not require reinstalling an unchanged wheel for every Runtime patch. Automatic updating is not implemented; see the [Amadeus](development/AMADEUS_UPDATE_STRATEGY.md) and [Runtime](development/RUNTIME_UPDATE_STRATEGY.md) strategies.
+The 0.0.4 wheel retains its fixed `instant-v0.1.6` download URL and API-route Skill. This round does not establish current-agent acceptance in Amadeus. A compatible HTTP contract does not require reinstalling an unchanged wheel for every Runtime patch. Runtime 0.1.8 introduces the updater; users of 0.1.7 and earlier must install it manually. Amadeus Host updates are separately submitted in [PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261), pending upstream delivery. See the [update guide](RUNTIME_UPDATES.md).
 
 ## Agent integration
 

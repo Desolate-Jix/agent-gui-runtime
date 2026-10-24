@@ -1,4 +1,4 @@
-Execution **0.1.7** adds the current-agent click workflow. Installed 0.1.7 passed a separate five-click Calculator workflow and cancellation checks; details and downloads: [0.1.7 release record](docs/releases/EXECUTION_017_20261024.md). The Amadeus **0.0.4** HTTP MCP extension retains its [existing API route](integrations/amadeus/agent-review-instant/README.md); independent catalog review remains pending. Learning stays paused; see [archive notes](docs/LEARNING_PAUSED.md).
+Execution **0.1.8** adds update checks, exact-target confirmation, task-aware maintenance locks and rollback. **Install this release manually if you use 0.1.7 or earlier**; those versions have no updater. [Release and downloads](docs/releases/EXECUTION_018_20261024.md). The Amadeus **0.0.4** HTTP MCP extension remains separately installed; its Host updater is [upstream PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261), pending merge and delivery. Learning stays paused; see [archive notes](docs/LEARNING_PAUSED.md).
 
 <div align="center">
 
@@ -11,12 +11,12 @@ Execution **0.1.7** adds the current-agent click workflow. Installed 0.1.7 passe
   </picture>
 </h1>
 
-**Execution 0.1.7 — use your current Agent to locate and verify clicks.**
+**Execution 0.1.8 — verified execution, updates under your control.**
 
 Your image-capable Agent reads the target and result.<br>
 Runtime keeps original evidence, input gates and action receipts.
 
-**[Download execution 0.1.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.7/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
+**[Download execution 0.1.8](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.8/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
 
 **Retained API-route recovery:** After a target is rejected by both model checks before input, Main can inspect the bound screenshot, explicitly review it and separately continue the same job. Settled text-input review also remains available without retyping. [Acceptance and limits →](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
 
@@ -26,13 +26,19 @@ Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents
 
 Choose **Use the current Agent** to let your connected, image-capable agent locate targets and check results, or **Use an external model API** for Runtime-managed visual checks. Neither requires local model weights or a GPU. Local models and delegated vision remain advanced options.
 
-**Current-agent mode in 0.1.7:** `--current-agent` provides a persistent basic-click loop without a separate Runtime vision or Decision API. The hosting agent's service and quota still apply. Text input, keys, scrolling, task plans and administrator mode are outside this adapter's supported set. [Setup and capability matrix](docs/development/CURRENT_AGENT_MODE.md).
+**Current-agent mode (introduced in 0.1.7):** `--current-agent` provides a persistent basic-click loop without a separate Runtime vision or Decision API. The hosting agent's service and quota still apply. Text input, keys, scrolling, task plans and administrator mode are outside this adapter's supported set. [Setup and capability matrix](docs/development/CURRENT_AGENT_MODE.md).
 
-## New in 0.1.7
+## New in 0.1.8
+
+- **Check automatically, install after confirmation:** launchers check stable releases at most daily, in the background; checks can be disabled. Download/verify with `update_runtime.ps1 -Action stage`, then explicitly confirm the exact target with `-Action apply`.
+- **Keep tasks intact:** installation-wide locks and original-session cleanup evidence prevent maintenance while clients, hosts, model workers or unresolved input remain. The updater never closes a task to install.
+- **Restore a verified version:** retain backups and a persistent journal, run a no-input installation health check, and roll back on failure. Interrupted updates have an external recovery entry; unknown states retain backups and block further action. Compatible patches keep the Amadeus wheel unchanged. [Commands and limits](docs/RUNTIME_UPDATES.md) · [Release record](docs/releases/EXECUTION_018_20261024.md).
+
+## Previous release: 0.1.7
 
 - **Original-image, original-command loop:** prepare → inspect original image → resolve → continue → inspect after image → verify. Keep one connection and one input owner; pending reads keep the original IDs and never replay unknown input.
 - **Source acceptance:** 20 live 7-Zip steps passed on one connection. Wrong-hash review, uncertain judgment and input after completion were blocked. Cancellation while awaiting grounding reached real cancelled state with no input, and cleanup passed. No independent vision/Decision profile or provider key was used. [Live evidence](docs/verification/CURRENT_AGENT_LIVE_20261024.md). Installed 0.1.7 separately passed Calculator C → 1 → + → 2 → =, showing 3, with per-frame Agent review; post-action and awaiting-grounding cancellation controls and cleanup passed. [Installed evidence and release](docs/releases/EXECUTION_017_20261024.md).
-- **Update boundary:** a compatible HTTP contract does not require reinstalling an unchanged wheel for each Runtime patch. Automatic updating is proposed, not implemented: [Runtime](docs/development/RUNTIME_UPDATE_STRATEGY.md) and [Amadeus](docs/development/AMADEUS_UPDATE_STRATEGY.md) strategies.
+- **Update boundary:** a compatible HTTP contract does not require reinstalling an unchanged wheel for each Runtime patch. Runtime and the Amadeus extension have independent release lifecycles.
 
 ## Previous release: 0.1.6
 
@@ -84,7 +90,7 @@ Navigate A → nested → Up → root → B → bundle.zip. [Full MP4](https://g
 
 You need **Windows x64, [uv](https://docs.astral.sh/uv/getting-started/installation/)** and Python: **3.12 recommended for API/Agent use** (existing 3.11 environments remain supported), or **3.11 for local models**. You also need an MCP-compatible agent. The installer includes source and setup scripts; first-time setup installs dependencies. Keys and model weights are not bundled.
 
-1. **[Download and install execution 0.1.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.7).** Its release gives downloads and checksums; the [acceptance record](docs/releases/EXECUTION_017_20261024.md) states the verified scope.
+1. **[Download and install execution 0.1.8](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.8).** Its release gives downloads and checksums; the [release record](docs/releases/EXECUTION_018_20261024.md) states the verified scope. Versions 0.1.7 and earlier require this first manual upgrade.
 2. **Choose a mode below.** For external Luna + Decision, copy the [vision profile](configs/vision-api-openai-luna.example.json) and [Decision profile](configs/decision-profile.visual-execution.example.json), then make `OPENAI_API_KEY` available to the MCP process. For current-agent clicks, use the 0.1.7 entry and declare the client's real image/vision capabilities.
 3. **Run setup and connect your agent.** Follow the [setup commands](docs/EXECUTION_GUIDE.md#install-and-configure), merge the generated `agent-review-instant` MCP entry into your client, and reconnect. Keep other server entries intact.
 
@@ -176,7 +182,7 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 | [Installation guide](FRIEND_SETUP.md) | [Execution guide and detailed flow](docs/EXECUTION_GUIDE.md) |
 | [Agent / MCP guide](AGENT_GUIDE.md) | [Decision API configuration](docs/development/DECISION_API.md) |
 | [External vision API](docs/development/EXTERNAL_VISION_API.md) | [Visual text input](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [0.1.7 release record and checksums](docs/releases/EXECUTION_017_20261024.md) | [Historical 0.1.4 multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
+| [0.1.8 release record and checksums](docs/releases/EXECUTION_018_20261024.md) | [Historical 0.1.4 multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 

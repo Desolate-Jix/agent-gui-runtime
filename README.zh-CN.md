@@ -1,4 +1,4 @@
-执行版 **0.1.7** 新增当前 Agent 点击流程。安装版 0.1.7 已通过独立的计算器五次点击及取消检查，详情与下载见 [0.1.7 发布记录](docs/releases/EXECUTION_017_20261024.md)。Amadeus **0.0.4** HTTP MCP 扩展保留[既有 API 路线](integrations/amadeus/agent-review-instant/README.zh-CN.md)，独立目录审核仍待完成。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
+执行版 **0.1.8** 新增更新检查、确切目标确认、任务维护门禁及回滚。**0.1.7 及更早版本需手动安装本版**，旧版没有更新器。[发布与下载](docs/releases/EXECUTION_018_20261024.md)。Amadeus **0.0.4** HTTP MCP 扩展仍独立安装；Host 更新器见[上游 PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261)，尚待合入交付。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
 
 <div align="center">
 
@@ -11,12 +11,12 @@
   </picture>
 </h1>
 
-**执行版 0.1.7 — 使用当前 Agent 定位并核验点击。**
+**执行版 0.1.8 — 执行有核验，更新由你确认。**
 
 支持图像的 Agent 读取目标与结果。<br>
 Runtime 保留原始证据、输入门禁和动作回执。
 
-**[下载执行版 0.1.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.7/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
+**[下载执行版 0.1.8](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.8/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
 
 **保留的 API 路线恢复：** 点击前两层模型均未接受目标时，Main 可查看绑定截图、明确审核，再单独继续同一任务；已结算文字输入的审核续行也继续保留，不重复输入。[验收与限制 →](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
 
@@ -26,13 +26,19 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 选择 **使用当前 Agent**，由已连接且支持图像的主 Agent 定位、核验；或选择 **使用外部模型 API**，由 Runtime 调用服务完成视觉核验。两者均不需要本地模型权重或 GPU。本地模型与委派识图保留为高级选项。
 
-**0.1.7 当前 Agent 模式：** `--current-agent` 提供持久的基础点击闭环，无需另配 Runtime 视觉或 Decision API，仍依赖承载 Agent 的服务并消耗其额度。文字输入、按键、滚动、任务计划和管理员模式不在该适配层支持范围。[配置与能力矩阵](docs/development/CURRENT_AGENT_MODE.zh-CN.md)。
+**当前 Agent 模式（0.1.7 引入）：** `--current-agent` 提供持久的基础点击闭环，无需另配 Runtime 视觉或 Decision API，仍依赖承载 Agent 的服务并消耗其额度。文字输入、按键、滚动、任务计划和管理员模式不在该适配层支持范围。[配置与能力矩阵](docs/development/CURRENT_AGENT_MODE.zh-CN.md)。
 
-## 0.1.7 新增内容
+## 0.1.8 新增内容
+
+- **自动检查，确认后安装：** 启动时在后台检查稳定版，每天最多一次，可关闭。通过 `update_runtime.ps1 -Action stage` 下载核验，再用 `-Action apply` 明确确认确切目标后安装。
+- **保留运行中的任务：** 安装级锁和原会话清理证据阻止客户端、宿主、模型 worker 或未结算输入尚存时进行维护，更新器不会为了安装而关闭任务。
+- **恢复已验证版本：** 保留备份与持久事务日志，进行无输入安装健康检查，失败时回滚；中断更新提供外部恢复入口，未知状态保留备份并阻止继续。兼容补丁不要求更换 Amadeus wheel。[命令与边界](docs/RUNTIME_UPDATES.zh-CN.md) · [发布记录](docs/releases/EXECUTION_018_20261024.md)。
+
+## 上一版本：0.1.7
 
 - **原图与原任务闭环：** prepare → 读取原图 → resolve → continue → 读取后图 → verify；同一连接、单输入所有者，pending 只读原 ID，不重放未知输入。
 - **源码实测：** 7-Zip 同连接 20 步通过；错 hash、不确定判断、完成后输入均被阻止，定位等待中的取消到达真实 cancelled、未输入且清理通过。未使用独立视觉／Decision 配置或服务密钥。[实机证据](docs/verification/CURRENT_AGENT_LIVE_20261024.md)。安装版 0.1.7 另测计算器 C → 1 → + → 2 → = 显示 3，逐帧由 Agent 读取核验；动作后取消、定位等待取消及清理均通过。[安装证据与发布记录](docs/releases/EXECUTION_017_20261024.md)。
-- **更新边界：** 兼容的 HTTP 合同不要求每个 Runtime 补丁重装未变化的 wheel。自动更新只是 [Runtime 提案](docs/development/RUNTIME_UPDATE_STRATEGY.md)和 [Amadeus 策略](docs/development/AMADEUS_UPDATE_STRATEGY.md)，尚未实现。
+- **更新边界：** 兼容的 HTTP 合同不要求每个 Runtime 补丁重装未变化的 wheel。Runtime 与 Amadeus 扩展分别发布和管理版本。
 
 ## 上一版本：0.1.6
 
@@ -84,7 +90,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 需要 **Windows x64、[uv](https://docs.astral.sh/uv/getting-started/installation/)** 和支持 MCP 的 Agent。**API／Agent 路线推荐 Python 3.12**，可继续使用已有的 3.11 环境；**本地模型路线仍使用 Python 3.11**。安装器提供源码及配置脚本，首次配置时安装依赖，不附带密钥或模型权重。
 
-1. **[下载并安装执行版 0.1.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.7)。** 发布页提供下载与校验文件；已验证范围见[验收记录](docs/releases/EXECUTION_017_20261024.md)。
+1. **[下载并安装执行版 0.1.8](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.8)。** 发布页提供下载与校验文件；已验证范围见[发布记录](docs/releases/EXECUTION_018_20261024.md)。0.1.7 及更早版本须先手动升级到本版。
 2. **选择下方运行方式。** 使用外部 Luna + Decision 时，复制[视觉配置](configs/vision-api-openai-luna.example.json)和 [Decision 配置](configs/decision-profile.visual-execution.example.json)，让 MCP 进程能够读取 `OPENAI_API_KEY`。当前 Agent 点击流程使用 0.1.7 入口，并声明客户端真实图像／视觉能力。
 3. **运行配置脚本，接入 Agent。** 按[安装命令](docs/EXECUTION_GUIDE.zh-CN.md#安装与配置)操作，将生成的 `agent-review-instant` MCP 条目合并到客户端后重新连接，保留其他服务器条目。
 
@@ -176,7 +182,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 | [安装指南](FRIEND_SETUP.md) | [执行详细指南与完整流程图](docs/EXECUTION_GUIDE.zh-CN.md) |
 | [Agent / MCP 指南](AGENT_GUIDE.md) | [Decision API 配置](docs/development/DECISION_API.md) |
 | [外部视觉 API](docs/development/EXTERNAL_VISION_API.md) | [视觉文字输入](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [0.1.7 发布记录与校验文件](docs/releases/EXECUTION_017_20261024.md) | [0.1.4 历史多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
+| [0.1.8 发布记录与校验文件](docs/releases/EXECUTION_018_20261024.md) | [0.1.4 历史多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 
