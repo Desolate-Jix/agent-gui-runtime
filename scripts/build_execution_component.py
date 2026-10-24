@@ -24,6 +24,7 @@ ENTRIES = (
     "scripts/check_execution_component.py",
     "scripts/learning_benchmark_client.py",
     "scripts/execution_client.py",
+    "scripts/current_agent_client.py",
     "scripts/execution_startup.py",
     # PowerShell 启动的维护 worker 不可从 Python 导入图发现，须显式闭合。
     "app/vision/model_workers/vista_openai_server.py",
@@ -49,6 +50,10 @@ RESOURCES = (
     "docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md",
     "docs/releases/EXECUTION_016_20261023.md",
     "docs/EXECUTION_GUIDE.md", "docs/EXECUTION_GUIDE.zh-CN.md",
+    "docs/development/CURRENT_AGENT_MODE.md", "docs/development/CURRENT_AGENT_MODE.zh-CN.md",
+    "docs/development/RUNTIME_UPDATE_STRATEGY.md", "docs/development/AMADEUS_UPDATE_STRATEGY.md",
+    "docs/verification/CURRENT_AGENT_MODE_20261024.md", "docs/verification/CURRENT_AGENT_LIVE_20261024.md",
+    "docs/releases/EXECUTION_017_20261024.md",
     "docs/assets/readme-hero.svg", "docs/assets/readme-hero.mobile.svg",
     "docs/assets/readme-hero.zh-CN.svg", "docs/assets/readme-hero.zh-CN.mobile.svg",
     "docs/assets/demos/browser-0.1.4.gif", "docs/assets/demos/notepad-0.1.4.gif",

@@ -1,10 +1,21 @@
-# 执行模式 0.1.6 详细指南
+# 执行模式 0.1.7 详细指南
 
-**0.1.6（2026-10-23）：** 保留 stdio，新增带鉴权的本机 HTTP MCP；新建 API／Agent 环境默认使用 Python 3.12；点击前双拒可由 Main 看图审核后继续原任务。临时队列锁竞争会短等后重核全部门禁，阈值、提示词和默认服务不变。[下载 Runtime 0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) · [Amadeus 0.0.4 安装说明](../integrations/amadeus/agent-review-instant/README.zh-CN.md) · [恢复验收与限制](verification/MAIN_PRE_ACTION_REVIEW_20261023.md)。
+**0.1.7（2026-10-24）：** 新增 `--current-agent` 持久基础点击闭环，由当前支持图像的 Agent 读原图、定位并核验，无需独立视觉／Decision API，仍消耗承载 Agent 的服务额度。源码同连接 7-Zip 20 步与拒绝／取消负控已通过；安装版 0.1.7 另测计算器五次点击（C → 1 → + → 2 → = 显示 3）、取消负控与清理通过，见[发布记录](releases/EXECUTION_017_20261024.md)及单独的[源码实机记录](verification/CURRENT_AGENT_LIVE_20261024.md)。
+
+**历史 0.1.6（2026-10-23）：** 保留 stdio，新增带鉴权的本机 HTTP MCP；新建 API／Agent 环境默认使用 Python 3.12；点击前双拒可由 Main 看图审核后继续原任务。临时队列锁竞争会短等后重核全部门禁，阈值、提示词和默认服务不变。[下载 Runtime 0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) · [Amadeus 0.0.4 安装说明](../integrations/amadeus/agent-review-instant/README.zh-CN.md) · [恢复验收与限制](verification/MAIN_PRE_ACTION_REVIEW_20261023.md)。
 
 **历史 0.1.5 同版本更新（2026-10-17）：** Enter 后自适应观察，当前结果复核与下一步只读定位并行。小样本源码对照中，实际动作间隔中位数为 **记事本 5.803→5.597 秒、7-Zip 7.805→7.254 秒、Edge 10.786→9.280 秒**。新候选六个三步计划均自动完成，原图／磁盘核对及收尾通过；模型配置和通过规则不变。这些是源码测量，不是通用准确率，尚未达到四秒目标。[方法、完整任务时间、调用和限制 →](verification/EXECUTION_015_REFRESH_20261017.md) · [日期安装包验收与摘要 →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 [返回首页](../README.zh-CN.md) · [English](EXECUTION_GUIDE.md)
+
+## 选择运行方式
+
+| 主要方式 | 职责与要求 |
+| --- | --- |
+| **使用当前 Agent** | 已连接的主 Agent 读取 Runtime 原图、定位并判断结果；Runtime 保留证据、输入门禁、派发和回执。支持的点击闭环无需另配视觉或 Decision API，仍依赖承载 Agent 的服务并消耗其额度。 |
+| **使用外部模型 API** | Runtime 明确调用已配置的视觉与 Decision 服务执行受支持的动作；需要服务配置及凭证，按服务商实际用量收费。 |
+
+**0.1.7 当前 Agent 入口：** `execution_client.py --current-agent` 选择受管适配层；`configure_instant_mcp.py --current-agent` 仅生成路线配置，不自动选择高层 JSONL 适配层。新适配层只支持基础点击，不开放文字输入、按键、滚动、任务计划或管理员模式。见[配置与能力矩阵](development/CURRENT_AGENT_MODE.zh-CN.md)。下方 Decision 流程与历史证据属于已配置的 API 路线；本地模型与委派保留为高级选项。
 
 ## 通过视觉核验执行 Windows 桌面任务
 
@@ -14,7 +25,7 @@ Agent Review Instant 让支持 MCP 的 Agent 操作 Windows 应用：从截图�
 
 **历史执行版 0.1.4 已通过限定范围的记事本与 7-Zip 安装态流程，包括 Sol 独立验收。** Main 完成三个计划（3+3+6 步），Sol 完成两个全新计划（3+3 步），五个计划均自动完成。耗时、原始失败与安装验收边界见[多应用报告](verification/MULTI_APP_EXECUTION_20261015.md)。使用外部视觉 API **不需要下载本地模型权重，也不需要本地 GPU**。
 
-[0.1.6 Windows 执行安装器](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/AgentGUIRuntimeExecution-Setup.exe) · [0.1.6 发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6)
+[0.1.7 制品、校验文件与安装验收状态](releases/EXECUTION_017_20261024.md)
 
 **0.1.6 的服务配置：** 通过 `--decision-profile` 可分别配置 Decision 与普通复核服务，默认方案保持不变。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。完整示例、协议要求和会话重启方式见[服务配置说明](development/DECISION_PROVIDERS.zh-CN.md)。下方流程描述默认 OpenAI／Luna 方案；兼容替换服务承担相同的两层职责。
 
@@ -133,7 +144,7 @@ flowchart TD
 | 路线 | 需要本地权重吗？ | 所需配置 |
 | --- | --- | --- |
 | 外部视觉 API：`external_api` | 不需要 | 图像端点、模型 ID、密钥环境变量 |
-| 当前 Agent：`agent_current` | 不需要 | 支持图像的客户端 |
+| 当前 Agent：`agent_current` | 不需要 | 明确声明图像交付／当前视觉能力；[0.1.7 适配层](development/CURRENT_AGENT_MODE.zh-CN.md) |
 | 视觉子 Agent：`agent_delegate` | 不需要 | 明确选择并持续复用的视觉会话 |
 | 本地 VISTA：`local` | 需要 | 本地依赖及 VISTA-4B 权重 |
 
@@ -141,7 +152,7 @@ flowchart TD
 
 ## 安装与配置
 
-要求 **Windows x64 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)**。API／Agent 路线推荐 Python 3.12，保留已有的受支持 3.11 环境；本地模型路线仍要求 Python 3.11。安装器提供维护源码与配置脚本；首次配置按所选路线安装依赖，不附带模型权重或 API 密钥。请按实际安装位置调整示例路径。为兼容升级，目录或快捷方式可能保留历史 Preview 名称；产品版本、安装窗口及卸载条目会标明组件版本。安装器校验值与精确验收范围见 0.1.6 发布说明。
+要求 **Windows x64 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)**。API／Agent 路线推荐 Python 3.12，保留已有的受支持 3.11 环境；本地模型路线仍要求 Python 3.11。安装器提供维护源码与配置脚本；首次配置按所选路线安装依赖，不附带模型权重或 API 密钥。请按实际安装位置调整示例路径。为兼容升级，目录或快捷方式可能保留历史 Preview 名称；产品版本、安装窗口及卸载条目会标明组件版本。安装器校验值与精确验收范围见 [0.1.7 发布记录](releases/EXECUTION_017_20261024.md)。
 
 使用外部 Luna 视觉 API 和 Decision：
 
@@ -156,10 +167,18 @@ flowchart TD
 
 将生成的 `mcp-config.local.json` 或 `.toml` 中的 `agent-review-instant` 条目合并到客户端，保留其他服务器后重新连接。上述命令配置普通权限宿主，生成配置时不会发送 API 请求。管理员应用的配置见 [安装指南](../FRIEND_SETUP.md)。
 
-使用当前 Agent 定位，或预览本地模型准备范围：
+当前 Agent 模式在 0.1.7 提供。首次运行 `setup_instant.ps1` 可能下载依赖；下方配置命令只生成当前 Runtime 目录的 JSON／TOML，不联网，也不修改客户端全局设置：
 
 ```powershell
 .\scripts\setup_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentReviewInstantData"
+.\.venv-agent\Scripts\python.exe .\scripts\configure_instant_mcp.py --current-agent --python "$PWD\.venv-agent\Scripts\python.exe" --data-dir "D:\AgentReviewInstantData"
+```
+
+生成器不声明客户端视觉能力，也不授予输入权限。新持久 JSONL 入口要求明确的能力声明；仅在已有操作者授权时添加 `--allow-actions`。见[完整入口示例与命令边界](development/CURRENT_AGENT_MODE.zh-CN.md#连接并声明能力)。新 `--current-agent` 选择不能混用 API、Decision、委派或本地模型参数；旧的显式 `--recognition-source agent_current` 配置仍保留可选 Decision 配置。
+
+预览高级本地配置：
+
+```powershell
 .\scripts\setup_instant.ps1 -RecognitionSource local -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel -WhatIf
 ```
 
@@ -168,6 +187,8 @@ flowchart TD
 ## Amadeus HTTP MCP 接入
 
 安装 Runtime 0.1.6、准备 API 环境，在独立控制台启动 `scripts/start_instant_mcp_http.py`。服务仅绑定 `127.0.0.1`，环境变量中的本机连接 token 与模型 API Key 分开。导入 0.0.4 wheel，填写 `runtime_url` 与保密的 `connection_token`，将 MCP＋Skill 绑定 Pi，启用、重启后端，再新建 Work。扩展不会启动 Runtime，也不接收其模型密钥。详见[完整命令与迁移说明](../integrations/amadeus/agent-review-instant/README.zh-CN.md)。原 stdio 客户端可继续使用原接入方式。
+
+0.0.4 wheel 继续使用固定 `instant-v0.1.6` 下载地址与原 API 路线 Skill；本轮没有 Amadeus 当前 Agent 实测。兼容的 HTTP 合同无需每个 Runtime 补丁重装未变化的 wheel。自动更新尚未实现，见 [Amadeus](development/AMADEUS_UPDATE_STRATEGY.md)与 [Runtime](development/RUNTIME_UPDATE_STRATEGY.md) 策略。
 
 ## Agent 接入
 
@@ -178,6 +199,8 @@ MCP stdio 提供七个核心工具：`instant_start`、`instant_status`、`insta
 维护代码中，`app/execution` 负责计划与动作，`app/judgment` 负责 Decision，`app/core` 负责截图与输入，`app/vision` 负责视觉定位。部分执行共享依赖仍保留历史 `learning_memory` 名称，不意味着必须安装学习工作台。
 
 ## 发布边界与历史记录
+
+0.1.7 源码实机 20 步只覆盖当前 Agent 基础点击闭环。独立安装态已通过计算器五次点击、动作后／定位等待取消及清理，详情见[本轮记录](releases/EXECUTION_017_20261024.md)；未新增性能、免费使用或通用成功率结论。
 
 本指南将 0.1.6 受控点击前恢复验收、安装态 0.1.5 正常任务与历史 0.1.4 源码／安装结果及首次失败分开。最终包的独立验收由发布说明记录，不从源码成功推定。安装器未签名，使用已有 Python 环境的检查不能证明全新机器依赖 setup。2026-10-15 的 0.1.3 重打包首次加入独立服务配置；上文浏览器计时及提示词评测属于 0.1.3，记事本／7-Zip 演示与测量保留 0.1.4 归属，均非新的 0.1.5 性能结果。已有安装须明确升级。不承诺任意任务无人干预完成或完整角色／壁纸合成效果。
 

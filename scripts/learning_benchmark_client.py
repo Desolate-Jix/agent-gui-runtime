@@ -782,7 +782,8 @@ class LearningBenchmarkClient:
 
         original_request_id = request_id
         # 控制回执属于外层请求，worker 身份只能来自明确的原输入引用。
-        controls_worker = command.get("kind") in {"agent_command_status", "agent_command_continue"}
+        controls_worker = command.get("kind") in {
+            "agent_command_status", "agent_command_continue", "agent_command_cancel"}
         expected_command_id = ((command.get("request") or {}).get("command_id")
                                if controls_worker else original_request_id)
         if not isinstance(expected_command_id, str) or not expected_command_id:

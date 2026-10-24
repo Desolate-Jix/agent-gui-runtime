@@ -1,3 +1,19 @@
+## 2026-10-24 使用当前 Agent（0.1.7） / Current Agent mode (0.1.7)
+
+使用 `scripts/execution_client.py --current-agent` 接入受管理的持续会话。当前客户端须明确声明 `--client-image-transport supported --client-current-vision supported`，输入权限另由 `--allow-actions` 和 Runtime 原门禁控制；未知能力不能依靠模型名称补成支持。该入口不配置独立视觉、Decision 或委派服务，仍消耗当前 Agent 所在客户端的模型额度。
+
+新入口隔离父进程遗留的 Decision profile，仅支持普通权限会话；`--administrator` 在连接前明确拒绝。旧的显式来源与管理员配置保持原合同。 / The new entry isolates an inherited Decision profile and supports ordinary-permission sessions only; administrator mode is rejected before connecting. Existing explicit-source and administrator routes keep their contracts.
+
+首版高层入口仅开放新图定位点击闭环：`agent_prepare` → 实际读取原图 → `agent_resolve` → `agent_continue` → 读取真实结果及后图 → `agent_verify`。原请求和后续外层请求由同一个状态对象关联；等待中使用 `agent_status`，不重发动作。取消须确认真实终态，任务结束用 `agent_complete`，随后 `finish` 关闭自有会话。不能将清理完成、动作派发完成或调用方判断混同为 Runtime 独立证明业务成功。具体参数、证据合同和能力矩阵见 [当前 Agent 模式](docs/development/CURRENT_AGENT_MODE.zh-CN.md)。
+
+Use the managed persistent client with explicit original-image transport and current-vision declarations; input authorization remains separate. The first adapter supports a fresh-image click/resolve/continue/result-review loop, with original-ticket reads and explicit completion. It does not invoke an extra model, supply a standalone Decision service, or infer vision from a client/model name. Model usage in the hosting client still applies. See the [mode guide and support matrix](docs/development/CURRENT_AGENT_MODE.md). Existing explicit recognition-source routes retain their contracts; source and installed acceptance are recorded separately.
+
+源码实机：7-Zip 同一持久连接 20 步原图→resolve→continue→后图→verify 通过；错 hash、不确定判断、complete 后输入负控通过，定位等待取消到真实终态、未输入且清理通过。未配置独立视觉／Decision API。 / Source live acceptance: 20 7-Zip steps passed on one connection; wrong-hash, uncertain and post-complete input controls held, and awaiting-grounding cancellation reached a no-input terminal state with cleanup. No independent vision/Decision API was configured. [实机证据 / Live evidence](docs/verification/CURRENT_AGENT_LIVE_20261024.md) · [安装验收与发布 / Installed acceptance and release](docs/releases/EXECUTION_017_20261024.md)。
+
+此高层适配层仅基础点击，不含文字输入、按键、滚动、计划、管理员或自动重启续跑。Amadeus 0.0.4 Skill 仍为旧 API 路线，未新增 current-agent 实测；HTTP 合同兼容时无需每个 Runtime 补丁重装未变 wheel。自动更新未实现。 / This adapter supports basic clicks only; text, keys, scroll, plans, admin and automatic restart continuation are unsupported. The Amadeus 0.0.4 Skill remains on its API route without new current-agent acceptance. Compatible Runtime patches retain an unchanged wheel; automatic updating is not implemented. [Amadeus 策略 / Strategy](docs/development/AMADEUS_UPDATE_STRATEGY.md) · [Runtime 策略 / Strategy](docs/development/RUNTIME_UPDATE_STRATEGY.md)。
+
+安装态 0.1.7 已独立通过计算器五次点击（C → 1 → + → 2 → = 显示 3）、动作后取消封锁下一步、定位等待取消与晚续行拒绝、两个宿主清理及原生卸载；684 项载荷运行前后摘要全同。 / Installed 0.1.7 separately passed five Calculator clicks showing 3, post-action input blocking, awaiting-grounding cancellation and late-continue rejection, both host cleanups and native uninstall; all 684 payload hashes matched before/after. Source 20 steps remain a separate result.
+
 ## 2026-10-18 当前入口 / Current entrypoints
 
 学习模式已暂缓并封存。以下历史记录中的 `learning_*`、学习工作台启动及恢复命令不再适用于当前维护分支；当前 Agent 仅使用执行命令。见 [执行指南](docs/EXECUTION_GUIDE.zh-CN.md) 与 [归档记录](docs/LEARNING_PAUSED.md)。

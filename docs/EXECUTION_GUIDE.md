@@ -1,10 +1,21 @@
-# Execution 0.1.6 guide
+# Execution 0.1.7 guide
 
-**0.1.6 (2026-10-23):** authenticated loopback HTTP MCP alongside stdio, Python 3.12 for new API/Agent environments, and Main review/continuation after authenticated pre-action double refusal. Temporary queue-lock contention is retried with all gates rechecked. Thresholds, prompts and provider defaults are unchanged. [Download Runtime 0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) · [Amadeus 0.0.4 setup](../integrations/amadeus/agent-review-instant/README.md) · [Recovery acceptance and limits](verification/MAIN_PRE_ACTION_REVIEW_20261023.md).
+**0.1.7 (2026-10-24):** `--current-agent` adds a persistent basic-click loop. The current image-capable Agent reads original images, grounds targets and judges results without an independent Runtime vision/Decision API; its hosting service quota still applies. A 20-step live 7-Zip source run and refusal/cancellation controls passed. Installed 0.1.7 separately passed five Calculator clicks (C → 1 → + → 2 → =, showing 3), cancellation controls and cleanup. See the [release record](releases/EXECUTION_017_20261024.md) and the distinct [source live evidence](verification/CURRENT_AGENT_LIVE_20261024.md).
+
+**Historical 0.1.6 (2026-10-23):** authenticated loopback HTTP MCP alongside stdio, Python 3.12 for new API/Agent environments, and Main review/continuation after authenticated pre-action double refusal. Temporary queue-lock contention is retried with all gates rechecked. Thresholds, prompts and provider defaults are unchanged. [Download Runtime 0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) · [Amadeus 0.0.4 setup](../integrations/amadeus/agent-review-instant/README.md) · [Recovery acceptance and limits](verification/MAIN_PRE_ACTION_REVIEW_20261023.md).
 
 **Historical 0.1.5 refresh (2026-10-17):** adaptive observation after Enter and next-step read-only grounding alongside current-result verification. In a small source comparison, actual action-interval medians changed **5.803→5.597 s (Notepad), 7.805→7.254 s (7-Zip), 10.786→9.280 s (Edge)**. New-candidate six three-step plans completed automatically, with independent image/disk checks and cleanup. Model settings and acceptance rules are unchanged. These are source measurements, not general accuracy claims; the four-second objective is not yet reached. [Method, complete task times, calls and limitations →](verification/EXECUTION_015_REFRESH_20261017.md) · [Dated installer acceptance and hashes →](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.5)
 
 [Home](../README.md) · [简体中文](EXECUTION_GUIDE.zh-CN.md)
+
+## Choose a mode
+
+| Main mode | Responsibilities and requirements |
+| --- | --- |
+| **Use the current Agent** | Your connected main agent reads original Runtime images, locates the target and judges the result; Runtime keeps evidence, input gates, dispatch and receipts. No separate vision or Decision API is needed for the supported click loop. The hosting agent's service and quota still apply. |
+| **Use an external model API** | Runtime calls explicitly configured vision and Decision services for supported execution. Requires provider configuration and credentials; provider usage charges apply. |
+
+**0.1.7 current-agent entry:** `execution_client.py --current-agent` selects the managed adapter. `configure_instant_mcp.py --current-agent` only generates route configuration; it does not select the high-level JSONL adapter. The adapter supports basic clicks, not text input, keys, scrolling, task plans or administrator mode. See [setup and capability matrix](development/CURRENT_AGENT_MODE.md). The Decision flow and historical evidence below belong to the configured API route; local/delegated vision remain advanced options.
 
 ## Windows computer use with focused visual checks
 
@@ -14,7 +25,7 @@ Agent Review Instant lets an MCP-compatible agent operate Windows applications: 
 
 **Historical 0.1.4 passed scoped installed Notepad and 7-Zip workflows, including independent Sol acceptance.** Main completed three plans (3+3+6 steps); Sol completed two fresh plans (3+3 steps). All five completed automatically. See the [multi-application report](verification/MULTI_APP_EXECUTION_20261015.md) for timings, original failures and installation boundaries. API-based vision does **not** require local model weights or a local GPU.
 
-[0.1.6 Windows execution installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/AgentGUIRuntimeExecution-Setup.exe) · [0.1.6 release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6)
+[0.1.7 artifacts, checksums and installed acceptance status](releases/EXECUTION_017_20261024.md)
 
 **Provider configuration in 0.1.6:** Decision and secondary review can be configured independently through `--decision-profile`, with the existing defaults preserved. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. See [provider configuration](development/DECISION_PROVIDERS.md) for the complete example, protocol requirements and session-restart behavior. The flow below describes the default OpenAI/Luna setup; compatible replacements occupy the same two roles.
 
@@ -141,7 +152,7 @@ With the adopted prompts, secondary review corrected 3 of 4 initial false reject
 | Route | Local weights required? | Configuration |
 | --- | --- | --- |
 | External vision API: `external_api` | No | Image endpoint, model ID and key environment variable |
-| Current agent: `agent_current` | No | An image-capable client |
+| Current agent: `agent_current` | No | Explicit image-transport/current-vision capability declarations; [new source adapter](development/CURRENT_AGENT_MODE.md) |
 | Visual subagent: `agent_delegate` | No | A selected, reusable visual-agent session |
 | Local VISTA: `local` | Yes | Local dependencies and VISTA-4B weights |
 
@@ -149,7 +160,7 @@ Without Decision, use basic actions, compatible v1/v2 plans or explicit `field_e
 
 ## Install and configure
 
-Requires **Windows x64 and [uv](https://docs.astral.sh/uv/getting-started/installation/)**. API/Agent setup recommends Python 3.12 and retains supported 3.11 environments; local-model setup still requires Python 3.11. The installer supplies the maintained source and setup scripts; initial setup installs dependencies for the chosen route. Model weights and API keys are not bundled. Adjust the example paths to your installation. Historical Preview directory or shortcut names may remain for upgrade compatibility; the product version, installer and uninstall entry identify the component version. Consult the 0.1.6 release notes for the installer checksums and exact acceptance boundary.
+Requires **Windows x64 and [uv](https://docs.astral.sh/uv/getting-started/installation/)**. API/Agent setup recommends Python 3.12 and retains supported 3.11 environments; local-model setup still requires Python 3.11. The installer supplies the maintained source and setup scripts; initial setup installs dependencies for the chosen route. Model weights and API keys are not bundled. Adjust the example paths to your installation. Historical Preview directory or shortcut names may remain for upgrade compatibility; the product version, installer and uninstall entry identify the component version. Consult the [0.1.7 release record](releases/EXECUTION_017_20261024.md) for installer checksums and exact acceptance scope.
 
 For external Luna vision plus Decision:
 
@@ -164,10 +175,18 @@ For external Luna vision plus Decision:
 
 Merge the `agent-review-instant` entry from the generated `mcp-config.local.json` or `.toml` into your client, preserve other servers and reconnect. These commands configure an ordinary-permission host and make no API request during configuration. See the [setup guide](../FRIEND_SETUP.md) for elevated applications.
 
-For current-agent grounding or a preview of local setup:
+Current-agent mode is available in the 0.1.7 entry. Initial `setup_instant.ps1` can download dependencies. The configuration command below only writes Runtime-local JSON/TOML, makes no network request and does not edit global client settings:
 
 ```powershell
 .\scripts\setup_instant.ps1 -RecognitionSource agent_current -DataDirectory "D:\AgentReviewInstantData"
+.\.venv-agent\Scripts\python.exe .\scripts\configure_instant_mcp.py --current-agent --python "$PWD\.venv-agent\Scripts\python.exe" --data-dir "D:\AgentReviewInstantData"
+```
+
+The generator does not declare client vision or grant input. The new persistent JSONL entry requires explicit client capabilities; add `--allow-actions` only with operator authorization. [Full entry example and command limits](development/CURRENT_AGENT_MODE.md#connect-and-declare-capabilities). Do not combine the new `--current-agent` selection with API, Decision, delegate or local-model options. Existing explicit `--recognition-source agent_current` configurations retain their optional Decision configuration.
+
+For a preview of advanced local setup:
+
+```powershell
 .\scripts\setup_instant.ps1 -RecognitionSource local -ModelDirectory "D:\AgentReviewModels\VISTA-4B" -DataDirectory "D:\AgentReviewInstantData" -DownloadModel -WhatIf
 ```
 
@@ -176,6 +195,8 @@ Remove `-WhatIf` to perform local setup. Local use requires the official [VISTA-
 ## HTTP MCP for Amadeus
 
 Install Runtime 0.1.6, prepare its API environment, and start `scripts/start_instant_mcp_http.py` in a dedicated console. The service binds only `127.0.0.1`; its named environment-variable connection token is separate from model API keys. Install the 0.0.4 wheel, configure `runtime_url` and secret `connection_token`, bind MCP + Skill to Pi, enable, restart the backend, then create a new Work. The extension neither launches Runtime nor receives its provider keys. Follow the [complete commands and migration instructions](../integrations/amadeus/agent-review-instant/README.md). stdio clients can keep their existing integration.
+
+The 0.0.4 wheel retains its fixed `instant-v0.1.6` download URL and API-route Skill. This round does not establish current-agent acceptance in Amadeus. A compatible HTTP contract does not require reinstalling an unchanged wheel for every Runtime patch. Automatic updating is not implemented; see the [Amadeus](development/AMADEUS_UPDATE_STRATEGY.md) and [Runtime](development/RUNTIME_UPDATE_STRATEGY.md) strategies.
 
 ## Agent integration
 
@@ -186,6 +207,8 @@ Keep one persistent session and one desktop input owner. Supported requests incl
 Maintained code is organized around `app/execution` for plans and actions, `app/judgment` for Decision, `app/core` for capture/input and `app/vision` for grounding. Some execution dependencies retain historical `learning_memory` names; they do not require the learning workbench to be installed.
 
 ## Release boundaries and history
+
+The 0.1.7 source live run covers only the current-agent basic-click loop. Separate installed acceptance passed the five-click Calculator task, post-action/awaiting-grounding cancellation checks and cleanup; details belong in the [current release record](releases/EXECUTION_017_20261024.md). This adds no performance, free-use or general success-rate claim.
 
 This guide separates 0.1.6 controlled pre-action recovery evidence from installed 0.1.5 normal-task evidence from historical 0.1.4 source/installed results and retained first failures. Independent final-package acceptance is recorded in the release notes, not inferred from source success. The installer is unsigned; checks using an existing Python environment do not prove clean-machine dependency setup. The 2026-10-15 0.1.3 rebuild first included independent provider configuration. Browser timings and prompt benchmarks above belong to 0.1.3, and the Notepad/7-Zip demos and measurements retain 0.1.4: none are new 0.1.5 performance results. Existing installations need an explicit upgrade. Arbitrary unattended completion and full character/wallpaper composition are not promised.
 

@@ -199,6 +199,12 @@ def check(root):
         if not callable(module.main):
             raise ValueError("execution entrypoint is unavailable: " + name)
         entries[name] = {"imported": True, "main_executed": False}
+    adapter = importlib.import_module("scripts.current_agent_client")
+    ordinary = importlib.import_module("scripts.execution_client")
+    if not isinstance(adapter.CurrentAgentClient, type) or not issubclass(
+            adapter.CurrentAgentClient, ordinary.ExecutionClient):
+        raise ValueError("current Agent session adapter is unavailable")
+    entries["current_agent_client"] = {"imported": True, "constructed": False}
     qt = [name for name in sys.modules if name.startswith(("PySide", "PyQt"))]
     if qt:
         raise ValueError("execution imported Qt: " + ", ".join(qt))

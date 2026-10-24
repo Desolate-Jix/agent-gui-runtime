@@ -1,4 +1,4 @@
-执行版 **0.1.6** 与 Amadeus **0.0.4** HTTP MCP 扩展现已提供。[版本与下载](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) · [Amadeus 安装说明](integrations/amadeus/agent-review-instant/README.zh-CN.md)。提交商店申请不等于通过目录审核。学习开发仍暂停，详见[封存说明](docs/LEARNING_PAUSED.md)。
+执行版 **0.1.7** 新增当前 Agent 点击流程。安装版 0.1.7 已通过独立的计算器五次点击及取消检查，详情与下载见 [0.1.7 发布记录](docs/releases/EXECUTION_017_20261024.md)。Amadeus **0.0.4** HTTP MCP 扩展保留[既有 API 路线](integrations/amadeus/agent-review-instant/README.zh-CN.md)，独立目录审核仍待完成。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
 
 <div align="center">
 
@@ -11,22 +11,30 @@
   </picture>
 </h1>
 
-**执行版 0.1.6 — 让你的 AI Agent 连续执行 Windows 桌面任务。**
+**执行版 0.1.7 — 使用当前 Agent 定位并核验点击。**
 
-视觉模型定位目标，Decision 核验当前步骤。<br>
-通过后继续执行；未解决的问题交回原主 Agent。
+支持图像的 Agent 读取目标与结果。<br>
+Runtime 保留原始证据、输入门禁和动作回执。
 
-**[下载执行版 v0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
+**[下载执行版 0.1.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.7/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
 
-**审核后，继续原任务。** 点击前两层模型均未接受目标时，Main 可查看绑定截图、明确审核，再单独继续同一任务；已结算文字输入的审核续行也继续保留，不重复输入。[验收与限制 →](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
+**保留的 API 路线恢复：** 点击前两层模型均未接受目标时，Main 可查看绑定截图、明确审核，再单独继续同一任务；已结算文字输入的审核续行也继续保留，不重复输入。[验收与限制 →](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
 
 </div>
 
 Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Agent 给出一份明确的线性计划，它就可以在应用中导航、点击目标、替换文字、按键和滚动。受支持的步骤在同一会话中执行并核验结果，减少每次成功操作后都返回主 Agent 的等待。
 
-**使用外部视觉 API，不需要本地模型权重或 GPU。** 你可以选择外部视觉 API、支持图像的 Agent，或者本地模型。**执行运行时 0.1.6** 可独立安装使用。
+选择 **使用当前 Agent**，由已连接且支持图像的主 Agent 定位、核验；或选择 **使用外部模型 API**，由 Runtime 调用服务完成视觉核验。两者均不需要本地模型权重或 GPU。本地模型与委派识图保留为高级选项。
 
-## 0.1.6 新增内容
+**0.1.7 当前 Agent 模式：** `--current-agent` 提供持久的基础点击闭环，无需另配 Runtime 视觉或 Decision API，仍依赖承载 Agent 的服务并消耗其额度。文字输入、按键、滚动、任务计划和管理员模式不在该适配层支持范围。[配置与能力矩阵](docs/development/CURRENT_AGENT_MODE.zh-CN.md)。
+
+## 0.1.7 新增内容
+
+- **原图与原任务闭环：** prepare → 读取原图 → resolve → continue → 读取后图 → verify；同一连接、单输入所有者，pending 只读原 ID，不重放未知输入。
+- **源码实测：** 7-Zip 同连接 20 步通过；错 hash、不确定判断、完成后输入均被阻止，定位等待中的取消到达真实 cancelled、未输入且清理通过。未使用独立视觉／Decision 配置或服务密钥。[实机证据](docs/verification/CURRENT_AGENT_LIVE_20261024.md)。安装版 0.1.7 另测计算器 C → 1 → + → 2 → = 显示 3，逐帧由 Agent 读取核验；动作后取消、定位等待取消及清理均通过。[安装证据与发布记录](docs/releases/EXECUTION_017_20261024.md)。
+- **更新边界：** 兼容的 HTTP 合同不要求每个 Runtime 补丁重装未变化的 wheel。自动更新只是 [Runtime 提案](docs/development/RUNTIME_UPDATE_STRATEGY.md)和 [Amadeus 策略](docs/development/AMADEUS_UPDATE_STRATEGY.md)，尚未实现。
+
+## 上一版本：0.1.6
 
 - **通过 HTTP MCP 接入 Amadeus：** 保留 stdio，新增仅绑定本机、带鉴权的服务入口。可选的 0.0.4 扩展为 Pi 提供连接声明和执行 Skill；Runtime 仍需单独安装、启动。[扩展安装说明](integrations/amadeus/agent-review-instant/README.zh-CN.md)。
 - **点击前也可由 Main 兜底：** Decision 与普通 Luna 均未通过时，返回原候选和绑定的操作前截图，供 Main 明确审核、单独继续同一任务。已完成输入不会重放，输入授权、截图新鲜度和取消检查继续保留。
@@ -76,24 +84,29 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 需要 **Windows x64、[uv](https://docs.astral.sh/uv/getting-started/installation/)** 和支持 MCP 的 Agent。**API／Agent 路线推荐 Python 3.12**，可继续使用已有的 3.11 环境；**本地模型路线仍使用 Python 3.11**。安装器提供源码及配置脚本，首次配置时安装依赖，不附带密钥或模型权重。
 
-1. **[下载安装执行版 0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6)。** 校验文件及最终包的独立验收状态见该版本发布说明。
-2. **选择视觉来源。** 使用外部 Luna + Decision 时，复制[视觉配置](configs/vision-api-openai-luna.example.json)和 [Decision 配置](configs/decision-profile.visual-execution.example.json)，让 MCP 进程能够读取 `OPENAI_API_KEY`。
+1. **[下载并安装执行版 0.1.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.7)。** 发布页提供下载与校验文件；已验证范围见[验收记录](docs/releases/EXECUTION_017_20261024.md)。
+2. **选择下方运行方式。** 使用外部 Luna + Decision 时，复制[视觉配置](configs/vision-api-openai-luna.example.json)和 [Decision 配置](configs/decision-profile.visual-execution.example.json)，让 MCP 进程能够读取 `OPENAI_API_KEY`。当前 Agent 点击流程使用 0.1.7 入口，并声明客户端真实图像／视觉能力。
 3. **运行配置脚本，接入 Agent。** 按[安装命令](docs/EXECUTION_GUIDE.zh-CN.md#安装与配置)操作，将生成的 `agent-review-instant` MCP 条目合并到客户端后重新连接，保留其他服务器条目。
 
-| 视觉来源 | 需要本地模型吗？ | 配置入口 |
+| 主要方式 | 谁负责定位与核验？ | 配置入口 |
 | --- | --- | --- |
-| 外部 API | 不需要 | [API 配置与凭证](docs/development/EXTERNAL_VISION_API.md) |
-| 当前 Agent 或持续复用的视觉子 Agent | 不需要 | [Agent 接入](AGENT_GUIDE.md) |
-| 本地 VISTA-4B | 需要 | [本地配置](FRIEND_SETUP.md) |
+| **使用当前 Agent** | 已连接的主 Agent；不另配 Runtime 视觉／Decision API，消耗承载 Agent 的服务额度。 | [0.1.7 入口与支持的点击闭环](docs/development/CURRENT_AGENT_MODE.zh-CN.md) |
+| **使用外部模型 API** | Runtime 调用已配置的视觉与 Decision 服务，按服务商实际用量收费。 | [API 配置与凭证](docs/development/EXTERNAL_VISION_API.md) |
+
+高级选项：[本地 VISTA-4B](FRIEND_SETUP.md) 需要权重和本地依赖；[委派识图](AGENT_GUIDE.md) 使用选定且持续复用的视觉 Agent 会话。
 
 默认视觉组合输入需要 Decision 的 auto 模式可用。不配置 Decision 时，仍可使用基础动作和显式 legacy／原生路线，由主 Agent 核验；运行时不会静默切换路线。所有路线都需要本机 Windows 运行时，API 服务商按实际用量收费。
 
 **0.1.6 的服务配置：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna；替换服务须兼容 Decisions／Responses 协议。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
 
-**Amadeus／Pi：** 下载 [HTTP MCP＋Skill 扩展 0.0.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/amadeus_agent_gui_runtime-0.0.4-py3-none-any.whl)，按 [0.0.4 安装说明](integrations/amadeus/agent-review-instant/README.zh-CN.md)操作。Runtime 0.1.6 必须单独安装、启动；目录审核期间可手动导入 wheel。[旧 0.0.2 stdio 指南](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md)继续封存，不能直接套用其配置。
+**Amadeus／Pi：** 下载 [HTTP MCP＋Skill 扩展 0.0.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/amadeus_agent_gui_runtime-0.0.4-py3-none-any.whl)，按 [0.0.4 安装说明](integrations/amadeus/agent-review-instant/README.zh-CN.md)操作。兼容的执行 Runtime 须单独安装、启动，0.1.6 是该扩展已记录的集成基线；目录审核期间可手动导入 wheel。[旧 0.0.2 stdio 指南](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md)继续封存，不能直接套用其配置。
 
 <a id="evaluation"></a>
+0.0.4 wheel 与下载地址保持原版，其 Skill 描述既有 API 路线；本轮不宣称 Amadeus 当前 Agent 模式已实测。兼容性与自动更新边界见 [Amadeus](docs/development/AMADEUS_UPDATE_STRATEGY.md)和 [Runtime](docs/development/RUNTIME_UPDATE_STRATEGY.md) 策略。
+
 ## 工程验证与实测
+
+**0.1.7 当前 Agent 源码实测：** 同连接 7-Zip 20 步及独立负控通过，详见[原图、回执与取消记录](docs/verification/CURRENT_AGENT_LIVE_20261024.md)。独立安装态计算器五次点击、取消负控与清理也已通过，见[发布记录](docs/releases/EXECUTION_017_20261024.md)；本轮不形成性能、成本节省比例或通用成功率结论。
 
 **0.1.5 同版本更新 — 构建 20261017-01：** Enter 后自适应观察，当前结果复核与下一步只读定位并行。新安装包使用同一冻结载荷完成以下任务：
 
@@ -137,7 +150,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 **用户下达任务 → 主 Agent 给出计划 → 定位 → 核验 → 执行 → 确认结果 → 继续**
 
-视觉模型提供坐标，OpenAI Decisions API 通过 Choice 核验目标或当前步骤的结果。有效通过则继续；未通过时由普通 Luna 复核一次，仍未解决再交回原主 Agent。Decision 不替代主 Agent 规划任务。
+当前 Agent 模式由已连接的 Agent 读原图、定位并判断后图。已配置的 API 路线由视觉模型提供坐标，OpenAI Decisions API 通过 Choice 核验目标或本步结果。有效通过则继续；未通过时由普通 Luna 复核一次，仍未解决再交回原主 Agent。Decision 不替代主 Agent 规划任务。
 
 运行时将证据绑定到请求、窗口和截图，校验坐标与截图新鲜度。默认执行走视觉路线，UIA 保留为显式原生路线。持续复用同一会话，同一时间仅保留一个桌面输入执行者。
 
@@ -148,6 +161,8 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 [详细执行流程 →](docs/EXECUTION_GUIDE.zh-CN.md#decision-和视觉模型如何配合) · [任务计划协议 →](docs/development/TASK_PLAN.md) · [Choice 协议 →](docs/development/DECISION_CHOICE.md)
 
 ## 当前限制
+
+- **当前 Agent 适配层仅支持基础点击。** 不支持文字输入、按键、滚动、任务计划、自动跨窗、重启续跑或管理员／UAC；既有 API／legacy 功能保留各自合同。
 
 - **自 0.1.4 起的线性计划：** 非空计划不设固定步数上限；唯一步骤 ID、逐步核验、内容大小限制、证据检查、取消和 API／时间预算继续有效。已有 0.1.3 安装在升级前保留构建时协议。[源码验证](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
 
@@ -161,7 +176,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 | [安装指南](FRIEND_SETUP.md) | [执行详细指南与完整流程图](docs/EXECUTION_GUIDE.zh-CN.md) |
 | [Agent / MCP 指南](AGENT_GUIDE.md) | [Decision API 配置](docs/development/DECISION_API.md) |
 | [外部视觉 API](docs/development/EXTERNAL_VISION_API.md) | [视觉文字输入](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [0.1.6 发布说明与校验文件](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) | [0.1.4 历史多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
+| [0.1.7 发布记录与校验文件](docs/releases/EXECUTION_017_20261024.md) | [0.1.4 历史多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 

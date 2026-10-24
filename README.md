@@ -1,4 +1,4 @@
-Execution **0.1.6** and the Amadeus **0.0.4** HTTP MCP extension are available. [Release and downloads](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) · [Amadeus setup](integrations/amadeus/agent-review-instant/README.md). Store submission is separate from catalog approval. Learning remains paused; see [archive notes](docs/LEARNING_PAUSED.md).
+Execution **0.1.7** adds the current-agent click workflow. Installed 0.1.7 passed a separate five-click Calculator workflow and cancellation checks; details and downloads: [0.1.7 release record](docs/releases/EXECUTION_017_20261024.md). The Amadeus **0.0.4** HTTP MCP extension retains its [existing API route](integrations/amadeus/agent-review-instant/README.md); independent catalog review remains pending. Learning stays paused; see [archive notes](docs/LEARNING_PAUSED.md).
 
 <div align="center">
 
@@ -11,22 +11,30 @@ Execution **0.1.6** and the Amadeus **0.0.4** HTTP MCP extension are available. 
   </picture>
 </h1>
 
-**Execution 0.1.6 — run multi-step Windows tasks from your AI agent.**
+**Execution 0.1.7 — use your current Agent to locate and verify clicks.**
 
-Visual grounding finds the target. Decision checks the current step.<br>
-Successful steps continue; unresolved cases return to your agent.
+Your image-capable Agent reads the target and result.<br>
+Runtime keeps original evidence, input gates and action receipts.
 
-**[Download execution v0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
+**[Download execution 0.1.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.7/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
 
-**Review, then continue the original task.** After a target is rejected by both model checks before input, Main can inspect the bound screenshot, explicitly review it and separately continue the same job. Settled text-input review also remains available without retyping. [Acceptance and limits →](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
+**Retained API-route recovery:** After a target is rejected by both model checks before input, Main can inspect the bound screenshot, explicitly review it and separately continue the same job. Settled text-input review also remains available without retyping. [Acceptance and limits →](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
 
 </div>
 
 Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents. Give it an explicit linear plan to navigate an application, click targets, replace text, press keys or scroll. It executes supported steps in one session and checks their results, reducing the need to return to the main agent after every successful action.
 
-**API vision needs no local model weights or GPU.** Use an external vision API, your image-capable agent, or a local model. The **execution runtime 0.1.6** installs as a standalone component.
+Choose **Use the current Agent** to let your connected, image-capable agent locate targets and check results, or **Use an external model API** for Runtime-managed visual checks. Neither requires local model weights or a GPU. Local models and delegated vision remain advanced options.
 
-## New in 0.1.6
+**Current-agent mode in 0.1.7:** `--current-agent` provides a persistent basic-click loop without a separate Runtime vision or Decision API. The hosting agent's service and quota still apply. Text input, keys, scrolling, task plans and administrator mode are outside this adapter's supported set. [Setup and capability matrix](docs/development/CURRENT_AGENT_MODE.md).
+
+## New in 0.1.7
+
+- **Original-image, original-command loop:** prepare → inspect original image → resolve → continue → inspect after image → verify. Keep one connection and one input owner; pending reads keep the original IDs and never replay unknown input.
+- **Source acceptance:** 20 live 7-Zip steps passed on one connection. Wrong-hash review, uncertain judgment and input after completion were blocked. Cancellation while awaiting grounding reached real cancelled state with no input, and cleanup passed. No independent vision/Decision profile or provider key was used. [Live evidence](docs/verification/CURRENT_AGENT_LIVE_20261024.md). Installed 0.1.7 separately passed Calculator C → 1 → + → 2 → =, showing 3, with per-frame Agent review; post-action and awaiting-grounding cancellation controls and cleanup passed. [Installed evidence and release](docs/releases/EXECUTION_017_20261024.md).
+- **Update boundary:** a compatible HTTP contract does not require reinstalling an unchanged wheel for each Runtime patch. Automatic updating is proposed, not implemented: [Runtime](docs/development/RUNTIME_UPDATE_STRATEGY.md) and [Amadeus](docs/development/AMADEUS_UPDATE_STRATEGY.md) strategies.
+
+## Previous release: 0.1.6
 
 - **Amadeus over HTTP MCP:** keep the existing stdio route or use the new authenticated, loopback-only service. The optional 0.0.4 extension connects Pi and supplies its execution Skill; install/start Runtime separately. [Install the extension](integrations/amadeus/agent-review-instant/README.md).
 - **Main can recover before a click:** Decision and ordinary Luna nonpasses return the original candidate and bound before image for explicit Main review and separate continuation. The same job continues; completed input is not replayed. Existing input, freshness and cancellation checks remain.
@@ -76,24 +84,29 @@ Navigate A → nested → Up → root → B → bundle.zip. [Full MP4](https://g
 
 You need **Windows x64, [uv](https://docs.astral.sh/uv/getting-started/installation/)** and Python: **3.12 recommended for API/Agent use** (existing 3.11 environments remain supported), or **3.11 for local models**. You also need an MCP-compatible agent. The installer includes source and setup scripts; first-time setup installs dependencies. Keys and model weights are not bundled.
 
-1. **[Download and install execution 0.1.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6).** Check its release notes for checksums and independent final-package acceptance status.
-2. **Choose your vision source.** For external Luna + Decision, copy the [vision profile](configs/vision-api-openai-luna.example.json) and [Decision profile](configs/decision-profile.visual-execution.example.json), then make `OPENAI_API_KEY` available to the MCP process.
+1. **[Download and install execution 0.1.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.7).** Its release gives downloads and checksums; the [acceptance record](docs/releases/EXECUTION_017_20261024.md) states the verified scope.
+2. **Choose a mode below.** For external Luna + Decision, copy the [vision profile](configs/vision-api-openai-luna.example.json) and [Decision profile](configs/decision-profile.visual-execution.example.json), then make `OPENAI_API_KEY` available to the MCP process. For current-agent clicks, use the 0.1.7 entry and declare the client's real image/vision capabilities.
 3. **Run setup and connect your agent.** Follow the [setup commands](docs/EXECUTION_GUIDE.md#install-and-configure), merge the generated `agent-review-instant` MCP entry into your client, and reconnect. Keep other server entries intact.
 
-| Vision source | Local model required? | Setup |
+| Main mode | Who locates and checks? | Setup |
 | --- | --- | --- |
-| External API | No | [API profiles and credentials](docs/development/EXTERNAL_VISION_API.md) |
-| Current agent or reusable visual subagent | No | [Agent integration](AGENT_GUIDE.md) |
-| Local VISTA-4B | Yes | [Local setup](FRIEND_SETUP.md) |
+| **Use the current Agent** | The connected main agent; no separate Runtime vision/Decision API. Uses the hosting agent's service quota. | [0.1.7 entry and supported click loop](docs/development/CURRENT_AGENT_MODE.md) |
+| **Use an external model API** | Runtime calls configured vision and Decision services. Provider usage charges apply. | [API profiles and credentials](docs/development/EXTERNAL_VISION_API.md) |
+
+Advanced: [local VISTA-4B](FRIEND_SETUP.md) requires weights and local dependencies; [delegated vision](AGENT_GUIDE.md) uses a selected, reusable visual-agent session.
 
 Default visual input sequences require Decision in auto mode. Without Decision, basic actions and explicit legacy/native routes remain available with main-agent review; the runtime does not silently switch routes. All routes require the local Windows runtime. API usage is billed by the provider.
 
 **Provider configuration in 0.1.6:** Decision and secondary review each support their own endpoint, model and key environment variable. Defaults remain OpenAI Decisions + ordinary Luna; replacements require Decisions/Responses-compatible services. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. [Configuration and compatibility →](docs/development/DECISION_PROVIDERS.md)
 
-**Amadeus/Pi:** download the [HTTP MCP + Skill extension 0.0.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/amadeus_agent_gui_runtime-0.0.4-py3-none-any.whl) and follow the [0.0.4 setup](integrations/amadeus/agent-review-instant/README.md). Runtime 0.1.6 must be installed and started separately. Manual wheel import is available while catalog review is pending. The [historical 0.0.2 stdio guide](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.md) remains archived; its configuration is different.
+**Amadeus/Pi:** download the [HTTP MCP + Skill extension 0.0.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/amadeus_agent_gui_runtime-0.0.4-py3-none-any.whl) and follow the [0.0.4 setup](integrations/amadeus/agent-review-instant/README.md). Install and start a compatible execution Runtime separately; 0.1.6 is the extension's recorded integration baseline. Manual wheel import is available while catalog review is pending. The [historical 0.0.2 stdio guide](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.md) remains archived; its configuration is different.
 
 <a id="evaluation"></a>
+The 0.0.4 wheel and download URL retain their original identity. Its Skill describes the existing API route; this round does not claim current-agent mode has been tested in Amadeus. See the [Amadeus](docs/development/AMADEUS_UPDATE_STRATEGY.md) and [Runtime](docs/development/RUNTIME_UPDATE_STRATEGY.md) strategies for compatibility and the unimplemented update proposal.
+
 ## Engineering evidence
+
+**0.1.7 current-agent source acceptance:** 20 live 7-Zip steps on one connection and separate refusal controls passed; see the [original-image, receipt and cancellation record](docs/verification/CURRENT_AGENT_LIVE_20261024.md). The separate installed five-click Calculator workflow, cancellation controls and cleanup also passed; see the [release record](docs/releases/EXECUTION_017_20261024.md). This does not establish a performance gain, cost-saving percentage or general success rate.
 
 **0.1.5 refresh — build 20261017-01:** adaptive observation after Enter and next-step read-only grounding alongside current-result verification. The refreshed installer completed the following tasks on the same frozen payload:
 
@@ -137,7 +150,7 @@ Historical 0.1.3 prompt evaluation used **39 real UI screenshots across 30 scena
 
 **User task → Main-agent plan → Ground → Check → Act → Verify → Continue**
 
-The vision model supplies coordinates. OpenAI's Decisions API checks the target or the current step's result using Choice. A valid pass continues the plan; a nonpass gets one ordinary Luna review before returning to the original main agent if unresolved. Decision does not replace the planner.
+In current-agent mode, the connected Agent reads the original screenshot, grounds the target and judges the after image. In the configured API route, the vision model supplies coordinates and OpenAI's Decisions API checks the target or result using Choice. A valid pass continues the plan; a nonpass gets one ordinary Luna review before returning to the original main agent if unresolved. Decision does not replace the planner.
 
 The runtime binds evidence to the request, window and screenshot, and validates coordinates and freshness. Default execution uses the visual route; UIA remains available through explicit native routes. Keep one persistent session and one desktop input owner.
 
@@ -148,6 +161,8 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 [Detailed execution flow →](docs/EXECUTION_GUIDE.md#how-decision-and-the-vision-model-work-together) · [Task-plan contract →](docs/development/TASK_PLAN.md) · [Choice contract →](docs/development/DECISION_CHOICE.md)
 
 ## Current limits
+
+- **Current-agent adapter: basic clicks only.** Text input, keys, scrolling, task plans, automatic cross-window work, restart continuation and administrator/UAC are unsupported by this adapter. Existing API/legacy capabilities keep their own contracts.
 
 - **Since 0.1.4, linear plans:** nonempty plans have no fixed step-count cap. Unique step IDs, per-step verification, context-size limits, evidence checks, cancellation and API/time budgets remain. Existing 0.1.3 installations retain their build-time contract until upgraded. [Source checks](docs/verification/UNBOUNDED_TASK_PLANS_20261015.md)
 
@@ -161,7 +176,7 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 | [Installation guide](FRIEND_SETUP.md) | [Execution guide and detailed flow](docs/EXECUTION_GUIDE.md) |
 | [Agent / MCP guide](AGENT_GUIDE.md) | [Decision API configuration](docs/development/DECISION_API.md) |
 | [External vision API](docs/development/EXTERNAL_VISION_API.md) | [Visual text input](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [0.1.6 release notes and checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.6) | [Historical 0.1.4 multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
+| [0.1.7 release record and checksums](docs/releases/EXECUTION_017_20261024.md) | [Historical 0.1.4 multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 

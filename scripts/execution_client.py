@@ -325,12 +325,16 @@ async def serve_jsonl(client: ExecutionClient, *, input_stream=None, output_stre
     outgoing = output_stream if output_stream is not None else sys.stdout
     try:
         async with client as opened:
-            _emit(outgoing, {"event": "ready", "session_directory": opened.session_directory,
+            ready = {"event": "ready", "session_directory": opened.session_directory,
                 "recognition_source": opened.recognition_source, "actions_enabled": opened.allow_actions,
                 "models_prepared": opened.models_prepared,
                 "model_state": ("prepared" if opened.models_prepared else "cold")
                     if opened.recognition_source == "local" else "not_required",
-                "preparation_request_id": opened.preparation_request_id})
+                "preparation_request_id": opened.preparation_request_id}
+            current_agent = getattr(opened, "current_agent_state", None)
+            if isinstance(current_agent, dict):
+                ready.update(execution_mode="current_agent", current_agent=deepcopy(current_agent))
+            _emit(outgoing, ready)
             while True:
                 line = await asyncio.to_thread(incoming.readline)
                 if not line:
@@ -346,7 +350,11 @@ async def serve_jsonl(client: ExecutionClient, *, input_stream=None, output_stre
                     _emit(outgoing, {"event": "result", "response": response})
                 except Exception as error:
                     _emit(outgoing, _error(error, request_id=_message_request_id(message)))
-        _emit(outgoing, {"event": "finished", "cleanup_verified": client.status.get("cleanup_verified") is True})
+        finished = {"event": "finished", "cleanup_verified": client.status.get("cleanup_verified") is True}
+        current_agent = getattr(client, "current_agent_state", None)
+        if isinstance(current_agent, dict):
+            finished.update(execution_mode="current_agent", current_agent=deepcopy(current_agent))
+        _emit(outgoing, finished)
         return 0
     except Exception as error:
         _emit(outgoing, _error(error))
@@ -358,12 +366,21 @@ class _Parser(argparse.ArgumentParser):
         raise ValueError("execution_client_arguments_invalid")
 
 
-def main(argv=None, *, input_stream=None, output_stream=None, client_factory=ExecutionClient):
+def main(argv=None, *, input_stream=None, output_stream=None, client_factory=ExecutionClient,
+         current_agent_factory=None):
     parser = _Parser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--data-dir", type=Path, required=True)
     parser.add_argument("--model-directory", type=Path)
     parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"])
+    parser.add_argument("--current-agent", action="store_true",
+        help="Use the current visual Agent through the managed session adapter; no separate vision or Decision API")
+    parser.add_argument("--client-name",
+        help="Name of the connected Agent client (a label, not proof of visual capability)")
+    parser.add_argument("--client-image-transport", choices=["supported", "unsupported", "unknown"],
+        help="Explicit client declaration that original Runtime images can be delivered")
+    parser.add_argument("--client-current-vision", choices=["supported", "unsupported", "unknown"],
+        help="Explicit client declaration that the current Agent can actually read images")
     parser.add_argument("--luna-api", action="store_true",
         help="Explicitly use external_api with the repository Luna example profile; credentials stay in the environment")
     parser.add_argument("--delegate-profile")
@@ -376,7 +393,32 @@ def main(argv=None, *, input_stream=None, output_stream=None, client_factory=Exe
     outgoing = output_stream if output_stream is not None else sys.stdout
     try:
         args = parser.parse_args(argv)
-        if args.luna_api:
+        mode_options = {}
+        selected_factory = client_factory
+        if args.current_agent:
+            if args.administrator:
+                raise ValueError("current_agent_administrator_unsupported")
+            if (args.luna_api or args.recognition_source not in {None, "agent_current"}
+                    or any(value is not None for value in (args.model_directory, args.delegate_profile,
+                                                          args.api_profile, args.decision_profile))
+                    or args.prepare_models):
+                raise ValueError("execution_client_current_agent_conflict")
+            name = args.client_name if args.client_name is not None else "current-agent"
+            if (not name or name != name.strip() or len(name) > 128
+                    or any(ord(character) < 32 or ord(character) == 127 for character in name)):
+                raise ValueError("execution_client_client_name_invalid")
+            args.recognition_source = "agent_current"
+            mode_options = {"client_name": name, "client_vision_capabilities": {
+                "image_transport": args.client_image_transport or "unknown",
+                "current_vision": args.client_current_vision or "unknown"}}
+            if current_agent_factory is None:
+                from scripts.current_agent_client import CurrentAgentClient
+                current_agent_factory = CurrentAgentClient
+            selected_factory = current_agent_factory
+        elif any(value is not None for value in (args.client_name, args.client_image_transport,
+                                                 args.client_current_vision)):
+            raise ValueError("execution_client_current_agent_option_conflict")
+        elif args.luna_api:
             profile = args.root.resolve() / "configs/vision-api-openai-luna.example.json"
             if (args.recognition_source not in {None, "external_api"} or args.model_directory is not None
                     or args.delegate_profile is not None or args.prepare_models
@@ -385,10 +427,11 @@ def main(argv=None, *, input_stream=None, output_stream=None, client_factory=Exe
             args.recognition_source, args.api_profile = "external_api", profile
         else:
             args.recognition_source = args.recognition_source or "local"
-        opened = client_factory(root=args.root, data_root=args.data_dir, model_directory=args.model_directory,
+        opened = selected_factory(root=args.root, data_root=args.data_dir, model_directory=args.model_directory,
             recognition_source=args.recognition_source, delegate_profile=args.delegate_profile,
             api_profile=args.api_profile, decision_profile=args.decision_profile,
-            allow_actions=args.allow_actions, administrator=args.administrator, prepare_models=args.prepare_models)
+            allow_actions=args.allow_actions, administrator=args.administrator, prepare_models=args.prepare_models,
+            **mode_options)
         return asyncio.run(serve_jsonl(opened, input_stream=input_stream, output_stream=outgoing))
     except Exception as error:
         _emit(outgoing, _error(error))

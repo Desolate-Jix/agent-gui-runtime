@@ -10,7 +10,9 @@ def main():
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--model-directory", type=Path)
     parser.add_argument("--recognition-source", choices=["local", "agent_current", "agent_delegate", "external_api"],
-                        default="local")
+                        help="Vision route; defaults to local unless --current-agent is selected")
+    parser.add_argument("--current-agent", action="store_true",
+                        help="Select agent_current without independent model/API profiles; client vision declarations and input authorization are still required")
     parser.add_argument("--delegate-profile")
     parser.add_argument("--api-profile", type=Path)
     parser.add_argument("--decision-profile", type=Path)
@@ -20,6 +22,17 @@ def main():
     parser.add_argument("--administrator", action="store_true",
                         help="Use the UAC administrator stdio bridge; operator confirmation required")
     args = parser.parse_args()
+    if args.current_agent:
+        if args.administrator:
+            parser.error("--current-agent does not support --administrator; the UAC environment is not isolated")
+        if args.recognition_source not in {None, "agent_current"}:
+            parser.error("--current-agent conflicts with --recognition-source other than agent_current")
+        if any(value is not None for value in (args.model_directory, args.api_profile,
+                                               args.decision_profile, args.delegate_profile)):
+            parser.error("--current-agent cannot be combined with model, API, Decision or delegate profiles")
+        args.recognition_source = "agent_current"
+    else:
+        args.recognition_source = args.recognition_source or "local"
     root = Path(__file__).resolve().parents[1]
     if not args.python.is_file():
         parser.error("Python executable must exist")
@@ -73,13 +86,18 @@ def main():
         arguments.append("--allow-local-input")
     server = {"command": str(args.python.resolve()), "args": arguments,
               "env": {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}}
+    if args.current_agent:
+        # MCP env overrides are merged with the parent environment.  Empty is
+        # the maintained InstantSession/DecisionService disabled fallback.
+        server["env"]["AGENT_GUI_DECISION_PROFILE"] = ""
     (root / "mcp-config.local.json").write_text(json.dumps({"mcpServers": {"agent-review-instant": server}},
         ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     q = lambda value: json.dumps(value, ensure_ascii=False)
     (root / "mcp-config.local.toml").write_text('[mcp_servers.agent-review-instant]\ncommand = '
         + q(server["command"]) + '\nargs = ' + q(arguments)
         + ('\nstartup_timeout_sec = 180\ntool_timeout_sec = 30\n' if args.administrator else '\nstartup_timeout_sec = 30\ntool_timeout_sec = 30\n')
-        + '\n[mcp_servers.agent-review-instant.env]\nPYTHONUTF8 = "1"\nPYTHONIOENCODING = "utf-8"\n', encoding="utf-8")
+        + '\n[mcp_servers.agent-review-instant.env]\n'
+        + ''.join(name + ' = ' + q(value) + '\n' for name, value in server["env"].items()), encoding="utf-8")
     print(str(root / "mcp-config.local.json"))
 
 
