@@ -1,4 +1,4 @@
-执行版 **0.1.8** 新增更新检查、确切目标确认、任务维护门禁及回滚。**0.1.7 及更早版本需手动安装本版**，旧版没有更新器。[发布与下载](docs/releases/EXECUTION_018_20261024.md)。Amadeus **0.0.4** HTTP MCP 扩展仍独立安装；Host 更新器见[上游 PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261)，尚待合入交付。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
+执行版 **0.1.8** 新增更新检查、确切目标确认、任务维护门禁及回滚。**0.1.7 及更早版本需手动安装本版**，旧版没有更新器。[发布与下载](docs/releases/EXECUTION_018_20261024.md)。独立发布的 Amadeus **0.0.5 连接器**补齐安装前披露和使用指南，商店审核仍待完成。Host 更新流程已在 [PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261) 合入，需使用包含该改动的 Amadeus 构建。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
 
 <div align="center">
 
@@ -105,10 +105,10 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 **0.1.6 的服务配置：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna；替换服务须兼容 Decisions／Responses 协议。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
 
-**Amadeus／Pi：** 下载 [HTTP MCP＋Skill 扩展 0.0.4](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.6/amadeus_agent_gui_runtime-0.0.4-py3-none-any.whl)，按 [0.0.4 安装说明](integrations/amadeus/agent-review-instant/README.zh-CN.md)操作。兼容的执行 Runtime 须单独安装、启动，0.1.6 是该扩展已记录的集成基线；目录审核期间可手动导入 wheel。[旧 0.0.2 stdio 指南](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md)继续封存，不能直接套用其配置。
+**Amadeus／Pi：** 下载 [HTTP MCP＋Skill 连接器 0.0.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.5/amadeus_agent_gui_runtime-0.0.5-py3-none-any.whl)，按[连接器安装指南](integrations/amadeus/agent-review-instant/README.zh-CN.md)配置。Runtime 需另外安装、启动；推荐使用 0.1.8，0.1.6 是上一版连接器已记录的集成基线。请核对实际版本及必要的 HTTP／审核能力。目录审核期间可手动导入 wheel。[旧 0.0.2 stdio 指南](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md)继续封存，不能直接套用其配置。
 
 <a id="evaluation"></a>
-0.0.4 wheel 与下载地址保持原版，其 Skill 描述既有 API 路线；本轮不宣称 Amadeus 当前 Agent 模式已实测。兼容性与自动更新边界见 [Amadeus](docs/development/AMADEUS_UPDATE_STRATEGY.md)和 [Runtime](docs/development/RUNTIME_UPDATE_STRATEGY.md) 策略。
+0.0.4 wheel 与下载地址保持原版。0.0.5 连接器说明既有 API 路线，配置键和权限不变；不代表已验证 Amadeus 当前 Agent 模式。见[连接器验证范围](docs/verification/AMADEUS_CONNECTOR_005_20261026.md)及 [Runtime 更新说明](docs/RUNTIME_UPDATES.zh-CN.md)。停用或卸载连接器不会停止或卸载外部 Runtime。
 
 ## 工程验证与实测
 
