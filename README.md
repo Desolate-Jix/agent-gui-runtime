@@ -1,4 +1,4 @@
-Execution **0.1.8** adds update checks, exact-target confirmation, task-aware maintenance locks and rollback. **Install this release manually if you use 0.1.7 or earlier**; those versions have no updater. [Release and downloads](docs/releases/EXECUTION_018_20261024.md). The separately released Amadeus **0.0.5 connector** adds installation disclosures and updated setup instructions; catalog review remains pending. The Host update workflow was merged in [PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261); use an Amadeus build containing that change. Learning stays paused; see [archive notes](docs/LEARNING_PAUSED.md).
+Execution **0.1.9** fixes task-plan maintenance settlement. Affected 0.1.8 users can use the repaired verifier before a normal confirmed update; [recovery steps](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md). [Release and downloads](docs/releases/EXECUTION_019_20261027.md). Amadeus **connector 0.0.6** recommends the repaired Runtime; [store review #11](https://github.com/Code-Amadeus/Amadeus-Extensions/pull/11) remains separate from release availability. Use a Host build containing [PR #261](https://github.com/Code-Amadeus/Amadeus/pull/261) for confirmed extension updates. Learning stays paused; see [archive notes](docs/LEARNING_PAUSED.md).
 
 <div align="center">
 
@@ -11,12 +11,12 @@ Execution **0.1.8** adds update checks, exact-target confirmation, task-aware ma
   </picture>
 </h1>
 
-**Execution 0.1.8 — verified execution, updates under your control.**
+**Execution 0.1.9 — verified execution, updates under your control.**
 
 Your image-capable Agent reads the target and result.<br>
 Runtime keeps original evidence, input gates and action receipts.
 
-**[Download execution 0.1.8](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.8/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
+**[Download execution 0.1.9](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.9/AgentGUIRuntimeExecution-Setup.exe)** · [Demos](#demos) · [Quick start](#quick-start) · [Architecture](#architecture) · [Evaluation](#evaluation)
 
 **Retained API-route recovery:** After a target is rejected by both model checks before input, Main can inspect the bound screenshot, explicitly review it and separately continue the same job. Settled text-input review also remains available without retyping. [Acceptance and limits →](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
 
@@ -28,7 +28,13 @@ Choose **Use the current Agent** to let your connected, image-capable agent loca
 
 **Current-agent mode (introduced in 0.1.7):** `--current-agent` provides a persistent basic-click loop without a separate Runtime vision or Decision API. The hosting agent's service and quota still apply. Text input, keys, scrolling, task plans and administrator mode are outside this adapter's supported set. [Setup and capability matrix](docs/development/CURRENT_AGENT_MODE.md).
 
-## New in 0.1.8
+## New in 0.1.9
+
+- **Settle the original plan:** maintenance validates the frozen plan, runner and input receipts for completed or proven-cancelled task plans. Active or unknown input and incomplete evidence still block installation.
+- **Upgrade affected 0.1.8 installations:** run the verified new release's maintenance script against the old installation, then use the normal confirmed update path. Do not delete task registrations. [Recovery procedure](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md).
+- **Amadeus connector 0.0.6:** recommends Runtime 0.1.9 with unchanged connection settings, permissions and same-session Main review/continue behavior. [Release scope and validation](docs/releases/EXECUTION_019_20261027.md). No new speed, accuracy or token-saving claim.
+
+## Previous release: 0.1.8
 
 - **Check automatically, install after confirmation:** launchers check stable releases at most daily, in the background; checks can be disabled. Download/verify with `update_runtime.ps1 -Action stage`, then explicitly confirm the exact target with `-Action apply`.
 - **Keep tasks intact:** installation-wide locks and original-session cleanup evidence prevent maintenance while clients, hosts, model workers or unresolved input remain. The updater never closes a task to install.
@@ -90,7 +96,7 @@ Navigate A → nested → Up → root → B → bundle.zip. [Full MP4](https://g
 
 You need **Windows x64, [uv](https://docs.astral.sh/uv/getting-started/installation/)** and Python: **3.12 recommended for API/Agent use** (existing 3.11 environments remain supported), or **3.11 for local models**. You also need an MCP-compatible agent. The installer includes source and setup scripts; first-time setup installs dependencies. Keys and model weights are not bundled.
 
-1. **[Download and install execution 0.1.8](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.8).** Its release gives downloads and checksums; the [release record](docs/releases/EXECUTION_018_20261024.md) states the verified scope. Versions 0.1.7 and earlier require this first manual upgrade.
+1. **[Download and install execution 0.1.9](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.9).** See the [release record](docs/releases/EXECUTION_019_20261027.md) for downloads, checksums and validation. Versions 0.1.7 and earlier require manual installation; affected 0.1.8 task-plan registrations need the [settlement procedure](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md) first.
 2. **Choose a mode below.** For external Luna + Decision, copy the [vision profile](configs/vision-api-openai-luna.example.json) and [Decision profile](configs/decision-profile.visual-execution.example.json), then make `OPENAI_API_KEY` available to the MCP process. For current-agent clicks, use the 0.1.7 entry and declare the client's real image/vision capabilities.
 3. **Run setup and connect your agent.** Follow the [setup commands](docs/EXECUTION_GUIDE.md#install-and-configure), merge the generated `agent-review-instant` MCP entry into your client, and reconnect. Keep other server entries intact.
 
@@ -105,10 +111,10 @@ Default visual input sequences require Decision in auto mode. Without Decision, 
 
 **Provider configuration in 0.1.6:** Decision and secondary review each support their own endpoint, model and key environment variable. Defaults remain OpenAI Decisions + ordinary Luna; replacements require Decisions/Responses-compatible services. These settings first shipped in the 2026-10-15 rebuilt 0.1.3 installer. [Configuration and compatibility →](docs/development/DECISION_PROVIDERS.md)
 
-**Amadeus/Pi:** download the [HTTP MCP + Skill connector 0.0.5](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.5/amadeus_agent_gui_runtime-0.0.5-py3-none-any.whl) and follow the [connector setup](integrations/amadeus/agent-review-instant/README.md). Install and start Runtime separately; 0.1.8 is recommended, and 0.1.6 is the recorded integration baseline for the previous connector. Check the actual version and required HTTP/review capabilities. Manual wheel import is available while catalog review is pending. The [historical 0.0.2 stdio guide](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.md) remains archived; its configuration is different.
+**Amadeus/Pi:** download the [HTTP MCP + Skill connector 0.0.6](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.6/amadeus_agent_gui_runtime-0.0.6-py3-none-any.whl) and follow the [connector setup](integrations/amadeus/agent-review-instant/README.md). Install and start Runtime separately; 0.1.9 is recommended. Check the actual version and required HTTP/review capabilities. Manual wheel import is available while catalog review is pending. The [historical 0.0.2 stdio guide](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.md) remains archived; its configuration is different.
 
 <a id="evaluation"></a>
-The 0.0.4 wheel and download URL retain their original identity. Connector 0.0.5 documents the existing API route and leaves configuration keys and permissions unchanged; it does not establish current-agent mode in Amadeus. See the [connector qualification scope](docs/verification/AMADEUS_CONNECTOR_005_20261026.md) and [Runtime update instructions](docs/RUNTIME_UPDATES.md). Disabling or uninstalling the connector does not stop or uninstall the external Runtime.
+Old wheels and download URLs retain their original bytes. Connector 0.0.6 updates the recommended Runtime; connection keys and permissions stay unchanged. It does not establish current-agent mode in Amadeus. See the [current release scope](docs/releases/EXECUTION_019_20261027.md), [historical 0.0.5 qualification](docs/verification/AMADEUS_CONNECTOR_005_20261026.md) and [Runtime update instructions](docs/RUNTIME_UPDATES.md). Disabling or uninstalling the connector does not stop or uninstall the external Runtime.
 
 ## Engineering evidence
 
@@ -182,7 +188,7 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 | [Installation guide](FRIEND_SETUP.md) | [Execution guide and detailed flow](docs/EXECUTION_GUIDE.md) |
 | [Agent / MCP guide](AGENT_GUIDE.md) | [Decision API configuration](docs/development/DECISION_API.md) |
 | [External vision API](docs/development/EXTERNAL_VISION_API.md) | [Visual text input](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [0.1.8 release record and checksums](docs/releases/EXECUTION_018_20261024.md) | [Historical 0.1.4 multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
+| [0.1.9 release record and checksums](docs/releases/EXECUTION_019_20261027.md) | [Historical 0.1.4 multi-application evidence](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 

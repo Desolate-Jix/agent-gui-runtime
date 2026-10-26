@@ -33,6 +33,7 @@ def epoch_scene(tmp_path, monkeypatch):
         "recognition_source":"agent_current","delegate_profile":None,"api_profile":None})
     active = {}
     launches = []
+    real_process = psutil.Process
     class Process:
         def __init__(self, pid):
             if pid not in active:
@@ -58,7 +59,13 @@ def epoch_scene(tmp_path, monkeypatch):
                 runner_identity={"pid":self.pid,"create_time_ns":round(active[self.pid]["created"]*1000000000)}).mark_ready()
             write_json_snapshot(new / "report.json", {"phase":"ready","runner_pid":self.pid,"target":None})
         def poll(self): return None if self.pid in active else 0
-    monkeypatch.setattr(psutil, "Process", Process)
+    def process(pid, *args, **kwargs):
+        # Only fixture-owned PIDs are synthetic; ledger ownership still uses
+        # the real current process identity.
+        if pid in {900001, 900002} or 900100 <= pid < 900100 + len(launches):
+            return Process(pid)
+        return real_process(pid, *args, **kwargs)
+    monkeypatch.setattr(psutil, "Process", process)
     monkeypatch.setattr("app.instant_mcp.subprocess.Popen", Popen)
     manager = InstantSession(root, data, allow_local_input=True, recognition_source="agent_current")
     try:

@@ -8,12 +8,12 @@ description: Execute an explicitly authorized Windows GUI task through the conne
 Read `references/runtime.md` before using the connected Runtime. Discover its
 actual tools and schemas; Pi names may be namespaced or hashed, so never invent
 a tool name. This Skill supplies no tools, authority, executor, learning mode or
-shell route. Connector 0.0.5 is author-published; independent store review and
-new installed GUI acceptance with Runtime 0.1.8 remain pending. Historical
-0.0.4/0.1.6 controlled Pi evidence is a separate result.
+shell route. Connector 0.0.6 supplies installation and execution guidance;
+publication, independent store approval and installed GUI execution are separate
+results. Historical 0.0.4/0.1.6 controlled Pi evidence is a separate result.
 
-Use only the existing external API route. Recommend separately released
-Runtime 0.1.8; minimum 0.1.6 supplies the HTTP/pre-action contract, and the active
+Use only the existing external API route. Recommend separately installed
+Runtime 0.1.9; minimum 0.1.6 supplies the HTTP/pre-action contract, and the active
 service must supply field review/continue. Runtime 0.1.5 has no HTTP entry point.
 Runtime 0.1.7 current-Agent mode is not qualified through Amadeus here. Manually
 check MCP initialization version, actual tools/schemas, authentication and
@@ -57,26 +57,33 @@ their closure is explicitly in scope. Call `instant_stop`, then poll until
 `host_alive=false`, `pending_ids=[]`, `cleanup_verified=true` and no unresolved
 cleanup error. Only then release the native HTTP owner. If an old owner is
 unresolved, inspect its original receipts and cleanup diagnostics. If the
-original connection is lost, retain evidence and stop for operator recovery;
-do not steal ownership, repeatedly reconnect/restart, or delete queues, locks
-or session records. Report task outcome separately from cleanup.
+original connection is lost, retain evidence and stop for operator recovery.
+After Pi disconnects or encounters an owner conflict, both
+`instant_recovery_preview` and `instant_recover_session` are operator-only;
+Pi must not use them to take over the old session or workflow. Main's
+bound-image review/continue path in the original live session remains available
+under its existing contracts. Do not steal ownership, repeatedly
+reconnect/restart, or delete queues, locks or session records. Report task
+outcome separately from cleanup. Runtime 0.1.9 fixes `task_plan` input-settlement
+validation; consult the [settlement recovery guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.9/docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)
+for retained Runtime 0.1.8 evidence and the maintained operator entry point.
 
 Disabling/removing the connector releases the Host connection only; it does
 not stop/uninstall the independently running Runtime or delete its data. Finish
-cleanup before disabling/removing. Connector 0.0.5 changes documentation and
-metadata only; 0.0.3/0.0.4 connection settings need no migration and input gates
-and permissions do not change.
+cleanup before disabling/removing. Connector 0.0.6 updates guidance and metadata;
+Runtime fixes are delivered separately. 0.0.3/0.0.4/0.0.5 connection settings
+need no migration and input gates and permissions do not change.
 
 ## 简体中文
 
-使用连接的 Runtime 前先读 `references/runtime.md`。发现实际工具与 schema；Pi 名称可能带命名空间或哈希，不能猜工具名。本 Skill 不提供工具、授权、执行器、学习模式或 shell 路线。连接器 0.0.5 为作者发行；独立商店审核及与 Runtime 0.1.8 的新安装态 GUI 验收仍待完成。历史 0.0.4／0.1.6 受控 Pi 证据单独记录。
+使用连接的 Runtime 前先读 `references/runtime.md`。发现实际工具与 schema；Pi 名称可能带命名空间或哈希，不能猜工具名。本 Skill 不提供工具、授权、执行器、学习模式或 shell 路线。连接器 0.0.6 提供安装与执行指引；作者发布、独立商店批准及安装态 GUI 执行分别记录。历史 0.0.4／0.1.6 受控 Pi 证据单独记录。
 
-仅使用原有 external API 路线。推荐独立发布的 Runtime 0.1.8；最低 0.1.6 提供 HTTP／输入前审核合同，活动服务还须提供文字结果审核／继续。Runtime 0.1.5 没有 HTTP 入口。此处没有通过 Amadeus 核验 Runtime 0.1.7 current-Agent 模式。人工核对 MCP 初始化版本、实际工具／schema、鉴权及审核／清理能力；版本号或后续发行不能证明兼容。本包不提供自动兼容探测器。
+仅使用原有 external API 路线。推荐独立安装的 Runtime 0.1.9；最低 0.1.6 提供 HTTP／输入前审核合同，活动服务还须提供文字结果审核／继续。Runtime 0.1.5 没有 HTTP 入口。此处没有通过 Amadeus 核验 Runtime 0.1.7 current-Agent 模式。人工核对 MCP 初始化版本、实际工具／schema、鉴权及审核／清理能力；版本号或后续发行不能证明兼容。本包不提供自动兼容探测器。
 
 完整授权 Work 保持一个 Runtime MCP 连接和一个输入所有者。操作员独立安装并启动带鉴权的本机 daemon；连接器不会启动 Python、选择可执行路径、提供模型密钥或改 profile。本机连接密钥不是模型 API Key。截图／任务信息可能发送给已配置模型服务，服务调用可能收费。确认任务范围及 Runtime 输入授权：`--allow-local-input` 启用输入，同时关闭自动风险拦截。宿主只启动一次，等待 ready，启动／选择目标窗口，使用当前绑定观察，提交任务并检查原回执。启动或异步确认不是任务成功。已知独立字段提前合并准备，及时读取正常待定批次，不在其间插入无关搜索或文档工作。
 
 待定、未知、超时、中断输入或图像不可用时，保留原 request／run／command ID 并检查状态。可能执行过的输入不能换 ID 重放，也不能为延长等待而重交。真实 `pre_action_review_packet.v1` 或 `field_review_packet.v1` 出现时，用新外层 request ID 和 `images=none` 调用 `agent_command_status`，`command_id=packet.execution_request_id`。随后用 `instant_image` 取该状态请求绑定图像：候选看 `view=before`，已输入文字看 `view=after`。对照任务检查确切绑定证据，复制 `caller_controls.review.request`，仅添加实际 verdict／reason，再单独使用返回的 continue recipe。审核本身不输入。前置继续保留原 job／候选，派发一次前须通过新截图的目标区域核对及既有硬门禁；文字结果继续不重输，后续 submit 仍须普通门禁及核验。没有真实可续票据或候选已过期就停报。不伪造哈希、wait ID、成功或重启／重放。
 
-取消须结算到真实终态；断线不等于取消或清理。仅按返回 handle／process 身份关闭本任务启动的窗口，仅处理已授权选择的保存对话框，并核对 `window_closed`。保留原有／操作员预备窗口，除非其关闭已明确纳入任务。调用 `instant_stop`，查询至 `host_alive=false`、`pending_ids=[]`、`cleanup_verified=true` 且没有未解决清理错误，之后才释放原生 HTTP 所有者。旧所有者未结算时读取原回执和清理诊断；原连接丢失时保留证据并停止，交操作员恢复，不抢占、不反复重连／重启、不删除队列、锁或会话记录。任务结果与清理分别报告。
+取消须结算到真实终态；断线不等于取消或清理。仅按返回 handle／process 身份关闭本任务启动的窗口，仅处理已授权选择的保存对话框，并核对 `window_closed`。保留原有／操作员预备窗口，除非其关闭已明确纳入任务。调用 `instant_stop`，查询至 `host_alive=false`、`pending_ids=[]`、`cleanup_verified=true` 且没有未解决清理错误，之后才释放原生 HTTP 所有者。旧所有者未结算时读取原回执和清理诊断；原连接丢失时保留证据并停止，交操作员恢复。Pi 断线或遇到 owner 冲突后，`instant_recovery_preview`、`instant_recover_session` 两个工具仅限操作员使用，Pi 不得用它们接管旧会话或工作流。原活动会话中 Main 对绑定图像审核／继续的路径仍按既有合同保留。不抢占、不反复重连／重启、不删除队列、锁或会话记录。任务结果与清理分别报告。Runtime 0.1.9 修复 `task_plan` 输入结算验证；保留的 Runtime 0.1.8 证据及正式维护的操作员入口见[结算恢复指南](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.9/docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。
 
-禁用／移除连接器只释放 Host 连接，不停止／卸载独立运行的 Runtime，也不删除它的数据。先完成清理再禁用／移除。连接器 0.0.5 只改文档与元数据，0.0.3／0.0.4 连接设置无需迁移，输入门禁及权限不变。
+禁用／移除连接器只释放 Host 连接，不停止／卸载独立运行的 Runtime，也不删除它的数据。先完成清理再禁用／移除。连接器 0.0.6 更新指引与元数据，Runtime 修复单独交付；0.0.3／0.0.4／0.0.5 连接设置无需迁移，输入门禁及权限不变。

@@ -1,3 +1,7 @@
+## 2026-10-27 执行 0.1.9 / Execution 0.1.9
+
+修复原任务计划和 API 派发的输入终态结算。活动／未知输入和证据不完整仍阻止维护；受影响的 0.1.8 用户通过新版独立维护入口验证原证据后正常升级。连接器 0.0.6 更新推荐版本，配置／权限及恢复策略不变；商店最终批准仍由维护者处理。不改模型阈值、不恢复学习开发。见 [0.1.9 发布记录](docs/releases/EXECUTION_019_20261027.md)及[0.1.8 恢复流程](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。 / Fix original task-plan and API-dispatch input settlement. Active/unknown input and incomplete evidence still block maintenance. Affected 0.1.8 installations use the new release's external verifier before the normal update. Connector 0.0.6 changes the recommended version, retaining settings, permissions and recovery policy; maintainers still own final store approval. Model thresholds and paused learning scope remain unchanged.
+
 ## 2026-10-24 执行 0.1.8 / Execution 0.1.8
 
 本次交付执行 Runtime 更新检查、确切目标确认、任务维护锁及恢复；0.1.7 及更早版本先手动安装。Amadeus Host 更新为独立上游 PR，扩展 wheel 保持 0.0.4；不恢复学习开发。确切包验收与限制见 [0.1.8 发布记录](docs/releases/EXECUTION_018_20261024.md)。下方为历史范围。 / This release delivers Runtime update checks, exact-target confirmation, task maintenance locks and recovery. Versions 0.1.7 and earlier require manual installation. Amadeus Host updates are a separate upstream PR; the extension wheel stays at 0.0.4 and learning remains paused. See the [0.1.8 release record](docs/releases/EXECUTION_018_20261024.md) for package acceptance and limits. Entries below are historical.

@@ -6,7 +6,9 @@ from pathlib import Path
 from app.core.receipt_action import _receipt_action
 
 
-_FOLDERS = ("commands", "responses", "agent-commands", "grounding", "sequence-progress", "workflow-trials", "workflow-runners", "workflow-observations", "workflow-decisions")
+_FOLDERS = ("commands", "responses", "agent-commands", "grounding", "sequence-progress", "workflow-trials", "workflow-runners", "workflow-observations", "workflow-decisions",
+            "task-plans", "task-plan-runners", "task-plan-reviews", "task-plan-verifications", "task-plan-decisions",
+            "task-plan-observations", "task-plan-manual-observations", "task-plan-video-playback")
 _CONTROLS = {"agent_command_status", "agent_command_continue", "agent_command_cancel"}
 _READ_ONLY = {"discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "close_launched_window", "desktop_capture", "grounding_prepare", "grounding_resolve", "grounding_status", "grounding_cancel", "close", "learning_start", "learning_status", "learning_stop", "learning_recover", "learning_event", "learning_review", "learning_projection", "learning_import", "learning_library", "learning_memory", "learning_save_interface", "learning_commit", "learning_project", "learning_reuse", "learning_adopt_source", "learning_template", "learning_feedback", "learning_workflow"}
 
@@ -33,7 +35,7 @@ def _catalog(root):
             result[path.relative_to(root).as_posix()] = raw
     from .decision_configuration import PROFILE_SNAPSHOT
     # 原判断策略和认证账本属于恢复准入证据；不读取用户密钥或扫描其他缓存。
-    for name in ("session-resources.json", "report.json", PROFILE_SNAPSHOT, "judgments/decisions.sqlite3",
+    for name in ("session-resources.json", "report.json", "closing.json", PROFILE_SNAPSHOT, "judgments/decisions.sqlite3",
                  "judgments/decisions.sqlite3-journal", "judgments/decisions.sqlite3-wal", "judgments/decisions.sqlite3-shm"):
         path = root / name
         if path.exists():
@@ -72,11 +74,42 @@ def _catalog(root):
         elif isinstance(value, list):
             for child in value:
                 native_frames(child)
+    def plan_evidence(value):
+        nonlocal total
+        if isinstance(value, dict):
+            if set(value) == {"path", "sha256"}:
+                from .task_plan_input_terminal import evidence_path
+                relative = evidence_path(root, value)
+                path = root / relative
+                if relative not in result:
+                    _require(len(result) < 4096 and total + path.stat().st_size <= 64 * 1024 * 1024, "catalog_limit")
+                    data = path.read_bytes()
+                    total += len(data)
+                    _require(total <= 64 * 1024 * 1024, "catalog_limit")
+                    result[relative] = data
+                _require(hashlib.sha256(result[relative]).hexdigest() == value["sha256"], "task_plan_evidence_changed")
+            if "image_path" in value and "sha256" in value:
+                frame(value)
+            for child in value.values():
+                plan_evidence(child)
+        elif isinstance(value, list):
+            for child in value:
+                plan_evidence(child)
     # 只闭合原业务引用，不扫描截图缓存或学习资产。
     for relative, raw in list(result.items()):
         if not relative.endswith(".json"):
             continue
         value = _json(raw)
+        if relative.startswith(("task-plans/", "task-plan-")):
+            plan_evidence(value)
+        if (relative.startswith("grounding/") and isinstance(value.get("execution_id"), str)
+                and value["execution_id"].startswith("api-")):
+            plan_evidence(value)
+        if relative.startswith("agent-commands/") and any(
+                isinstance(value.get(key), dict) and isinstance(value[key].get("packet"), dict)
+                and "task-plans/" + str(value[key]["packet"].get("run_id")) + ".json" in result
+                for key in ("pre_action_review", "field_review")):
+            plan_evidence(value)
         if relative.startswith(("responses/", "agent-commands/")):
             # 原选择证明的两张图闭合到同一目录清单，不扫描截图缓存。
             def selection_frames(item):
@@ -242,6 +275,9 @@ def inspect_session_input_terminal(session_dir, library_root, *, admission_recor
                      and response.get("status") in {"returned", "failed"}, "response_unproven")
             result = response.get("result") or {}
             _require(isinstance(result, dict), "result_invalid")
+            if kind == "task_plan":
+                # 控制响应可早于原输入终态；统一在冻结来源和运行器闭合后结算。
+                return None
 
             if result.get("contract_version") == "vision_admission_rejection.v1":
                 from app.execution.session_resources import decode_session_resources
@@ -397,6 +433,12 @@ def inspect_session_input_terminal(session_dir, library_root, *, admission_recor
                 _require(Path(path).stem in commands and commands[Path(path).stem].get("kind") in {"input_sequence", "form_fill"}, "orphan_progress")
             if path.startswith("grounding/") and values[path].get("execution_id") is not None:
                 eid = values[path]["execution_id"]
+                if isinstance(eid, str) and eid.startswith("api-") and eid not in commands:
+                    from .task_plan_input_terminal import settle_api_grounding
+                    identity = settle_api_grounding(path, values, results, _worker, _continued_grounding_action)
+                    _require(identity not in grounded_dispatches, "grounding_dispatch_claim_duplicate")
+                    grounded_dispatches.add(identity)
+                    continue
                 _require(isinstance(eid, str) and eid in commands
                          and (commands[eid].get("request") or {}).get("grounding_request_id") == values[path].get("request_id"), "orphan_grounding_execution")
                 if commands[eid].get("kind") == "agent_command_continue":
@@ -439,6 +481,8 @@ def inspect_session_input_terminal(session_dir, library_root, *, admission_recor
                 eid = Path(path).stem
                 _require(eid in commands and (values.get("responses/" + eid + ".json", {}).get("result") or {}).get("contract_version") == "agent_command.v1", "orphan_worker")
                 _worker(values[path], eid)
+        from .task_plan_input_terminal import settle_task_plan_inputs
+        results.update(settle_task_plan_inputs(root, values, raw, input_result))
         settlements, settled_trials = {}, {}
         trials = {Path(path).stem: value for path, value in values.items() if path.startswith("workflow-trials/trial-") and path.count("/") == 1}
         for path, runner in values.items():
