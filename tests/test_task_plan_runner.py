@@ -214,7 +214,7 @@ def test_owner_reopen_is_read_only_and_source_cannot_be_reclassified(tmp_path, m
     for request in ({"action": "cancel", "run_id": s.run_id},
                     {"action": "continue", "run_id": s.run_id, "wait_id": s.first["wait"]["wait_id"]}):
         with pytest.raises(ValueError, match="owner_mismatch"):
-            other.control(request, "other-control")
+            other.control(request, "other-control-" + request["action"])
     path = s.runtime.backend._source_path(s.first["plan_id"])
     original = read_json_snapshot(path)
     write_json_snapshot(path, {**original, "source_kind": "reviewed_program"})

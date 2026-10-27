@@ -13,7 +13,7 @@ profiles, thresholds or prompts to bypass a refusal.
 
 本资源连接器使用用户独立安装并启动、带鉴权的 Windows 本机 HTTP MCP Runtime，不会启动外部代码。本机连接密钥与模型 API Key 不同。本 Skill 仅支持原有 external API 路线；已配置模型服务会接收识别／审核截图及任务信息，可能按调用收费。输入须有明确任务授权及 Runtime opt-in；`--allow-local-input` 也会关闭自动风险拦截。不能改 profile、阈值或提示词来绕过拒绝。
 
-Recommend Runtime 0.1.9. The minimum HTTP/pre-action contract is 0.1.6;
+Recommend Runtime 0.1.10. The minimum HTTP/pre-action contract is 0.1.6;
 the service must also supply field-review/continue. Runtime 0.1.5 has field
 review but no HTTP entry point. This connector does not qualify Runtime 0.1.7
 current-Agent mode through Amadeus. Manually inspect the MCP initialization
@@ -23,8 +23,10 @@ version, authentication, discovered tools and active schemas before input:
 review/continue support. Logical names below are Runtime names, not guesses
 about Pi's namespaced/hashed tool names. Neither a version marker nor a later
 release proves compatibility; no automatic compatibility detector is provided.
+The 0.1.6 protocol floor does not qualify every later 0.1.x version; use
+validation evidence for the exact Runtime/connector versions and route.
 
-推荐 Runtime 0.1.9。最低 HTTP／前置审核合同为 0.1.6，服务还须提供文字结果审核／继续。Runtime 0.1.5 有文字审核但没有 HTTP 入口。本连接器没有通过 Amadeus 核验 Runtime 0.1.7 current-Agent 模式。输入前人工检查 MCP 初始化版本、鉴权、已发现工具及活动 schema：`instant_start`、`instant_status`、`instant_run`、`instant_result`、`instant_image`、`instant_stop`，以及 task-plan／原命令状态和审核／继续支持。下文逻辑名称是 Runtime 名称，不能据此猜 Pi 带命名空间／哈希的工具名。版本号或后续发行不能证明兼容，本包没有自动兼容探测器。
+推荐 Runtime 0.1.10。最低 HTTP／前置审核合同为 0.1.6，服务还须提供文字结果审核／继续。Runtime 0.1.5 有文字审核但没有 HTTP 入口。本连接器没有通过 Amadeus 核验 Runtime 0.1.7 current-Agent 模式。输入前人工检查 MCP 初始化版本、鉴权、已发现工具及活动 schema：`instant_start`、`instant_status`、`instant_run`、`instant_result`、`instant_image`、`instant_stop`，以及 task-plan／原命令状态和审核／继续支持。下文逻辑名称是 Runtime 名称，不能据此猜 Pi 带命名空间／哈希的工具名。版本号或后续发行不能证明兼容，本包没有自动兼容探测器。0.1.6 的协议起点不表示所有后续 0.1.x 版本均已具备资格；须按确切 Runtime／连接器版本及路线的验证证据判断。
 
 ## Start and select / 启动与选择
 
@@ -207,12 +209,17 @@ After Pi disconnects or encounters an owner conflict,
 **operator-only**. Pi must not call either tool to take over the old session or
 resume its workflow. Main's bound-image review and continuation of the original
 job in the same live session remain supported under the contracts above.
-Runtime 0.1.9 fixes `task_plan` input-settlement validation. For retained Runtime
-0.1.8 evidence, follow the [settlement recovery guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.9/docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)
+Runtime 0.1.10 adds settlement for proven rejected `task_plan` controls and
+successful `observe` requests. A rejection needs its original durable
+before-dispatch proof; an error string alone cannot prove zero input.
+Successful observation needs its bound original capture and ledger evidence.
+Settlement of `recover` and `resume_pre_dispatch` remains unqualified; no
+support for those paths is claimed here. For retained evidence, follow the
+[settlement recovery guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.10/docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)
 and its maintained operator entry point. Keep original receipts and diagnostics;
 unknown settlement does not prove that no input occurred or authorize replay.
 
-Pi 断线或遇到 owner 冲突后，`instant_recovery_preview` 和 `instant_recover_session` 两个工具均**仅限操作员使用**。Pi 不得调用任一工具接管旧会话或续跑其工作流。同一活动会话中 Main 对绑定图像审核并继续原 job 的路径仍按上文合同保留。Runtime 0.1.9 修复 `task_plan` 输入结算验证；保留的 Runtime 0.1.8 证据须按[结算恢复指南](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.9/docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)及其正式维护的操作员入口处理。保留原回执和诊断；未知结算既不能证明没有执行输入，也不授权重放。
+Pi 断线或遇到 owner 冲突后，`instant_recovery_preview` 和 `instant_recover_session` 两个工具均**仅限操作员使用**。Pi 不得调用任一工具接管旧会话或续跑其工作流。同一活动会话中 Main 对绑定图像审核并继续原 job 的路径仍按上文合同保留。Runtime 0.1.10 新增证据完整的拒绝 `task_plan` 控制及成功 `observe` 请求的结算；拒绝须有原始持久化派发前证明，错误字符串本身不能证明零输入，成功观察须有绑定的原截图及账本证据。`recover`、`resume_pre_dispatch` 的结算仍未具备资格，此处不声称支持。保留证据须按[结算恢复指南](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.10/docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)及其正式维护的操作员入口处理。保留原回执和诊断；未知结算既不能证明没有执行输入，也不授权重放。
 
 ## Owned-window and host cleanup / 自有窗口与宿主收尾
 
@@ -256,14 +263,14 @@ browser profiles, cookies, history, sessions or retained extension data.
 
 ## Evidence boundary / 证据边界
 
-Connector 0.0.6 updates installation/recovery guidance and metadata; Runtime
-fixes are delivered separately. Existing 0.0.3/0.0.4/0.0.5 connection settings
+Connector 0.0.7 updates installation/recovery guidance and metadata; Runtime
+fixes are delivered separately. Existing 0.0.3/0.0.4/0.0.5/0.0.6 connection settings
 need no migration, and permissions/input gates do not change.
 [Controlled installed Pi evidence](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.6/docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
 belongs to connector 0.0.4/Runtime 0.1.6; it does not validate the
-0.0.6/0.1.9 combination. Read the separate [historical 0.0.5 author validation record](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.5/docs/verification/AMADEUS_CONNECTOR_005_20261026.md)
+0.0.7/0.1.10 combination. Read the separate [historical 0.0.5 author validation record](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.5/docs/verification/AMADEUS_CONNECTOR_005_20261026.md)
 for its exact scope of packaging/protocol checks. Publication, author checks,
 installed GUI execution and independent approval are separate results; these
 records do not establish unattended accuracy or performance.
 
-连接器 0.0.6 更新安装／恢复指引与元数据，Runtime 修复单独交付；既有 0.0.3／0.0.4／0.0.5 连接设置无需迁移，权限／输入门禁不变。[受控安装态 Pi 证据](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.6/docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)属于连接器 0.0.4／Runtime 0.1.6，不验证 0.0.6／0.1.9 组合。打包／协议检查的确切范围见单独的 [0.0.5 历史作者验证记录](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.5/docs/verification/AMADEUS_CONNECTOR_005_20261026.md)。作者发布、作者检查、安装态 GUI 执行及独立批准分别记录；这些记录不证明无人准确率或性能。
+连接器 0.0.7 更新安装／恢复指引与元数据，Runtime 修复单独交付；既有 0.0.3／0.0.4／0.0.5／0.0.6 连接设置无需迁移，权限／输入门禁不变。[受控安装态 Pi 证据](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.6/docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)属于连接器 0.0.4／Runtime 0.1.6，不验证 0.0.7／0.1.10 组合。打包／协议检查的确切范围见单独的 [0.0.5 历史作者验证记录](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.5/docs/verification/AMADEUS_CONNECTOR_005_20261026.md)。作者发布、作者检查、安装态 GUI 执行及独立批准分别记录；这些记录不证明无人准确率或性能。

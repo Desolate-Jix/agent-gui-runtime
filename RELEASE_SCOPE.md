@@ -1,3 +1,7 @@
+## 2026-10-27 执行 0.1.10 / Execution 0.1.10
+
+修复具有原始派发前证明的拒绝控制请求及成功只读 observe 的维护结算。未知／中断／篡改证据仍拒；旧拒绝记录不补造证明，高级 recover／resume_pre_dispatch 仍未认证。连接器 0.0.7 更新推荐组合，设置／权限和恢复边界不变。见 [0.1.10 发布记录](docs/releases/EXECUTION_0110_20261027.md)。 / Fix maintenance settlement for proven pre-dispatch control rejections and bound read-only observations. Unknown/interrupted/altered evidence stays blocked; old refusals are not backfilled and advanced recover/resume_pre_dispatch settlement stays unqualified. Connector 0.0.7 updates the recommended combination without changing settings, permissions or recovery policy.
+
 ## 2026-10-27 执行 0.1.9 / Execution 0.1.9
 
 修复原任务计划和 API 派发的输入终态结算。活动／未知输入和证据不完整仍阻止维护；受影响的 0.1.8 用户通过新版独立维护入口验证原证据后正常升级。连接器 0.0.6 更新推荐版本，配置／权限及恢复策略不变；商店最终批准仍由维护者处理。不改模型阈值、不恢复学习开发。见 [0.1.9 发布记录](docs/releases/EXECUTION_019_20261027.md)及[0.1.8 恢复流程](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。 / Fix original task-plan and API-dispatch input settlement. Active/unknown input and incomplete evidence still block maintenance. Affected 0.1.8 installations use the new release's external verifier before the normal update. Connector 0.0.6 changes the recommended version, retaining settings, permissions and recovery policy; maintainers still own final store approval. Model thresholds and paused learning scope remain unchanged.

@@ -118,11 +118,13 @@ def test_late_continue_only_proven_wait_rejection_is_zero_input(tmp_path, monkey
     s, _ = arranged(tmp_path, monkeypatch, cancel=True, zero=True)
     command = {"kind": "task_plan", "request": {"action": "continue", "run_id": s.run_id,
         "wait_id": s.first["wait"]["wait_id"]}}
-    with pytest.raises(ValueError, match="workflow_runner_wait_id_mismatch"):
+    with pytest.raises(ValueError, match="workflow_runner_wait_id_mismatch") as caught:
         s.runtime.control(command["request"], "late-continue")
     save(s.session, "commands", "late-continue", command)
     response = {"command": command, "status": "failed", "error_type": "ValueError",
-                "error": "workflow_runner_wait_id_mismatch", "result": None}
+                "error": "workflow_runner_wait_id_mismatch", "result": None, "automatic_retry_allowed": False}
+    from scripts.run_local_step_session import preserve_input_admission_rejection
+    preserve_input_admission_rejection(response, caught.value, "late-continue")
     save(s.session, "responses", "late-continue", response)
     assert inspect(s.session)["commands"]["late-continue"]["action_executed"] is False
     response["error"] = "unexpected_after_dispatch"

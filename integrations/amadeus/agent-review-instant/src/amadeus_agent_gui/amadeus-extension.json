@@ -1,16 +1,16 @@
 {
   "schema": "amadeus.extension/v0",
   "id": "io.github.desolate-jix.gui-runtime",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "display_name": {
     "en": "Windows GUI Runtime Connector",
     "zh-CN": "Windows GUI Runtime 连接器"
   },
   "description": {
-    "en": "Connector to a separately installed and started Windows GUI Runtime. Recommend 0.1.9; require 0.1.6+ authenticated HTTP MCP and review/continue tools, with actual capability checks. Configure trusted loopback runtime_url and connection_token; bind MCP and Skill to Pi. You deploy and stop Runtime separately. Disabling/uninstalling this connector does not stop/uninstall Runtime or delete its data. External model APIs may charge usage fees.",
-    "zh-CN": "连接器：需自行单独安装、配置并启动 Windows GUI Runtime。建议使用 0.1.9；要求具备 0.1.6 起提供的鉴权 HTTP MCP 和审核／继续工具，并核对实际能力。填写可信本机 runtime_url 和 connection_token，将 MCP 与 Skill 绑定 Pi。Runtime 由用户独立部署和停止；停用／卸载本连接器不会停止、卸载 Runtime 或删除其数据。外部模型 API 可能按用量收费。"
+    "en": "Connector to a separately installed and started Windows GUI Runtime. Recommend 0.1.10; 0.1.6 marks the minimum HTTP protocol, not a compatibility range. Check the actual version, authenticated HTTP MCP and review/continue tools. Configure trusted loopback runtime_url and connection_token; bind MCP and Skill to Pi. You deploy and stop Runtime separately. Disabling/uninstalling this connector does not stop/uninstall Runtime or delete its data. External model APIs may charge usage fees.",
+    "zh-CN": "连接器：需自行单独安装、配置并启动 Windows GUI Runtime。建议使用 0.1.10；0.1.6 表示最低 HTTP 协议起点，不保证所有后续版本兼容。须核对实际版本、鉴权 HTTP MCP 及审核／继续工具。填写可信本机 runtime_url 和 connection_token，将 MCP 与 Skill 绑定 Pi。Runtime 由用户独立部署和停止；停用／卸载本连接器不会停止、卸载 Runtime 或删除其数据。外部模型 API 可能按用量收费。"
   },
-  "homepage": "https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.6/integrations/amadeus/agent-review-instant/README.md",
+  "homepage": "https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.7/integrations/amadeus/agent-review-instant/README.md",
   "repository": "https://github.com/Desolate-Jix/agent-gui-runtime",
   "author": {
     "name": "Desolate-Jix"

@@ -90,7 +90,7 @@ def _exclusive(path):
 
 class WorkflowRunner:
     def __init__(self, session_dir, *, library_root=None, submit_command, read_result, verify_step,
-                 settle_failed=None, backend: RunBackend | None = None):
+                 settle_failed=None, backend: RunBackend | None = None, before_input_capability=None):
         if not all(callable(item) for item in (submit_command, read_result, verify_step)):
             raise ValueError("workflow_runner_callbacks_required")
         self.session = Path(session_dir).resolve()
@@ -110,6 +110,7 @@ class WorkflowRunner:
         self.read_result = read_result
         self.verify_step = verify_step
         self.settle_failed = settle_failed
+        self.before_input_capability = before_input_capability
         self.root = self.session / ("task-plan-runners" if self.source_kind == "caller_plan" else "workflow-runners")
         self.active_path = self.root / "active.json"
         self.lock_path = self.root / "active.lock"
@@ -451,6 +452,8 @@ class WorkflowRunner:
                 # 新 Trial 只在同一活动锁与准入检查之后创建；幂等回读仍核验原绑定。
                 if state is None:
                     self._assert_start_available()
+                    if self.before_input_capability is not None:
+                        self.before_input_capability()
                 _prepare_trial()
             self._recovery_guard(self._trial("status", run_id), state)
             if state is not None:
@@ -460,6 +463,8 @@ class WorkflowRunner:
                 return self._snapshot(state)
             if _prepare_trial is None:
                 self._assert_start_available()
+                if self.before_input_capability is not None:
+                    self.before_input_capability()
             self._trial("status", run_id)
             state = {"schema": _SCHEMA, "run_id": run_id, "start_request_id": request_id, **self._source_fields(),
                      "mode": mode, "vision_capabilities": vision_capabilities,
@@ -541,6 +546,8 @@ class WorkflowRunner:
             controls = state.setdefault("control_requests", {})
             if request_id in controls:
                 raise ValueError("workflow_runner_control_conflict")
+            if self.before_input_capability is not None:
+                self.before_input_capability()
             controls[request_id] = {"schema": "workflow_runner_control.v1", "command_sha256": _digest({
                 "kind": self._control_kind(), "request": {"action": "continue", "run_id": run_id, "wait_id": wait_id}})}
             state["resume_requests"][request_id] = wait_id
@@ -576,6 +583,8 @@ class WorkflowRunner:
                 self._recovery_guard(trial, state, revalidate_initial=True)
                 if not state.get("wait") or state["wait"]["wait_id"] != wait_id or not state.get("ticket"):
                     raise ValueError("workflow_runner_intervention_wait_id_mismatch")
+            if self.before_input_capability is not None:
+                self.before_input_capability()
             fresh = self.backend.resume_pre_dispatch(run_id, request_id, wait_id, review)
             old = fresh["intervention_resumes"][request_id]["packet"]
             if not state.get("ticket") or state["ticket"]["execution_request_id"] != old["execution_request_id"]:

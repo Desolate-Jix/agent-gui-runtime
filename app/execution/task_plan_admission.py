@@ -108,11 +108,12 @@ class TaskPlanRuntime(WorkflowRuntime):
         self.requires_client_vision = requires_client_vision
         self._enabled_run = None
         self._control_id = None
+        self._control_receipt = None
         self._next_tick = 0.0
         self.backend = TaskPlanBackend(self.session, owner_id=owner_id)
         self.runner = WorkflowRunner(self.session, backend=self.backend,
             submit_command=self._enqueue, read_result=self._read_result, verify_step=self._verify,
-            settle_failed=self._verify)
+            settle_failed=self._verify, before_input_capability=self._before_input_capability)
         if self.agent_jobs is not None:
             self.agent_jobs.field_review_plan_validator = self._field_review_plan_matches
             self.agent_jobs.pre_action_plan_validator = self._pre_action_plan_matches
@@ -214,6 +215,7 @@ class TaskPlanRuntime(WorkflowRuntime):
         if validate_task_plan_target(self._target_identity()) != state["target_identity"]:
             raise ValueError("task_plan_target_changed_before_dispatch")
         self.reviewed_runtime._admit_input(execution_id, command)
+        self._before_input_capability()
         super()._enqueue(execution_id, command)
 
     def _verify(self, run_id, request_id, execution_id):
@@ -335,6 +337,7 @@ class TaskPlanRuntime(WorkflowRuntime):
                 if read_json_snapshot(path).get("status") not in _TERMINAL:
                     raise ValueError("task_plan_successor_agent_job_not_quiescent")
             target = validate_task_plan_target(self._target_identity())
+            self._before_input_capability()
             child = self.backend.start_successor(plan, target, successor, transport_request_id=self._control_id,
                 vision_capabilities=request.get("vision_capabilities"),
             recovery_policy=request.get("recovery_policy", "intervention_v1" if request["plan"]["schema_version"] == "task_plan.v3" else "legacy"))
@@ -425,6 +428,7 @@ class TaskPlanRuntime(WorkflowRuntime):
             if self.requires_client_vision and "vision_capabilities" not in request["command"]:
                 raise ValueError("task_plan_recovery_client_vision_capabilities_required")
             if prior_control is None:
+                self._before_input_capability()
                 controls[request_id] = {"schema": "workflow_runner_control.v1", "command_sha256": digest}
                 self.runner._save(state)
             prior = trial.get("intervention_recovery")
@@ -447,7 +451,30 @@ class TaskPlanRuntime(WorkflowRuntime):
             self._enqueue(permit["recovery_request_id"], permit["command"])
             return self._review_snapshot(self.runner._snapshot(state))
 
-    def control(self, request, request_id):
+    def _before_input_capability(self):
+        if self._control_receipt is not None:
+            self._control_receipt.before_input_capability()
+
+    def control(self, request, request_id, *, before_control=None):
+        _id(request_id, "request_id")
+        from app.core.task_plan_control_receipt import TaskPlanControlReceipt
+        if self._control_receipt is not None:
+            raise ValueError("task_plan_control_already_processing")
+        receipt = TaskPlanControlReceipt(self.session, self.backend.owner_id, request_id, request)
+        self._control_receipt = receipt
+        try:
+            if before_control is not None:
+                before_control()
+            result = self._control(request, request_id)
+            receipt.returned()
+            return result
+        except Exception as error:
+            receipt.failed(error)
+            raise
+        finally:
+            self._control_receipt = None
+
+    def _control(self, request, request_id):
         request = validate_task_plan_request(request)
         _id(request_id, "request_id")
         action = request["action"]

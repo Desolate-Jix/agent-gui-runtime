@@ -129,6 +129,8 @@ def preserve_input_admission_rejection(response, error, command_id):
     from app.vision.agent_command_jobs import AgentCommandVisionAdmissionError
     if isinstance(error, (AgentCommandAdmissionError, AgentCommandVisionAdmissionError)):
         response['result'] = error.before_dispatch_result(command_id)
+    from app.core.task_plan_control_receipt import preserve_control_rejection
+    preserve_control_rejection(response, error, command_id)
 
 
 def check_agent_command_admission(jobs, kind, command=None):
@@ -474,18 +476,23 @@ def main():
                 if (kind.startswith("learning_") or kind == "enable_agent_learning"
                         or "enable_agent_learning" in command):
                     raise ValueError("learning_mode_retired: use execution commands")
-                workflow_runtime.admit(path.stem, command)
-                task_plan_runtime.admit(path.stem, command)
-                check_agent_command_admission(agent_jobs, kind, command)
+                def admit_control():
+                    workflow_runtime.admit(path.stem, command)
+                    task_plan_runtime.admit(path.stem, command)
+                    check_agent_command_admission(agent_jobs, kind, command)
+                if kind == "task_plan":
+                    response["result"] = task_plan_runtime.control(command["request"], path.stem,
+                        before_control=admit_control)
+                else:
+                    admit_control()
                 workflow_bindings = None
-                if (command.get("request") or {}).get("target_memory") is not None:
+                if kind != "task_plan" and (command.get("request") or {}).get("target_memory") is not None:
                     from app.learning_memory.workflow_target_bindings import load_workflow_target_bindings
                     workflow_bindings = load_workflow_target_bindings(co._memory_library_root, out,
                         execution_request_id=path.stem, command=command)
-                agent_result = dispatch_agent_command(agent_jobs, path.stem, command, target,
-                    workflow_bindings=workflow_bindings)
+                agent_result = (dispatch_agent_command(agent_jobs, path.stem, command, target,
+                    workflow_bindings=workflow_bindings) if kind != "task_plan" else None)
                 if kind == "task_plan":
-                    response["result"] = task_plan_runtime.control(command["request"], path.stem)
                     report["task_plan_run"] = response["result"]
                     if command["request"]["action"] in {"start", "continue"}:
                         report.pop("task_plan_runtime_error", None)

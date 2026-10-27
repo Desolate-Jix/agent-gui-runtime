@@ -8,7 +8,7 @@ from app.core.receipt_action import _receipt_action
 
 _FOLDERS = ("commands", "responses", "agent-commands", "grounding", "sequence-progress", "workflow-trials", "workflow-runners", "workflow-observations", "workflow-decisions",
             "task-plans", "task-plan-runners", "task-plan-reviews", "task-plan-verifications", "task-plan-decisions",
-            "task-plan-observations", "task-plan-manual-observations", "task-plan-video-playback")
+            "task-plan-observations", "task-plan-manual-observations", "task-plan-video-playback", "task-plan-controls")
 _CONTROLS = {"agent_command_status", "agent_command_continue", "agent_command_cancel"}
 _READ_ONLY = {"discover", "launch", "select", "maximize", "capture", "read_text", "prepare_models", "release_models", "close_launched_window", "desktop_capture", "grounding_prepare", "grounding_resolve", "grounding_status", "grounding_cancel", "close", "learning_start", "learning_status", "learning_stop", "learning_recover", "learning_event", "learning_review", "learning_projection", "learning_import", "learning_library", "learning_memory", "learning_save_interface", "learning_commit", "learning_project", "learning_reuse", "learning_adopt_source", "learning_template", "learning_feedback", "learning_workflow"}
 

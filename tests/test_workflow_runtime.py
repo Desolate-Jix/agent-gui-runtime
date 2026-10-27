@@ -147,16 +147,21 @@ def test_active_workflow_rejects_competing_input_and_allows_original_ticket(runt
     runtime.admit("close", {"kind": "close"})
 
 
-def test_run_and_continue_are_live_only_closed_control_contracts():
+def test_retired_workflow_control_rejected_and_execution_controls_stay_closed():
     from app.instant_mcp import InstantCommand
     from app.learning_memory.workflow_control import workflow_control
     request = {"action": "run", "run_id": "trial-" + "a" * 64, "mode": "single"}
     command = {"kind": "learning_workflow", "request": request}
-    assert InstantCommand.model_validate(command).command() == command
+    with pytest.raises(ValueError, match="learning_workflow"):
+        InstantCommand.model_validate(command).command()
     with pytest.raises(ValueError, match="live_host"):
         workflow_control(None, None, request, "offline")
+    execution = {"kind": "task_plan", "request": {"action": "continue",
+        "run_id": request["run_id"], "wait_id": "original-wait"}}
+    assert InstantCommand.model_validate(execution).command() == execution
     with pytest.raises(ValueError):
-        InstantCommand.model_validate({**command, "request": {**request, "bindings": {}}}).command()
+        InstantCommand.model_validate({**execution,
+            "request": {**execution["request"], "bindings": {}}}).command()
 
 
 def test_queued_status_defers_original_ticket_then_submits_once(runtime_scene):

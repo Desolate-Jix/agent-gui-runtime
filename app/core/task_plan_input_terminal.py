@@ -113,10 +113,51 @@ def settle_task_plan_inputs(root, values, raw, input_result):
 
     controls = {Path(path).stem: value for path, value in values.items()
                 if path.startswith("commands/") and value.get("kind") == "task_plan"}
+    results, rejected = {}, set()
+    _require(all(path.count("/") == 1 for path in values if path.startswith("task-plan-controls/")),
+        "control_receipt_layout")
+    receipts = {Path(path).stem: value for path, value in values.items()
+        if path.startswith("task-plan-controls/")}
+    receipt_owners = set()
+    for request_id, receipt in receipts.items():
+        path = "task-plan-controls/" + request_id + ".json"
+        command = controls.get(request_id)
+        response = values.get("responses/" + request_id + ".json")
+        expected = {"schema": "task_plan_control_receipt.v1", "session_directory": str(root),
+            "owner_id": receipt.get("owner_id"), "request_id": request_id,
+            "command_sha256": _digest(command)}
+        _require(path in values and isinstance(command, dict) and isinstance(response, dict)
+            and response.get("command") == command and isinstance(receipt.get("owner_id"), str)
+            and bool(receipt["owner_id"].strip()) and len(receipt["owner_id"]) <= 160
+            and all(receipt.get(key) == value for key, value in expected.items())
+            and type(receipt.get("input_dispatch_started")) is bool, "control_receipt_binding")
+        receipt_owners.add(receipt["owner_id"])
+        if receipt.get("phase") == "returned":
+            _require(receipt == {**expected, "phase": "returned",
+                "input_dispatch_started": receipt["input_dispatch_started"]}
+                and response.get("status") == "returned", "control_receipt_unsettled")
+            continue
+        _require(receipt == {**expected, "phase": "rejected_before_dispatch", "input_dispatch_started": False,
+                "error_type": response.get("error_type"), "error_sha256": _digest(response.get("error"))}
+            and response.get("status") == "failed" and isinstance(response.get("error_type"), str)
+            and isinstance(response.get("error"), str) and response.get("automatic_retry_allowed") is False
+            and response.get("result") == {"contract_version": "task_plan_control_rejection.v1",
+                "request_id": request_id, "status": "rejected_before_dispatch", "input_attempted": False,
+                "action_executed": False, "record": {"path": path, "sha256": hashlib.sha256(raw[path]).hexdigest()}}
+            and (response.get("result") or {}).get("input_attempted") is False
+            and (response.get("result") or {}).get("action_executed") is False
+            and "agent-commands/" + request_id + ".json" not in values
+            and response.get("observation") is None, "control_rejection_unproven")
+        results[request_id] = {"kind": "task_plan", "terminal_status": "not_dispatched", "action_executed": False}
+        rejected.add(request_id)
+    _require(len(receipt_owners) <= 1, "control_owner_mismatch")
     artifacts = {path: value for path, value in values.items()
                  if path.startswith(("task-plans/", "task-plan-runners/"))}
-    if not controls and not artifacts:
+    if not controls and not artifacts and not receipts:
         return {}
+    if not artifacts:
+        _require(set(controls) == rejected, "runner_missing")
+        return results
     backend = TaskPlanBackend(root)
     states, runners, sources = {}, {}, set()
     for path, value in artifacts.items():
@@ -142,6 +183,27 @@ def settle_task_plan_inputs(root, values, raw, input_result):
         else:
             _require(path.startswith("task-plans/task-plan-"), "artifact_unknown")
     _require(states and set(states) == set(runners), "runner_missing")
+    _require(not receipt_owners or all(state["owner_id"] in receipt_owners for state in states.values()),
+        "control_owner_mismatch")
+    for request_id in rejected:
+        request = controls[request_id].get("request")
+        if (isinstance(request, dict) and request.get("action") == "observe"
+                and all(isinstance(request.get(key), str) for key in
+                    ("run_id", "execution_request_id", "observation_request_id"))):
+            state = states.get(request.get("run_id"), {})
+            observations = state.get("manual_observations", {})
+            _require(isinstance(observations, dict), "control_observation_unsettled")
+            entries = observations.get(request.get("execution_request_id"), {})
+            _require(isinstance(entries, dict) and isinstance(entries.get("requests", {}), dict),
+                "control_observation_unsettled")
+            _require(request.get("observation_request_id") not in entries.get("requests", {}),
+                "control_observation_unsettled")
+        _require(all(request_id not in state.get(key, {}) for state in states.values()
+            for key in ("verification_results", "verification_requests", "cancel_requests", "prepare_requests",
+                "intervention_resumes")) and all(request_id not in runner.get(key, {}) for runner in runners.values()
+                for key in ("control_requests", "resume_requests", "intervention_resume_requests"))
+            and all(request_id not in {state.get("start_request_id"), state.get("start_transport_request_id")}
+                for state in states.values()), "control_rejection_conflict")
     _require({p for p in artifacts if p.startswith("task-plans/task-plan-")} == sources, "source_orphan")
     active = artifacts.get("task-plan-runners/active.json")
     _require(active is not None and active.get("run_id") in states, "active_binding")
@@ -217,8 +279,9 @@ def settle_task_plan_inputs(root, values, raw, input_result):
         _require(cancel_id is None or state["cancel_requests"].get(cancel_id) is True
             and controls.get(cancel_id) == {"kind": "task_plan", "request": {"action": "cancel", "run_id": run_id}}, "cancel_binding")
 
-    results = {}
     for request_id, command in controls.items():
+        if request_id in rejected:
+            continue
         _require(set(command) == {"kind", "request"}, "control_invalid")
         request = validate_task_plan_request(command["request"])
         response = values.get("responses/" + request_id + ".json")
@@ -233,22 +296,17 @@ def settle_task_plan_inputs(root, values, raw, input_result):
         _require(run_id in states, "control_binding")
         state, runner = states[run_id], runners[run_id]
         snapshot = response.get("result")
-        if (action == "continue" and response.get("status") == "failed"
-                and response.get("error_type") == "ValueError"
-                and response.get("error") == "workflow_runner_wait_id_mismatch" and snapshot is None):
-            # resume() rejects this branch before persisting control or dispatch.
-            _require(request_id not in runner.get("resume_requests", {})
-                and request_id not in runner.get("control_requests", {}) and runner.get("wait") is None,
-                "rejection_unproven")
-            results[request_id] = {"kind": "task_plan", "terminal_status": "not_dispatched",
-                "action_executed": False, "run_id": run_id}
-            continue
         _require(response.get("status") == "returned" and isinstance(snapshot, dict)
             and all(snapshot.get(k) == state[k] for k in
                 ("run_id", "plan_id", "plan_sha256", "owner_id", "session_directory", "target_identity"))
             and snapshot.get("source_kind") == "caller_plan"
             and isinstance(snapshot.get("history"), list)
             and snapshot["history"] == state["history"][:len(snapshot["history"])], "response_binding")
+        if action == "observe":
+            from .task_plan_observation_terminal import settle_task_plan_observe
+            results[request_id] = settle_task_plan_observe(root, values, raw, state, runner,
+                request_id, request, snapshot)
+            continue
         if action == "continue":
             _require(runner.get("resume_requests", {}).get(request_id) == request["wait_id"]
                 and runner.get("control_requests", {}).get(request_id) == {

@@ -1,8 +1,9 @@
 # 确认后更新 Runtime
 
-**0.1.8 任务计划结算：** 若已完成清理但 `settle` 仍报
-`runtime_task_ledger_session_unsettled`，请按 [0.1.9 恢复流程](RUNTIME_018_SETTLEMENT_RECOVERY.md)
+**0.1.8／0.1.9 任务计划结算：** 若已完成清理但 `settle` 仍报
+`runtime_task_ledger_session_unsettled`，请按 [0.1.10 恢复流程](RUNTIME_018_SETTLEMENT_RECOVERY.md)
 处理。不要删除登记或任务证据；活动任务和未知输入仍会阻止维护。
+原始证明不足的旧拒绝记录仍可能阻断，不保证所有会话均可恢复。
 
 Runtime **0.1.8** 开始提供更新器。0.1.7 及更早版本需先关闭并核实所有旧 Runtime
 入口，再手动安装 0.1.8；旧安装器没有更新器。[发布与下载](releases/EXECUTION_018_20261024.md)。

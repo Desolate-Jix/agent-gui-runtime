@@ -1,9 +1,10 @@
 # Confirmed Runtime updates
 
-**0.1.8 task-plan settlement:** if cleanup has completed but `settle` reports
-`runtime_task_ledger_session_unsettled`, use the [0.1.9 recovery procedure](RUNTIME_018_SETTLEMENT_RECOVERY.md).
+**Task-plan settlement in 0.1.8/0.1.9:** if cleanup has completed but `settle` reports
+`runtime_task_ledger_session_unsettled`, use the [0.1.10 recovery procedure](RUNTIME_018_SETTLEMENT_RECOVERY.md).
 Do not delete registrations or task evidence. Active tasks and unknown input
-remain maintenance blockers.
+remain maintenance blockers. Old refusals without sufficient original proof may
+still refuse; recovery of every session is not guaranteed.
 
 Available in Runtime **0.1.8**. Close and verify all old Runtime entrypoints,
 then install 0.1.8 manually if upgrading from 0.1.7 or earlier: those installers

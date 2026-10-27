@@ -122,7 +122,9 @@ def execution_session(tmp_path, monkeypatch):
         def admit(self, request_id, command):
             calls.append(("plan_admit", request_id))
 
-        def control(self, request, request_id):
+        def control(self, request, request_id, *, before_control=None):
+            if before_control is not None:
+                before_control()
             calls.append("plan_control")
             return {"status": "idle"}
 

@@ -75,5 +75,6 @@ def control_field_review(runtime, snapshot, request, request_id):
     # 先验证并保存原 wait 的继续请求，再唤醒；失败后相同请求可重试而不重放输入。
     runtime.runner.resume(snapshot['run_id'], request_id, request['wait_id'])
     _check_control(runtime, snapshot)
+    runtime._before_input_capability()
     runtime.agent_jobs.continue_field(execution_id, request_id)
     return runtime._remember_active(runtime.runner.advance(snapshot['run_id']))

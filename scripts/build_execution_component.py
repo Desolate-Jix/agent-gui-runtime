@@ -62,6 +62,7 @@ RESOURCES = (
     "docs/releases/EXECUTION_017_20261024.md",
     "docs/releases/EXECUTION_018_20261024.md",
     "docs/releases/EXECUTION_019_20261027.md",
+    "docs/releases/EXECUTION_0110_20261027.md",
     "docs/RUNTIME_018_SETTLEMENT_RECOVERY.md",
     "docs/assets/readme-hero.svg", "docs/assets/readme-hero.mobile.svg",
     "docs/assets/readme-hero.zh-CN.svg", "docs/assets/readme-hero.zh-CN.mobile.svg",
