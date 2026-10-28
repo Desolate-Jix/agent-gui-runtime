@@ -34,37 +34,6 @@ Choose **Use the current Agent** to let your connected, image-capable agent loca
 - **Keep existing cleanup gates:** the `cleanup_verified=true` release path remains available. Any attempted start, active or unknown work, attached resources or unverified cleanup still requires the original cleanup path.
 - **Connector 0.0.8:** recommends Runtime 0.1.11 with unchanged connection settings, permissions, model policy and operator-only recovery. Exact regression, package and installed results belong to the [release validation record](docs/releases/EXECUTION_0111_20261028.md); no new speed or accuracy result is claimed.
 
-## Previous release: 0.1.10
-
-- **Settle proven pre-dispatch refusals:** original durable processing evidence distinguishes a rejected control from unknown input; an error string or missing record alone never permits maintenance.
-- **Observe without replay:** bind read-only observation to its original capture and revised review packet, then settle the completed original task. Unknown, interrupted or altered evidence remains blocked.
-- **Connector 0.0.7:** recommends the tested Runtime combination with unchanged settings and permissions. Advanced `recover`/`resume_pre_dispatch` settlement remains unqualified. [Scope and validation](docs/releases/EXECUTION_0110_20261027.md).
-
-## Previous release: 0.1.9
-
-- **Settle the original plan:** maintenance validates the frozen plan, runner and input receipts for completed or proven-cancelled task plans. Active or unknown input and incomplete evidence still block installation.
-- **Upgrade affected 0.1.8 installations:** run the verified new release's maintenance script against the old installation, then use the normal confirmed update path. Do not delete task registrations. [Recovery procedure](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md).
-- **Amadeus connector 0.0.6:** recommends Runtime 0.1.9 with unchanged connection settings, permissions and same-session Main review/continue behavior. [Release scope and validation](docs/releases/EXECUTION_019_20261027.md). No new speed, accuracy or token-saving claim.
-
-## Previous release: 0.1.8
-
-- **Check automatically, install after confirmation:** launchers check stable releases at most daily, in the background; checks can be disabled. Download/verify with `update_runtime.ps1 -Action stage`, then explicitly confirm the exact target with `-Action apply`.
-- **Keep tasks intact:** installation-wide locks and original-session cleanup evidence prevent maintenance while clients, hosts, model workers or unresolved input remain. The updater never closes a task to install.
-- **Restore a verified version:** retain backups and a persistent journal, run a no-input installation health check, and roll back on failure. Interrupted updates have an external recovery entry; unknown states retain backups and block further action. Compatible patches keep the Amadeus wheel unchanged. [Commands and limits](docs/RUNTIME_UPDATES.md) · [Release record](docs/releases/EXECUTION_018_20261024.md).
-
-## Previous release: 0.1.7
-
-- **Original-image, original-command loop:** prepare → inspect original image → resolve → continue → inspect after image → verify. Keep one connection and one input owner; pending reads keep the original IDs and never replay unknown input.
-- **Source acceptance:** 20 live 7-Zip steps passed on one connection. Wrong-hash review, uncertain judgment and input after completion were blocked. Cancellation while awaiting grounding reached real cancelled state with no input, and cleanup passed. No independent vision/Decision profile or provider key was used. [Live evidence](docs/verification/CURRENT_AGENT_LIVE_20261024.md). Installed 0.1.7 separately passed Calculator C → 1 → + → 2 → =, showing 3, with per-frame Agent review; post-action and awaiting-grounding cancellation controls and cleanup passed. [Installed evidence and release](docs/releases/EXECUTION_017_20261024.md).
-- **Update boundary:** a compatible HTTP contract does not require reinstalling an unchanged wheel for each Runtime patch. Runtime and the Amadeus extension have independent release lifecycles.
-
-## Previous release: 0.1.6
-
-- **Amadeus over HTTP MCP:** keep the existing stdio route or use the new authenticated, loopback-only service. The optional 0.0.4 extension connects Pi and supplies its execution Skill; install/start Runtime separately. [Install the extension](integrations/amadeus/agent-review-instant/README.md).
-- **Main can recover before a click:** Decision and ordinary Luna nonpasses return the original candidate and bound before image for explicit Main review and separate continuation. The same job continues; completed input is not replayed. Existing input, freshness and cancellation checks remain.
-- **Queue recovery:** temporary command-queue lock contention no longer becomes a permanent task-binding failure. Decision/Luna thresholds, prompts and provider defaults are unchanged.
-- **Scoped acceptance:** a five-step direct Runtime workflow and a four-step native Amadeus/Pi workflow completed after explicit TEST double refusal and actual Main image review. Python 3.11 and 3.12 each passed 188 affected regression checks. These are functional recovery results, not new speed, accuracy or token-saving claims. [Evidence and known limits](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md).
-
 <a id="demos"></a>
 
 ## Demos (0.1.4)
@@ -209,3 +178,39 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 ## Optional benchmark data
 
 The [benchmark backup](https://github.com/Desolate-Jix/agent-gui-runtime-benchmarks) is available in a separate **public repository**. The frozen suite contains **39 original screenshots, 30 interface families and 254 labelled cases**. Dataset images, annotations and raw evaluation records are not bundled with the execution installer or downloaded during setup. Clone separately when needed.
+
+<details>
+<summary>Release history</summary>
+
+## Previous release: 0.1.10
+
+- **Settle proven pre-dispatch refusals:** original durable processing evidence distinguishes a rejected control from unknown input; an error string or missing record alone never permits maintenance.
+- **Observe without replay:** bind read-only observation to its original capture and revised review packet, then settle the completed original task. Unknown, interrupted or altered evidence remains blocked.
+- **Connector 0.0.7:** recommends the tested Runtime combination with unchanged settings and permissions. Advanced `recover`/`resume_pre_dispatch` settlement remains unqualified. [Scope and validation](docs/releases/EXECUTION_0110_20261027.md).
+
+## Previous release: 0.1.9
+
+- **Settle the original plan:** maintenance validates the frozen plan, runner and input receipts for completed or proven-cancelled task plans. Active or unknown input and incomplete evidence still block installation.
+- **Upgrade affected 0.1.8 installations:** run the verified new release's maintenance script against the old installation, then use the normal confirmed update path. Do not delete task registrations. [Recovery procedure](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md).
+- **Amadeus connector 0.0.6:** recommends Runtime 0.1.9 with unchanged connection settings, permissions and same-session Main review/continue behavior. [Release scope and validation](docs/releases/EXECUTION_019_20261027.md). No new speed, accuracy or token-saving claim.
+
+## Previous release: 0.1.8
+
+- **Check automatically, install after confirmation:** launchers check stable releases at most daily, in the background; checks can be disabled. Download/verify with `update_runtime.ps1 -Action stage`, then explicitly confirm the exact target with `-Action apply`.
+- **Keep tasks intact:** installation-wide locks and original-session cleanup evidence prevent maintenance while clients, hosts, model workers or unresolved input remain. The updater never closes a task to install.
+- **Restore a verified version:** retain backups and a persistent journal, run a no-input installation health check, and roll back on failure. Interrupted updates have an external recovery entry; unknown states retain backups and block further action. Compatible patches keep the Amadeus wheel unchanged. [Commands and limits](docs/RUNTIME_UPDATES.md) · [Release record](docs/releases/EXECUTION_018_20261024.md).
+
+## Previous release: 0.1.7
+
+- **Original-image, original-command loop:** prepare → inspect original image → resolve → continue → inspect after image → verify. Keep one connection and one input owner; pending reads keep the original IDs and never replay unknown input.
+- **Source acceptance:** 20 live 7-Zip steps passed on one connection. Wrong-hash review, uncertain judgment and input after completion were blocked. Cancellation while awaiting grounding reached real cancelled state with no input, and cleanup passed. No independent vision/Decision profile or provider key was used. [Live evidence](docs/verification/CURRENT_AGENT_LIVE_20261024.md). Installed 0.1.7 separately passed Calculator C → 1 → + → 2 → =, showing 3, with per-frame Agent review; post-action and awaiting-grounding cancellation controls and cleanup passed. [Installed evidence and release](docs/releases/EXECUTION_017_20261024.md).
+- **Update boundary:** a compatible HTTP contract does not require reinstalling an unchanged wheel for each Runtime patch. Runtime and the Amadeus extension have independent release lifecycles.
+
+## Previous release: 0.1.6
+
+- **Amadeus over HTTP MCP:** keep the existing stdio route or use the new authenticated, loopback-only service. The optional 0.0.4 extension connects Pi and supplies its execution Skill; install/start Runtime separately. [Install the extension](integrations/amadeus/agent-review-instant/README.md).
+- **Main can recover before a click:** Decision and ordinary Luna nonpasses return the original candidate and bound before image for explicit Main review and separate continuation. The same job continues; completed input is not replayed. Existing input, freshness and cancellation checks remain.
+- **Queue recovery:** temporary command-queue lock contention no longer becomes a permanent task-binding failure. Decision/Luna thresholds, prompts and provider defaults are unchanged.
+- **Scoped acceptance:** a five-step direct Runtime workflow and a four-step native Amadeus/Pi workflow completed after explicit TEST double refusal and actual Main image review. Python 3.11 and 3.12 each passed 188 affected regression checks. These are functional recovery results, not new speed, accuracy or token-saving claims. [Evidence and known limits](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md).
+
+</details>

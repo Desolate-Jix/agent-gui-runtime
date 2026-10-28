@@ -34,37 +34,6 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 - **保留原清理门禁：** `cleanup_verified=true` 的释放路线继续保留；任何启动尝试、活动或未知工作、附着资源及未核验清理仍须走原清理路线。
 - **连接器 0.0.8：** 推荐 Runtime 0.1.11，连接设置、权限、模型策略和仅限操作员恢复的边界不变。具体回归、包体及安装态结果见[发行验证记录](docs/releases/EXECUTION_0111_20261028.md)，不新增速度或准确率成绩。
 
-## 上一版：0.1.10
-
-- **结算有证明的派发前拒绝：** 用原始持久处理记录区分被拒控制和未知输入，不凭错误文字或记录缺失放行维护。
-- **观察不重放：** 只读观察绑定原截图和更新后的审核 packet，再结算完成的原任务；未知、中断或篡改证据仍拒绝。
-- **连接器 0.0.7：** 更新推荐已测 Runtime 组合，设置和权限不变；高级 `recover`／`resume_pre_dispatch` 结算仍未认证。见[范围与验证](docs/releases/EXECUTION_0110_20261027.md)。
-
-## 上一版：0.1.9
-
-- **按原计划证据结算：** 对已完成、已证明取消的任务计划，维护入口核对冻结计划、runner 和输入回执；活动／未知输入及证据不完整仍阻止安装。
-- **处理受影响的 0.1.8 安装：** 从独立核验的新发行目录运行维护脚本检查旧安装，再正常确认升级，不删除任务登记。见[恢复流程](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。
-- **Amadeus 连接器 0.0.6：** 推荐 Runtime 0.1.9，连接设置、权限和同会话 Main 审核续行不变。见[发布范围与验证](docs/releases/EXECUTION_019_20261027.md)。不新增速度、准确率或 token 节省结论。
-
-## 上一版：0.1.8
-
-- **自动检查，确认后安装：** 启动时在后台检查稳定版，每天最多一次，可关闭。通过 `update_runtime.ps1 -Action stage` 下载核验，再用 `-Action apply` 明确确认确切目标后安装。
-- **保留运行中的任务：** 安装级锁和原会话清理证据阻止客户端、宿主、模型 worker 或未结算输入尚存时进行维护，更新器不会为了安装而关闭任务。
-- **恢复已验证版本：** 保留备份与持久事务日志，进行无输入安装健康检查，失败时回滚；中断更新提供外部恢复入口，未知状态保留备份并阻止继续。兼容补丁不要求更换 Amadeus wheel。[命令与边界](docs/RUNTIME_UPDATES.zh-CN.md) · [发布记录](docs/releases/EXECUTION_018_20261024.md)。
-
-## 上一版本：0.1.7
-
-- **原图与原任务闭环：** prepare → 读取原图 → resolve → continue → 读取后图 → verify；同一连接、单输入所有者，pending 只读原 ID，不重放未知输入。
-- **源码实测：** 7-Zip 同连接 20 步通过；错 hash、不确定判断、完成后输入均被阻止，定位等待中的取消到达真实 cancelled、未输入且清理通过。未使用独立视觉／Decision 配置或服务密钥。[实机证据](docs/verification/CURRENT_AGENT_LIVE_20261024.md)。安装版 0.1.7 另测计算器 C → 1 → + → 2 → = 显示 3，逐帧由 Agent 读取核验；动作后取消、定位等待取消及清理均通过。[安装证据与发布记录](docs/releases/EXECUTION_017_20261024.md)。
-- **更新边界：** 兼容的 HTTP 合同不要求每个 Runtime 补丁重装未变化的 wheel。Runtime 与 Amadeus 扩展分别发布和管理版本。
-
-## 上一版本：0.1.6
-
-- **通过 HTTP MCP 接入 Amadeus：** 保留 stdio，新增仅绑定本机、带鉴权的服务入口。可选的 0.0.4 扩展为 Pi 提供连接声明和执行 Skill；Runtime 仍需单独安装、启动。[扩展安装说明](integrations/amadeus/agent-review-instant/README.zh-CN.md)。
-- **点击前也可由 Main 兜底：** Decision 与普通 Luna 均未通过时，返回原候选和绑定的操作前截图，供 Main 明确审核、单独继续同一任务。已完成输入不会重放，输入授权、截图新鲜度和取消检查继续保留。
-- **修复队列续行：** 临时命令队列锁竞争不再被误记为永久任务绑定失效。Decision／Luna 的阈值、提示词和默认服务均未改动。
-- **限定范围验收：** 本体五步、原生 Amadeus／Pi 四步流程均在显式 TEST 双拒、实际 Main 看图审核后完成。Python 3.11 和 3.12 各通过 188 项相关回归。这些是功能恢复结果，不是新的速度、准确率或 token 节省结论。[证据与已知限制](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)。
-
 <a id="demos"></a>
 
 ## 实录演示（0.1.4）
@@ -209,3 +178,39 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 ## 可选 benchmark 数据
 
 [Benchmark 备份](https://github.com/Desolate-Jix/agent-gui-runtime-benchmarks) 保存在独立的**公开仓库**，可按需下载。冻结套件包含 **39 张原图、30 个界面族、254 个标注案例**。数据集图片、标注和原始评测记录不随执行安装器分发，安装时也不会自动下载；需要时单独克隆。
+
+<details>
+<summary>历史版本更新</summary>
+
+## 上一版：0.1.10
+
+- **结算有证明的派发前拒绝：** 用原始持久处理记录区分被拒控制和未知输入，不凭错误文字或记录缺失放行维护。
+- **观察不重放：** 只读观察绑定原截图和更新后的审核 packet，再结算完成的原任务；未知、中断或篡改证据仍拒绝。
+- **连接器 0.0.7：** 更新推荐已测 Runtime 组合，设置和权限不变；高级 `recover`／`resume_pre_dispatch` 结算仍未认证。见[范围与验证](docs/releases/EXECUTION_0110_20261027.md)。
+
+## 上一版：0.1.9
+
+- **按原计划证据结算：** 对已完成、已证明取消的任务计划，维护入口核对冻结计划、runner 和输入回执；活动／未知输入及证据不完整仍阻止安装。
+- **处理受影响的 0.1.8 安装：** 从独立核验的新发行目录运行维护脚本检查旧安装，再正常确认升级，不删除任务登记。见[恢复流程](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。
+- **Amadeus 连接器 0.0.6：** 推荐 Runtime 0.1.9，连接设置、权限和同会话 Main 审核续行不变。见[发布范围与验证](docs/releases/EXECUTION_019_20261027.md)。不新增速度、准确率或 token 节省结论。
+
+## 上一版：0.1.8
+
+- **自动检查，确认后安装：** 启动时在后台检查稳定版，每天最多一次，可关闭。通过 `update_runtime.ps1 -Action stage` 下载核验，再用 `-Action apply` 明确确认确切目标后安装。
+- **保留运行中的任务：** 安装级锁和原会话清理证据阻止客户端、宿主、模型 worker 或未结算输入尚存时进行维护，更新器不会为了安装而关闭任务。
+- **恢复已验证版本：** 保留备份与持久事务日志，进行无输入安装健康检查，失败时回滚；中断更新提供外部恢复入口，未知状态保留备份并阻止继续。兼容补丁不要求更换 Amadeus wheel。[命令与边界](docs/RUNTIME_UPDATES.zh-CN.md) · [发布记录](docs/releases/EXECUTION_018_20261024.md)。
+
+## 上一版本：0.1.7
+
+- **原图与原任务闭环：** prepare → 读取原图 → resolve → continue → 读取后图 → verify；同一连接、单输入所有者，pending 只读原 ID，不重放未知输入。
+- **源码实测：** 7-Zip 同连接 20 步通过；错 hash、不确定判断、完成后输入均被阻止，定位等待中的取消到达真实 cancelled、未输入且清理通过。未使用独立视觉／Decision 配置或服务密钥。[实机证据](docs/verification/CURRENT_AGENT_LIVE_20261024.md)。安装版 0.1.7 另测计算器 C → 1 → + → 2 → = 显示 3，逐帧由 Agent 读取核验；动作后取消、定位等待取消及清理均通过。[安装证据与发布记录](docs/releases/EXECUTION_017_20261024.md)。
+- **更新边界：** 兼容的 HTTP 合同不要求每个 Runtime 补丁重装未变化的 wheel。Runtime 与 Amadeus 扩展分别发布和管理版本。
+
+## 上一版本：0.1.6
+
+- **通过 HTTP MCP 接入 Amadeus：** 保留 stdio，新增仅绑定本机、带鉴权的服务入口。可选的 0.0.4 扩展为 Pi 提供连接声明和执行 Skill；Runtime 仍需单独安装、启动。[扩展安装说明](integrations/amadeus/agent-review-instant/README.zh-CN.md)。
+- **点击前也可由 Main 兜底：** Decision 与普通 Luna 均未通过时，返回原候选和绑定的操作前截图，供 Main 明确审核、单独继续同一任务。已完成输入不会重放，输入授权、截图新鲜度和取消检查继续保留。
+- **修复队列续行：** 临时命令队列锁竞争不再被误记为永久任务绑定失效。Decision／Luna 的阈值、提示词和默认服务均未改动。
+- **限定范围验收：** 本体五步、原生 Amadeus／Pi 四步流程均在显式 TEST 双拒、实际 Main 看图审核后完成。Python 3.11 和 3.12 各通过 188 项相关回归。这些是功能恢复结果，不是新的速度、准确率或 token 节省结论。[证据与已知限制](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)。
+
+</details>
