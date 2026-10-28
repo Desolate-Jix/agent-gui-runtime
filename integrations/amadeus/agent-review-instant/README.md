@@ -1,8 +1,8 @@
-# Amadeus Windows GUI Runtime Connector 0.0.7
+# Amadeus Windows GUI Runtime Connector 0.0.8
 
-[简体中文](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.7/integrations/amadeus/agent-review-instant/README.zh-CN.md)
+[简体中文](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/README.zh-CN.md)
 
-This author-published connector connects Pi to a **separately installed and
+This connector connects Pi to a **separately installed and
 operator-started Windows GUI Runtime** over native Streamable HTTP MCP. It
 contains a connection declaration and execution Skill, not the Runtime. Use
 this guide to install and connect it; publication and independent store
@@ -10,22 +10,22 @@ approval are separate results.
 
 ## Downloads and compatibility
 
-- [Connector 0.0.7 release](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.7)
-- [Connector wheel: amadeus_agent_gui_runtime-0.0.7-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.7/amadeus_agent_gui_runtime-0.0.7-py3-none-any.whl)
-- [Connector source: extension-source-0.0.7.zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.7/extension-source-0.0.7.zip)
-- [Author preflight: preflight.json](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.7/preflight.json)
-- [Recommended Runtime 0.1.10 Windows installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.10/AgentGUIRuntimeExecution-Setup.exe)
-  and [Runtime release/checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.10)
+- [Connector 0.0.8 release](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.8)
+- [Connector wheel: amadeus_agent_gui_runtime-0.0.8-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/amadeus_agent_gui_runtime-0.0.8-py3-none-any.whl)
+- [Connector source: extension-source-0.0.8.zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/extension-source-0.0.8.zip)
+- [Author preflight: preflight.json](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/preflight.json)
+- [Recommended Runtime 0.1.11 Windows installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentGUIRuntimeExecution-Setup.exe)
+  and [Runtime release/checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11)
 
 Install the Runtime yourself on the Windows computer running Amadeus, then
-import the connector wheel. See the [Runtime installation guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.10/README.md#quick-start).
+import the connector wheel. See the [Runtime installation guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.11/README.md#quick-start).
 The connector and Runtime have independent version numbers and release tags;
-connector 0.0.7 does not update Runtime 0.1.10.
+connector 0.0.8 does not update Runtime 0.1.11.
 
 | Combination or capability | Supported scope and evidence |
 | --- | --- |
-| Runtime 0.1.10 + connector 0.0.7 | Recommended Runtime and this connector. Inspect the actual running service and the scope of its validation evidence before input; a version pair alone does not prove installed GUI execution. |
-| Runtime 0.1.6 + connector 0.0.4 | Historical controlled installed Pi evidence covers four navigation steps, explicit TEST double refusal, Main review/continue and cleanup. It does not validate the 0.0.7/0.1.10 combination. |
+| Runtime 0.1.11 + connector 0.0.8 | Recommended Runtime and this connector. Inspect the actual running service and the scope of its validation evidence before input; a version pair alone does not prove installed GUI execution. |
+| Runtime 0.1.6 + connector 0.0.4 | Historical controlled installed Pi evidence covers four navigation steps, explicit TEST double refusal, Main review/continue and cleanup. It does not validate the 0.0.8/0.1.11 combination. |
 | Minimum protocol contract | 0.1.6 introduced the authenticated HTTP MCP entry point and pre-action review needed by this connector route; the running service must also supply field-review/continue. This protocol floor does not qualify every later Runtime, including all future 0.1.x releases. |
 | Runtime 0.1.5 or earlier | Not usable by this HTTP connector: 0.1.5 has no HTTP MCP entry point, even though field-result review existed there. |
 | Runtime 0.1.7 current-Agent mode | Not qualified through Amadeus by this connector. This Skill supports the existing **external API route** only. |
@@ -42,7 +42,7 @@ as proof of desktop execution.
 | Component | Responsibility |
 | --- | --- |
 | Amadeus / Pi | Plans the task, owns its approval UI and uses its native HTTP MCP client. |
-| Connector 0.0.7 | Resource-only connection declaration and Skill; no launcher, executable selector, model weights or Runtime dependencies. |
+| Connector 0.0.8 | Resource-only connection declaration and Skill; no launcher, executable selector, model weights or Runtime dependencies. |
 | Local Runtime | Provides the authenticated loopback service, vision/Decision configuration, input gates, receipts and host cleanup. It is installed and started independently. |
 
 The Host uses Python 3.12. The Runtime API setup defaults new environments to
@@ -103,7 +103,7 @@ a public bind, tunnel or reverse proxy.
 
 1. Use an Amadeus build with native Streamable HTTP MCP and Skill contributions;
    check its actual installed version against the recorded baseline above.
-2. Download and install the **0.0.7 wheel** in Settings → Extensions. Inspect its
+2. Download and install the **0.0.8 wheel** in Settings → Extensions. Inspect its
    identity and disclosure; installation starts disabled.
 3. Set `runtime_url` to `http://127.0.0.1:17665/mcp`, or the port you selected.
    Use only your trusted local Runtime. Set secret `connection_token` to the
@@ -156,8 +156,8 @@ navigation example, not compression/extraction or a performance benchmark.
 
 ## Task, review and cleanup
 
-Use the packaged [Skill](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.7/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/SKILL.md)
-and [reference](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.7/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/references/runtime.md).
+Use the packaged [Skill](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/SKILL.md)
+and [reference](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/references/runtime.md).
 Keep one MCP connection and one input owner for the whole Work. Pending,
 unknown or interrupted input keeps its original request/run/command IDs; never
 replay it with a new ID to extend a wait.
@@ -205,7 +205,17 @@ Pi must not call them to take over the old session or continue its workflow.
 This restriction does not remove Main's bound-image review/continue path in
 the original live session: that path retains the original job and existing
 input gates. For settlement diagnostics and migration from Runtime 0.1.8, see
-the [Runtime settlement recovery guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.10/docs/RUNTIME_018_SETTLEMENT_RECOVERY.md).
+the [Runtime settlement recovery guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.11/docs/RUNTIME_018_SETTLEMENT_RECOVERY.md).
+Runtime 0.1.11 also fixes release of an initialized HTTP owner before any
+Runtime start attempt. DELETE can accept `cleanup_verified=false` only when the
+server's lifecycle evidence proves no start attempt, attached resources or
+pending work. Initial phase or `host_alive=false` alone is insufficient. Any
+attempted/failed start, active or unknown work, or unverified cleanup must follow
+the existing cleanup gate; the `cleanup_verified=true` path is unchanged. This
+exception releases an unused transport owner, not a task or recovery workflow.
+Do not start/stop a host or invoke recovery merely to make an unused owner
+releasable.
+
 Runtime 0.1.10 extends `task_plan` input-settlement validation to proven rejected
 control requests and successful `observe` requests. A rejection must have its
 original durable before-dispatch proof; an error string alone does not prove
@@ -217,10 +227,12 @@ Keep original evidence; an unknown settlement is not proof that no input ran.
 
 ## Version changes and installation scope
 
-0.0.7 updates package metadata and bilingual installation/recovery guidance,
-and recommends Runtime 0.1.10. Runtime fixes are delivered separately; this wheel
+0.0.8 updates package metadata and bilingual installation/recovery guidance,
+and recommends Runtime 0.1.11 for the never-started-owner release fix. Exact
+checks and remaining qualification are recorded in the [Runtime release validation record](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.11/docs/releases/EXECUTION_0111_20261028.md).
+Runtime fixes are delivered separately; this wheel
 does not change connection configuration, permissions or input execution.
-Existing 0.0.3/0.0.4/0.0.5/0.0.6 `runtime_url` and `connection_token` settings need no
+Existing 0.0.3/0.0.4/0.0.5/0.0.6/0.0.7 `runtime_url` and `connection_token` settings need no
 migration. The historical 0.0.2 stdio launcher and earlier release artifacts
 remain intact.
 When migrating from 0.0.2, configure Runtime paths, profiles, provider keys and

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amadeus-agent-gui-runtime"
-version = "0.0.7"
+version = "0.0.8"
 description = "Connector to a separately installed Windows GUI Runtime using authenticated HTTP MCP and a Skill"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -12,7 +12,7 @@ license = "ISC"
 license-files = ["LICENSE"]
 
 [project.urls]
-Homepage = "https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.7/integrations/amadeus/agent-review-instant/README.md"
+Homepage = "https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/README.md"
 Repository = "https://github.com/Desolate-Jix/agent-gui-runtime"
 
 [project.entry-points."amadeus.extensions"]

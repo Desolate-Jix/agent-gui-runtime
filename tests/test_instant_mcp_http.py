@@ -236,6 +236,19 @@ def test_disconnect_reconnect_preserves_original_owner_and_receipt(tmp_path, mon
     {"host_alive": True, "pending_ids": [], "cleanup_verified": True},
     {"host_alive": False, "pending_ids": ["original"], "cleanup_verified": True},
     {"host_alive": False, "pending_ids": [], "cleanup_verified": False},
+    {"phase": "not_started", "host_alive": False, "pending_ids": [], "cleanup_verified": False},
+    *({"phase": "not_started", "host_alive": False, "pending_ids": [], "cleanup_verified": False,
+       "http_owner_release": proof} for proof in (
+        None, False, {},
+        {"schema": "instant_http_owner_release.v0", "state": "never_started_instance"},
+        {"schema": "instant_http_owner_release.v1", "state": "unknown"},
+    )),
+    {"phase": "starting", "host_alive": False, "pending_ids": [], "cleanup_verified": False,
+     "http_owner_release": {"schema": "instant_http_owner_release.v1", "state": "never_started_instance"}},
+    {"phase": "not_started", "host_alive": True, "pending_ids": [], "cleanup_verified": False,
+     "http_owner_release": {"schema": "instant_http_owner_release.v1", "state": "never_started_instance"}},
+    {"phase": "not_started", "host_alive": False, "pending_ids": ["original"], "cleanup_verified": False,
+     "http_owner_release": {"schema": "instant_http_owner_release.v1", "state": "never_started_instance"}},
     {},
 ])
 def test_delete_cannot_release_unclean_or_unknown_runtime(transport, state):

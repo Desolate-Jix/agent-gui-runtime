@@ -1,5 +1,13 @@
 # Confirmed Runtime updates
 
+**Never-started HTTP owners in 0.1.11:** DELETE may release an initialized owner
+with `cleanup_verified=false` only when explicit lifecycle evidence proves that
+Runtime start was never attempted, no resources were attached and no work is
+pending. Initial status or an absent host alone is not proof. An attempted or
+failed start, active/unknown work or unverified cleanup keeps the existing
+release gate; the `cleanup_verified=true` path remains available. This does not
+settle an old task or grant recovery authority. [Release semantics and validation](releases/EXECUTION_0111_20261028.md).
+
 **Task-plan settlement in 0.1.8/0.1.9:** if cleanup has completed but `settle` reports
 `runtime_task_ledger_session_unsettled`, use the [0.1.10 recovery procedure](RUNTIME_018_SETTLEMENT_RECOVERY.md).
 Do not delete registrations or task evidence. Active tasks and unknown input

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.instant_attachment_transport import InstantAttachmentTransport, InstantAdmissionError, _validate_request_id
 
-INSTANT_VERSION = "0.1.10"
+INSTANT_VERSION = "0.1.11"
 
 
 def _run_wait_budget(kind, requested):
@@ -184,6 +184,9 @@ class InstantSession(InstantAttachmentTransport):
         self.lock_file = None
         self.log_file = None
         self.host_identity = None
+        # Monotonic per-instance provenance, not an inference from missing
+        # processes/files. Any startup or recovery attempt consumes cold proof.
+        self._host_start_attempted = False
         # Cover every data directory and both maintained MCP transports.  The
         # child independently holds its lease until actual process exit.
         from app.runtime_lifecycle import InstallationLease
@@ -243,8 +246,20 @@ class InstantSession(InstantAttachmentTransport):
                 "Check --model-directory is an existing directory; use forward slashes or escaped backslashes in configuration, then reconnect.")
         return config
 
+    def _http_owner_release_proof(self):
+        # Called by status() while holding guard. This says nothing about old
+        # sessions or peer processes in the data directory; DELETE retains all
+        # such evidence and the same instance's subsequent startup gates.
+        if (getattr(self, "_host_start_attempted", None) is False
+                and self.process is None and self.session is None
+                and self.host_identity is None and self.log_file is None
+                and self.lock_file is None):
+            return {"schema": "instant_http_owner_release.v1", "state": "never_started_instance"}
+        return None
+
     def start(self, new_session=False):
         with self.guard:
+            self._host_start_attempted = True
             config = self._startup_configuration()
             self._lock()
             pointer = self.data_root / "latest-session.json"
@@ -295,6 +310,8 @@ class InstantSession(InstantAttachmentTransport):
                 raise ValueError("previous host still active or cleaning up; inspect its report before restarting")
 
     def _launch_session(self, config, *, session_name=None, on_created=None, before_publish=None):
+        with self.guard:
+            self._host_start_attempted = True
         import psutil
         # Also cover explicit recovery/reuse of an object after close().
         self._installation_lease.acquire()
@@ -346,7 +363,9 @@ class InstantSession(InstantAttachmentTransport):
 
     def recover_session(self, request_id, preview_sha256):
         from app.execution.session_epoch_admission import SessionEpochAdmission
-        return SessionEpochAdmission(self).recover(request_id, preview_sha256)
+        with self.guard:
+            self._host_start_attempted = True
+            return SessionEpochAdmission(self).recover(request_id, preview_sha256)
 
 
 

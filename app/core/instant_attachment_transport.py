@@ -122,6 +122,7 @@ class InstantAttachmentTransport:
             review_context = ({'pre_action_review': pre_action,
                 'caller_controls': (deepcopy(plan_status.get('caller_controls'))
                     if alive and not (self.session / 'closing.json').exists() else None)} if pre_action is not None else {})
+            release_proof = getattr(self, "_http_owner_release_proof", None)
             return {**review_context, "mode": "instant-local-operator-preview", "phase": phase, "host_alive": alive,
                 "recognition_source": self.recognition_source, "delegate_profile": self.delegate_profile,
                 "api_profile": self.api_profile,
@@ -142,6 +143,7 @@ class InstantAttachmentTransport:
                 "cleanup_verified": bool(report.get("finished_at") and report.get("phase") == "stopped"
                     and report.get("host_phase") == "stopped" and report.get("cleanup_errors") == []
                     and report.get("sampler_stopped") is True and not alive),
+                "http_owner_release": release_proof() if callable(release_proof) else None,
                 "cleanup_errors": report.get("cleanup_errors"), "error_type": report.get("error_type"),
                 **({'next': report['cleanup_next']} if report.get('cleanup_next') else {}),
                 "automatic_retry_allowed": False}

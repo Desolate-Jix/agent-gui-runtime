@@ -1,8 +1,9 @@
 """Authenticated loopback Streamable HTTP for the maintained instant MCP tools.
 
 One negotiated MCP session owns this daemon's InstantSession. HTTP disconnects
-do not release that owner. DELETE is admitted only after the existing Runtime
-reports verified cleanup, and never cancels or replays Runtime input. The SDK
+do not release that owner. DELETE requires verified cleanup or explicit proof
+that this Runtime instance never attempted startup or attached resources. It
+never cancels or replays Runtime input. The SDK
 owns JSON-RPC, protocol negotiation, tool dispatch and its session lifecycle.
 """
 
@@ -315,8 +316,11 @@ class InstantHttpMcpApp:
         try:
             try:
                 status = await anyio.to_thread.run_sync(self._session.status)
+                cold_instance = (status.get("phase") == "not_started"
+                    and status.get("http_owner_release") == {
+                        "schema": "instant_http_owner_release.v1", "state": "never_started_instance"})
                 cleaned = (status.get("host_alive") is False and status.get("pending_ids") == []
-                           and status.get("cleanup_verified") is True)
+                           and (status.get("cleanup_verified") is True or cold_instance))
             except Exception:
                 cleaned = False
             if not cleaned:

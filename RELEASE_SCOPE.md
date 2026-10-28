@@ -1,3 +1,7 @@
+## 2026-10-28 执行 0.1.11 / Execution 0.1.11
+
+修复从未尝试启动 Runtime 的初始 HTTP 所有者在 `cleanup_verified=false` 时无法 DELETE 的问题。仅凭明确生命周期证明，确认从未尝试 start、未附着资源且无 pending 时才允许释放；原 `cleanup_verified=true` 路线保留，已启动、未知或未清理状态仍拒绝。连接器 0.0.8 仅更新包内推荐及说明，配置、权限、最低协议 0.1.6 和操作员恢复边界不变。具体验证结果见 [0.1.11 发布记录](docs/releases/EXECUTION_0111_20261028.md)，未完成结果不记为通过。 / Fix DELETE of an initial HTTP owner with `cleanup_verified=false` only when explicit lifecycle evidence proves no start attempt, attached resources or pending work. Retain the `cleanup_verified=true` path and block started, unknown or unclean sessions. Connector 0.0.8 updates the packaged recommendation and guidance without changing settings, permissions, the 0.1.6 protocol floor or operator-only recovery. Exact validation is recorded separately; incomplete checks are not passes.
+
 ## 2026-10-27 执行 0.1.10 / Execution 0.1.10
 
 修复具有原始派发前证明的拒绝控制请求及成功只读 observe 的维护结算。未知／中断／篡改证据仍拒；旧拒绝记录不补造证明，高级 recover／resume_pre_dispatch 仍未认证。连接器 0.0.7 更新推荐组合，设置／权限和恢复边界不变。见 [0.1.10 发布记录](docs/releases/EXECUTION_0110_20261027.md)。 / Fix maintenance settlement for proven pre-dispatch control rejections and bound read-only observations. Unknown/interrupted/altered evidence stays blocked; old refusals are not backfilled and advanced recover/resume_pre_dispatch settlement stays unqualified. Connector 0.0.7 updates the recommended combination without changing settings, permissions or recovery policy.

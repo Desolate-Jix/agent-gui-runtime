@@ -26,12 +26,12 @@ def test_instant_and_attachment_share_live_admission_and_receipt_contracts():
     assert InstantAdmissionError is SharedError
 
 
-def test_learning_connect_poll_and_queue_remain_lightweight_and_do_not_own_host():
+def test_attachment_poll_and_queue_remain_lightweight_and_do_not_own_host():
     script = '''
 import json, os, sys, tempfile
 from pathlib import Path
 import psutil
-from app.learning_memory.workflow_run_client import WorkflowRunClient
+from app.core.instant_attachment_transport import InstantAttachmentTransport
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     session = root / ('session-' + 'a' * 32)
@@ -45,12 +45,15 @@ with tempfile.TemporaryDirectory() as temporary:
                'recognition_source': 'agent_delegate', 'delegate_profile': 'fixture', 'api_profile': None}
     (root / 'latest-session.json').write_text(json.dumps(pointer), encoding='utf-8')
     (session / 'report.json').write_text(json.dumps({'runner_pid': os.getpid(), 'phase': 'ready'}), encoding='utf-8')
-    client = WorkflowRunClient(session, library)
-    assert client.connect()['host_alive']
-    receipt = client.control({'action': 'status', 'run_id': 'fixture'}, 'status-original')
+    client = InstantAttachmentTransport(root, root)
+    client.session = session
+    client.host_identity = identity
+    assert client.status()['host_alive']
+    receipt = client.submit('status-original', {'kind': 'task_plan',
+        'request': {'action': 'status', 'run_id': 'fixture'}})
     assert receipt['status'] == 'pending'
     assert client.result('status-original')['status'] == 'pending'
-    client.close()
+    assert not hasattr(client, 'close')
     assert not (root / 'owner.lock').exists()
     assert not (session / 'closing.json').exists()
     assert len(list((session / 'commands').glob('*.json'))) == 1

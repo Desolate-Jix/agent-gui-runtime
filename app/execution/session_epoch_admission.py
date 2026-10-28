@@ -118,6 +118,10 @@ class SessionEpochAdmission(SessionEpochReadContract):
                  and (old / "session-resources.json").read_bytes() == journal_raw, "preview_changed")
 
     def recover(self, request_id, preview_sha256):
+        # This entry can be used without InstantSession.recover_session(),
+        # including unknown-launch/reattachment paths that do not launch again.
+        with self.instant.guard:
+            self.instant._host_start_attempted = True
         from app.instant_mcp import _validate_request_id
         _validate_request_id(request_id)
         _require(request_id.isascii(), "request_id_invalid")

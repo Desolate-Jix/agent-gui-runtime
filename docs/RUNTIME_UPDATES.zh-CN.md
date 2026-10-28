@@ -1,5 +1,11 @@
 # 确认后更新 Runtime
 
+**0.1.11 的未启动 HTTP 所有者：** 仅当明确生命周期证据证明从未尝试启动
+Runtime、未附着资源且无待处理工作时，DELETE 才允许在 `cleanup_verified=false`
+时释放已初始化所有者。初始状态或宿主不存在本身不是证明；已尝试或失败的启动、
+活动／未知工作、未核验清理仍遵守原门禁，`cleanup_verified=true` 路线继续保留。
+该修复不结算旧任务，也不授予恢复权限。见[发布语义与验证](releases/EXECUTION_0111_20261028.md)。
+
 **0.1.8／0.1.9 任务计划结算：** 若已完成清理但 `settle` 仍报
 `runtime_task_ledger_session_unsettled`，请按 [0.1.10 恢复流程](RUNTIME_018_SETTLEMENT_RECOVERY.md)
 处理。不要删除登记或任务证据；活动任务和未知输入仍会阻止维护。

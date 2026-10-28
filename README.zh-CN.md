@@ -1,4 +1,4 @@
-执行版 **0.1.10** 修复被拒绝控制请求和只读观察后的维护结算。[发布与下载](docs/releases/EXECUTION_0110_20261027.md)。Amadeus **0.0.7 连接器**更新推荐版本；[商店审核 #11](https://github.com/Code-Amadeus/Amadeus-Extensions/pull/11) 与发行下载分别处理。[受影响安装的恢复步骤](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
+执行版 **0.1.11** 修复从未尝试启动 Runtime 的 HTTP 所有者无法释放的问题，已启动或状态不明会话继续遵守清理门禁。[发布范围与验证](docs/releases/EXECUTION_0111_20261028.md)。Amadeus **0.0.8 连接器**更新推荐版本；[商店审核 #11](https://github.com/Code-Amadeus/Amadeus-Extensions/pull/11) 与发行下载分别处理。[受影响安装的恢复步骤](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
 
 <div align="center">
 
@@ -11,12 +11,12 @@
   </picture>
 </h1>
 
-**执行版 0.1.10 — 执行有核验，更新由你确认。**
+**执行版 0.1.11 — 执行有核验，更新由你确认。**
 
 支持图像的 Agent 读取目标与结果。<br>
 Runtime 保留原始证据、输入门禁和动作回执。
 
-**[下载执行版 0.1.10](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.10/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
+**[下载执行版 0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentGUIRuntimeExecution-Setup.exe)** · [实录演示](#demos) · [快速开始](#quick-start) · [运行架构](#architecture) · [实测表现](#evaluation)
 
 **保留的 API 路线恢复：** 点击前两层模型均未接受目标时，Main 可查看绑定截图、明确审核，再单独继续同一任务；已结算文字输入的审核续行也继续保留，不重复输入。[验收与限制 →](docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
 
@@ -28,7 +28,13 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 **当前 Agent 模式（0.1.7 引入）：** `--current-agent` 提供持久的基础点击闭环，无需另配 Runtime 视觉或 Decision API，仍依赖承载 Agent 的服务并消耗其额度。文字输入、按键、滚动、任务计划和管理员模式不在该适配层支持范围。[配置与能力矩阵](docs/development/CURRENT_AGENT_MODE.zh-CN.md)。
 
-## 0.1.10 新增内容
+## 0.1.11 新增内容
+
+- **释放有证明的未启动 HTTP 所有者：** 仅当生命周期证据证明从未尝试 start、未附着资源、没有待处理工作时，已初始化的所有者才可在 `cleanup_verified=false` 时删除；仅有看似初始的状态不足以放行。
+- **保留原清理门禁：** `cleanup_verified=true` 的释放路线继续保留；任何启动尝试、活动或未知工作、附着资源及未核验清理仍须走原清理路线。
+- **连接器 0.0.8：** 推荐 Runtime 0.1.11，连接设置、权限、模型策略和仅限操作员恢复的边界不变。具体回归、包体及安装态结果见[发行验证记录](docs/releases/EXECUTION_0111_20261028.md)，不新增速度或准确率成绩。
+
+## 上一版：0.1.10
 
 - **结算有证明的派发前拒绝：** 用原始持久处理记录区分被拒控制和未知输入，不凭错误文字或记录缺失放行维护。
 - **观察不重放：** 只读观察绑定原截图和更新后的审核 packet，再结算完成的原任务；未知、中断或篡改证据仍拒绝。
@@ -102,7 +108,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 需要 **Windows x64、[uv](https://docs.astral.sh/uv/getting-started/installation/)** 和支持 MCP 的 Agent。**API／Agent 路线推荐 Python 3.12**，可继续使用已有的 3.11 环境；**本地模型路线仍使用 Python 3.11**。安装器提供源码及配置脚本，首次配置时安装依赖，不附带密钥或模型权重。
 
-1. **[下载并安装执行版 0.1.10](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.10)。** 下载、摘要及验证见[发布记录](docs/releases/EXECUTION_0110_20261027.md)。0.1.7 及更早版本需手动安装；受影响的 0.1.8／0.1.9 会话需先按[结算流程](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)处理。旧证据可能仍不充分，不保证所有会话均可恢复。
+1. **[下载并安装执行版 0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11)。** 下载、摘要及验证见[发布记录](docs/releases/EXECUTION_0111_20261028.md)。0.1.7 及更早版本需手动安装；受影响的 0.1.8／0.1.9 会话需先按[结算流程](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)处理。旧证据可能仍不充分，不保证所有会话均可恢复。
 2. **选择下方运行方式。** 使用外部 Luna + Decision 时，复制[视觉配置](configs/vision-api-openai-luna.example.json)和 [Decision 配置](configs/decision-profile.visual-execution.example.json)，让 MCP 进程能够读取 `OPENAI_API_KEY`。当前 Agent 点击流程使用 0.1.7 入口，并声明客户端真实图像／视觉能力。
 3. **运行配置脚本，接入 Agent。** 按[安装命令](docs/EXECUTION_GUIDE.zh-CN.md#安装与配置)操作，将生成的 `agent-review-instant` MCP 条目合并到客户端后重新连接，保留其他服务器条目。
 
@@ -117,10 +123,10 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 **0.1.6 的服务配置：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna；替换服务须兼容 Decisions／Responses 协议。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
 
-**Amadeus／Pi：** 下载 [HTTP MCP＋Skill 连接器 0.0.7](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.7/amadeus_agent_gui_runtime-0.0.7-py3-none-any.whl)，按[连接器安装指南](integrations/amadeus/agent-review-instant/README.zh-CN.md)配置。Runtime 需另外安装、启动，推荐使用 0.1.10。请核对实际版本及必要的 HTTP／审核能力。目录审核期间可手动导入 wheel。[旧 0.0.2 stdio 指南](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md)继续封存，不能直接套用其配置。
+**Amadeus／Pi：** 下载 [HTTP MCP＋Skill 连接器 0.0.8](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/amadeus_agent_gui_runtime-0.0.8-py3-none-any.whl)，按[连接器安装指南](integrations/amadeus/agent-review-instant/README.zh-CN.md)配置。Runtime 需另外安装、启动，推荐使用 0.1.11。请核对实际版本及必要的 HTTP／审核能力。目录审核期间可手动导入 wheel。[旧 0.0.2 stdio 指南](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md)继续封存，不能直接套用其配置。
 
 <a id="evaluation"></a>
-旧 wheel 与下载地址保持原字节。0.0.7 连接器更新推荐 Runtime，连接键和权限不变，不代表已验证 Amadeus 当前 Agent 模式。见[当前发布范围](docs/releases/EXECUTION_0110_20261027.md)、[0.0.5 历史验证](docs/verification/AMADEUS_CONNECTOR_005_20261026.md)及 [Runtime 更新说明](docs/RUNTIME_UPDATES.zh-CN.md)。停用或卸载连接器不会停止或卸载外部 Runtime。
+旧 wheel 与下载地址保持原字节。0.0.8 连接器更新推荐 Runtime，连接键和权限不变，不代表已验证 Amadeus 当前 Agent 模式。见[当前发布范围](docs/releases/EXECUTION_0111_20261028.md)、[0.0.5 历史验证](docs/verification/AMADEUS_CONNECTOR_005_20261026.md)及 [Runtime 更新说明](docs/RUNTIME_UPDATES.zh-CN.md)。停用或卸载连接器不会停止或卸载外部 Runtime。
 
 ## 工程验证与实测
 
@@ -194,7 +200,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 | [安装指南](FRIEND_SETUP.md) | [执行详细指南与完整流程图](docs/EXECUTION_GUIDE.zh-CN.md) |
 | [Agent / MCP 指南](AGENT_GUIDE.md) | [Decision API 配置](docs/development/DECISION_API.md) |
 | [外部视觉 API](docs/development/EXTERNAL_VISION_API.md) | [视觉文字输入](docs/development/VISUAL_EXECUTION_INPUT.md) |
-| [0.1.10 发布记录与校验文件](docs/releases/EXECUTION_0110_20261027.md) | [0.1.4 历史多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
+| [0.1.11 发布记录与校验文件](docs/releases/EXECUTION_0111_20261028.md) | [0.1.4 历史多应用证据](docs/verification/MULTI_APP_EXECUTION_20261015.md) |
 
 ---
 
