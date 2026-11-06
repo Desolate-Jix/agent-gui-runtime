@@ -1,31 +1,53 @@
-# Amadeus Windows GUI Runtime Connector 0.0.8
+# Windows Desktop Automation (GUI Runtime)
 
-[简体中文](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/README.zh-CN.md)
+[简体中文](README.zh-CN.md)
 
-This connector connects Pi to a **separately installed and
-operator-started Windows GUI Runtime** over native Streamable HTTP MCP. It
-contains a connection declaration and execution Skill, not the Runtime. Use
-this guide to install and connect it; publication and independent store
-approval are separate results.
+**Let Amadeus handle repetitive clicks, typing and copy-paste.**
+
+Once installed and configured, this extension lets you describe a desktop task to Amadeus and have it operate Windows apps through GUI Runtime. Runtime is the local program that captures screenshots, locates targets, clicks, types and checks results. This extension connects those capabilities to Amadeus.
+
+## Why install it
+
+- **Complete tasks across multiple steps.** Chain actions such as opening a page, entering content and moving to the next step, reducing repetitive manual work.
+- **Work through the app's interface.** Locate buttons and input fields from screenshots for tasks performed on the desktop, without writing a separate integration for every target app.
+- **Return uncertain steps for review.** Amadeus's execution agent can inspect the relevant screenshot when a step needs review. If the original task can still continue, an approved review lets it resume without starting over.
+
+## What can you use it for?
+
+These task examples come from existing controlled Runtime tests:
+
+- **Browser:** enter a search term, inspect the results and open the target page.
+- **Notepad:** enter or edit text, then save it to a specified file.
+- **7-Zip:** open a folder, enter a subfolder and return to its parent.
+
+It is intended for people who repeatedly click, enter text, or inspect pages and folders in Windows apps. Different apps and interfaces still need validation; these Runtime examples do not mean every scenario has been verified with the current Amadeus extension. Direct Amadeus/Pi evidence includes 7-Zip folder navigation and review/continue in historical versions. See the compatibility section below for exact versions and scope.
+
+## What do you need?
+
+- **A Windows computer and a compatible Amadeus build.** This extension connects to the Pi execution agent.
+- **GUI Runtime, installed and started separately.** The extension does not include Runtime or start it for you.
+- **Model API and local connection configuration.** This extension uses external model APIs, so no local GPU or model-weight download is needed. Screenshots and task information go to your chosen model services, which may charge API fees. Configure the local connection token separately from model API keys.
+
+Configure the connection and explicitly authorize desktop input before starting a task. Disabling or uninstalling the extension does not stop or uninstall Runtime, or delete its data. Installation, configuration and version compatibility details follow.
 
 ## Downloads and compatibility
 
-- [Connector 0.0.8 release](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.8)
-- [Connector wheel: amadeus_agent_gui_runtime-0.0.8-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/amadeus_agent_gui_runtime-0.0.8-py3-none-any.whl)
-- [Connector source: extension-source-0.0.8.zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/extension-source-0.0.8.zip)
-- [Author preflight: preflight.json](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/preflight.json)
+- [Connector 0.0.9 release](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.9)
+- [Connector wheel: amadeus_agent_gui_runtime-0.0.9-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.9/amadeus_agent_gui_runtime-0.0.9-py3-none-any.whl)
+- [Connector source: extension-source-0.0.9.zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.9/extension-source-0.0.9.zip)
+- [Author preflight: preflight.json](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.9/preflight.json)
 - [Recommended Runtime 0.1.11 Windows installer](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentGUIRuntimeExecution-Setup.exe)
   and [Runtime release/checksums](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11)
 
 Install the Runtime yourself on the Windows computer running Amadeus, then
 import the connector wheel. See the [Runtime installation guide](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.11/README.md#quick-start).
 The connector and Runtime have independent version numbers and release tags;
-connector 0.0.8 does not update Runtime 0.1.11.
+connector 0.0.9 does not update Runtime 0.1.11.
 
 | Combination or capability | Supported scope and evidence |
 | --- | --- |
-| Runtime 0.1.11 + connector 0.0.8 | Recommended Runtime and this connector. Inspect the actual running service and the scope of its validation evidence before input; a version pair alone does not prove installed GUI execution. |
-| Runtime 0.1.6 + connector 0.0.4 | Historical controlled installed Pi evidence covers four navigation steps, explicit TEST double refusal, Main review/continue and cleanup. It does not validate the 0.0.8/0.1.11 combination. |
+| Runtime 0.1.11 + connector 0.0.9 | Recommended Runtime and this connector. Inspect the actual running service and the scope of its validation evidence before input; a version pair alone does not prove installed GUI execution. |
+| Runtime 0.1.6 + connector 0.0.4 | Historical controlled installed Pi evidence covers four navigation steps, explicit TEST double refusal, Main review/continue and cleanup. It does not validate the 0.0.9/0.1.11 combination. |
 | Minimum protocol contract | 0.1.6 introduced the authenticated HTTP MCP entry point and pre-action review needed by this connector route; the running service must also supply field-review/continue. This protocol floor does not qualify every later Runtime, including all future 0.1.x releases. |
 | Runtime 0.1.5 or earlier | Not usable by this HTTP connector: 0.1.5 has no HTTP MCP entry point, even though field-result review existed there. |
 | Runtime 0.1.7 current-Agent mode | Not qualified through Amadeus by this connector. This Skill supports the existing **external API route** only. |
@@ -42,7 +64,7 @@ as proof of desktop execution.
 | Component | Responsibility |
 | --- | --- |
 | Amadeus / Pi | Plans the task, owns its approval UI and uses its native HTTP MCP client. |
-| Connector 0.0.8 | Resource-only connection declaration and Skill; no launcher, executable selector, model weights or Runtime dependencies. |
+| Connector 0.0.9 | Resource-only connection declaration and Skill; no launcher, executable selector, model weights or Runtime dependencies. |
 | Local Runtime | Provides the authenticated loopback service, vision/Decision configuration, input gates, receipts and host cleanup. It is installed and started independently. |
 
 The Host uses Python 3.12. The Runtime API setup defaults new environments to
@@ -103,7 +125,7 @@ a public bind, tunnel or reverse proxy.
 
 1. Use an Amadeus build with native Streamable HTTP MCP and Skill contributions;
    check its actual installed version against the recorded baseline above.
-2. Download and install the **0.0.8 wheel** in Settings → Extensions. Inspect its
+2. Download and install the **0.0.9 wheel** in Settings → Extensions. Inspect its
    identity and disclosure; installation starts disabled.
 3. Set `runtime_url` to `http://127.0.0.1:17665/mcp`, or the port you selected.
    Use only your trusted local Runtime. Set secret `connection_token` to the
@@ -156,8 +178,8 @@ navigation example, not compression/extraction or a performance benchmark.
 
 ## Task, review and cleanup
 
-Use the packaged [Skill](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/SKILL.md)
-and [reference](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/references/runtime.md).
+Use the packaged [Skill](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.9/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/SKILL.md)
+and [reference](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.9/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/references/runtime.md).
 Keep one MCP connection and one input owner for the whole Work. Pending,
 unknown or interrupted input keeps its original request/run/command IDs; never
 replay it with a new ID to extend a wait.
@@ -226,6 +248,10 @@ retained evidence through the maintained settlement entry point.
 Keep original evidence; an unknown settlement is not proof that no input ran.
 
 ## Version changes and installation scope
+
+**0.0.9** makes the store title, description and bilingual introduction easier to understand: what desktop tasks Runtime can help with, why to install it, and what setup is needed. Connection fields, permissions, HTTP transport and execution/review behavior are unchanged from 0.0.8. Existing 0.0.8 settings need no migration. Runtime remains a separate installation; 0.1.11 is still recommended. This is a documentation/metadata update, with no new GUI performance or compatibility claim.
+
+Previous release:
 
 0.0.8 updates package metadata and bilingual installation/recovery guidance,
 and recommends Runtime 0.1.11 for the never-started-owner release fix. Exact

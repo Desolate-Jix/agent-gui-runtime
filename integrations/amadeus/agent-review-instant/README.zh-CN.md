@@ -1,23 +1,49 @@
-# Amadeus Windows GUI Runtime 连接器 0.0.8
+# Windows 桌面操作（GUI Runtime）
 
-[English](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/README.md)
+[English](README.md)
 
-本连接器通过原生 Streamable HTTP MCP，将 Pi 连接到**用户独立安装并启动的 Windows 本机 GUI Runtime**。它只含连接声明与执行 Skill，不含 Runtime。本指南用于安装与连接；作者发布与独立商店批准分别记录。
+**把重复点击、输入和复制粘贴交给 Amadeus。**
+
+安装并配置后，你可以向 Amadeus 描述桌面任务，让它通过 GUI Runtime 操作 Windows 软件。Runtime 是实际负责截图、定位、点击、输入和结果核验的本机程序；这个扩展把这些能力接入 Amadeus。
+
+## 为什么安装
+
+- **连续完成多步任务。** 将打开页面、输入内容、进入下一步等操作串起来，减少手动重复操作。
+- **根据界面操作软件。** 使用截图寻找按钮和输入框，适合需要在桌面界面上完成的任务，无需为每个目标软件单独编写接口。
+- **遇到疑问可以交回审核。** 需要复核时，Amadeus 的执行 Agent 可查看对应截图；如果原任务仍可继续，审核通过后接着执行，不必从头重来。
+
+## 可以用来做什么
+
+以下是 Runtime 已有受控实测中的任务示例：
+
+- **浏览器：** 输入搜索词、查看搜索结果、打开目标网页。
+- **记事本：** 输入或修改文字，再保存到指定文件。
+- **7-Zip：** 打开文件夹、进入子目录，再返回上一级。
+
+适合经常在 Windows 软件中重复点击、录入文字、查看页面或文件夹的用户。不同应用和界面仍需要验证；上述 Runtime 示例不代表当前 Amadeus 扩展已验证全部场景。Amadeus／Pi 的已有直接实测包括历史版本中的 7-Zip 目录导航与审核后继续，具体版本和范围见下方兼容性说明。
+
+## 安装前需要什么
+
+- **Windows 电脑和兼容的 Amadeus。** 本扩展连接 Pi 执行 Agent。
+- **单独安装并启动 GUI Runtime。** 扩展不包含 Runtime，也不会自动替你启动它。
+- **配置模型 API 和本机连接。** 当前扩展使用外部模型 API，无需本地 GPU 或下载模型权重；截图和任务信息会发送给你选择的模型服务，可能产生 API 费用。本机连接密钥与模型 API Key 分开配置。
+
+完成配置并明确授权桌面操作后再开始任务。停用或卸载扩展不会自动停止、卸载 Runtime，也不会删除 Runtime 数据。安装、配置和版本兼容细节如下。
 
 ## 下载与兼容性
 
-- [连接器 0.0.8 发布页](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.8)
-- [连接器 wheel：amadeus_agent_gui_runtime-0.0.8-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/amadeus_agent_gui_runtime-0.0.8-py3-none-any.whl)
-- [连接器源码：extension-source-0.0.8.zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/extension-source-0.0.8.zip)
-- [作者预检：preflight.json](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/preflight.json)
+- [连接器 0.0.9 发布页](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.9)
+- [连接器 wheel：amadeus_agent_gui_runtime-0.0.9-py3-none-any.whl](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.9/amadeus_agent_gui_runtime-0.0.9-py3-none-any.whl)
+- [连接器源码：extension-source-0.0.9.zip](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.9/extension-source-0.0.9.zip)
+- [作者预检：preflight.json](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.9/preflight.json)
 - [推荐的 Runtime 0.1.11 Windows 安装包](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentGUIRuntimeExecution-Setup.exe)与 [Runtime 发布页／校验值](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11)
 
-请先在运行 Amadeus 的 Windows 电脑上自行安装 Runtime，再导入连接器 wheel。详见 [Runtime 安装指南](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.11/README.zh-CN.md#快速开始)。连接器与 Runtime 使用独立版本号和发布 tag；连接器 0.0.8 不会更新 Runtime 0.1.11。
+请先在运行 Amadeus 的 Windows 电脑上自行安装 Runtime，再导入连接器 wheel。详见 [Runtime 安装指南](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.11/README.zh-CN.md#快速开始)。连接器与 Runtime 使用独立版本号和发布 tag；连接器 0.0.9 不会更新 Runtime 0.1.11。
 
 | 组合或能力 | 支持范围与证据 |
 | --- | --- |
-| Runtime 0.1.11 ＋连接器 0.0.8 | 推荐的 Runtime 与本连接器。输入前须检查实际运行服务及其验证证据范围；单凭版本组合不能证明已安装态 GUI 执行。 |
-| Runtime 0.1.6 ＋连接器 0.0.4 | 历史受控安装态 Pi 证据覆盖四步目录导航、显式 TEST 双拒、Main 审核／继续及收尾，不验证 0.0.8／0.1.11 组合。 |
+| Runtime 0.1.11 ＋连接器 0.0.9 | 推荐的 Runtime 与本连接器。输入前须检查实际运行服务及其验证证据范围；单凭版本组合不能证明已安装态 GUI 执行。 |
+| Runtime 0.1.6 ＋连接器 0.0.4 | 历史受控安装态 Pi 证据覆盖四步目录导航、显式 TEST 双拒、Main 审核／继续及收尾，不验证 0.0.9／0.1.11 组合。 |
 | 最低协议合同 | 0.1.6 引入本连接路线所需的带鉴权 HTTP MCP 入口及输入前候选审核；运行中的服务还必须提供文字结果审核／继续。这个协议起点不表示所有后续 Runtime（包括未来全部 0.1.x 版本）均已具备资格。 |
 | Runtime 0.1.5 及更早版本 | 不能用于本 HTTP 连接器：0.1.5 没有 HTTP MCP 入口，尽管当时已有文字结果审核。 |
 | Runtime 0.1.7 current-Agent 模式 | 本连接器没有通过 Amadeus 核验该模式；本 Skill 仅支持原有的 **external API 路线**。 |
@@ -30,7 +56,7 @@
 | 组件 | 职责 |
 | --- | --- |
 | Amadeus／Pi | 规划任务，管理自身批准界面，并使用原生 HTTP MCP 客户端。 |
-| 连接器 0.0.8 | 仅含连接声明与 Skill；不含启动器、可执行程序选择、模型权重或 Runtime 依赖。 |
+| 连接器 0.0.9 | 仅含连接声明与 Skill；不含启动器、可执行程序选择、模型权重或 Runtime 依赖。 |
 | 本机 Runtime | 提供带鉴权的本机服务、视觉／Decision 配置、输入门禁、回执与宿主清理；由用户独立安装并启动。 |
 
 Host 使用 Python 3.12。Runtime API setup 为新环境默认准备 Python 3.12，保留既有受支持的 Python 3.11 环境，**不需要本地 GPU 或下载模型权重**。可选本地模型安装有单独的 Python 3.11 合同，不在本连接器支持路线内。相同 Python 小版本不等于共用虚拟环境，各组件保留自己的锁定依赖。
@@ -62,7 +88,7 @@ setup 运行一次即可，可能下载锁定依赖；它生成的独立 stdio M
 ## 安装与连接
 
 1. 使用支持原生 Streamable HTTP MCP 和 Skill 的 Amadeus 构建，将实际安装版本与上方已记录基线核对。
-2. 下载并在 Settings → Extensions 安装 **0.0.8 wheel**，检查身份和披露；安装后初始禁用。
+2. 下载并在 Settings → Extensions 安装 **0.0.9 wheel**，检查身份和披露；安装后初始禁用。
 3. 将 `runtime_url` 填为 `http://127.0.0.1:17665/mcp` 或所选端口，只使用可信的本机 Runtime。secret `connection_token` 填入启动 Runtime 控制台使用的同一本机密钥，不能填模型 API Key。
 4. MCP 和 Skill 均绑定 Pi，明确启用并应用 backend restart，再开新 Work。保存配置不证明它已加载。
 5. 查看 MCP 初始化报告的版本和实际发现的工具，再在申请输入前读取 `instant_status`。必要工具为 `instant_start`、`instant_status`、`instant_run`、`instant_result`、`instant_image`、`instant_stop`；其 schema 须支持随包 Skill 描述的 task-plan、原命令状态及审核／继续操作。实际进入审核状态时核对服务返回的真实 recipe。这是人工核对，不是自动兼容认证。
@@ -87,7 +113,7 @@ $FixtureRoot
 
 ## 任务、审核与收尾
 
-使用随包 [Skill](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/SKILL.md) 和[参考](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.8/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/references/runtime.md)。完整 Work 保持同一个 MCP 连接及一个输入所有者。待定、未知或中断的输入保留原 request／run／command ID，不能为了延长等待而换 ID 重放。
+使用随包 [Skill](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.9/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/SKILL.md) 和[参考](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.9/integrations/amadeus/agent-review-instant/src/amadeus_agent_gui/skills/gui-execution/references/runtime.md)。完整 Work 保持同一个 MCP 连接及一个输入所有者。待定、未知或中断的输入保留原 request／run／command ID，不能为了延长等待而换 ID 重放。
 
 遇到真实 `pre_action_review_packet.v1` 时，用新的状态请求读取原 job，查看该状态请求绑定的 **before 图像**，复制返回的 review recipe，再使用单独返回的 continue recipe。审核本身不点击；继续保留原 job／候选，派发一次前仍须通过新截图的目标区域核对及现有输入门禁。遇到 `field_review_packet.v1` 时，查看已输入文字的绑定 **after 图像**，继续不会重输。文字审核不批准输入前候选，也不证明后续提交成功。没有真实可续票据或证据已过期时，停止并报告原状态。
 
@@ -112,6 +138,10 @@ Pi 断线或报告 owner 冲突后，`instant_recovery_preview` 和 `instant_rec
 Runtime 0.1.10 将 `task_plan` 输入结算验证扩展到证据完整的拒绝控制请求和成功的 `observe` 请求。拒绝须有原始持久化的派发前证明，错误字符串本身不能证明零输入；成功观察须绑定原截图及账本证据。`recover`、`resume_pre_dispatch` 的结算仍未具备资格，本版不声称支持。按指南通过正式维护的结算入口核对保留证据。保留原证据；未知结算不能证明没有执行输入。
 
 ## 版本变化与安装用途
+
+**0.0.9** 更新商店名称、简介及中英文介绍，先说明 Runtime 能帮你完成什么桌面任务、为什么安装，以及使用前需要准备什么。连接字段、权限、HTTP 接口和执行／审核行为与 0.0.8 相同，已有 0.0.8 配置无需迁移。Runtime 仍需单独安装，继续推荐 0.1.11。本次仅更新文案与元数据，不新增 GUI 性能或兼容性结论。
+
+上一版记录：
 
 0.0.8 更新包元数据及双语安装／恢复说明，并为未启动 owner 释放修复推荐 Runtime 0.1.11；确切检查及未完成资格见 [Runtime 发行验证记录](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.11/docs/releases/EXECUTION_0111_20261028.md)。Runtime 修复单独交付，本 wheel 不改变连接配置、权限或输入执行。既有 0.0.3／0.0.4／0.0.5／0.0.6／0.0.7 的 `runtime_url`、`connection_token` 无需迁移。历史 0.0.2 stdio 启动器及早期版本产物保持原样。从 0.0.2 迁移时，Runtime 路径、profile、模型密钥与本机输入选项改在独立服务配置，并明确填写两个连接器配置；不能把旧模型密钥当作连接密钥。
 

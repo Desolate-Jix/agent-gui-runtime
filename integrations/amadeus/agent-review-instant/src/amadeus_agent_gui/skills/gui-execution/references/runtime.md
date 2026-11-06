@@ -277,14 +277,14 @@ browser profiles, cookies, history, sessions or retained extension data.
 
 ## Evidence boundary / 证据边界
 
-Connector 0.0.8 updates installation/recovery guidance and metadata; Runtime
+Connector 0.0.9 updates installation/recovery guidance and metadata; Runtime
 fixes are delivered separately. Existing 0.0.3/0.0.4/0.0.5/0.0.6/0.0.7 connection settings
 need no migration, and permissions/input gates do not change.
 [Controlled installed Pi evidence](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.6/docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)
 belongs to connector 0.0.4/Runtime 0.1.6; it does not validate the
-0.0.8/0.1.11 combination. Read the separate [historical 0.0.5 author validation record](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.5/docs/verification/AMADEUS_CONNECTOR_005_20261026.md)
+0.0.9/0.1.11 combination. Read the separate [historical 0.0.5 author validation record](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.5/docs/verification/AMADEUS_CONNECTOR_005_20261026.md)
 for its exact scope of packaging/protocol checks. Publication, author checks,
 installed GUI execution and independent approval are separate results; these
 records do not establish unattended accuracy or performance.
 
-连接器 0.0.8 更新安装／恢复指引与元数据，Runtime 修复单独交付；既有 0.0.3／0.0.4／0.0.5／0.0.6／0.0.7 连接设置无需迁移，权限／输入门禁不变。[受控安装态 Pi 证据](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.6/docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)属于连接器 0.0.4／Runtime 0.1.6，不验证 0.0.8／0.1.11 组合。打包／协议检查的确切范围见单独的 [0.0.5 历史作者验证记录](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.5/docs/verification/AMADEUS_CONNECTOR_005_20261026.md)。作者发布、作者检查、安装态 GUI 执行及独立批准分别记录；这些记录不证明无人准确率或性能。
+连接器 0.0.9 更新安装／恢复指引与元数据，Runtime 修复单独交付；既有 0.0.3／0.0.4／0.0.5／0.0.6／0.0.7 连接设置无需迁移，权限／输入门禁不变。[受控安装态 Pi 证据](https://github.com/Desolate-Jix/agent-gui-runtime/blob/instant-v0.1.6/docs/verification/MAIN_PRE_ACTION_REVIEW_20261023.md)属于连接器 0.0.4／Runtime 0.1.6，不验证 0.0.9／0.1.11 组合。打包／协议检查的确切范围见单独的 [0.0.5 历史作者验证记录](https://github.com/Desolate-Jix/agent-gui-runtime/blob/amadeus-extension-v0.0.5/docs/verification/AMADEUS_CONNECTOR_005_20261026.md)。作者发布、作者检查、安装态 GUI 执行及独立批准分别记录；这些记录不证明无人准确率或性能。

@@ -1,4 +1,4 @@
-执行版 **0.1.11** 修复从未尝试启动 Runtime 的 HTTP 所有者无法释放的问题，已启动或状态不明会话继续遵守清理门禁。[发布范围与验证](docs/releases/EXECUTION_0111_20261028.md)。Amadeus **0.0.8 连接器**更新推荐版本；[商店审核 #11](https://github.com/Code-Amadeus/Amadeus-Extensions/pull/11) 与发行下载分别处理。[受影响安装的恢复步骤](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
+执行版 **0.1.11** 修复从未尝试启动 Runtime 的 HTTP 所有者无法释放的问题，已启动或状态不明会话继续遵守清理门禁。[发布范围与验证](docs/releases/EXECUTION_0111_20261028.md)。Amadeus **扩展 0.0.9** 更新面向用户的名称与介绍；见[扩展更新说明](docs/releases/AMADEUS_CONNECTOR_009_20261106.md)。商店批准与发行下载分别处理。[受影响安装的恢复步骤](docs/RUNTIME_018_SETTLEMENT_RECOVERY.md)。学习开发保持暂停，见[封存说明](docs/LEARNING_PAUSED.md)。
 
 <div align="center">
 
@@ -92,10 +92,10 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 
 **0.1.6 的服务配置：** Decision 与普通模型复核均可独立配置接口、模型和密钥环境变量，默认仍为 OpenAI Decisions + 普通 Luna；替换服务须兼容 Decisions／Responses 协议。这些设置首次包含于 2026-10-15 重打包的 0.1.3 安装器。[配置方法与兼容范围 →](docs/development/DECISION_PROVIDERS.zh-CN.md)
 
-**Amadeus／Pi：** 下载 [HTTP MCP＋Skill 连接器 0.0.8](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.8/amadeus_agent_gui_runtime-0.0.8-py3-none-any.whl)，按[连接器安装指南](integrations/amadeus/agent-review-instant/README.zh-CN.md)配置。Runtime 需另外安装、启动，推荐使用 0.1.11。请核对实际版本及必要的 HTTP／审核能力。目录审核期间可手动导入 wheel。[旧 0.0.2 stdio 指南](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md)继续封存，不能直接套用其配置。
+**Amadeus／Pi：** 使用 [Windows 桌面操作扩展 0.0.9](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/amadeus-extension-v0.0.9/amadeus_agent_gui_runtime-0.0.9-py3-none-any.whl)，让 Amadeus 帮你处理重复的 Windows 桌面任务。先看[功能介绍与安装指南](integrations/amadeus/agent-review-instant/README.zh-CN.md)。Runtime 需另外安装、启动，推荐使用 0.1.11。0.0.8 已进入官方商店；0.0.9 需独立目录审核，期间可从发布页下载并手动导入。[旧 0.0.2 stdio 指南](integrations/amadeus/agent-review-instant/README.stdio-0.0.2.zh-CN.md)继续封存。
 
 <a id="evaluation"></a>
-旧 wheel 与下载地址保持原字节。0.0.8 连接器更新推荐 Runtime，连接键和权限不变，不代表已验证 Amadeus 当前 Agent 模式。见[当前发布范围](docs/releases/EXECUTION_0111_20261028.md)、[0.0.5 历史验证](docs/verification/AMADEUS_CONNECTOR_005_20261026.md)及 [Runtime 更新说明](docs/RUNTIME_UPDATES.zh-CN.md)。停用或卸载连接器不会停止或卸载外部 Runtime。
+旧 wheel 与下载地址保持原字节。0.0.9 扩展更新展示文案和说明，连接键、权限及推荐 Runtime 不变，不代表已验证 Amadeus 当前 Agent 模式。见[当前发布范围](docs/releases/EXECUTION_0111_20261028.md)、[0.0.5 历史验证](docs/verification/AMADEUS_CONNECTOR_005_20261026.md)及 [Runtime 更新说明](docs/RUNTIME_UPDATES.zh-CN.md)。停用或卸载连接器不会停止或卸载外部 Runtime。
 
 ## 工程验证与实测
 
