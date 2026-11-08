@@ -176,6 +176,22 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 - Models can reject correct evidence or accept incorrect evidence. A primary false pass skips secondary review; this remains a known limitation. Arbitrary unattended tasks are not guaranteed.
 - The installer is unsigned. API dependencies were checked in an isolated Python 3.12 environment; new-machine setup and normal OS registry/shortcut integration were not newly verified. Pi full receipts remain verbose; this release makes no token-saving claim. [Release scope and history](docs/EXECUTION_GUIDE.md#release-boundaries-and-history)
 
+## Download statistics
+
+<!-- DOWNLOAD-STATS:START -->
+| Component | Total downloads | Latest release downloads |
+| --- | ---: | --- |
+| Execution installer | 43 | [instant-v0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11) · 3 |
+| Runtime update package | 5 | [instant-v0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11) · 1 |
+| Amadeus extension | 56 | [amadeus-extension-v0.0.9](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.9) · 4 |
+
+Cumulative GitHub Releases downloads of installer, update ZIP and extension wheel assets; excludes historical previews, legacy portable packages, source archives, videos and verification attachments. Includes author testing, repeat and automated downloads; these are not unique user counts.
+
+Updated: 2026-11-08 UTC. Refreshed daily.
+<!-- DOWNLOAD-STATS:END -->
+
+Counts refresh daily and after a release is published. [Source: GitHub Releases](https://github.com/Desolate-Jix/agent-gui-runtime/releases) · [Refresh workflow](https://github.com/Desolate-Jix/agent-gui-runtime/actions/workflows/download-stats.yml).
+
 ## Documentation
 
 | Start using it | Understand and integrate |

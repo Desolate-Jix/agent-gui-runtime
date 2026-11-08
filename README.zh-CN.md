@@ -176,6 +176,22 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 - 模型可能误拒，也可能误放。第一层误放会跳过二次复核，这是已知限制；不承诺任意任务都能无人干预完成。
 - 安装器未签名。API 依赖已在隔离 Python 3.12 环境检查；未新增全新机器配置及正常注册表／快捷方式集成验收。Pi 完整回执仍较冗长，本版不宣称节省 token。[发布范围与历史记录](docs/EXECUTION_GUIDE.zh-CN.md#发布边界与历史记录)
 
+## 下载统计
+
+<!-- DOWNLOAD-STATS:START -->
+| 组件 | 累计下载 | 最新版下载 |
+| --- | ---: | --- |
+| 执行版安装器 | 43 | [instant-v0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11) · 3 |
+| Runtime 更新包 | 5 | [instant-v0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11) · 1 |
+| Amadeus 扩展 | 56 | [amadeus-extension-v0.0.9](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.9) · 4 |
+
+统计 GitHub Releases 中安装器、更新 ZIP 和扩展 wheel 的累计下载次数；不含历史预览版、旧便携包、源码、视频及验证附件。包含作者测试、重复和自动化下载，不代表独立用户数。
+
+更新时间：2026-11-08 UTC。每日自动刷新。
+<!-- DOWNLOAD-STATS:END -->
+
+每天及发布新版本后自动刷新。[数据来源：GitHub Releases](https://github.com/Desolate-Jix/agent-gui-runtime/releases) · [刷新工作流](https://github.com/Desolate-Jix/agent-gui-runtime/actions/workflows/download-stats.yml)。
+
 ## 文档导航
 
 | 开始使用 | 理解架构与接入 |
