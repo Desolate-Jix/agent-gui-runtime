@@ -26,6 +26,22 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 
 选择 **使用当前 Agent**，由已连接且支持图像的主 Agent 定位、核验；或选择 **使用外部模型 API**，由 Runtime 调用服务完成视觉核验。两者均不需要本地模型权重或 GPU。本地模型与委派识图保留为高级选项。
 
+<a id="demos"></a>
+
+## 看 Runtime 操作 Excel
+
+用 3,000 条合成订单演示数据清洗、毛利计算，以及按月、门店和品类汇总。这个中文视频展示真实桌面操作与已完成的阶段成果，包含主 Agent 的规划、核验和纠错。
+
+<p align="center">
+  <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentReviewInstant-Excel-zh-CN-20261108-1080p.mp4">
+    <img src="docs/assets/demos/excel-zh-CN-20261108.gif" width="960" alt="中文 Excel 演示：数据清洗、毛利计算和销售汇总。点击观看完整中文视频。">
+  </a>
+</p>
+
+**[观看中文版 · 2:59](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentReviewInstant-Excel-zh-CN-20261108-1080p.mp4)** · [4K 视频](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentReviewInstant-Excel-zh-CN-20261108-4k.mp4) · [English walkthrough](README.md#demos)
+
+动图选取原速片段，完整视频经过剪辑，片长不代表端到端执行耗时。中文片主要展示数据处理与汇总；英文片另含完成的透视表和图表演示。
+
 **当前 Agent 模式（0.1.7 引入）：** `--current-agent` 提供持久的基础点击闭环，无需另配 Runtime 视觉或 Decision API，仍依赖承载 Agent 的服务并消耗其额度。文字输入、按键、滚动、任务计划和管理员模式不在该适配层支持范围。[配置与能力矩阵](docs/development/CURRENT_AGENT_MODE.zh-CN.md)。
 
 ## 0.1.11 新增内容
@@ -34,9 +50,7 @@ Agent Review Instant 是面向 MCP Agent 的 Windows 桌面执行运行时。Age
 - **保留原清理门禁：** `cleanup_verified=true` 的释放路线继续保留；任何启动尝试、活动或未知工作、附着资源及未核验清理仍须走原清理路线。
 - **连接器 0.0.8：** 推荐 Runtime 0.1.11，连接设置、权限、模型策略和仅限操作员恢复的边界不变。具体回归、包体及安装态结果见[发行验证记录](docs/releases/EXECUTION_0111_20261028.md)，不新增速度或准确率成绩。
 
-<a id="demos"></a>
-
-## 实录演示（0.1.4）
+## 更多桌面演示（0.1.4）
 
 以下为 **0.1.4** 已发布视频的压缩预览，降低尺寸与帧率，**不加速播放**。浏览器与记事本片剪去了开头等待，GIF 长度不代表性能。[完整视频与真实计划耗时 →](#evaluation)
 

@@ -26,6 +26,22 @@ Agent Review Instant is a Windows computer-use runtime for MCP-compatible agents
 
 Choose **Use the current Agent** to let your connected, image-capable agent locate targets and check results, or **Use an external model API** for Runtime-managed visual checks. Neither requires local model weights or a GPU. Local models and delegated vision remain advanced options.
 
+<a id="demos"></a>
+
+## Watch Runtime work in Excel
+
+Turn 3,000 synthetic orders into a checked sales report: clean the data, calculate gross profit, build a monthly PivotTable, rank stores and create charts. This English walkthrough shows real desktop actions, with planning, review and corrections by the main Agent.
+
+<p align="center">
+  <a href="https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentReviewInstant-Excel-en-20261108-1080p.mp4">
+    <img src="docs/assets/demos/excel-en-20261108.gif" width="960" alt="English Excel demonstration: monthly PivotTable, sales summaries and charts. Click to watch the full English video.">
+  </a>
+</p>
+
+**[Watch in English · 3:05](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentReviewInstant-Excel-en-20261108-1080p.mp4)** · [4K video](https://github.com/Desolate-Jix/agent-gui-runtime/releases/download/instant-v0.1.11/AgentReviewInstant-Excel-en-20261108-4k.mp4) · [中文演示](README.zh-CN.md#demos)
+
+The preview uses selected excerpts at their original playback speed. The full video is an edited walkthrough, including a continuous 20-second 1× PivotTable segment; its duration is not an end-to-end speed benchmark.
+
 **Current-agent mode (introduced in 0.1.7):** `--current-agent` provides a persistent basic-click loop without a separate Runtime vision or Decision API. The hosting agent's service and quota still apply. Text input, keys, scrolling, task plans and administrator mode are outside this adapter's supported set. [Setup and capability matrix](docs/development/CURRENT_AGENT_MODE.md).
 
 ## New in 0.1.11
@@ -34,9 +50,7 @@ Choose **Use the current Agent** to let your connected, image-capable agent loca
 - **Keep existing cleanup gates:** the `cleanup_verified=true` release path remains available. Any attempted start, active or unknown work, attached resources or unverified cleanup still requires the original cleanup path.
 - **Connector 0.0.8:** recommends Runtime 0.1.11 with unchanged connection settings, permissions, model policy and operator-only recovery. Exact regression, package and installed results belong to the [release validation record](docs/releases/EXECUTION_0111_20261028.md); no new speed or accuracy result is claimed.
 
-<a id="demos"></a>
-
-## Demos (0.1.4)
+## More desktop demos (0.1.4)
 
 These **0.1.4** demos are compressed previews of the published videos, with lower resolution/frame rate and **no playback acceleration**. Browser and Notepad clips trim the initial wait; GIF length is not a performance measurement. [Full videos and actual plan timings →](#evaluation)
 
