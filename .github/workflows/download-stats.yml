@@ -13,7 +13,6 @@ on:
       - '.github/scripts/render_download_chart.py'
       - '.github/scripts/test_download_stats.py'
       - '.github/workflows/download-stats.yml'
-      - 'docs/data/download-history-estimate.json'
 
 permissions:
   contents: write
@@ -41,11 +40,11 @@ jobs:
         shell: bash
         run: |
           git diff --check
-          if git diff --quiet -- README.md README.zh-CN.md docs/data/download-history.json docs/assets/downloads; then
+          if git diff --quiet -- README.md README.zh-CN.md docs/data/download-history.json docs/data/downloads-by-release.json docs/assets/downloads; then
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- README.md README.zh-CN.md docs/data/download-history.json docs/assets/downloads
+          git add -- README.md README.zh-CN.md docs/data/download-history.json docs/data/downloads-by-release.json docs/assets/downloads
           git commit -m 'docs: refresh download statistics'
           git push origin HEAD:main

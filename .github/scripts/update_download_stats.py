@@ -48,13 +48,14 @@ def fetch_releases(token=None):
 
 
 def summarize(releases):
-    """Return totals and the newest matching release for each component."""
+    """Return component totals and current counts for each matching release."""
     if not isinstance(releases, list):
         raise ValueError("Releases must be a list")
     stats = {
         key: {"downloads": 0, "files": 0, "latest": None}
         for key, *_ in COMPONENTS
     }
+    release_rows = []
     for index, release in enumerate(releases):
         context = f"Release {index}"
         if not isinstance(release, dict) or type(release.get("draft")) is not bool:
@@ -87,6 +88,12 @@ def summarize(releases):
             raise ValueError(f"{context} has an invalid published_at") from error
         if published_at.utcoffset() is None:
             raise ValueError(f"{context} published_at must include a timezone")
+        release_rows.append({
+            "tag": tag,
+            "published_at": published_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "downloads": sum(value["downloads"] for value in matched.values()),
+            "components": {key: value["downloads"] for key, value in matched.items()},
+        })
         for key, value in matched.items():
             if not value["files"]:
                 continue
@@ -99,7 +106,7 @@ def summarize(releases):
     for key, item in stats.items():
         if not item["files"]:
             raise ValueError(f"No matching assets found for {key}; refusing to replace existing statistics")
-    return stats
+    return stats, sorted(release_rows, key=lambda row: (row["published_at"], row["tag"]))
 
 
 def record_snapshot(history, stats, day):
@@ -128,17 +135,15 @@ def record_snapshot(history, stats, day):
     return history[:-1] + [snapshot] if previous == today else history + [snapshot]
 
 
-def render_block(language, first_date, estimated=False):
+def render_block(language, day):
     """Render only the content between the existing comment markers."""
     chinese = language == "zh-CN"
     chart_path = f"docs/assets/downloads/download-trend.{language}.svg"
     return "\n".join([
-        f"![{'按日期记录的累计下载趋势' if chinese else 'Cumulative downloads over time'}]({chart_path})",
+        f"![{'按版本发布日期累计下载量' if chinese else 'Cumulative downloads by release date'}]({chart_path})",
         "",
-        ((f"累计下载（含安装包、更新包、扩展及重复下载）：虚线按版本发布日期估算历史分布，实线为 {first_date} 起的每日实测。[估算依据](docs/data/download-history-estimate.json) · [实测数据](docs/data/download-history.json)。" if chinese else
-          f"Installer, update and extension downloads, including repeats. Dashed: history estimated by release date. Solid: daily observations since {first_date}. [Estimate](docs/data/download-history-estimate.json) · [Observed data](docs/data/download-history.json).") if estimated else
-         (f"安装包、更新包和扩展的累计下载次数，包含重复下载。[自 {first_date} 起每日记录](docs/data/download-history.json)。" if chinese else
-          f"Combined installer, update and extension downloads, including repeat downloads. [Recorded daily since {first_date}](docs/data/download-history.json).")),
+        (f"截至 {day}，将各版本当前下载量按版本发布日期累加，每日更新。包含安装包、更新包、扩展及重复下载。[各版本数据](docs/data/downloads-by-release.json)。" if chinese else
+         f"Each release's current downloads, accumulated by release date as of {day}; refreshed daily. Includes installers, updates, extensions and repeat downloads. [Per-release data](docs/data/downloads-by-release.json)."),
     ])
 
 
@@ -155,25 +160,33 @@ def replace_block(content, block):
     return content[:start] + replacement + content[end:]
 
 
-def update_outputs(root, stats, day):
+def update_outputs(root, releases, day):
     """Prepare both charts, history and README blocks before writing outputs."""
     root = Path(root)
+    stats, release_rows = summarize(releases)
     history_path = root / "docs/data/download-history.json"
     history = record_snapshot(json.loads(history_path.read_text(encoding="utf-8")), stats, day)
-    estimate_path = root / "docs/data/download-history-estimate.json"
-    estimate = json.loads(estimate_path.read_text(encoding="utf-8")) if estimate_path.exists() else None
-    pending = [(history_path, (json.dumps(history, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))]
+    snapshot = {
+        "counts_as_of": day,
+        "source": API_URL,
+        "metric": "Current release asset download counts accumulated by release publication date, not download occurrence date.",
+        "scope": "Execution installers, update ZIPs and Amadeus wheels, including repeated downloads.",
+        "releases": release_rows,
+    }
+    pending = [(path, (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+               for path, data in ((history_path, history), (root / "docs/data/downloads-by-release.json", snapshot))]
     for filename, language in (("README.md", "en"), ("README.zh-CN.md", "zh-CN")):
-        chart = render_chart(history, language, estimate=estimate).encode("utf-8")
+        chart = render_chart(snapshot, language).encode("utf-8")
         pending.append((root / f"docs/assets/downloads/download-trend.{language}.svg", chart))
         path = root / filename
         original = path.read_bytes()
-        replacement = replace_block(original, render_block(language, history[0]["date"], estimate is not None))
+        replacement = replace_block(original, render_block(language, day))
         pending.append((path, replacement))
     for path, replacement in pending:
         if not path.exists() or replacement != path.read_bytes():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(replacement)
+    return stats
 
 
 def main():
@@ -184,9 +197,8 @@ def main():
         releases = json.loads(arguments.releases_json.read_text(encoding="utf-8"))
     else:
         releases = fetch_releases(os.environ.get("GITHUB_TOKEN"))
-    stats = summarize(releases)
     day = datetime.now(timezone.utc).date().isoformat()
-    update_outputs(Path(__file__).resolve().parents[2], stats, day)
+    stats = update_outputs(Path(__file__).resolve().parents[2], releases, day)
     print("Updated README download statistics: " + ", ".join(
         f"{key}={item['downloads']} downloads/{item['files']} files" for key, item in stats.items()
     ))

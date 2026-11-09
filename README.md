@@ -179,9 +179,9 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 ## Download statistics
 
 <!-- DOWNLOAD-STATS:START -->
-![Cumulative downloads over time](docs/assets/downloads/download-trend.en.svg)
+![Cumulative downloads by release date](docs/assets/downloads/download-trend.en.svg)
 
-Installer, update and extension downloads, including repeats. Dashed: history estimated by release date. Solid: daily observations since 2026-11-08. [Estimate](docs/data/download-history-estimate.json) · [Observed data](docs/data/download-history.json).
+Each release's current downloads, accumulated by release date as of 2026-11-09; refreshed daily. Includes installers, updates, extensions and repeat downloads. [Per-release data](docs/data/downloads-by-release.json).
 <!-- DOWNLOAD-STATS:END -->
 
 ## Documentation

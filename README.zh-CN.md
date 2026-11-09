@@ -179,9 +179,9 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 ## 下载统计
 
 <!-- DOWNLOAD-STATS:START -->
-![按日期记录的累计下载趋势](docs/assets/downloads/download-trend.zh-CN.svg)
+![按版本发布日期累计下载量](docs/assets/downloads/download-trend.zh-CN.svg)
 
-累计下载（含安装包、更新包、扩展及重复下载）：虚线按版本发布日期估算历史分布，实线为 2026-11-08 起的每日实测。[估算依据](docs/data/download-history-estimate.json) · [实测数据](docs/data/download-history.json)。
+截至 2026-11-09，将各版本当前下载量按版本发布日期累加，每日更新。包含安装包、更新包、扩展及重复下载。[各版本数据](docs/data/downloads-by-release.json)。
 <!-- DOWNLOAD-STATS:END -->
 
 ## 文档导航

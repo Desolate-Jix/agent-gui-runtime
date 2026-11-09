@@ -15,8 +15,8 @@ def release(tag, day, assets):
             "assets": [{"name": name, "download_count": count} for name, count in assets]}
 
 
-def stats():
-    return downloads.summarize([
+def release_data():
+    return [
         release("instant-v0.1.11", "2026-10-28", [
             ("AgentGUIRuntimeExecution-Setup.exe", 43),
             ("AgentGUIRuntimeExecution-update.zip", 5),
@@ -26,15 +26,14 @@ def stats():
         release("amadeus-extension-v0.0.9", "2026-11-06", [
             ("amadeus_agent_gui_runtime-0.0.9-py3-none-any.whl", 56),
         ]),
-    ])
+    ]
+
+
+def stats():
+    return downloads.summarize(release_data())[0]
 
 
 ROW = {"date": "2026-11-08", "installer": 43, "update": 5, "extension": 56}
-ESTIMATE = {"cutoff": ROW["date"], "points": [
-    {"date": "2026-10-01", "total": 0},
-    {"date": "2026-10-15", "total": 38},
-    {"date": ROW["date"], "total": 104},
-]}
 
 
 class DownloadHistoryTests(unittest.TestCase):
@@ -84,9 +83,9 @@ class DownloadHistoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.setup_root(root)
-            downloads.update_outputs(root, stats(), "2026-11-09")
+            downloads.update_outputs(root, release_data(), "2026-11-09")
             first = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
-            downloads.update_outputs(root, stats(), "2026-11-09")
+            downloads.update_outputs(root, release_data(), "2026-11-09")
             second = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
             self.assertEqual(first, second)
             for name in ("README.md", "README.zh-CN.md"):
@@ -105,42 +104,47 @@ class DownloadHistoryTests(unittest.TestCase):
             history_before = history_path.read_bytes()
             (root / "README.zh-CN.md").write_bytes(b"missing markers")
             with self.assertRaises(ValueError):
-                downloads.update_outputs(root, stats(), "2026-11-09")
+                downloads.update_outputs(root, release_data(), "2026-11-09")
             self.assertEqual((root / "README.md").read_bytes(), original)
             self.assertEqual(history_path.read_bytes(), history_before)
             self.assertFalse((root / "docs/assets/downloads").exists())
 
-    def test_estimate_is_frozen_when_real_history_grows(self):
+    def test_release_counts_refresh_without_rewriting_daily_history(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.setup_root(root)
-            estimate_path = root / "docs/data/download-history-estimate.json"
-            estimate_bytes = json.dumps(ESTIMATE).encode("utf-8")
-            estimate_path.write_bytes(estimate_bytes)
-            counts = stats()
-            counts["installer"]["downloads"] = 45
-            downloads.update_outputs(root, counts, "2026-11-10")
-            self.assertEqual(estimate_path.read_bytes(), estimate_bytes)
+            releases = release_data()
+            releases[0]["assets"][0]["download_count"] = 45
+            downloads.update_outputs(root, releases[::-1], "2026-11-10")
             history = json.loads((root / "docs/data/download-history.json").read_text())
             self.assertEqual(history, [ROW, dict(ROW, date="2026-11-10", installer=45)])
+            snapshot = json.loads((root / "docs/data/downloads-by-release.json").read_text())
+            self.assertEqual(snapshot["counts_as_of"], "2026-11-10")
+            self.assertEqual([r["downloads"] for r in snapshot["releases"]], [50, 56])
+            self.assertEqual([r["published_at"][:10] for r in snapshot["releases"]], ["2026-10-28", "2026-11-06"])
             for lang, month in (("en", "Oct 2026"), ("zh-CN", "2026年10月")):
                 svg = ET.fromstring((root / f"docs/assets/downloads/download-trend.{lang}.svg").read_bytes())
-                paths = {node.get("id"): node for node in svg.iter() if node.get("id")}
-                estimated = paths["series-estimated"]
-                observed = paths["series-observed"]
-                self.assertIn("stroke-dasharray", estimated.attrib)
-                self.assertNotIn("stroke-dasharray", observed.attrib)
-                self.assertEqual(estimated.get("points").split()[-1], observed.get("points").split()[0])
-                self.assertEqual(len(observed.get("points").split()), 2)
+                paths = svg.findall(".//{http://www.w3.org/2000/svg}polyline")
+                self.assertEqual(len(paths), 1)
+                self.assertNotIn("stroke-dasharray", paths[0].attrib)
+                self.assertEqual(len(paths[0].get("points").split()), 3)
                 self.assertIn(month, " ".join(svg.itertext()))
 
-    def test_estimate_cannot_forge_the_observed_bridge(self):
-        bad_cutoff = dict(ESTIMATE, cutoff="2026-11-07")
-        bad_total = deepcopy(ESTIMATE)
-        bad_total["points"][-1]["total"] = 105
-        for estimate in (bad_cutoff, bad_total):
-            with self.subTest(estimate=estimate), self.assertRaises(ValueError):
-                downloads.render_chart([ROW], estimate=estimate)
+    def test_same_utc_release_day_is_combined_before_accumulating(self):
+        releases = release_data()
+        releases.append(release("second-same-day", "2026-10-28", [("AgentGUIRuntimeExecution-Setup.exe", 2)]))
+        # A draft must not add to the totals or chart.
+        releases.append(dict(release("draft", "2026-11-07", [("AgentGUIRuntimeExecution-Setup.exe", 500)]), draft=True))
+        counts, rows = downloads.summarize(releases[::-1])
+        self.assertEqual(sum(r["downloads"] for r in rows), 106)
+        self.assertEqual(counts["installer"]["downloads"], 45)
+        svg = ET.fromstring(downloads.render_chart({"counts_as_of": "2026-11-09", "releases": rows}))
+        path = svg.find(".//{http://www.w3.org/2000/svg}polyline")
+        points = [tuple(map(float, point.split(","))) for point in path.get("points").split()]
+        self.assertEqual(len(points), 3)  # Baseline + two distinct release dates.
+        self.assertLess(points[0][0], points[1][0])
+        self.assertLess(points[1][0], points[2][0])
+        self.assertAlmostEqual((points[0][1] - points[1][1]) / (points[0][1] - points[2][1]), 50 / 106, places=3)
 
 
 if __name__ == "__main__":

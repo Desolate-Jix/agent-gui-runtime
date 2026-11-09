@@ -1,55 +1,8 @@
 {
-  "method": "release_date_allocation",
   "counts_as_of": "2026-11-09",
-  "cutoff": "2026-11-08",
-  "notes": "Per-version download counts are observed GitHub counts. Assigning those counts to release publication dates estimates their timing; it is not measured download history. Frozen at the first observed total (104); subsequent days use actual snapshots.",
-  "scope": "Execution installers, update ZIPs and Amadeus wheels only; excludes historical previews, portable packages, source, videos and verification files.",
-  "points": [
-    {
-      "date": "2026-10-01",
-      "total": 0
-    },
-    {
-      "date": "2026-10-11",
-      "total": 0
-    },
-    {
-      "date": "2026-10-12",
-      "total": 3
-    },
-    {
-      "date": "2026-10-15",
-      "total": 38
-    },
-    {
-      "date": "2026-10-23",
-      "total": 46
-    },
-    {
-      "date": "2026-10-24",
-      "total": 59
-    },
-    {
-      "date": "2026-10-26",
-      "total": 72
-    },
-    {
-      "date": "2026-10-27",
-      "total": 79
-    },
-    {
-      "date": "2026-10-28",
-      "total": 100
-    },
-    {
-      "date": "2026-11-06",
-      "total": 104
-    },
-    {
-      "date": "2026-11-08",
-      "total": 104
-    }
-  ],
+  "source": "https://api.github.com/repos/Desolate-Jix/agent-gui-runtime/releases",
+  "metric": "Current release asset download counts accumulated by release publication date, not download occurrence date.",
+  "scope": "Execution installers, update ZIPs and Amadeus wheels, including repeated downloads.",
   "releases": [
     {
       "tag": "instant-v0.1.2",
