@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import re
 import sys
-from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from render_download_chart import render_chart
@@ -129,46 +128,16 @@ def record_snapshot(history, stats, day):
     return history[:-1] + [snapshot] if previous == today else history + [snapshot]
 
 
-def render_block(stats, language, updated_at, first_date):
+def render_block(language, first_date):
     """Render only the content between the existing comment markers."""
     chinese = language == "zh-CN"
     chart_path = f"docs/assets/downloads/download-trend.{language}.svg"
-    lines = [
+    return "\n".join([
         f"![{'按日期记录的累计下载趋势' if chinese else 'Cumulative downloads over time'}]({chart_path})",
         "",
-        (f"横轴为 UTC 日期，纵轴为累计下载次数；每天保留一条实测快照。记录始于 **{first_date}**，不回填此前的每日数据。图中最多显示最近 90 天，[查看完整记录](docs/data/download-history.json)。" if chinese else
-         f"The horizontal axis shows UTC dates; the vertical axis shows cumulative downloads. One measured snapshot is kept per day, starting **{first_date}**; earlier daily data is not reconstructed. The chart shows up to 90 days; [view the full history](docs/data/download-history.json)."),
-        "",
-        "<details>",
-        "<summary>当前下载明细</summary>" if chinese else "<summary>Current download totals</summary>",
-        "",
-        "| 组件 | 累计下载 | 最新版下载 |" if chinese else "| Component | Total downloads | Latest release downloads |",
-        "| --- | ---: | --- |",
-    ]
-    for key, _, english, chinese_label in COMPONENTS:
-        item = stats[key]
-        latest = item["latest"]
-        tag = latest["tag"]
-        label = tag.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]").replace("|", "\\|")
-        url = f"https://github.com/{REPOSITORY}/releases/tag/{quote(tag, safe='')}"
-        total = f"{item['downloads']:,}"
-        lines.append(f"| {chinese_label if chinese else english} | {total} | [{label}]({url}) · {latest['downloads']:,} |")
-    lines += ["", "</details>"]
-    if chinese:
-        lines += [
-            "",
-            "统计 GitHub Releases 中安装器、更新 ZIP 和扩展 wheel 的累计下载次数；不含历史预览版、旧便携包、源码、视频及验证附件。包含作者测试、重复和自动化下载，不代表独立用户数。",
-            "",
-            f"更新时间：{updated_at}。每日自动刷新。",
-        ]
-    else:
-        lines += [
-            "",
-            "Cumulative GitHub Releases downloads of installer, update ZIP and extension wheel assets; excludes historical previews, legacy portable packages, source archives, videos and verification attachments. Includes author testing, repeat and automated downloads; these are not unique user counts.",
-            "",
-            f"Updated: {updated_at}. Refreshed daily.",
-        ]
-    return "\n".join(lines)
+        (f"安装包、更新包和扩展的累计下载次数，包含重复下载。[自 {first_date} 起每日记录](docs/data/download-history.json)。" if chinese else
+         f"Combined installer, update and extension downloads, including repeat downloads. [Recorded daily since {first_date}](docs/data/download-history.json)."),
+    ])
 
 
 def replace_block(content, block):
@@ -195,7 +164,7 @@ def update_outputs(root, stats, day):
         pending.append((root / f"docs/assets/downloads/download-trend.{language}.svg", chart))
         path = root / filename
         original = path.read_bytes()
-        replacement = replace_block(original, render_block(stats, language, day + " UTC", history[0]["date"]))
+        replacement = replace_block(original, render_block(language, history[0]["date"]))
         pending.append((path, replacement))
     for path, replacement in pending:
         if not path.exists() or replacement != path.read_bytes():

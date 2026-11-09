@@ -1,48 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="500" viewBox="0 0 960 500" role="img" aria-labelledby="chart-title chart-desc" lang="en">
-<title id="chart-title">Cumulative downloads</title>
-<desc id="chart-desc">Cumulative GitHub Releases asset download totals observed from 2026-11-08 – 2026-11-09 UTC. Observed daily totals; missing days are not zero. Latest observation: Execution installer: 43; Runtime update package: 5; Amadeus extension: 56.</desc>
-<rect x="1" y="1" width="958" height="498" rx="18" fill="#0b1424" stroke="#25364d"/>
-<g font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-<text x="32" y="44" fill="#f1f5f9" font-size="28" font-weight="700">Cumulative downloads</text>
-<text x="32" y="75" fill="#a9bad0" font-size="17">Daily snapshots · 2026-11-08 – 2026-11-09 UTC · Last 90 days</text>
-<line x1="32" y1="111" x2="60" y2="111" stroke="#60a5fa" stroke-width="3" stroke-linecap="round"/>
-<text x="71" y="117" fill="#cbd5e1" font-size="20">Execution installer</text>
-<text x="71" y="149" fill="#60a5fa" font-size="27" font-weight="700">43</text>
-<line x1="334" y1="111" x2="362" y2="111" stroke="#67e8f9" stroke-width="3" stroke-linecap="round" stroke-dasharray="10 6"/>
-<text x="373" y="117" fill="#cbd5e1" font-size="20">Runtime update package</text>
-<text x="373" y="149" fill="#67e8f9" font-size="27" font-weight="700">5</text>
-<line x1="636" y1="111" x2="664" y2="111" stroke="#2dd4bf" stroke-width="3" stroke-linecap="round" stroke-dasharray="3 6"/>
-<text x="675" y="117" fill="#cbd5e1" font-size="20">Amadeus extension</text>
-<text x="675" y="149" fill="#2dd4bf" font-size="27" font-weight="700">56</text>
-<text x="84" y="177" fill="#a9bad0" font-size="17">Cumulative downloads</text>
-<line x1="84" y1="386.00" x2="920" y2="386.00" stroke="#293a50" stroke-width="1"/>
-<text x="70" y="392.00" text-anchor="end" fill="#a9bad0" font-size="18">0</text>
-<line x1="84" y1="320.67" x2="920" y2="320.67" stroke="#293a50" stroke-width="1"/>
-<text x="70" y="326.67" text-anchor="end" fill="#a9bad0" font-size="18">20</text>
-<line x1="84" y1="255.33" x2="920" y2="255.33" stroke="#293a50" stroke-width="1"/>
-<text x="70" y="261.33" text-anchor="end" fill="#a9bad0" font-size="18">40</text>
-<line x1="84" y1="190.00" x2="920" y2="190.00" stroke="#293a50" stroke-width="1"/>
-<text x="70" y="196.00" text-anchor="end" fill="#a9bad0" font-size="18">60</text>
-<line x1="84.00" y1="386" x2="84.00" y2="392" stroke="#53677f"/>
-<text x="84.00" y="416" text-anchor="start" fill="#a9bad0" font-size="18">2026-11-08</text>
-<line x1="920.00" y1="386" x2="920.00" y2="392" stroke="#53677f"/>
-<text x="920.00" y="416" text-anchor="end" fill="#a9bad0" font-size="18">2026-11-09</text>
-<g id="series-installer"><title>Execution installer</title>
-<polyline points="84.00,245.53 920.00,245.53" fill="none" stroke="#60a5fa" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-<circle cx="84.00" cy="245.53" r="6" fill="#60a5fa" stroke="#0b1424" stroke-width="1.5"><title>Execution installer · 2026-11-08 UTC: 43</title></circle>
-<circle cx="920.00" cy="245.53" r="6" fill="#60a5fa" stroke="#0b1424" stroke-width="1.5"><title>Execution installer · 2026-11-09 UTC: 43</title></circle>
-</g>
-<g id="series-update"><title>Runtime update package</title>
-<polyline points="84.00,369.67 920.00,369.67" fill="none" stroke="#67e8f9" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="10 6"/>
-<circle cx="84.00" cy="369.67" r="4.5" fill="#67e8f9" stroke="#0b1424" stroke-width="1.5"><title>Runtime update package · 2026-11-08 UTC: 5</title></circle>
-<circle cx="920.00" cy="369.67" r="4.5" fill="#67e8f9" stroke="#0b1424" stroke-width="1.5"><title>Runtime update package · 2026-11-09 UTC: 5</title></circle>
-</g>
-<g id="series-extension"><title>Amadeus extension</title>
-<polyline points="84.00,203.07 920.00,203.07" fill="none" stroke="#2dd4bf" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3 6"/>
-<circle cx="84.00" cy="203.07" r="3" fill="#2dd4bf" stroke="#0b1424" stroke-width="1.5"><title>Amadeus extension · 2026-11-08 UTC: 56</title></circle>
-<circle cx="920.00" cy="203.07" r="3" fill="#2dd4bf" stroke="#0b1424" stroke-width="1.5"><title>Amadeus extension · 2026-11-09 UTC: 56</title></circle>
-</g>
-<text x="920" y="447" text-anchor="end" fill="#a9bad0" font-size="17">Date (UTC)</text>
-<text x="32" y="480" fill="#a9bad0" font-size="17">Observed daily totals; missing days are not zero.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="440" viewBox="0 0 900 440" role="img" aria-labelledby="chart-title chart-desc" lang="en">
+<title id="chart-title">Cumulative download history</title>
+<desc id="chart-desc">Combined cumulative downloads of installer, update package and extension assets observed from 2026-11-08 – 2026-11-09 UTC. Latest observation: 104. Missing days are not zero; totals may decrease when assets are removed.</desc>
+<rect width="900" height="440" fill="#ffffff"/>
+<g font-family="Arial, Helvetica, sans-serif" fill="#111111">
+<line x1="279" y1="29" x2="307" y2="29" stroke="#f04426" stroke-width="2"/>
+<text x="317" y="35" font-size="18">Desolate-Jix/agent-gui-runtime</text>
+<path d="M 86 65 V 360 H 870" fill="none" stroke="#111111" stroke-width="1"/>
+<line x1="81" y1="360.00" x2="86" y2="360.00" stroke="#111111" stroke-width="1"/>
+<text x="74" y="365.00" text-anchor="end" font-size="16">0</text>
+<line x1="81" y1="261.67" x2="86" y2="261.67" stroke="#111111" stroke-width="1"/>
+<text x="74" y="266.67" text-anchor="end" font-size="16">50</text>
+<line x1="81" y1="163.33" x2="86" y2="163.33" stroke="#111111" stroke-width="1"/>
+<text x="74" y="168.33" text-anchor="end" font-size="16">100</text>
+<line x1="81" y1="65.00" x2="86" y2="65.00" stroke="#111111" stroke-width="1"/>
+<text x="74" y="70.00" text-anchor="end" font-size="16">150</text>
+<line x1="86.00" y1="360" x2="86.00" y2="365" stroke="#111111" stroke-width="1"/>
+<text x="86.00" y="389" text-anchor="start" font-size="16">2026-11-08</text>
+<line x1="870.00" y1="360" x2="870.00" y2="365" stroke="#111111" stroke-width="1"/>
+<text x="870.00" y="389" text-anchor="end" font-size="16">2026-11-09</text>
+<polyline points="86.00,155.47 870.00,155.47" fill="none" stroke="#f04426" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="478.00" y="427" text-anchor="middle" font-size="18">Date</text>
+<text x="23" y="212.50" text-anchor="middle" font-size="18" transform="rotate(-90 23 212.50)">Downloads</text>
 </g>
 </svg>

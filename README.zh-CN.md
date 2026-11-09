@@ -181,25 +181,8 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 <!-- DOWNLOAD-STATS:START -->
 ![按日期记录的累计下载趋势](docs/assets/downloads/download-trend.zh-CN.svg)
 
-横轴为 UTC 日期，纵轴为累计下载次数；每天保留一条实测快照。记录始于 **2026-11-08**，不回填此前的每日数据。图中最多显示最近 90 天，[查看完整记录](docs/data/download-history.json)。
-
-<details>
-<summary>当前下载明细</summary>
-
-| 组件 | 累计下载 | 最新版下载 |
-| --- | ---: | --- |
-| 执行版安装器 | 43 | [instant-v0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11) · 3 |
-| Runtime 更新包 | 5 | [instant-v0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11) · 1 |
-| Amadeus 扩展 | 56 | [amadeus-extension-v0.0.9](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.9) · 4 |
-
-</details>
-
-统计 GitHub Releases 中安装器、更新 ZIP 和扩展 wheel 的累计下载次数；不含历史预览版、旧便携包、源码、视频及验证附件。包含作者测试、重复和自动化下载，不代表独立用户数。
-
-更新时间：2026-11-09 UTC。每日自动刷新。
+安装包、更新包和扩展的累计下载次数，包含重复下载。[自 2026-11-08 起每日记录](docs/data/download-history.json)。
 <!-- DOWNLOAD-STATS:END -->
-
-每天及发布新版本后自动刷新。[数据来源：GitHub Releases](https://github.com/Desolate-Jix/agent-gui-runtime/releases) · [刷新工作流](https://github.com/Desolate-Jix/agent-gui-runtime/actions/workflows/download-stats.yml)。
 
 ## 文档导航
 

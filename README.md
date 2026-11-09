@@ -181,25 +181,8 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 <!-- DOWNLOAD-STATS:START -->
 ![Cumulative downloads over time](docs/assets/downloads/download-trend.en.svg)
 
-The horizontal axis shows UTC dates; the vertical axis shows cumulative downloads. One measured snapshot is kept per day, starting **2026-11-08**; earlier daily data is not reconstructed. The chart shows up to 90 days; [view the full history](docs/data/download-history.json).
-
-<details>
-<summary>Current download totals</summary>
-
-| Component | Total downloads | Latest release downloads |
-| --- | ---: | --- |
-| Execution installer | 43 | [instant-v0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11) · 3 |
-| Runtime update package | 5 | [instant-v0.1.11](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/instant-v0.1.11) · 1 |
-| Amadeus extension | 56 | [amadeus-extension-v0.0.9](https://github.com/Desolate-Jix/agent-gui-runtime/releases/tag/amadeus-extension-v0.0.9) · 4 |
-
-</details>
-
-Cumulative GitHub Releases downloads of installer, update ZIP and extension wheel assets; excludes historical previews, legacy portable packages, source archives, videos and verification attachments. Includes author testing, repeat and automated downloads; these are not unique user counts.
-
-Updated: 2026-11-09 UTC. Refreshed daily.
+Combined installer, update and extension downloads, including repeat downloads. [Recorded daily since 2026-11-08](docs/data/download-history.json).
 <!-- DOWNLOAD-STATS:END -->
-
-Counts refresh daily and after a release is published. [Source: GitHub Releases](https://github.com/Desolate-Jix/agent-gui-runtime/releases) · [Refresh workflow](https://github.com/Desolate-Jix/agent-gui-runtime/actions/workflows/download-stats.yml).
 
 ## Documentation
 
