@@ -30,6 +30,11 @@ def stats():
 
 
 ROW = {"date": "2026-11-08", "installer": 43, "update": 5, "extension": 56}
+ESTIMATE = {"cutoff": ROW["date"], "points": [
+    {"date": "2026-10-01", "total": 0},
+    {"date": "2026-10-15", "total": 38},
+    {"date": ROW["date"], "total": 104},
+]}
 
 
 class DownloadHistoryTests(unittest.TestCase):
@@ -104,6 +109,38 @@ class DownloadHistoryTests(unittest.TestCase):
             self.assertEqual((root / "README.md").read_bytes(), original)
             self.assertEqual(history_path.read_bytes(), history_before)
             self.assertFalse((root / "docs/assets/downloads").exists())
+
+    def test_estimate_is_frozen_when_real_history_grows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.setup_root(root)
+            estimate_path = root / "docs/data/download-history-estimate.json"
+            estimate_bytes = json.dumps(ESTIMATE).encode("utf-8")
+            estimate_path.write_bytes(estimate_bytes)
+            counts = stats()
+            counts["installer"]["downloads"] = 45
+            downloads.update_outputs(root, counts, "2026-11-10")
+            self.assertEqual(estimate_path.read_bytes(), estimate_bytes)
+            history = json.loads((root / "docs/data/download-history.json").read_text())
+            self.assertEqual(history, [ROW, dict(ROW, date="2026-11-10", installer=45)])
+            for lang, month in (("en", "Oct 2026"), ("zh-CN", "2026年10月")):
+                svg = ET.fromstring((root / f"docs/assets/downloads/download-trend.{lang}.svg").read_bytes())
+                paths = {node.get("id"): node for node in svg.iter() if node.get("id")}
+                estimated = paths["series-estimated"]
+                observed = paths["series-observed"]
+                self.assertIn("stroke-dasharray", estimated.attrib)
+                self.assertNotIn("stroke-dasharray", observed.attrib)
+                self.assertEqual(estimated.get("points").split()[-1], observed.get("points").split()[0])
+                self.assertEqual(len(observed.get("points").split()), 2)
+                self.assertIn(month, " ".join(svg.itertext()))
+
+    def test_estimate_cannot_forge_the_observed_bridge(self):
+        bad_cutoff = dict(ESTIMATE, cutoff="2026-11-07")
+        bad_total = deepcopy(ESTIMATE)
+        bad_total["points"][-1]["total"] = 105
+        for estimate in (bad_cutoff, bad_total):
+            with self.subTest(estimate=estimate), self.assertRaises(ValueError):
+                downloads.render_chart([ROW], estimate=estimate)
 
 
 if __name__ == "__main__":

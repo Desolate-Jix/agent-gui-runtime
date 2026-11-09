@@ -128,15 +128,17 @@ def record_snapshot(history, stats, day):
     return history[:-1] + [snapshot] if previous == today else history + [snapshot]
 
 
-def render_block(language, first_date):
+def render_block(language, first_date, estimated=False):
     """Render only the content between the existing comment markers."""
     chinese = language == "zh-CN"
     chart_path = f"docs/assets/downloads/download-trend.{language}.svg"
     return "\n".join([
         f"![{'按日期记录的累计下载趋势' if chinese else 'Cumulative downloads over time'}]({chart_path})",
         "",
-        (f"安装包、更新包和扩展的累计下载次数，包含重复下载。[自 {first_date} 起每日记录](docs/data/download-history.json)。" if chinese else
-         f"Combined installer, update and extension downloads, including repeat downloads. [Recorded daily since {first_date}](docs/data/download-history.json)."),
+        ((f"累计下载（含安装包、更新包、扩展及重复下载）：虚线按版本发布日期估算历史分布，实线为 {first_date} 起的每日实测。[估算依据](docs/data/download-history-estimate.json) · [实测数据](docs/data/download-history.json)。" if chinese else
+          f"Installer, update and extension downloads, including repeats. Dashed: history estimated by release date. Solid: daily observations since {first_date}. [Estimate](docs/data/download-history-estimate.json) · [Observed data](docs/data/download-history.json).") if estimated else
+         (f"安装包、更新包和扩展的累计下载次数，包含重复下载。[自 {first_date} 起每日记录](docs/data/download-history.json)。" if chinese else
+          f"Combined installer, update and extension downloads, including repeat downloads. [Recorded daily since {first_date}](docs/data/download-history.json).")),
     ])
 
 
@@ -158,13 +160,15 @@ def update_outputs(root, stats, day):
     root = Path(root)
     history_path = root / "docs/data/download-history.json"
     history = record_snapshot(json.loads(history_path.read_text(encoding="utf-8")), stats, day)
+    estimate_path = root / "docs/data/download-history-estimate.json"
+    estimate = json.loads(estimate_path.read_text(encoding="utf-8")) if estimate_path.exists() else None
     pending = [(history_path, (json.dumps(history, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))]
     for filename, language in (("README.md", "en"), ("README.zh-CN.md", "zh-CN")):
-        chart = render_chart(history, language).encode("utf-8")
+        chart = render_chart(history, language, estimate=estimate).encode("utf-8")
         pending.append((root / f"docs/assets/downloads/download-trend.{language}.svg", chart))
         path = root / filename
         original = path.read_bytes()
-        replacement = replace_block(original, render_block(language, history[0]["date"]))
+        replacement = replace_block(original, render_block(language, history[0]["date"], estimate is not None))
         pending.append((path, replacement))
     for path, replacement in pending:
         if not path.exists() or replacement != path.read_bytes():
