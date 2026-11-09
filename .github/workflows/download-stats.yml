@@ -10,6 +10,8 @@ on:
     branches: [main]
     paths:
       - '.github/scripts/update_download_stats.py'
+      - '.github/scripts/render_download_chart.py'
+      - '.github/scripts/test_download_stats.py'
       - '.github/workflows/download-stats.yml'
 
 permissions:
@@ -28,19 +30,21 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: main
+      - name: Check history and chart generation
+        run: python3 -m unittest discover -s .github/scripts -p 'test_download_stats.py'
       - name: Read GitHub release download counts
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/update_download_stats.py
-      - name: Commit the two README tables
+      - name: Commit download history, charts and README summaries
         shell: bash
         run: |
           git diff --check
-          if git diff --quiet -- README.md README.zh-CN.md; then
+          if git diff --quiet -- README.md README.zh-CN.md docs/data/download-history.json docs/assets/downloads; then
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- README.md README.zh-CN.md
+          git add -- README.md README.zh-CN.md docs/data/download-history.json docs/assets/downloads
           git commit -m 'docs: refresh download statistics'
           git push origin HEAD:main

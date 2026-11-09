@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Refresh the marked download tables in both READMEs using GitHub Releases."""
+"""Record daily release downloads and refresh the bilingual README charts."""
 
 import argparse
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -10,6 +10,8 @@ import re
 import sys
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+from render_download_chart import render_chart
 
 
 REPOSITORY = "Desolate-Jix/agent-gui-runtime"
@@ -101,10 +103,45 @@ def summarize(releases):
     return stats
 
 
-def render_block(stats, language, updated_at):
+def record_snapshot(history, stats, day):
+    """Keep one measured snapshot per UTC day, without inventing earlier data."""
+    if not isinstance(history, list):
+        raise ValueError("Download history must be a list")
+    previous = None
+    for row in history:
+        if not isinstance(row, dict) or not isinstance(row.get("date"), str):
+            raise ValueError("History rows must have an ISO date")
+        observed = date.fromisoformat(row["date"])
+        if observed.isoformat() != row["date"] or (previous and observed <= previous):
+            raise ValueError("History dates must be unique, ISO-formatted and increasing")
+        for key, *_ in COMPONENTS:
+            if type(row.get(key)) is not int or row[key] < 0:
+                raise ValueError(f"History {key} must be a nonnegative integer")
+        previous = observed
+    today = date.fromisoformat(day)
+    if today.isoformat() != day or (previous and today < previous):
+        raise ValueError("Snapshot date must not precede the existing history")
+    snapshot = {"date": day, **{key: stats[key]["downloads"] for key, *_ in COMPONENTS}}
+    for key, *_ in COMPONENTS:
+        if type(snapshot[key]) is not int or snapshot[key] < 0:
+            raise ValueError(f"Snapshot {key} must be a nonnegative integer")
+    # Replace today's observation; preserve earlier observations, including declines.
+    return history[:-1] + [snapshot] if previous == today else history + [snapshot]
+
+
+def render_block(stats, language, updated_at, first_date):
     """Render only the content between the existing comment markers."""
     chinese = language == "zh-CN"
+    chart_path = f"docs/assets/downloads/download-trend.{language}.svg"
     lines = [
+        f"![{'按日期记录的累计下载趋势' if chinese else 'Cumulative downloads over time'}]({chart_path})",
+        "",
+        (f"横轴为 UTC 日期，纵轴为累计下载次数；每天保留一条实测快照。记录始于 **{first_date}**，不回填此前的每日数据。图中最多显示最近 90 天，[查看完整记录](docs/data/download-history.json)。" if chinese else
+         f"The horizontal axis shows UTC dates; the vertical axis shows cumulative downloads. One measured snapshot is kept per day, starting **{first_date}**; earlier daily data is not reconstructed. The chart shows up to 90 days; [view the full history](docs/data/download-history.json)."),
+        "",
+        "<details>",
+        "<summary>当前下载明细</summary>" if chinese else "<summary>Current download totals</summary>",
+        "",
         "| 组件 | 累计下载 | 最新版下载 |" if chinese else "| Component | Total downloads | Latest release downloads |",
         "| --- | ---: | --- |",
     ]
@@ -116,6 +153,7 @@ def render_block(stats, language, updated_at):
         url = f"https://github.com/{REPOSITORY}/releases/tag/{quote(tag, safe='')}"
         total = f"{item['downloads']:,}"
         lines.append(f"| {chinese_label if chinese else english} | {total} | [{label}]({url}) · {latest['downloads']:,} |")
+    lines += ["", "</details>"]
     if chinese:
         lines += [
             "",
@@ -146,16 +184,22 @@ def replace_block(content, block):
     return content[:start] + replacement + content[end:]
 
 
-def update_readmes(root, stats, updated_at):
-    """Validate and prepare both replacements before writing either README."""
-    pending = []
+def update_outputs(root, stats, day):
+    """Prepare both charts, history and README blocks before writing outputs."""
+    root = Path(root)
+    history_path = root / "docs/data/download-history.json"
+    history = record_snapshot(json.loads(history_path.read_text(encoding="utf-8")), stats, day)
+    pending = [(history_path, (json.dumps(history, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))]
     for filename, language in (("README.md", "en"), ("README.zh-CN.md", "zh-CN")):
-        path = Path(root) / filename
+        chart = render_chart(history, language).encode("utf-8")
+        pending.append((root / f"docs/assets/downloads/download-trend.{language}.svg", chart))
+        path = root / filename
         original = path.read_bytes()
-        replacement = replace_block(original, render_block(stats, language, updated_at))
-        pending.append((path, original, replacement))
-    for path, original, replacement in pending:
-        if replacement != original:
+        replacement = replace_block(original, render_block(stats, language, day + " UTC", history[0]["date"]))
+        pending.append((path, replacement))
+    for path, replacement in pending:
+        if not path.exists() or replacement != path.read_bytes():
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(replacement)
 
 
@@ -168,8 +212,8 @@ def main():
     else:
         releases = fetch_releases(os.environ.get("GITHUB_TOKEN"))
     stats = summarize(releases)
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d UTC")
-    update_readmes(Path(__file__).resolve().parents[2], stats, timestamp)
+    day = datetime.now(timezone.utc).date().isoformat()
+    update_outputs(Path(__file__).resolve().parents[2], stats, day)
     print("Updated README download statistics: " + ", ".join(
         f"{key}={item['downloads']} downloads/{item['files']} files" for key, item in stats.items()
     ))
