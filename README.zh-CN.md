@@ -181,7 +181,7 @@ Google URL → 搜索 java → 打开首个普通结果。[完整 MP4](https://g
 <!-- DOWNLOAD-STATS:START -->
 ![按版本发布日期累计下载量](docs/assets/downloads/download-trend.zh-CN.svg)
 
-截至 2026-11-09，将各版本当前下载量按版本发布日期累加，每日更新。包含安装包、更新包、扩展及重复下载。[各版本数据](docs/data/downloads-by-release.json)。
+截至 2026-11-10，将各版本当前下载量按版本发布日期累加，每日更新。包含安装包、更新包、扩展及重复下载。[各版本数据](docs/data/downloads-by-release.json)。
 <!-- DOWNLOAD-STATS:END -->
 
 ## 文档导航
