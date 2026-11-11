@@ -181,7 +181,7 @@ The runtime binds evidence to the request, window and screenshot, and validates 
 <!-- DOWNLOAD-STATS:START -->
 ![Cumulative downloads by release date](docs/assets/downloads/download-trend.en.svg)
 
-Each release's current downloads, accumulated by release date as of 2026-11-10; refreshed daily. Includes installers, updates, extensions and repeat downloads. [Per-release data](docs/data/downloads-by-release.json).
+Each release's current downloads, accumulated by release date as of 2026-11-11; refreshed daily. Includes installers, updates, extensions and repeat downloads. [Per-release data](docs/data/downloads-by-release.json).
 <!-- DOWNLOAD-STATS:END -->
 
 ## Documentation

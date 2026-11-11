@@ -1,5 +1,5 @@
 {
-  "counts_as_of": "2026-11-10",
+  "counts_as_of": "2026-11-11",
   "source": "https://api.github.com/repos/Desolate-Jix/agent-gui-runtime/releases",
   "metric": "Current release asset download counts accumulated by release publication date, not download occurrence date.",
   "scope": "Execution installers, update ZIPs and Amadeus wheels, including repeated downloads.",
@@ -127,11 +127,11 @@
     {
       "tag": "amadeus-extension-v0.0.8",
       "published_at": "2026-10-28T01:17:32Z",
-      "downloads": 17,
+      "downloads": 19,
       "components": {
         "installer": 0,
         "update": 0,
-        "extension": 17
+        "extension": 19
       }
     },
     {
@@ -147,11 +147,11 @@
     {
       "tag": "amadeus-extension-v0.0.9",
       "published_at": "2026-11-06T02:06:48Z",
-      "downloads": 4,
+      "downloads": 5,
       "components": {
         "installer": 0,
         "update": 0,
-        "extension": 4
+        "extension": 5
       }
     }
   ]
