@@ -1,10 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="440" viewBox="0 0 900 440" role="img" aria-labelledby="chart-title chart-desc" lang="zh-CN">
 <title id="chart-title">按版本发布日期累计下载量</title>
-<desc id="chart-desc">截至 2026-11-11，将各版本当前下载次数按 UTC 发布日期同日汇总后累加，合计 107。横轴并非下载发生日期。</desc>
+<desc id="chart-desc">截至 2026-11-12，将各版本当前下载次数按 UTC 发布日期同日汇总后累加，合计 107。横轴并非下载发生日期。</desc>
 <rect width="900" height="440" fill="#ffffff"/>
 <g font-family="Arial, Helvetica, sans-serif" fill="#111111">
 <text x="450" y="29" text-anchor="middle" font-size="22" font-weight="600">按版本发布日期累计下载量</text>
-<text x="450" y="54" text-anchor="middle" font-size="14" fill="#555555">截至 2026-11-11</text>
+<text x="450" y="54" text-anchor="middle" font-size="14" fill="#555555">截至 2026-11-12</text>
 <path d="M 86 75 V 360 H 870" fill="none" stroke="#111111" stroke-width="1"/>
 <line x1="81" y1="360.00" x2="86" y2="360.00" stroke="#111111" stroke-width="1"/>
 <text x="74" y="365.00" text-anchor="end" font-size="16">0</text>

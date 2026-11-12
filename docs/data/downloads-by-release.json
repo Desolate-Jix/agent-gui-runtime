@@ -1,5 +1,5 @@
 {
-  "counts_as_of": "2026-11-11",
+  "counts_as_of": "2026-11-12",
   "source": "https://api.github.com/repos/Desolate-Jix/agent-gui-runtime/releases",
   "metric": "Current release asset download counts accumulated by release publication date, not download occurrence date.",
   "scope": "Execution installers, update ZIPs and Amadeus wheels, including repeated downloads.",
