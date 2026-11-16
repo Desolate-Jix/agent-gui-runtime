@@ -1,5 +1,5 @@
 {
-  "counts_as_of": "2026-11-15",
+  "counts_as_of": "2026-11-16",
   "source": "https://api.github.com/repos/Desolate-Jix/agent-gui-runtime/releases",
   "metric": "Current release asset download counts accumulated by release publication date, not download occurrence date.",
   "scope": "Execution installers, update ZIPs and Amadeus wheels, including repeated downloads.",
@@ -137,9 +137,9 @@
     {
       "tag": "instant-v0.1.11",
       "published_at": "2026-10-28T01:18:12Z",
-      "downloads": 5,
+      "downloads": 6,
       "components": {
-        "installer": 3,
+        "installer": 4,
         "update": 2,
         "extension": 0
       }
@@ -147,11 +147,11 @@
     {
       "tag": "amadeus-extension-v0.0.9",
       "published_at": "2026-11-06T02:06:48Z",
-      "downloads": 5,
+      "downloads": 6,
       "components": {
         "installer": 0,
         "update": 0,
-        "extension": 5
+        "extension": 6
       }
     }
   ]
