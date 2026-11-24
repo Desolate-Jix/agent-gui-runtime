@@ -88,5 +88,11 @@
     "installer": 44,
     "update": 6,
     "extension": 62
+  },
+  {
+    "date": "2026-11-24",
+    "installer": 46,
+    "update": 8,
+    "extension": 62
   }
 ]
